@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 8765
+    port: int = 51717
 
     # Session limits
     max_sessions: int = 10
@@ -26,11 +26,15 @@ class Settings(BaseSettings):
     # Whisper model settings
     whisper_model: str = "large-v3-turbo"
     whisper_device: Literal["auto", "cpu", "cuda"] = "auto"
-    whisper_compute_type: Literal["auto", "int8", "int8_float16", "int16", "float16", "float32"] = "auto"
+    whisper_compute_type: Literal[
+        "auto", "int8", "int8_float16", "int16", "float16", "float32"
+    ] = "auto"
 
     # Transcription settings
     partial_emission_interval: float = 0.5  # Seconds between partial emissions
-    min_audio_for_transcription: float = 0.5  # Minimum seconds of audio before transcribing
+    min_audio_for_transcription: float = (
+        0.5  # Minimum seconds of audio before transcribing
+    )
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

@@ -1,0 +1,31 @@
+# Voiceserver justfile
+# Runs uv via PowerShell on Windows from WSL
+
+set windows-shell := ["/mnt/c/Program Files/PowerShell/7/pwsh.exe", "-NoProfile", "-Command"]
+
+port := "51717"
+pwsh := "/mnt/c/Program\\ Files/PowerShell/7/pwsh.exe"
+
+# List available commands
+default:
+    @just --list
+
+# Run tests
+test:
+    {{pwsh}} -NoProfile -Command "uv run pytest"
+
+# Start server in foreground
+start:
+    {{pwsh}} -NoProfile -Command "uv run python -m voiceserver"
+
+# Start server in background
+start-bg:
+    {{pwsh}} -NoProfile -Command "Start-Process -NoNewWindow -FilePath uv -ArgumentList 'run','python','-m','voiceserver'"
+
+# Stop server by killing process on port
+stop:
+    {{pwsh}} -NoProfile -Command "Get-NetTCPConnection -LocalPort {{port}} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+
+# Show status - check if server is running
+status:
+    {{pwsh}} -NoProfile -Command "Get-NetTCPConnection -LocalPort {{port}} -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess"
