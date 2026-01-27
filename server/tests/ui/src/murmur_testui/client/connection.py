@@ -43,6 +43,7 @@ class VoiceClient:
         self._event_callback: Callable[[ClientEvent], None] | None = None
         self._receive_task: asyncio.Task | None = None
         self._ready_event: asyncio.Event = asyncio.Event()
+        self._closing_event: asyncio.Event = asyncio.Event()
 
     @property
     def on_event(self) -> Callable[[ClientEvent], None] | None:
@@ -66,9 +67,15 @@ class VoiceClient:
 
     async def _connect(self, url: str) -> None:
         """Internal: establish WebSocket connection."""
-        self._ws = await websockets.connect(url)
+        # Use short timeouts for faster failure detection
+        self._ws = await websockets.connect(
+            url,
+            open_timeout=5,
+            close_timeout=2,
+        )
         self._sequence = 0
         self._ready_event.clear()
+        self._closing_event.clear()
         self._emit(ConnectedEvent(url=url))
 
         # Start receive loop
@@ -115,6 +122,7 @@ class VoiceClient:
                 self._ready_event.set()
                 self._emit(ReadyEvent())
             elif msg_type == "closing":
+                self._closing_event.set()
                 self._emit(ClosingEvent(reason=data.get("reason", "unknown")))
             elif msg_type == "error":
                 self._emit(
@@ -178,13 +186,23 @@ class VoiceClient:
         frame = header + samples.tobytes()
         await self._ws.send(frame)
 
-    async def stop(self) -> None:
-        """Send stop frame to end the session."""
+    async def stop(self, wait_timeout: float = 5.0) -> None:
+        """Send stop frame and wait for server to send final transcription.
+
+        Args:
+            wait_timeout: Seconds to wait for closing frame from server.
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
 
         stop_frame = {"frame": "control", "type": "stop"}
         await self._ws.send(json.dumps(stop_frame))
+
+        # Wait for server to send final + closing frames
+        try:
+            await asyncio.wait_for(self._closing_event.wait(), timeout=wait_timeout)
+        except asyncio.TimeoutError:
+            pass  # Proceed with disconnect anyway
 
 
 class VoiceClientContext:

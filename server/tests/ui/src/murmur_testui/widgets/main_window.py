@@ -5,12 +5,10 @@ import logging
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -22,14 +20,11 @@ logger = logging.getLogger("murmur_testui.window")
 
 
 class MainWindow(QMainWindow):
-    """Main window with dark theme for the voice transcription test client."""
+    """Main window for the voice transcription test client."""
 
     # Signals
-    connect_clicked = Signal(str)  # URL
-    disconnect_clicked = Signal()
     ptt_pressed = Signal()
     ptt_released = Signal()
-    log_toggled = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -48,89 +43,58 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # Server connection bar
-        conn_layout = QHBoxLayout()
-        conn_layout.addWidget(QLabel("Server:"))
+        # Server URL bar
+        url_layout = QHBoxLayout()
+        url_layout.addWidget(QLabel("Server:"))
 
-        self.url_input = QLineEdit("ws://localhost:9867/ws")
+        # Use 127.0.0.1 instead of localhost to avoid DNS resolution delay
+        self.url_input = QLineEdit("ws://127.0.0.1:51717/transcribe")
         self.url_input.setMinimumWidth(300)
-        conn_layout.addWidget(self.url_input, stretch=1)
+        url_layout.addWidget(self.url_input, stretch=1)
 
-        self.connect_btn = QPushButton("Connect")
-        self.connect_btn.setFixedWidth(100)
-        conn_layout.addWidget(self.connect_btn)
-
-        layout.addLayout(conn_layout)
+        layout.addLayout(url_layout)
 
         # Transcript area
         self.transcript = TranscriptView()
         layout.addWidget(self.transcript, stretch=1)
 
-        # PTT button
+        # PTT button (always enabled)
         self.ptt_btn = PTTButton()
-        self.ptt_btn.setEnabled(False)
         layout.addWidget(self.ptt_btn)
 
         # Hint text
-        hint = QLabel("Hold button to record")
+        hint = QLabel("Hold to record - connects automatically")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #888888; font-size: 12px;")
         layout.addWidget(hint)
 
         # Status bar
-        status_layout = QHBoxLayout()
-
-        self.status_label = QLabel("Status: Disconnected")
+        self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #888888;")
-        status_layout.addWidget(self.status_label, stretch=1)
-
-        self.log_checkbox = QCheckBox("Log to file")
-        status_layout.addWidget(self.log_checkbox)
-
-        layout.addLayout(status_layout)
+        layout.addWidget(self.status_label)
 
     def _connect_signals(self) -> None:
         """Connect internal signals."""
-        self.connect_btn.clicked.connect(self._on_connect_clicked)
         self.ptt_btn.pressed_ptt.connect(self.ptt_pressed.emit)
         self.ptt_btn.released_ptt.connect(self.ptt_released.emit)
-        self.log_checkbox.toggled.connect(self.log_toggled.emit)
 
-    def _on_connect_clicked(self) -> None:
-        """Handle connect button click."""
-        if self.connect_btn.text() == "Connect":
-            self.connect_clicked.emit(self.url_input.text())
-        else:
-            self.disconnect_clicked.emit()
-
-    # Public methods for state updates
-
-    def set_connected(self, connected: bool) -> None:
-        """Update UI for connection state."""
-        if connected:
-            self.connect_btn.setText("Disconnect")
-            self.status_label.setText("Status: Connected")
-            self.status_label.setStyleSheet("color: #4caf50;")
-            self.url_input.setEnabled(False)
-            self.ptt_btn.setEnabled(True)
-        else:
-            self.connect_btn.setText("Connect")
-            self.status_label.setText("Status: Disconnected")
-            self.status_label.setStyleSheet("color: #888888;")
-            self.url_input.setEnabled(True)
-            self.ptt_btn.setEnabled(False)
+    def get_url(self) -> str:
+        """Get the current server URL."""
+        return self.url_input.text()
 
     def set_status(self, text: str, error: bool = False) -> None:
         """Set status bar text."""
-        self.status_label.setText(f"Status: {text}")
+        self.status_label.setText(text)
         if error:
             self.status_label.setStyleSheet("color: #ef5350;")
         else:
-            self.status_label.setStyleSheet("color: #4caf50;")
+            self.status_label.setStyleSheet("color: #888888;")
+
+    def set_recording(self, recording: bool) -> None:
+        """Update UI for recording state."""
+        self.url_input.setEnabled(not recording)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event."""
-        import traceback
-        logger.warning("Window closeEvent triggered!")
-        logger.warning("Stack trace:\n%s", "".join(traceback.format_stack()))
+        logger.debug("Window closing")
         super().closeEvent(event)

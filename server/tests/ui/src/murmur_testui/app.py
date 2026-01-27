@@ -2,9 +2,6 @@
 
 import asyncio
 import logging
-import sys
-from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -23,7 +20,6 @@ from .client import (
 )
 from .widgets import MainWindow
 
-# Set up module logger
 logger = logging.getLogger("murmur_testui")
 
 
@@ -46,13 +42,12 @@ class AudioWorker(QThread):
             self._mic.start()
         except Exception as e:
             logger.exception("Failed to start microphone")
-            self.error_occurred.emit(f"Microphone start failed: {e}")
+            self.error_occurred.emit(f"Microphone error: {e}")
             return
 
         try:
             for chunk in self._mic.chunks():
                 if not self._running:
-                    logger.debug("AudioWorker stopping (running=False)")
                     break
                 try:
                     self._send_callback(chunk)
@@ -62,15 +57,13 @@ class AudioWorker(QThread):
                     break
         except Exception as e:
             logger.exception("Error in audio capture loop")
-            self.error_occurred.emit(f"Audio capture error: {e}")
+            self.error_occurred.emit(f"Audio error: {e}")
         finally:
-            logger.debug("AudioWorker stopping microphone")
             self._mic.stop()
             logger.debug("AudioWorker finished")
 
     def stop(self) -> None:
         """Stop audio capture."""
-        logger.debug("AudioWorker.stop() called")
         self._running = False
         self._mic.stop()
 
@@ -78,7 +71,7 @@ class AudioWorker(QThread):
 class AsyncBridge(QObject):
     """Bridge between asyncio and Qt signals."""
 
-    event_received = Signal(object)  # ClientEvent
+    event_received = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -87,265 +80,190 @@ class AsyncBridge(QObject):
 
     def start(self) -> None:
         """Start the asyncio event loop in a background thread."""
-        logger.debug("Starting async bridge")
         self._thread = QThread()
         self._thread.run = self._run_loop
         self._thread.start()
 
     def stop(self) -> None:
         """Stop the asyncio event loop."""
-        logger.debug("Stopping async bridge")
         if self._loop:
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
-            self._thread.wait(5000)  # 5 second timeout
+            self._thread.wait(5000)
             self._thread = None
-        logger.debug("Async bridge stopped")
 
     def _run_loop(self) -> None:
         """Run asyncio event loop."""
-        logger.debug("Async event loop starting")
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_forever()
-        except Exception as e:
-            logger.exception("Async event loop error")
         finally:
             self._loop.close()
-            logger.debug("Async event loop closed")
 
     def run_coroutine(self, coro) -> asyncio.Future:
         """Schedule a coroutine on the asyncio loop."""
         if self._loop is None:
             raise RuntimeError("Event loop not started")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        # Add callback to log any exceptions
-        future.add_done_callback(self._on_coroutine_done)
+        future.add_done_callback(self._on_done)
         return future
 
-    def _on_coroutine_done(self, future: asyncio.Future) -> None:
-        """Log any exceptions from scheduled coroutines."""
+    def _on_done(self, future: asyncio.Future) -> None:
+        """Log exceptions from coroutines."""
         try:
             exc = future.exception()
             if exc:
-                logger.error("Coroutine raised exception: %s", exc, exc_info=exc)
-        except asyncio.CancelledError:
+                logger.error("Coroutine error: %s", exc)
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
             pass
-        except Exception:
-            pass  # Future was cancelled or similar
 
 
 class TestClientApp(QObject):
-    """Main application controller."""
+    """Main application controller.
 
-    def __init__(self, log_file: Path | None = None) -> None:
+    Simplified flow:
+    - PTT press: connect → start session → record audio
+    - PTT release: stop audio → stop session → disconnect
+    """
+
+    def __init__(self) -> None:
         super().__init__()
 
-        self._log_file = log_file
-        self._log_handle = None
-        self._logging_enabled = False
-
-        # Create components
         self._client = VoiceClient()
         self._mic = MicrophoneCapture()
         self._window = MainWindow()
         self._async_bridge = AsyncBridge()
         self._audio_worker: AudioWorker | None = None
 
-        self._connected = False
-        self._url = ""
+        self._recording = False
 
         self._setup()
 
     def _setup(self) -> None:
         """Set up event handling."""
-        # Client events
         self._client.on_event = self._on_client_event
-
-        # Window signals
-        self._window.connect_clicked.connect(self._on_connect)
-        self._window.disconnect_clicked.connect(self._on_disconnect)
         self._window.ptt_pressed.connect(self._on_ptt_pressed)
         self._window.ptt_released.connect(self._on_ptt_released)
-        self._window.log_toggled.connect(self._on_log_toggled)
-
-        # Async bridge
         self._async_bridge.event_received.connect(self._handle_event)
         self._async_bridge.start()
 
     def _on_client_event(self, event: ClientEvent) -> None:
         """Handle client event (called from asyncio thread)."""
-        # Emit signal to handle in Qt thread
         self._async_bridge.event_received.emit(event)
 
     def _handle_event(self, event: ClientEvent) -> None:
         """Handle client event in Qt thread."""
         if isinstance(event, ConnectedEvent):
-            self._connected = True
-            self._window.set_connected(True)
-            self._window.transcript.add_system(f"Connected to {event.url}")
-            self._log(f"Connected to {event.url}")
+            logger.info("Connected to %s", event.url)
 
         elif isinstance(event, ReadyEvent):
-            self._window.transcript.add_system("Server ready, listening...")
-            self._log("Server ready")
+            self._window.set_status("Recording...")
+            self._window.transcript.add_system("Recording started")
+            logger.info("Server ready, recording")
 
         elif isinstance(event, PartialEvent):
             self._window.transcript.add_partial(event.text, event.confidence)
-            self._log(f"Partial ({event.confidence:.0%}): {event.text}")
 
         elif isinstance(event, FinalEvent):
             self._window.transcript.add_final(event.text, event.confidence)
-            self._log(f"Final ({event.confidence:.0%}): {event.text}")
+            logger.info("Final: %s", event.text)
 
         elif isinstance(event, ClosingEvent):
-            self._window.transcript.add_system(f"Session closed: {event.reason}")
-            self._log(f"Session closed: {event.reason}")
-            # Update connection state
-            self._connected = False
-            self._window.set_connected(False)
+            self._window.transcript.add_system(f"Session ended: {event.reason}")
+            self._window.set_status("Ready")
+            logger.info("Session closed: %s", event.reason)
 
         elif isinstance(event, ErrorEvent):
             self._window.transcript.add_error(f"{event.code}: {event.message}")
             self._window.set_status(event.message, error=True)
-            self._log(f"Error {event.code}: {event.message}")
-
-    def _on_connect(self, url: str) -> None:
-        """Handle connect button click."""
-        self._url = url
-        self._window.set_status("Connecting...")
-        self._async_bridge.run_coroutine(self._connect(url))
-
-    async def _connect(self, url: str) -> None:
-        """Connect to the server."""
-        try:
-            await self._client._connect(url)
-        except Exception as e:
-            self._async_bridge.event_received.emit(
-                ErrorEvent(code="connection_failed", message=str(e))
-            )
-
-    def _on_disconnect(self) -> None:
-        """Handle disconnect button click."""
-        self._window.set_status("Disconnecting...")
-        self._log("Disconnecting...")
-        self._async_bridge.run_coroutine(self._disconnect())
-
-    async def _disconnect(self) -> None:
-        """Disconnect from the server."""
-        logger.debug("Disconnecting from server")
-        try:
-            await self._client._disconnect()
-        except Exception as e:
-            logger.warning("Error during disconnect: %s", e)
-        finally:
-            # Emit event to update UI (handled in _handle_event)
-            self._async_bridge.event_received.emit(
-                ClosingEvent(reason="user_disconnect")
-            )
+            logger.error("Error %s: %s", event.code, event.message)
+            # Reset state on error
+            self._recording = False
+            self._window.set_recording(False)
 
     def _on_ptt_pressed(self) -> None:
-        """Handle PTT button press."""
-        if not self._connected:
+        """Handle PTT button press - start full recording flow."""
+        if self._recording:
             return
 
-        self._window.transcript.add_system("Recording started")
-        self._log("Recording started")
+        self._recording = True
+        self._window.set_recording(True)
+        self._window.set_status("Connecting...")
 
-        # Start session
-        self._async_bridge.run_coroutine(self._start_session())
+        url = self._window.get_url()
+        self._async_bridge.run_coroutine(self._start_recording(url))
 
-    async def _start_session(self) -> None:
-        """Start transcription session and audio capture."""
+    async def _start_recording(self, url: str) -> None:
+        """Connect, start session, and begin audio capture."""
         try:
-            logger.debug("Starting transcription session")
-            await self._client.start(silence_timeout=5.0)
-            logger.debug("Session started, starting audio worker")
+            # Connect to server
+            logger.debug("Connecting to %s", url)
+            await self._client._connect(url)
 
-            # Start audio worker
+            # Start transcription session
+            logger.debug("Starting session")
+            await self._client.start(silence_timeout=30.0)
+
+            # Start audio capture (runs in separate thread)
             self._audio_worker = AudioWorker(
                 self._mic,
                 lambda chunk: self._async_bridge.run_coroutine(
                     self._client.send_audio(chunk)
                 ),
             )
-            self._audio_worker.error_occurred.connect(
-                lambda e: self._window.transcript.add_error(e)
-            )
+            self._audio_worker.error_occurred.connect(self._on_audio_error)
             self._audio_worker.start()
-            logger.debug("Audio worker started")
 
         except Exception as e:
-            logger.exception("Failed to start session")
+            logger.exception("Failed to start recording")
             self._async_bridge.event_received.emit(
                 ErrorEvent(code="start_failed", message=str(e))
             )
 
+    def _on_audio_error(self, error: str) -> None:
+        """Handle audio worker error."""
+        self._async_bridge.event_received.emit(
+            ErrorEvent(code="audio_error", message=error)
+        )
+
     def _on_ptt_released(self) -> None:
-        """Handle PTT button release."""
-        if not self._connected:
+        """Handle PTT button release - stop recording and disconnect."""
+        if not self._recording:
             return
 
-        self._window.transcript.add_system("Recording stopped")
-        self._log("Recording stopped")
+        self._recording = False
+        self._window.set_recording(False)
+        self._window.set_status("Finishing...")
 
-        # Stop audio worker
+        # Stop audio worker first
         if self._audio_worker:
-            try:
-                self._audio_worker.stop()
-                self._audio_worker.wait(5000)  # 5 second timeout
-            except Exception as e:
-                logger.exception("Error stopping audio worker")
-                self._window.transcript.add_error(f"Audio worker error: {e}")
-            finally:
-                self._audio_worker = None
+            self._audio_worker.stop()
+            self._audio_worker.wait(3000)
+            self._audio_worker = None
 
-        # Stop session
-        try:
-            self._async_bridge.run_coroutine(self._stop_session())
-        except Exception as e:
-            logger.exception("Error scheduling stop_session")
-            self._window.transcript.add_error(f"Stop session error: {e}")
+        # Stop session and disconnect
+        self._async_bridge.run_coroutine(self._stop_recording())
 
-    async def _stop_session(self) -> None:
-        """Stop transcription session."""
+    async def _stop_recording(self) -> None:
+        """Stop session and disconnect."""
         try:
-            logger.debug("Stopping transcription session")
+            # Send stop and wait for server to send final transcription
+            logger.debug("Stopping session")
             await self._client.stop()
-            logger.debug("Transcription session stopped")
         except Exception as e:
-            logger.exception("Failed to stop session")
+            logger.warning("Error stopping session: %s", e)
+            # Emit closing event since we won't get one from server
             self._async_bridge.event_received.emit(
-                ErrorEvent(code="stop_failed", message=str(e))
+                ClosingEvent(reason="stop_failed")
             )
 
-    def _on_log_toggled(self, enabled: bool) -> None:
-        """Handle log checkbox toggle."""
-        self._logging_enabled = enabled
-
-        if enabled and self._log_file:
-            try:
-                self._log_handle = open(self._log_file, "a")
-                self._log("Logging started")
-            except Exception as e:
-                self._window.transcript.add_error(f"Failed to open log: {e}")
-                self._logging_enabled = False
-        elif self._log_handle:
-            self._log("Logging stopped")
-            self._log_handle.close()
-            self._log_handle = None
-
-    def _log(self, message: str) -> None:
-        """Write to console and log file if enabled."""
-        # Always log to console via logger
-        logger.info(message)
-
-        # Also write to file if enabled
-        if self._logging_enabled and self._log_handle:
-            timestamp = datetime.now().isoformat()
-            self._log_handle.write(f"[{timestamp}] {message}\n")
-            self._log_handle.flush()
+        try:
+            # Disconnect (server should have already sent closing frame)
+            logger.debug("Disconnecting")
+            await self._client._disconnect()
+        except Exception as e:
+            logger.warning("Error disconnecting: %s", e)
 
     def show(self) -> None:
         """Show the main window."""
@@ -353,32 +271,19 @@ class TestClientApp(QObject):
 
     def cleanup(self) -> None:
         """Clean up resources."""
-        logger.debug("Cleaning up resources")
+        logger.debug("Cleaning up")
 
         if self._audio_worker:
-            logger.debug("Stopping audio worker")
-            try:
-                self._audio_worker.stop()
-                self._audio_worker.wait(5000)
-            except Exception as e:
-                logger.exception("Error stopping audio worker during cleanup")
+            self._audio_worker.stop()
+            self._audio_worker.wait(3000)
 
-        if self._connected:
-            logger.debug("Disconnecting client")
+        if self._recording:
             try:
                 self._async_bridge.run_coroutine(self._client._disconnect())
-            except Exception as e:
-                logger.exception("Error disconnecting during cleanup")
+            except Exception:
+                pass
 
-        logger.debug("Stopping async bridge")
-        try:
-            self._async_bridge.stop()
-        except Exception as e:
-            logger.exception("Error stopping async bridge")
-
-        if self._log_handle:
-            self._log_handle.close()
-
+        self._async_bridge.stop()
         logger.debug("Cleanup complete")
 
 
@@ -413,7 +318,9 @@ def setup_dark_theme(app: QApplication) -> None:
         QColor(128, 128, 128),
     )
     palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(128, 128, 128)
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Text,
+        QColor(128, 128, 128),
     )
     palette.setColor(
         QPalette.ColorGroup.Disabled,

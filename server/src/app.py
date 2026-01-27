@@ -26,6 +26,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
+    # Reduce noise from faster_whisper (logs every audio chunk at INFO)
+    logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+
     logger.info("Starting murmur...")
     logger.info("Loading Whisper model (this may take a moment)...")
 
