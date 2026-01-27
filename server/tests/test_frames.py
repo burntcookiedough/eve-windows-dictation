@@ -3,8 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
-from murmur.protocol.errors import ErrorCode
-from murmur.protocol.frames import (
+from protocol.errors import ErrorCode
+from protocol.frames import (
     ClosingFrame,
     ClosingReason,
     ErrorFrame,

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from tests.ui.client import (
+from murmur_testui.client import (
     VoiceClient,
     ConnectedEvent,
     ReadyEvent,
@@ -71,12 +71,9 @@ class TestVoiceClient:
         events = []
         client.on_event = events.append
 
-        message = json.dumps({
-            "frame": "text",
-            "type": "partial",
-            "text": "hello",
-            "confidence": 0.85
-        })
+        message = json.dumps(
+            {"frame": "text", "type": "partial", "text": "hello", "confidence": 0.85}
+        )
         client._handle_json_message(message)
 
         assert len(events) == 1
@@ -89,12 +86,14 @@ class TestVoiceClient:
         events = []
         client.on_event = events.append
 
-        message = json.dumps({
-            "frame": "text",
-            "type": "final",
-            "text": "hello world",
-            "confidence": 0.95
-        })
+        message = json.dumps(
+            {
+                "frame": "text",
+                "type": "final",
+                "text": "hello world",
+                "confidence": 0.95,
+            }
+        )
         client._handle_json_message(message)
 
         assert len(events) == 1
@@ -107,11 +106,9 @@ class TestVoiceClient:
         events = []
         client.on_event = events.append
 
-        message = json.dumps({
-            "frame": "control",
-            "type": "closing",
-            "reason": "stop_received"
-        })
+        message = json.dumps(
+            {"frame": "control", "type": "closing", "reason": "stop_received"}
+        )
         client._handle_json_message(message)
 
         assert len(events) == 1
@@ -123,12 +120,14 @@ class TestVoiceClient:
         events = []
         client.on_event = events.append
 
-        message = json.dumps({
-            "frame": "control",
-            "type": "error",
-            "code": "invalid_frame",
-            "message": "Bad frame format"
-        })
+        message = json.dumps(
+            {
+                "frame": "control",
+                "type": "error",
+                "code": "invalid_frame",
+                "message": "Bad frame format",
+            }
+        )
         client._handle_json_message(message)
 
         assert len(events) == 1
@@ -158,7 +157,7 @@ class TestVoiceClient:
         assert sent_data == {
             "frame": "control",
             "type": "start",
-            "silence_timeout": 3.0
+            "silence_timeout": 3.0,
         }
 
     @pytest.mark.asyncio

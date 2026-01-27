@@ -2,7 +2,7 @@
 
 import pytest
 
-from murmur.session.state import (
+from session.state import (
     InvalidTransitionError,
     SessionState,
     SessionStateMachine,

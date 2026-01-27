@@ -16,11 +16,11 @@ test:
 
 # Start server in foreground
 start:
-    {{pwsh}} -NoProfile -Command "uv run python -m murmur"
+    {{pwsh}} -NoProfile -Command "uv run python -m main"
 
 # Start server in background
 start-bg:
-    {{pwsh}} -NoProfile -Command "Start-Process -NoNewWindow -FilePath uv -ArgumentList 'run','python','-m','murmur'"
+    {{pwsh}} -NoProfile -Command "Start-Process -NoNewWindow -FilePath uv -ArgumentList 'run','python','-m','main'"
 
 # Stop server by killing process on port
 stop:

@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from murmur.audio.buffer import AudioBuffer
-from murmur.protocol.constants import AUDIO_SAMPLE_RATE
+from audio.buffer import AudioBuffer
+from protocol.constants import AUDIO_SAMPLE_RATE
 
 
 class TestAudioBuffer:

@@ -1,0 +1,21 @@
+[project]
+name = "murmur-testui"
+version = "0.1.0"
+description = "Voice transcription test UI"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26.0",
+    "PySide6>=6.6.0",
+    "sounddevice>=0.5.1",
+    "websockets>=16.0",
+]
+
+[project.scripts]
+testui = "murmur_testui.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/murmur_testui"]

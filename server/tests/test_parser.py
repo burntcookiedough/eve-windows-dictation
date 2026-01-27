@@ -5,8 +5,8 @@ import struct
 import numpy as np
 import pytest
 
-from murmur.audio.parser import AudioFrame, ParseError, parse_audio_frame
-from murmur.protocol.constants import HEADER_SIZE
+from audio.parser import AudioFrame, ParseError, parse_audio_frame
+from protocol.constants import HEADER_SIZE
 
 
 def make_audio_frame(sequence: int, samples: np.ndarray, flags: int = 0) -> bytes:
