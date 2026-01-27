@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,9 @@ from .client import (
 )
 from .widgets import MainWindow
 
+# Set up module logger
+logger = logging.getLogger("murmur_testui")
+
 
 class AudioWorker(QThread):
     """Background thread for audio capture and sending."""
@@ -36,23 +40,37 @@ class AudioWorker(QThread):
 
     def run(self) -> None:
         """Capture and send audio chunks."""
+        logger.debug("AudioWorker starting")
         self._running = True
-        self._mic.start()
+        try:
+            self._mic.start()
+        except Exception as e:
+            logger.exception("Failed to start microphone")
+            self.error_occurred.emit(f"Microphone start failed: {e}")
+            return
 
         try:
             for chunk in self._mic.chunks():
                 if not self._running:
+                    logger.debug("AudioWorker stopping (running=False)")
                     break
                 try:
                     self._send_callback(chunk)
                 except Exception as e:
+                    logger.exception("Error sending audio chunk")
                     self.error_occurred.emit(str(e))
                     break
+        except Exception as e:
+            logger.exception("Error in audio capture loop")
+            self.error_occurred.emit(f"Audio capture error: {e}")
         finally:
+            logger.debug("AudioWorker stopping microphone")
             self._mic.stop()
+            logger.debug("AudioWorker finished")
 
     def stop(self) -> None:
         """Stop audio capture."""
+        logger.debug("AudioWorker.stop() called")
         self._running = False
         self._mic.stop()
 
@@ -69,30 +87,53 @@ class AsyncBridge(QObject):
 
     def start(self) -> None:
         """Start the asyncio event loop in a background thread."""
+        logger.debug("Starting async bridge")
         self._thread = QThread()
         self._thread.run = self._run_loop
         self._thread.start()
 
     def stop(self) -> None:
         """Stop the asyncio event loop."""
+        logger.debug("Stopping async bridge")
         if self._loop:
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
-            self._thread.wait()
+            self._thread.wait(5000)  # 5 second timeout
             self._thread = None
+        logger.debug("Async bridge stopped")
 
     def _run_loop(self) -> None:
         """Run asyncio event loop."""
+        logger.debug("Async event loop starting")
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_forever()
-        self._loop.close()
+        try:
+            self._loop.run_forever()
+        except Exception as e:
+            logger.exception("Async event loop error")
+        finally:
+            self._loop.close()
+            logger.debug("Async event loop closed")
 
     def run_coroutine(self, coro) -> asyncio.Future:
         """Schedule a coroutine on the asyncio loop."""
         if self._loop is None:
             raise RuntimeError("Event loop not started")
-        return asyncio.run_coroutine_threadsafe(coro, self._loop)
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        # Add callback to log any exceptions
+        future.add_done_callback(self._on_coroutine_done)
+        return future
+
+    def _on_coroutine_done(self, future: asyncio.Future) -> None:
+        """Log any exceptions from scheduled coroutines."""
+        try:
+            exc = future.exception()
+            if exc:
+                logger.error("Coroutine raised exception: %s", exc, exc_info=exc)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass  # Future was cancelled or similar
 
 
 class TestClientApp(QObject):
@@ -161,6 +202,9 @@ class TestClientApp(QObject):
         elif isinstance(event, ClosingEvent):
             self._window.transcript.add_system(f"Session closed: {event.reason}")
             self._log(f"Session closed: {event.reason}")
+            # Update connection state
+            self._connected = False
+            self._window.set_connected(False)
 
         elif isinstance(event, ErrorEvent):
             self._window.transcript.add_error(f"{event.code}: {event.message}")
@@ -184,27 +228,21 @@ class TestClientApp(QObject):
 
     def _on_disconnect(self) -> None:
         """Handle disconnect button click."""
+        self._window.set_status("Disconnecting...")
+        self._log("Disconnecting...")
         self._async_bridge.run_coroutine(self._disconnect())
 
     async def _disconnect(self) -> None:
         """Disconnect from the server."""
+        logger.debug("Disconnecting from server")
         try:
             await self._client._disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Error during disconnect: %s", e)
         finally:
-            self._connected = False
+            # Emit event to update UI (handled in _handle_event)
             self._async_bridge.event_received.emit(
                 ClosingEvent(reason="user_disconnect")
-            )
-            # Update UI in Qt thread
-            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
-
-            QMetaObject.invokeMethod(
-                self._window,
-                "set_connected",
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(bool, False),
             )
 
     def _on_ptt_pressed(self) -> None:
@@ -221,7 +259,9 @@ class TestClientApp(QObject):
     async def _start_session(self) -> None:
         """Start transcription session and audio capture."""
         try:
+            logger.debug("Starting transcription session")
             await self._client.start(silence_timeout=5.0)
+            logger.debug("Session started, starting audio worker")
 
             # Start audio worker
             self._audio_worker = AudioWorker(
@@ -234,8 +274,10 @@ class TestClientApp(QObject):
                 lambda e: self._window.transcript.add_error(e)
             )
             self._audio_worker.start()
+            logger.debug("Audio worker started")
 
         except Exception as e:
+            logger.exception("Failed to start session")
             self._async_bridge.event_received.emit(
                 ErrorEvent(code="start_failed", message=str(e))
             )
@@ -250,18 +292,30 @@ class TestClientApp(QObject):
 
         # Stop audio worker
         if self._audio_worker:
-            self._audio_worker.stop()
-            self._audio_worker.wait()
-            self._audio_worker = None
+            try:
+                self._audio_worker.stop()
+                self._audio_worker.wait(5000)  # 5 second timeout
+            except Exception as e:
+                logger.exception("Error stopping audio worker")
+                self._window.transcript.add_error(f"Audio worker error: {e}")
+            finally:
+                self._audio_worker = None
 
         # Stop session
-        self._async_bridge.run_coroutine(self._stop_session())
+        try:
+            self._async_bridge.run_coroutine(self._stop_session())
+        except Exception as e:
+            logger.exception("Error scheduling stop_session")
+            self._window.transcript.add_error(f"Stop session error: {e}")
 
     async def _stop_session(self) -> None:
         """Stop transcription session."""
         try:
+            logger.debug("Stopping transcription session")
             await self._client.stop()
+            logger.debug("Transcription session stopped")
         except Exception as e:
+            logger.exception("Failed to stop session")
             self._async_bridge.event_received.emit(
                 ErrorEvent(code="stop_failed", message=str(e))
             )
@@ -283,7 +337,11 @@ class TestClientApp(QObject):
             self._log_handle = None
 
     def _log(self, message: str) -> None:
-        """Write to log file if enabled."""
+        """Write to console and log file if enabled."""
+        # Always log to console via logger
+        logger.info(message)
+
+        # Also write to file if enabled
         if self._logging_enabled and self._log_handle:
             timestamp = datetime.now().isoformat()
             self._log_handle.write(f"[{timestamp}] {message}\n")
@@ -295,17 +353,33 @@ class TestClientApp(QObject):
 
     def cleanup(self) -> None:
         """Clean up resources."""
+        logger.debug("Cleaning up resources")
+
         if self._audio_worker:
-            self._audio_worker.stop()
-            self._audio_worker.wait()
+            logger.debug("Stopping audio worker")
+            try:
+                self._audio_worker.stop()
+                self._audio_worker.wait(5000)
+            except Exception as e:
+                logger.exception("Error stopping audio worker during cleanup")
 
         if self._connected:
-            self._async_bridge.run_coroutine(self._client._disconnect())
+            logger.debug("Disconnecting client")
+            try:
+                self._async_bridge.run_coroutine(self._client._disconnect())
+            except Exception as e:
+                logger.exception("Error disconnecting during cleanup")
 
-        self._async_bridge.stop()
+        logger.debug("Stopping async bridge")
+        try:
+            self._async_bridge.stop()
+        except Exception as e:
+            logger.exception("Error stopping async bridge")
 
         if self._log_handle:
             self._log_handle.close()
+
+        logger.debug("Cleanup complete")
 
 
 def setup_dark_theme(app: QApplication) -> None:

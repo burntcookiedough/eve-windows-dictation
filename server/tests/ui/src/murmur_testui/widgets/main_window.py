@@ -1,7 +1,9 @@
 """Main window for the test client."""
 
+import logging
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -15,6 +17,8 @@ from PySide6.QtWidgets import (
 
 from .ptt_button import PTTButton
 from .transcript_view import TranscriptView
+
+logger = logging.getLogger("murmur_testui.window")
 
 
 class MainWindow(QMainWindow):
@@ -68,7 +72,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.ptt_btn)
 
         # Hint text
-        hint = QLabel("Hold Space or click button to record")
+        hint = QLabel("Hold button to record")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #888888; font-size: 12px;")
         layout.addWidget(hint)
@@ -99,22 +103,6 @@ class MainWindow(QMainWindow):
         else:
             self.disconnect_clicked.emit()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Handle key press for PTT."""
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            if self.ptt_btn.isEnabled() and not self.ptt_btn.is_active:
-                self.ptt_btn._activate()
-        else:
-            super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        """Handle key release for PTT."""
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            if self.ptt_btn.isEnabled() and self.ptt_btn.is_active:
-                self.ptt_btn._deactivate()
-        else:
-            super().keyReleaseEvent(event)
-
     # Public methods for state updates
 
     def set_connected(self, connected: bool) -> None:
@@ -139,3 +127,10 @@ class MainWindow(QMainWindow):
             self.status_label.setStyleSheet("color: #ef5350;")
         else:
             self.status_label.setStyleSheet("color: #4caf50;")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Handle window close event."""
+        import traceback
+        logger.warning("Window closeEvent triggered!")
+        logger.warning("Stack trace:\n%s", "".join(traceback.format_stack()))
+        super().closeEvent(event)

@@ -1,5 +1,7 @@
 """Microphone capture using sounddevice."""
 
+import logging
+import threading
 from collections.abc import Generator
 
 import numpy as np
@@ -9,6 +11,8 @@ import sounddevice as sd
 SAMPLE_RATE = 16000
 CHANNELS = 1
 DTYPE = np.int16
+
+logger = logging.getLogger("murmur_testui.audio")
 
 
 class MicrophoneCapture:
@@ -31,6 +35,7 @@ class MicrophoneCapture:
         self._chunk_samples = int(SAMPLE_RATE * chunk_ms / 1000)
         self._stream: sd.InputStream | None = None
         self._running = False
+        self._lock = threading.Lock()
 
     @property
     def chunk_samples(self) -> int:
@@ -39,25 +44,38 @@ class MicrophoneCapture:
 
     def start(self) -> None:
         """Start microphone capture."""
-        if self._stream is not None:
-            return
+        with self._lock:
+            if self._stream is not None:
+                logger.debug("Microphone already started")
+                return
 
-        self._stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=DTYPE,
-            blocksize=self._chunk_samples,
-        )
-        self._stream.start()
-        self._running = True
+            logger.debug("Starting microphone capture")
+            self._stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=DTYPE,
+                blocksize=self._chunk_samples,
+            )
+            self._stream.start()
+            self._running = True
+            logger.debug("Microphone capture started")
 
     def stop(self) -> None:
         """Stop microphone capture."""
-        self._running = False
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        with self._lock:
+            self._running = False
+            if self._stream is not None:
+                logger.debug("Stopping microphone capture")
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception as e:
+                    logger.warning("Error stopping microphone stream: %s", e)
+                finally:
+                    self._stream = None
+                logger.debug("Microphone capture stopped")
+            else:
+                logger.debug("Microphone already stopped")
 
     def read_chunk(self) -> np.ndarray | None:
         """Read a single chunk of audio.

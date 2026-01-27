@@ -88,8 +88,9 @@ async def websocket_handler(websocket: WebSocket) -> None:
         except Exception:
             pass
     finally:
-        # Clean up session
-        context.state_machine.transition_to(SessionState.CLOSED)
+        # Clean up session (only transition if not already closed)
+        if context.state_machine.state != SessionState.CLOSED:
+            context.state_machine.transition_to(SessionState.CLOSED)
         manager.remove_session(context.session_id)
         try:
             await websocket.close()

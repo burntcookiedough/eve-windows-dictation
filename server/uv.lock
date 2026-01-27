@@ -478,6 +478,7 @@ ui = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "murmur-testui" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "websockets" },
@@ -507,11 +508,31 @@ provides-extras = ["dev", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "murmur-testui", editable = "tests/ui" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "websockets", specifier = ">=16.0" },
 ]
 ui = [
+    { name = "pyside6", specifier = ">=6.6.0" },
+    { name = "sounddevice", specifier = ">=0.5.1" },
+    { name = "websockets", specifier = ">=16.0" },
+]
+
+[[package]]
+name = "murmur-testui"
+version = "0.1.0"
+source = { editable = "tests/ui" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pyside6" },
+    { name = "sounddevice" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.26.0" },
     { name = "pyside6", specifier = ">=6.6.0" },
     { name = "sounddevice", specifier = ">=0.5.1" },
     { name = "websockets", specifier = ">=16.0" },
