@@ -3,7 +3,7 @@
 import logging
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.ptt_btn)
 
         # Hint text
-        hint = QLabel("Hold to record - connects automatically")
+        hint = QLabel("Hold button or F17 to record - connects automatically")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #888888; font-size: 12px;")
         layout.addWidget(hint)
@@ -93,6 +93,32 @@ class MainWindow(QMainWindow):
     def set_recording(self, recording: bool) -> None:
         """Update UI for recording state."""
         self.url_input.setEnabled(not recording)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle key press events."""
+        # Ignore auto-repeat
+        if event.isAutoRepeat():
+            return
+
+        # F17 activates PTT via keyboard
+        if event.key() == Qt.Key.Key_F17:
+            self.ptt_btn.key_activate()
+            return
+
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        """Handle key release events."""
+        # Ignore auto-repeat
+        if event.isAutoRepeat():
+            return
+
+        # F17 deactivates PTT via keyboard
+        if event.key() == Qt.Key.Key_F17:
+            self.ptt_btn.key_deactivate()
+            return
+
+        super().keyReleaseEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event."""
