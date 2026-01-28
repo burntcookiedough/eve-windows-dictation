@@ -2,9 +2,11 @@
 
 import argparse
 import logging
+import signal
 import sys
 import threading
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .app import TestClientApp, setup_dark_theme
@@ -86,6 +88,12 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Voice Transcription Test Client")
+
+    # Enable Ctrl+C to quit - Qt needs periodic timer to process signals
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    timer = QTimer()
+    timer.timeout.connect(lambda: None)  # No-op to let Python process signals
+    timer.start(100)
 
     setup_dark_theme(app)
 

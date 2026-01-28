@@ -167,6 +167,7 @@ class TestClientApp(QObject):
 
         elif isinstance(event, FinalEvent):
             self._window.transcript.add_final(event.text, event.confidence)
+            QApplication.clipboard().setText(event.text)
             logger.info("Final: %s", event.text)
 
         elif isinstance(event, ClosingEvent):

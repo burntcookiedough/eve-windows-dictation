@@ -98,3 +98,4 @@ server_err.log
 # more sensitive dev docs
 .dev/transcription-decision.md
 .dev/transcription-research.md
+.pyre/
