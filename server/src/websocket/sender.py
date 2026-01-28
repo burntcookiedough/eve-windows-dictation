@@ -59,28 +59,62 @@ class FrameSender:
         await self._ws.send_json(frame.model_dump())
         logger.debug("[%s] Sent closing frame: %s", self._session_id, reason)
 
-    async def send_partial(self, text: str, confidence: float) -> None:
+    async def send_partial(
+        self,
+        text: str,
+        confidence: float,
+        transcription_time: float,
+        audio_duration: float,
+    ) -> None:
         """Send a partial text frame.
 
         Args:
             text: Partial transcription text.
             confidence: Confidence score (0.0 to 1.0).
+            transcription_time: Time in seconds for transcription processing.
+            audio_duration: Duration in seconds of the audio transcribed.
         """
-        frame = PartialTextFrame(text=text, confidence=confidence)
+        frame = PartialTextFrame(
+            text=text,
+            confidence=confidence,
+            transcription_time=transcription_time,
+            audio_duration=audio_duration,
+        )
         await self._ws.send_json(frame.model_dump())
         logger.debug(
-            "[%s] Sent partial: %r (conf=%.2f)", self._session_id, text[:50], confidence
+            "[%s] Sent partial: %r (conf=%.2f, time=%.3fs)",
+            self._session_id,
+            text[:50],
+            confidence,
+            transcription_time,
         )
 
-    async def send_final(self, text: str, confidence: float) -> None:
+    async def send_final(
+        self,
+        text: str,
+        confidence: float,
+        transcription_time: float,
+        audio_duration: float,
+    ) -> None:
         """Send a final text frame.
 
         Args:
             text: Final transcription text (must be non-empty).
             confidence: Confidence score (0.0 to 1.0).
+            transcription_time: Time in seconds for transcription processing.
+            audio_duration: Duration in seconds of the audio transcribed.
         """
-        frame = FinalTextFrame(text=text, confidence=confidence)
+        frame = FinalTextFrame(
+            text=text,
+            confidence=confidence,
+            transcription_time=transcription_time,
+            audio_duration=audio_duration,
+        )
         await self._ws.send_json(frame.model_dump())
         logger.info(
-            "[%s] Sent final: %r (conf=%.2f)", self._session_id, text[:100], confidence
+            "[%s] Sent final: %r (conf=%.2f, time=%.3fs)",
+            self._session_id,
+            text[:100],
+            confidence,
+            transcription_time,
         )

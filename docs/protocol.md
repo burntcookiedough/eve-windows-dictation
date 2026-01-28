@@ -223,7 +223,9 @@ Interim transcription result. Speculative — may change.
   "frame": "text",
   "type": "partial",
   "text": "hello how are",
-  "confidence": 0.72
+  "confidence": 0.72,
+  "transcription_time": 0.142,
+  "audio_duration": 2.5
 }
 ```
 
@@ -233,6 +235,10 @@ Interim transcription result. Speculative — may change.
 | `type` | string | `"partial"` |
 | `text` | string | Current transcription hypothesis |
 | `confidence` | number | Confidence score, 0.0 to 1.0 |
+| `transcription_time` | number | Time in seconds for transcription processing (see below) |
+| `audio_duration` | number | Duration in seconds of the audio transcribed |
+
+**`transcription_time` includes:** reading audio from buffer, converting to float32, and model inference. **Does not include:** network latency, audio capture, or any post-processing.
 
 **Client behavior:** Replace any previously displayed partial text with this text. Do not persist.
 
@@ -247,7 +253,9 @@ Committed transcription result. Will not change.
   "frame": "text",
   "type": "final",
   "text": "hello how are you",
-  "confidence": 0.94
+  "confidence": 0.94,
+  "transcription_time": 0.156,
+  "audio_duration": 3.2
 }
 ```
 
@@ -257,6 +265,10 @@ Committed transcription result. Will not change.
 | `type` | string | `"final"` |
 | `text` | string | Finalized transcription (always non-empty) |
 | `confidence` | number | Confidence score, 0.0 to 1.0 |
+| `transcription_time` | number | Time in seconds for transcription processing (see below) |
+| `audio_duration` | number | Duration in seconds of the audio transcribed |
+
+**`transcription_time` includes:** reading audio from buffer, converting to float32, and model inference. **Does not include:** network latency, audio capture, or any post-processing.
 
 **Client behavior:** Append text to transcript. Clear partial buffer.
 

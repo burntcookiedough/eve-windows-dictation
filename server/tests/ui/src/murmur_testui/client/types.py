@@ -27,6 +27,8 @@ class PartialEvent(ClientEvent):
     """Emitted for interim transcription results."""
     text: str
     confidence: float
+    transcription_time: float
+    audio_duration: float
 
 
 @dataclass
@@ -34,6 +36,8 @@ class FinalEvent(ClientEvent):
     """Emitted for committed transcription results."""
     text: str
     confidence: float
+    transcription_time: float
+    audio_duration: float
 
 
 @dataclass

@@ -53,7 +53,13 @@ class TranscriptView(QTextEdit):
         # Scroll to bottom
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
-    def add_partial(self, text: str, confidence: float) -> None:
+    def add_partial(
+        self,
+        text: str,
+        confidence: float,
+        transcription_time: float,
+        audio_duration: float,
+    ) -> None:
         """Add or update partial transcription result."""
         # Remember position before inserting partial
         cursor = self.textCursor()
@@ -61,21 +67,31 @@ class TranscriptView(QTextEdit):
         self._last_partial_block = cursor.position()
 
         conf_pct = int(confidence * 100)
+        # Calculate speed ratio (avoid division by zero)
+        speed_ratio = int(audio_duration / transcription_time) if transcription_time > 0 else 0
         html = (
             f'<span style="color: #888888; font-style: italic;">'
-            f'[{self._timestamp()}] ({conf_pct}%) {text}</span>'
+            f'[{self._timestamp()}] ({conf_pct}%) ({speed_ratio}x) {transcription_time:.3f}s {text}</span>'
         )
         self._append_html(html, replace_partial=False)
 
-    def add_final(self, text: str, confidence: float) -> None:
+    def add_final(
+        self,
+        text: str,
+        confidence: float,
+        transcription_time: float,
+        audio_duration: float,
+    ) -> None:
         """Add final transcription result."""
         # Clear last partial since we're replacing with final
         self._last_partial_block = None
 
         conf_pct = int(confidence * 100)
+        # Calculate speed ratio (avoid division by zero)
+        speed_ratio = int(audio_duration / transcription_time) if transcription_time > 0 else 0
         html = (
             f'<span style="color: #ffffff; font-weight: bold;">'
-            f'[{self._timestamp()}] ({conf_pct}%) {text}</span>'
+            f'[{self._timestamp()}] ({conf_pct}%) ({speed_ratio}x) {transcription_time:.3f}s {text}</span>'
         )
         self._append_html(html, replace_partial=True)
 

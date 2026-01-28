@@ -82,6 +82,8 @@ class PartialTextFrame(TextFrameBase):
     type: Literal["partial"] = "partial"
     text: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    transcription_time: Annotated[float, Field(ge=0.0)]
+    audio_duration: Annotated[float, Field(ge=0.0)]
 
 
 class FinalTextFrame(TextFrameBase):
@@ -90,6 +92,8 @@ class FinalTextFrame(TextFrameBase):
     type: Literal["final"] = "final"
     text: Annotated[str, Field(min_length=1)]  # Never empty
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    transcription_time: Annotated[float, Field(ge=0.0)]
+    audio_duration: Annotated[float, Field(ge=0.0)]
 
 
 # Union type for all text frames

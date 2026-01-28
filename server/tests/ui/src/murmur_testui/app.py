@@ -163,10 +163,20 @@ class TestClientApp(QObject):
             logger.info("Server ready, recording")
 
         elif isinstance(event, PartialEvent):
-            self._window.transcript.add_partial(event.text, event.confidence)
+            self._window.transcript.add_partial(
+                event.text,
+                event.confidence,
+                event.transcription_time,
+                event.audio_duration,
+            )
 
         elif isinstance(event, FinalEvent):
-            self._window.transcript.add_final(event.text, event.confidence)
+            self._window.transcript.add_final(
+                event.text,
+                event.confidence,
+                event.transcription_time,
+                event.audio_duration,
+            )
             QApplication.clipboard().setText(event.text)
             logger.info("Final: %s", event.text)
 

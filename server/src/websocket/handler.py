@@ -281,7 +281,12 @@ async def _partial_emission_loop(
         try:
             result = await processor.transcribe_partial()
             if result is not None and not result.is_empty:
-                await sender.send_partial(result.text, result.confidence)
+                await sender.send_partial(
+                    result.text,
+                    result.confidence,
+                    result.transcription_time,
+                    result.audio_duration,
+                )
                 context.has_speech = True
         except Exception as e:
             logger.exception(
@@ -339,7 +344,12 @@ async def _finalize_session(
     try:
         result = await processor.transcribe_final()
         if not result.is_empty:
-            await sender.send_final(result.text, result.confidence)
+            await sender.send_final(
+                result.text,
+                result.confidence,
+                result.transcription_time,
+                result.audio_duration,
+            )
     except Exception as e:
         logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
 

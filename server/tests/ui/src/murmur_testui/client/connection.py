@@ -137,6 +137,8 @@ class VoiceClient:
                     PartialEvent(
                         text=data.get("text", ""),
                         confidence=data.get("confidence", 0.0),
+                        transcription_time=data.get("transcription_time", 0.0),
+                        audio_duration=data.get("audio_duration", 0.0),
                     )
                 )
             elif msg_type == "final":
@@ -144,6 +146,8 @@ class VoiceClient:
                     FinalEvent(
                         text=data.get("text", ""),
                         confidence=data.get("confidence", 0.0),
+                        transcription_time=data.get("transcription_time", 0.0),
+                        audio_duration=data.get("audio_duration", 0.0),
                     )
                 )
 

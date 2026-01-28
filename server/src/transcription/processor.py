@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -33,6 +34,8 @@ class TranscriptionResult:
     text: str
     confidence: float
     is_empty: bool
+    transcription_time: float
+    audio_duration: float
 
 
 class TranscriptionProcessor:
@@ -61,6 +64,12 @@ class TranscriptionProcessor:
         ):
             return None
 
+        # Start timing
+        start_time = time.perf_counter()
+
+        # Capture audio duration before transcription
+        audio_duration = self._context.audio_buffer.duration_seconds
+
         # Get audio as float32 for Whisper
         audio = self._context.audio_buffer.get_audio_float32()
         if len(audio) == 0:
@@ -74,6 +83,9 @@ class TranscriptionProcessor:
             get_executor(),
             lambda: engine.transcribe(audio),
         )
+
+        # Stop timing
+        transcription_time = time.perf_counter() - start_time
 
         # Check if text changed from last partial
         if result.text == self._context.last_partial_text:
@@ -86,6 +98,8 @@ class TranscriptionProcessor:
             text=result.text,
             confidence=result.confidence,
             is_empty=len(result.text.strip()) == 0,
+            transcription_time=transcription_time,
+            audio_duration=audio_duration,
         )
 
     async def transcribe_final(self) -> TranscriptionResult:
@@ -94,11 +108,23 @@ class TranscriptionProcessor:
         Returns:
             TranscriptionResult with final transcription.
         """
+        # Start timing
+        start_time = time.perf_counter()
+
+        # Capture audio duration before transcription
+        audio_duration = self._context.audio_buffer.duration_seconds
+
         # Get audio as float32 for Whisper
         audio = self._context.audio_buffer.get_audio_float32()
 
         if len(audio) == 0:
-            return TranscriptionResult(text="", confidence=0.0, is_empty=True)
+            return TranscriptionResult(
+                text="",
+                confidence=0.0,
+                is_empty=True,
+                transcription_time=0.0,
+                audio_duration=0.0,
+            )
 
         # Run transcription in thread pool
         loop = asyncio.get_running_loop()
@@ -109,10 +135,15 @@ class TranscriptionProcessor:
             lambda: engine.transcribe(audio),
         )
 
+        # Stop timing
+        transcription_time = time.perf_counter() - start_time
+
         return TranscriptionResult(
             text=result.text,
             confidence=result.confidence,
             is_empty=len(result.text.strip()) == 0,
+            transcription_time=transcription_time,
+            audio_duration=audio_duration,
         )
 
 
