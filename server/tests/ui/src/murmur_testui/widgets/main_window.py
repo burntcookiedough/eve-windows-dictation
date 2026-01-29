@@ -5,6 +5,7 @@ import logging
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,6 +26,7 @@ class MainWindow(QMainWindow):
     # Signals
     ptt_pressed = Signal()
     ptt_released = Signal()
+    global_hotkey_toggled = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -62,6 +64,15 @@ class MainWindow(QMainWindow):
         self.ptt_btn = PTTButton()
         layout.addWidget(self.ptt_btn)
 
+        # Global hotkey toggle
+        self.global_hotkey_checkbox = QCheckBox("Global F17 hotkey (works without focus)")
+        self.global_hotkey_checkbox.setStyleSheet("color: #888888; font-size: 12px;")
+        self.global_hotkey_checkbox.setToolTip(
+            "When enabled, F17 works even when this window is not focused.\n"
+            "The window will appear on top when recording."
+        )
+        layout.addWidget(self.global_hotkey_checkbox)
+
         # Hint text
         hint = QLabel("Hold button or F17 to record - connects automatically")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -77,6 +88,7 @@ class MainWindow(QMainWindow):
         """Connect internal signals."""
         self.ptt_btn.pressed_ptt.connect(self.ptt_pressed.emit)
         self.ptt_btn.released_ptt.connect(self.ptt_released.emit)
+        self.global_hotkey_checkbox.toggled.connect(self.global_hotkey_toggled.emit)
 
     def get_url(self) -> str:
         """Get the current server URL."""
@@ -119,6 +131,32 @@ class MainWindow(QMainWindow):
             return
 
         super().keyReleaseEvent(event)
+
+    def raise_without_focus(self) -> None:
+        """Raise window to top without stealing keyboard focus.
+
+        This brings the window visually on top of other windows while
+        keeping the keyboard focus on whatever application the user
+        was using. Useful for global hotkey activation.
+        """
+        # Ensure window is visible and not minimized
+        if self.isMinimized():
+            self.showNormal()
+
+        # Set stay-on-top hint temporarily to ensure we're on top
+        original_flags = self.windowFlags()
+        self.setWindowFlags(original_flags | Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
+
+        # Remove stay-on-top after a brief moment so other windows can go on top later
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(100, lambda: self._restore_window_flags(original_flags))
+
+    def _restore_window_flags(self, flags: Qt.WindowType) -> None:
+        """Restore original window flags."""
+        self.setWindowFlags(flags)
+        self.show()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event."""

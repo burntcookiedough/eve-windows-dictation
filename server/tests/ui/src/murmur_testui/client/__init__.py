@@ -2,6 +2,7 @@
 
 from .connection import VoiceClient
 from .audio import MicrophoneCapture
+from .global_hotkey import GlobalHotkeyListener
 from .types import (
     ClientEvent,
     ConnectedEvent,
@@ -15,6 +16,7 @@ from .types import (
 __all__ = [
     "VoiceClient",
     "MicrophoneCapture",
+    "GlobalHotkeyListener",
     "ClientEvent",
     "ConnectedEvent",
     "ReadyEvent",

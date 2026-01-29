@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from .client import (
     VoiceClient,
     MicrophoneCapture,
+    GlobalHotkeyListener,
     ClientEvent,
     ConnectedEvent,
     ReadyEvent,
@@ -127,6 +128,10 @@ class TestClientApp(QObject):
     - PTT release: stop audio → stop session → disconnect
     """
 
+    # Signals for global hotkey events (called from background thread)
+    _global_key_pressed = Signal()
+    _global_key_released = Signal()
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -135,6 +140,8 @@ class TestClientApp(QObject):
         self._window = MainWindow()
         self._async_bridge = AsyncBridge()
         self._audio_worker: AudioWorker | None = None
+        self._global_hotkey: GlobalHotkeyListener | None = None
+        self._global_hotkey_enabled = False
 
         self._recording = False
 
@@ -145,8 +152,13 @@ class TestClientApp(QObject):
         self._client.on_event = self._on_client_event
         self._window.ptt_pressed.connect(self._on_ptt_pressed)
         self._window.ptt_released.connect(self._on_ptt_released)
+        self._window.global_hotkey_toggled.connect(self._on_global_hotkey_toggled)
         self._async_bridge.event_received.connect(self._handle_event)
         self._async_bridge.start()
+
+        # Global hotkey signals (thread-safe bridge)
+        self._global_key_pressed.connect(self._on_global_ptt_pressed)
+        self._global_key_released.connect(self._on_global_ptt_released)
 
     def _on_client_event(self, event: ClientEvent) -> None:
         """Handle client event (called from asyncio thread)."""
@@ -256,6 +268,38 @@ class TestClientApp(QObject):
         # Stop session and disconnect
         self._async_bridge.run_coroutine(self._stop_recording())
 
+    def _on_global_hotkey_toggled(self, enabled: bool) -> None:
+        """Handle global hotkey toggle."""
+        self._global_hotkey_enabled = enabled
+
+        if enabled:
+            # Create and start global hotkey listener
+            if self._global_hotkey is None:
+                self._global_hotkey = GlobalHotkeyListener(
+                    on_press=lambda: self._global_key_pressed.emit(),
+                    on_release=lambda: self._global_key_released.emit(),
+                )
+            self._global_hotkey.start()
+            logger.info("Global F17 hotkey enabled")
+        else:
+            # Stop global hotkey listener
+            if self._global_hotkey is not None:
+                self._global_hotkey.stop()
+            logger.info("Global F17 hotkey disabled")
+
+    def _on_global_ptt_pressed(self) -> None:
+        """Handle global F17 press (from background thread via signal)."""
+        # Bring window to top without stealing focus
+        self._window.raise_without_focus()
+
+        # Activate PTT via keyboard mode
+        self._window.ptt_btn.key_activate()
+
+    def _on_global_ptt_released(self) -> None:
+        """Handle global F17 release (from background thread via signal)."""
+        # Deactivate PTT via keyboard mode
+        self._window.ptt_btn.key_deactivate()
+
     async def _stop_recording(self) -> None:
         """Stop session and disconnect."""
         try:
@@ -283,6 +327,11 @@ class TestClientApp(QObject):
     def cleanup(self) -> None:
         """Clean up resources."""
         logger.debug("Cleaning up")
+
+        # Stop global hotkey listener
+        if self._global_hotkey is not None:
+            self._global_hotkey.stop()
+            self._global_hotkey = None
 
         if self._audio_worker:
             self._audio_worker.stop()
