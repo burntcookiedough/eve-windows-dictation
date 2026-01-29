@@ -21,6 +21,8 @@ from .client import (
 )
 from .widgets import MainWindow
 
+from pynput import keyboard as pynput_keyboard
+
 logger = logging.getLogger("murmur_testui")
 
 
@@ -141,7 +143,8 @@ class TestClientApp(QObject):
         self._async_bridge = AsyncBridge()
         self._audio_worker: AudioWorker | None = None
         self._global_hotkey: GlobalHotkeyListener | None = None
-        self._global_hotkey_enabled = False
+        self._global_hotkey_enabled = True  # Enabled by default
+        self._auto_paste_enabled = True  # Enabled by default
 
         self._recording = False
 
@@ -153,12 +156,21 @@ class TestClientApp(QObject):
         self._window.ptt_pressed.connect(self._on_ptt_pressed)
         self._window.ptt_released.connect(self._on_ptt_released)
         self._window.global_hotkey_toggled.connect(self._on_global_hotkey_toggled)
+        self._window.auto_paste_toggled.connect(self._on_auto_paste_toggled)
         self._async_bridge.event_received.connect(self._handle_event)
         self._async_bridge.start()
 
         # Global hotkey signals (thread-safe bridge)
         self._global_key_pressed.connect(self._on_global_ptt_pressed)
         self._global_key_released.connect(self._on_global_ptt_released)
+
+        # Start global hotkey listener (enabled by default)
+        self._global_hotkey = GlobalHotkeyListener(
+            on_press=lambda: self._global_key_pressed.emit(),
+            on_release=lambda: self._global_key_released.emit(),
+        )
+        self._global_hotkey.start()
+        logger.info("Global F17 hotkey enabled (default)")
 
     def _on_client_event(self, event: ClientEvent) -> None:
         """Handle client event (called from asyncio thread)."""
@@ -191,6 +203,10 @@ class TestClientApp(QObject):
             )
             QApplication.clipboard().setText(event.text)
             logger.info("Final: %s", event.text)
+
+            # Auto-paste if enabled (only works with global hotkey)
+            if self._auto_paste_enabled and self._global_hotkey_enabled:
+                self._perform_paste()
 
         elif isinstance(event, ClosingEvent):
             self._window.transcript.add_system(f"Session ended: {event.reason}")
@@ -286,6 +302,31 @@ class TestClientApp(QObject):
             if self._global_hotkey is not None:
                 self._global_hotkey.stop()
             logger.info("Global F17 hotkey disabled")
+            # Also disable auto-paste when global hotkey is disabled
+            self._auto_paste_enabled = False
+
+    def _on_auto_paste_toggled(self, enabled: bool) -> None:
+        """Handle auto-paste toggle."""
+        self._auto_paste_enabled = enabled
+        if enabled:
+            logger.info("Auto-paste enabled")
+        else:
+            logger.info("Auto-paste disabled")
+
+    def _perform_paste(self) -> None:
+        """Simulate Ctrl+V to paste clipboard contents."""
+        try:
+            keyboard_controller = pynput_keyboard.Controller()
+            # Small delay to ensure clipboard is ready
+            import time
+
+            time.sleep(0.05)
+            # Press Ctrl+V
+            with keyboard_controller.pressed(pynput_keyboard.Key.ctrl):
+                keyboard_controller.tap("v")
+            logger.debug("Auto-paste performed")
+        except Exception as e:
+            logger.warning("Failed to auto-paste: %s", e)
 
     def _on_global_ptt_pressed(self) -> None:
         """Handle global F17 press (from background thread via signal)."""
@@ -309,9 +350,7 @@ class TestClientApp(QObject):
         except Exception as e:
             logger.warning("Error stopping session: %s", e)
             # Emit closing event since we won't get one from server
-            self._async_bridge.event_received.emit(
-                ClosingEvent(reason="stop_failed")
-            )
+            self._async_bridge.event_received.emit(ClosingEvent(reason="stop_failed"))
 
         try:
             # Disconnect (server should have already sent closing frame)

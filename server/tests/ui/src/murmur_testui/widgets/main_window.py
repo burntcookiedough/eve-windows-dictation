@@ -27,6 +27,7 @@ class MainWindow(QMainWindow):
     ptt_pressed = Signal()
     ptt_released = Signal()
     global_hotkey_toggled = Signal(bool)
+    auto_paste_toggled = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -64,14 +65,32 @@ class MainWindow(QMainWindow):
         self.ptt_btn = PTTButton()
         layout.addWidget(self.ptt_btn)
 
+        # Checkbox row for global hotkey and auto-paste
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setSpacing(24)
+
         # Global hotkey toggle
-        self.global_hotkey_checkbox = QCheckBox("Global F17 hotkey (works without focus)")
+        self.global_hotkey_checkbox = QCheckBox("Global F17 hotkey")
         self.global_hotkey_checkbox.setStyleSheet("color: #888888; font-size: 12px;")
         self.global_hotkey_checkbox.setToolTip(
             "When enabled, F17 works even when this window is not focused.\n"
             "The window will appear on top when recording."
         )
-        layout.addWidget(self.global_hotkey_checkbox)
+        self.global_hotkey_checkbox.setChecked(True)  # Enabled by default
+        checkbox_layout.addWidget(self.global_hotkey_checkbox)
+
+        # Auto-paste toggle (only works when global hotkey is enabled)
+        self.auto_paste_checkbox = QCheckBox("Auto-paste result")
+        self.auto_paste_checkbox.setStyleSheet("color: #888888; font-size: 12px;")
+        self.auto_paste_checkbox.setToolTip(
+            "When enabled, automatically pastes the transcription result.\n"
+            "Only works when global hotkey is enabled."
+        )
+        self.auto_paste_checkbox.setChecked(True)  # Enabled by default
+        checkbox_layout.addWidget(self.auto_paste_checkbox)
+
+        checkbox_layout.addStretch()  # Push checkboxes to the left
+        layout.addLayout(checkbox_layout)
 
         # Hint text
         hint = QLabel("Hold button or F17 to record - connects automatically")
@@ -88,7 +107,15 @@ class MainWindow(QMainWindow):
         """Connect internal signals."""
         self.ptt_btn.pressed_ptt.connect(self.ptt_pressed.emit)
         self.ptt_btn.released_ptt.connect(self.ptt_released.emit)
-        self.global_hotkey_checkbox.toggled.connect(self.global_hotkey_toggled.emit)
+        self.global_hotkey_checkbox.toggled.connect(self._on_global_hotkey_toggled)
+        self.auto_paste_checkbox.toggled.connect(self.auto_paste_toggled.emit)
+
+    def _on_global_hotkey_toggled(self, enabled: bool) -> None:
+        """Handle global hotkey checkbox toggle - enable/disable auto-paste checkbox."""
+        self.auto_paste_checkbox.setEnabled(enabled)
+        if not enabled:
+            self.auto_paste_checkbox.setChecked(False)
+        self.global_hotkey_toggled.emit(enabled)
 
     def get_url(self) -> str:
         """Get the current server URL."""
