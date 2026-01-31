@@ -8,7 +8,7 @@
   let recordingState = $state<RecordingState>('idle');
   let transcriptionText = $state('');
   let transcriptionType = $state<'partial' | 'final'>('partial');
-  let audioLevels = $state<number[]>(new Array(32).fill(0));
+  let audioLevels = $state<number[]>(new Array(40).fill(0));
   let isVisible = $state(false);
 
   let cleanupFns: Array<() => void> = [];
@@ -32,7 +32,7 @@
 
   function stopAudioCapture() {
     audioCapture.stop();
-    audioLevels = new Array(32).fill(0);
+    audioLevels = new Array(40).fill(0);
   }
 
   onMount(() => {
