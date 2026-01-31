@@ -1,0 +1,55 @@
+{
+  "name": "murmur",
+  "version": "0.1.0",
+  "description": "Desktop voice transcription app",
+  "main": "dist/main/index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"bun run dev:vite\" \"bun run dev:main\" \"bun run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:main": "bun run build:main --watch",
+    "dev:electron": "node scripts/wait-for-vite.js && electron .",
+    "build": "bun run build:main && bun run build:renderer",
+    "build:main": "node scripts/build-main.js",
+    "build:renderer": "vite build",
+    "preview": "vite preview",
+    "package": "bun run build && electron-builder",
+    "package:win": "bun run build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.1.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "electron": "^40.1.0",
+    "electron-builder": "^26.4.0",
+    "esbuild": "^0.27.2",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "electron-store": "^11.0.2",
+    "svelte": "^5.49.1",
+    "ws": "^8.19.0"
+  },
+  "build": {
+    "appId": "com.murmur.app",
+    "productName": "Murmur",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "resources/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "resources/icon.ico"
+    }
+  }
+}
