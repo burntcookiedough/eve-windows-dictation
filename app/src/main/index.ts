@@ -12,6 +12,11 @@ let overlayWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let isRecording = false;
 
+function log(...args: unknown[]) {
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+  console.log(`[${ts}]`, ...args);
+}
+
 async function startRecording() {
   if (isRecording || !overlayWindow) return;
   isRecording = true;
@@ -78,11 +83,11 @@ function setupAudioHandler() {
 }
 
 app.whenReady().then(async () => {
-  console.log('Murmur starting...');
+  log('Murmur starting...');
 
   // Create overlay window (pre-warmed, hidden)
   overlayWindow = await createOverlayWindow();
-  console.log('Overlay window created');
+  log('Overlay window created');
 
   // Open DevTools in development
   if (process.env.NODE_ENV !== 'production') {
@@ -94,22 +99,21 @@ app.whenReady().then(async () => {
   setupAudioHandler();
 
   // Set up global hotkey (hold-to-talk)
-  console.log('Registering hotkey:', DEFAULT_SETTINGS.hotkey);
   setupHotkeyService(
     DEFAULT_SETTINGS.hotkey,
     () => {
-      console.log('Hotkey pressed - starting recording');
+      log('Recording started');
       startRecording();
     },
     () => {
-      console.log('Hotkey released - stopping recording');
+      log('Recording stopped');
       stopRecording();
     }
   );
 
   // Set up system tray
   setupTray();
-  console.log('Murmur ready! Press', DEFAULT_SETTINGS.hotkey, 'to start recording');
+  log('Murmur ready!');
 
   // Handle app lifecycle
   app.on('window-all-closed', () => {

@@ -16,6 +16,7 @@ const commonOptions = {
     'electron',
     'better-sqlite3',
     'ws',
+    'uiohook-napi',
   ],
   sourcemap: true,
   logLevel: 'info',

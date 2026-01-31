@@ -7,7 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
 
 export async function createOverlayWindow(): Promise<BrowserWindow> {
-  const preloadPath = join(__dirname, '../preload/overlay.js');
+  // __dirname at runtime is dist/main/, preload is at dist/main/preload/
+  const preloadPath = join(__dirname, 'preload/overlay.js');
+  console.log('Preload path:', preloadPath);
 
   const overlay = new BrowserWindow({
     width: OVERLAY_CONFIG.WIDTH,

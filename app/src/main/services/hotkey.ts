@@ -1,36 +1,47 @@
-import { globalShortcut, app } from 'electron';
+import { uIOhook, UiohookKey } from 'uiohook-napi';
+import { app } from 'electron';
 
-let currentAccelerator: string | null = null;
-let isKeyDown = false;
 let keyDownCallback: (() => void) | null = null;
 let keyUpCallback: (() => void) | null = null;
+let isKeyDown = false;
+let isStarted = false;
 
-// Polling interval for key state (electron doesn't have native keyup for global shortcuts)
-let pollInterval: ReturnType<typeof setInterval> | null = null;
+// F17 key code - UiohookKey.F17 = 0xFFCE (65486) for X11, 128 for Windows
+const F17_KEYCODE = 128; // Windows virtual key code for F17
 
 export function setupHotkeyService(
-  accelerator: string,
+  _accelerator: string, // Ignored - we hardcode F17
   onKeyDown: () => void,
   onKeyUp: () => void
 ): void {
-  currentAccelerator = accelerator;
   keyDownCallback = onKeyDown;
   keyUpCallback = onKeyUp;
 
-  // Register the global shortcut
-  const registered = globalShortcut.register(accelerator, () => {
-    if (!isKeyDown) {
-      isKeyDown = true;
-      keyDownCallback?.();
-      startPollingForKeyUp();
+  uIOhook.on('keydown', (e) => {
+    // Check if it's F17 (keycode 128 on Windows)
+    if (e.keycode === F17_KEYCODE || e.keycode === UiohookKey.F17) {
+      if (!isKeyDown) {
+        isKeyDown = true;
+        console.log(`[${timestamp()}] F17 keydown`);
+        keyDownCallback?.();
+      }
     }
   });
 
-  if (!registered) {
-    console.error(`Failed to register global shortcut: ${accelerator}`);
-  } else {
-    console.log(`Global shortcut registered: ${accelerator}`);
-  }
+  uIOhook.on('keyup', (e) => {
+    if (e.keycode === F17_KEYCODE || e.keycode === UiohookKey.F17) {
+      if (isKeyDown) {
+        isKeyDown = false;
+        console.log(`[${timestamp()}] F17 keyup`);
+        keyUpCallback?.();
+      }
+    }
+  });
+
+  // Start the hook
+  uIOhook.start();
+  isStarted = true;
+  console.log(`[${timestamp()}] Global keyboard hook started (listening for F17)`);
 
   // Clean up on app quit
   app.on('will-quit', () => {
@@ -38,48 +49,14 @@ export function setupHotkeyService(
   });
 }
 
-function startPollingForKeyUp(): void {
-  if (pollInterval) return;
-
-  // Poll for key release
-  // This is a workaround since Electron doesn't support keyup for global shortcuts
-  // We check if the shortcut fires again within the interval
-  let lastTriggerTime = Date.now();
-
-  pollInterval = setInterval(() => {
-    const now = Date.now();
-    // If we haven't received a trigger in 150ms, assume key is released
-    if (now - lastTriggerTime > 150 && isKeyDown) {
-      isKeyDown = false;
-      keyUpCallback?.();
-      stopPolling();
-    }
-  }, 50);
-
-  // Update last trigger time on each shortcut press
-  if (currentAccelerator) {
-    globalShortcut.unregister(currentAccelerator);
-    globalShortcut.register(currentAccelerator, () => {
-      lastTriggerTime = Date.now();
-      if (!isKeyDown) {
-        isKeyDown = true;
-        keyDownCallback?.();
-      }
-    });
-  }
-}
-
-function stopPolling(): void {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
-  }
+function timestamp(): string {
+  return new Date().toLocaleTimeString('en-US', { hour12: false });
 }
 
 export function unregisterHotkey(): void {
-  stopPolling();
-  if (currentAccelerator) {
-    globalShortcut.unregister(currentAccelerator);
-    currentAccelerator = null;
+  if (isStarted) {
+    uIOhook.stop();
+    isStarted = false;
+    console.log(`[${timestamp()}] Global keyboard hook stopped`);
   }
 }

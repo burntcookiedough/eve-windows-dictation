@@ -44,8 +44,8 @@ export class AudioCapture {
       this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
 
       // Use ScriptProcessorNode for simplicity (deprecated but widely supported)
-      // Buffer size of 4096 gives us ~256ms of audio at 16kHz
-      const bufferSize = AUDIO_CONFIG.FRAME_SIZE * 2; // ~200ms
+      // Buffer size must be power of 2: 2048 = ~128ms at 16kHz
+      const bufferSize = 2048;
       this.processorNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
 
       this.processorNode.onaudioprocess = (event) => {

@@ -79,9 +79,10 @@ export function createAudioFrame(sequence: number, samples: Int16Array): ArrayBu
   // Flags (1 byte, reserved)
   view.setUint8(4, 0x00);
 
-  // PCM data (little-endian)
-  const pcmView = new Int16Array(buffer, AUDIO_HEADER_SIZE);
-  pcmView.set(samples);
+  // PCM data (little-endian) - write each sample via DataView due to odd header size
+  for (let i = 0; i < sampleCount; i++) {
+    view.setInt16(AUDIO_HEADER_SIZE + i * 2, samples[i]!, true); // true = little-endian
+  }
 
   return buffer;
 }
