@@ -1,14 +1,11 @@
 import { Tray, Menu, app, nativeImage } from 'electron';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { join } from 'path';
 
 let tray: Tray | null = null;
 
 export function setupTray(onShowMainWindow?: () => void): void {
-  // Create a simple tray icon - use placeholder for now
-  const iconPath = join(__dirname, '../../../resources/tray/tray-idle.png');
+  // Use app.getAppPath() for consistent path resolution in dev and production
+  const iconPath = join(app.getAppPath(), 'resources', 'icon.png');
 
   // Create a simple 16x16 icon if the file doesn't exist
   let icon: Electron.NativeImage;

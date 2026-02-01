@@ -1,10 +1,16 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, nativeImage } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { MAIN_WINDOW_CONFIG } from '../../shared/constants.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
+
+function getAppIcon(): Electron.NativeImage | undefined {
+  const iconPath = join(app.getAppPath(), 'resources', 'icon.ico');
+  const icon = nativeImage.createFromPath(iconPath);
+  return icon.isEmpty() ? undefined : icon;
+}
 
 let isQuitting = false;
 
@@ -25,6 +31,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     frame: true,
     titleBarStyle: 'default',
     backgroundColor: '#1a1a1a',
+    icon: getAppIcon(),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
