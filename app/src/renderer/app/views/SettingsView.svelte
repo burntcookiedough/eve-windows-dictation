@@ -36,7 +36,7 @@
 </script>
 
 <div class="h-full overflow-y-auto px-4 pb-4">
-  <div class="max-w-2xl space-y-8">
+  <div class="space-y-8">
 
     <!-- Activation -->
     <SettingsSection title="Activation">

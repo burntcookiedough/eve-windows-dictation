@@ -41,8 +41,8 @@ export const AUDIO_CONFIG = {
 
 // Main window constants
 export const MAIN_WINDOW_CONFIG = {
-  WIDTH: 900,
-  HEIGHT: 600,
-  MIN_WIDTH: 600,
-  MIN_HEIGHT: 400,
+  WIDTH: 600,
+  HEIGHT: 900,
+  MIN_WIDTH: 400,
+  MIN_HEIGHT: 600,
 } as const;
