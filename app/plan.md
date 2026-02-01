@@ -5,6 +5,8 @@
 
 This document outlines the UI architecture, features, and implementation plan for the Murmur desktop application. It's meant to be a living document that we refine through discussion.
 
+ANYTHING ABOUT THE ACTUAL LOOK OF THE MAIN WINDOW, NOT THE OVERLAY, BUT THE MAIN WINDOW IS COMPLETELY OUTDATED AND SHOULDN'T BE USED AS IT'S WRITTEN IN THE DOCUMENT.
+
 ---
 
 ## Table of Contents
