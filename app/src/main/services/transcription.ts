@@ -6,6 +6,7 @@ import {
   type ControlFrameStart,
   type ControlFrameStop,
   type TextFrame,
+  type TextFrameFinal,
 } from '../../shared/protocol.js';
 import type { TranscriptionPayload, ConnectionStatePayload, RecordingStatePayload } from '../../shared/types.js';
 
@@ -16,7 +17,7 @@ export class TranscriptionService {
   private overlayWindow: BrowserWindow;
   private sequenceNumber = 0;
   private isReady = false;
-  private onFinalCallback: ((text: string) => void) | null = null;
+  private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
 
   constructor(serverUrl: string, silenceTimeout: number, overlayWindow: BrowserWindow) {
@@ -83,7 +84,7 @@ export class TranscriptionService {
     this.ws.send(JSON.stringify(frame));
   }
 
-  onFinal(callback: (text: string) => void): void {
+  onFinal(callback: (frame: TextFrameFinal) => void): void {
     this.onFinalCallback = callback;
   }
 
@@ -133,7 +134,7 @@ export class TranscriptionService {
       this.sendRecordingState('transcribing');
     } else if (frame.type === 'final') {
       this.sendRecordingState('success');
-      this.onFinalCallback?.(frame.text);
+      this.onFinalCallback?.(frame);
     }
   }
 

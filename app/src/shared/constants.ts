@@ -22,6 +22,11 @@ export const IPC_CHANNELS = {
 
   // Request/Response
   GET_SETTINGS: 'get:settings',
+
+  // History
+  HISTORY_GET_ENTRIES: 'history:get-entries',
+  HISTORY_DELETE: 'history:delete',
+  HISTORY_NEW_ENTRY: 'history:new-entry',
 } as const;
 
 // Overlay window constants

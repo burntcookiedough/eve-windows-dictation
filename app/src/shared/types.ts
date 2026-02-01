@@ -24,7 +24,7 @@ export interface TranscriptionPayload {
   confidence: number;
 }
 
-// Transcription history entry (for future use)
+// Transcription history entry
 export interface TranscriptionEntry {
   id: string;
   timestamp: number;
@@ -34,6 +34,28 @@ export interface TranscriptionEntry {
   transcriptionTime: number;
   editedAt?: number;
   originalText?: string;
+}
+
+// History entry with date group for UI display
+export interface HistoryEntryWithGroup extends TranscriptionEntry {
+  dateGroup: string; // "Today", "Yesterday", "This Week", "Jan 15", etc.
+}
+
+// Filters for history queries
+export interface HistoryFilters {
+  text?: string;
+  dateFrom?: number;
+  dateTo?: number;
+  minDuration?: number;
+  maxDuration?: number;
+  minConfidence?: number;
+  editedOnly?: boolean;
+}
+
+// Response from history queries
+export interface HistoryResponse {
+  entries: HistoryEntryWithGroup[];
+  hasMore: boolean;
 }
 
 // Settings (v0 uses hardcoded values, but define the shape)

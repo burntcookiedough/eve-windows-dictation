@@ -30,10 +30,14 @@ When a feature is fully implemented:
 - [ ] **Server URL**: Input works locally but doesn't persist. Needs: settings persistence.
 
 ## History View
-- [ ] **History data**: Shows empty state. Needs: SQLite history service, IPC to fetch history.
-- [ ] **Copy from history**: Button exists but needs history data first.
-- [ ] **Delete from history**: Button exists but needs history data + IPC to delete.
-- [ ] **Search**: Works on local state but needs history data.
+- [x] **History data**: SQLite history service implemented with IPC to fetch entries.
+- [x] **Copy from history**: Connected via IPC to clipboard service.
+- [x] **Delete from history**: Connected with confirmation dialog.
+- [x] **Search**: Full-text search on transcription text.
+- [x] **Filters**: Date range, duration, confidence, edited-only filters.
+- [x] **Infinite scroll**: Seamless loading with 30-entry batches.
+- [x] **Real-time updates**: New transcriptions push to history when window is visible.
+- [ ] **Disable delete confirmation setting**: Setting to skip confirmation dialog (not yet implemented).
 
 ## Test View
 - [ ] **Manual recording**: Big button exists but not connected. Needs: IPC to trigger start/stop recording from main window.
@@ -45,4 +49,4 @@ When a feature is fully implemented:
 - [ ] **Connection status**: Shows static "Connected". Needs: IPC subscription to connection state.
 
 ---
-Last updated: 2026-02-01 (Post-Processing section added)
+Last updated: 2026-02-02 (History View implemented)

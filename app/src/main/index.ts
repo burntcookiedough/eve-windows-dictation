@@ -5,13 +5,16 @@ import { setupHotkeyService } from './services/hotkey.js';
 import { setupTray } from './services/tray.js';
 import { setupIpcHandlers } from './ipc/handlers.js';
 import { TranscriptionService } from './services/transcription.js';
-import { copyToClipboard, simulatePaste } from './services/clipboard.js';
+import { HistoryService } from './services/history.js';
+import { processFinalTranscription } from './services/pipeline.js';
 import { DEFAULT_SETTINGS } from '../shared/types.js';
+import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 
 let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
+let historyService: HistoryService | null = null;
 let isRecording = false;
 
 function log(...args: unknown[]) {
@@ -35,16 +38,14 @@ async function startRecording() {
   );
 
   // Set up transcription callbacks
-  transcriptionService.onFinal((text) => {
-    if (text) {
-      if (DEFAULT_SETTINGS.autoCopy) {
-        copyToClipboard(text);
-      }
-      if (DEFAULT_SETTINGS.autoPaste) {
-        // Paste immediately - overlay is non-focusable so target app still has focus
-        simulatePaste().catch((err) => {
-          console.error('Auto-paste failed:', err);
-        });
+  transcriptionService.onFinal(async (frame: TextFrameFinal) => {
+    if (frame.text) {
+      // Process through pipeline (post-processing, clipboard, paste, history)
+      const result = await processFinalTranscription(frame, DEFAULT_SETTINGS, historyService);
+
+      // Push new entry to main window if visible
+      if (mainWindow && mainWindow.isVisible()) {
+        mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
       }
     }
   });
@@ -114,6 +115,14 @@ function setupMainWindowHandlers() {
 app.whenReady().then(async () => {
   log('Murmur starting...');
 
+  // Initialize history service early
+  historyService = new HistoryService();
+  historyService.initialize();
+  log('History service initialized');
+
+  // Set up IPC handlers before creating windows (renderers call handlers on mount)
+  setupIpcHandlers(historyService);
+
   // Create main window (shown on startup)
   mainWindow = await createMainWindow();
   log('Main window created');
@@ -126,9 +135,6 @@ app.whenReady().then(async () => {
   if (process.env.NODE_ENV !== 'production') {
     overlayWindow.webContents.openDevTools({ mode: 'detach' });
   }
-
-  // Set up IPC handlers
-  setupIpcHandlers();
   setupAudioHandler();
   setupMainWindowHandlers();
 
@@ -170,6 +176,7 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   // Cleanup
   transcriptionService?.stop();
+  historyService?.close();
 });
 
 // Prevent multiple instances

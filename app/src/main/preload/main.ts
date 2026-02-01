@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
+import type { HistoryFilters, HistoryResponse, HistoryEntryWithGroup } from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
 const murmurMainAPI = {
@@ -21,9 +22,33 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS);
   },
 
+  // History
+  getHistoryEntries: (offset: number, limit: number, filters?: HistoryFilters): Promise<HistoryResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_ENTRIES, offset, limit, filters);
+  },
+
+  deleteHistoryEntry: (id: string): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id);
+  },
+
+  onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): void => {
+    ipcRenderer.on(IPC_CHANNELS.HISTORY_NEW_ENTRY, (_event, entry) => {
+      callback(entry);
+    });
+  },
+
+  removeNewHistoryEntryListener: (): void => {
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
+  },
+
+  // Clipboard
+  copyToClipboard: (text: string): void => {
+    ipcRenderer.send(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
+  },
+
   // Cleanup
   removeAllListeners: () => {
-    // Add listener cleanup here as needed
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
   },
 };
 
