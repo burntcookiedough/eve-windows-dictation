@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { createOverlayWindow, showOverlay, hideOverlay, positionOverlayOnActiveDisplay } from './windows/overlay.js';
+import { createMainWindow, showMainWindow } from './windows/main.js';
 import { setupHotkeyService } from './services/hotkey.js';
 import { setupTray } from './services/tray.js';
 import { setupIpcHandlers } from './ipc/handlers.js';
@@ -9,6 +10,7 @@ import { DEFAULT_SETTINGS } from '../shared/types.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 
 let overlayWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let isRecording = false;
 
@@ -85,6 +87,10 @@ function setupAudioHandler() {
 app.whenReady().then(async () => {
   log('Murmur starting...');
 
+  // Create main window (shown on startup)
+  mainWindow = await createMainWindow();
+  log('Main window created');
+
   // Create overlay window (pre-warmed, hidden)
   overlayWindow = await createOverlayWindow();
   log('Overlay window created');
@@ -111,8 +117,12 @@ app.whenReady().then(async () => {
     }
   );
 
-  // Set up system tray
-  setupTray();
+  // Set up system tray with main window reference for show/focus
+  setupTray(() => {
+    if (mainWindow) {
+      showMainWindow(mainWindow);
+    }
+  });
   log('Murmur ready!');
 
   // Handle app lifecycle

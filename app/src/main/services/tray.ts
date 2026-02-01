@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let tray: Tray | null = null;
 
-export function setupTray(): void {
+export function setupTray(onShowMainWindow?: () => void): void {
   // Create a simple tray icon - use placeholder for now
   const iconPath = join(__dirname, '../../../resources/tray/tray-idle.png');
 
@@ -31,6 +31,13 @@ export function setupTray(): void {
     },
     { type: 'separator' },
     {
+      label: 'Show Window',
+      click: () => {
+        onShowMainWindow?.();
+      },
+    },
+    { type: 'separator' },
+    {
       label: 'Quit',
       click: () => {
         app.quit();
@@ -39,6 +46,11 @@ export function setupTray(): void {
   ]);
 
   tray.setContextMenu(contextMenu);
+
+  // Left-click also shows the main window
+  tray.on('click', () => {
+    onShowMainWindow?.();
+  });
 }
 
 function createPlaceholderIcon(): Electron.NativeImage {

@@ -29,25 +29,35 @@ const mainOptions = {
   outfile: resolve(projectRoot, 'dist/main/index.js'),
 };
 
-// Build preload script
-const preloadOptions = {
+// Build overlay preload script
+const preloadOverlayOptions = {
   ...commonOptions,
   entryPoints: [resolve(projectRoot, 'src/main/preload/overlay.ts')],
   outfile: resolve(projectRoot, 'dist/main/preload/overlay.js'),
 };
 
+// Build main window preload script
+const preloadMainOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(projectRoot, 'src/main/preload/main.ts')],
+  outfile: resolve(projectRoot, 'dist/main/preload/main.js'),
+};
+
 async function build() {
   if (isWatch) {
     const mainCtx = await esbuild.context(mainOptions);
-    const preloadCtx = await esbuild.context(preloadOptions);
+    const preloadOverlayCtx = await esbuild.context(preloadOverlayOptions);
+    const preloadMainCtx = await esbuild.context(preloadMainOptions);
 
     await mainCtx.watch();
-    await preloadCtx.watch();
+    await preloadOverlayCtx.watch();
+    await preloadMainCtx.watch();
 
     console.log('Watching for changes...');
   } else {
     await esbuild.build(mainOptions);
-    await esbuild.build(preloadOptions);
+    await esbuild.build(preloadOverlayOptions);
+    await esbuild.build(preloadMainOptions);
   }
 }
 

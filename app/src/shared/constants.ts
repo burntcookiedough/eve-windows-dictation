@@ -15,6 +15,10 @@ export const IPC_CHANNELS = {
   // Renderer → Main (commands)
   COMMAND_COPY_TO_CLIPBOARD: 'command:copy-to-clipboard',
 
+  // Main window controls
+  MAIN_WINDOW_CLOSE: 'main-window:close',
+  MAIN_WINDOW_MINIMIZE: 'main-window:minimize',
+
   // Request/Response
   GET_SETTINGS: 'get:settings',
 } as const;
@@ -32,4 +36,12 @@ export const AUDIO_CONFIG = {
   FRAME_SIZE: 1600, // 100ms at 16kHz
   LEVEL_UPDATE_FPS: 30,
   WAVEFORM_BARS: 32,
+} as const;
+
+// Main window constants
+export const MAIN_WINDOW_CONFIG = {
+  WIDTH: 900,
+  HEIGHT: 600,
+  MIN_WIDTH: 600,
+  MIN_HEIGHT: 400,
 } as const;
