@@ -36,6 +36,11 @@
   <div class="h-full overflow-y-auto pr-4">
     <div class="max-w-xl mx-auto">
 
+    <!-- Not Implemented Banner -->
+    <div class="mb-6 px-4 py-2 bg-red-950/30 border border-red-900 rounded-lg text-center">
+      <span class="text-xs text-red-400/80 uppercase tracking-wider font-medium">Not Yet Implemented</span>
+    </div>
+
     <!-- Record Button -->
     <div class="flex flex-col items-center py-12">
       <button
