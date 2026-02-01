@@ -13,7 +13,8 @@
 </script>
 
 <div class="flex items-center justify-between h-9 bg-[#0f0f0f] border-b border-[#1f1f1f] select-none">
-  <div class="flex-1 flex items-center h-full pl-4 [-webkit-app-region:drag]">
+  <div class="flex-1 flex items-center h-full pl-3 gap-2 [-webkit-app-region:drag]">
+    <img src="/icon.png" alt="Murmur" class="w-5 h-5 rounded-[4px] shrink-0" />
     <span class="text-[13px] font-medium text-[#a1a1a1] tracking-wide">Murmur</span>
   </div>
 

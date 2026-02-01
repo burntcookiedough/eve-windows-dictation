@@ -112,3 +112,8 @@ Microphone → AudioWorklet → IPC → TranscriptionService → WebSocket → S
 - Vite config: `app/vite.config.ts` (multi-entry: overlay + app)
 - Main process build: `app/scripts/build-main.js` (esbuild)
 - TypeScript: `tsconfig.json` (renderer), `tsconfig.main.json` (main process)
+
+## Important Guidelines
+
+- **Never fake or approximate assets** - When using images, icons, or other assets, always use the actual files. Never create SVG approximations or recreate assets from scratch. If there are path/access issues, ask about the best way to resolve them.
+- **Ask when there are multiple approaches** - When a task has multiple valid solutions and the "right" choice isn't obvious, ask which approach is preferred rather than picking one arbitrarily.
