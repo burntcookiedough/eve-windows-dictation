@@ -80,28 +80,12 @@
   });
 </script>
 
-<div class="overlay-container" class:visible={isVisible}>
+<div
+  class="flex flex-col items-center gap-8 pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+>
   {#if transcriptionText}
     <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} />
   {/if}
 
   <Pill state={recordingState} levels={audioLevels} />
 </div>
-
-<style>
-  .overlay-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 33px;
-    opacity: 0;
-    transform: translateY(20px);
-    transition: opacity 150ms ease-out, transform 150ms ease-out;
-    pointer-events: none;
-  }
-
-  .overlay-container.visible {
-    opacity: 1;
-    transform: translateY(0);
-  }
-</style>

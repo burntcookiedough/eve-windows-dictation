@@ -21,52 +21,13 @@
   });
 </script>
 
-<div class="text-display" class:final={isFinal}>
-  <div class="text-content" class:overflowing={isOverflowing} bind:this={scrollRef}>
-    <p>{text}</p>
+<div class="max-w-xl bg-black rounded-3xl border border-zinc-500/25 px-3.5 py-2.5">
+  <div
+    class="max-h-30 overflow-y-auto scrollbar-hide {isOverflowing ? '[mask-image:linear-gradient(to_bottom,transparent_0%,black_30%,black_100%)]' : ''}"
+    bind:this={scrollRef}
+  >
+    <p class="text-zinc-100 text-base font-medium leading-relaxed text-center break-words">
+      {text}
+    </p>
   </div>
 </div>
-
-<style>
-  .text-display {
-    max-width: 575px;
-    background: rgb(0, 0, 0);
-    border-radius: 24px;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    padding: 10px 14px;
-  }
-
-  .text-content {
-    max-height: 120px;
-    overflow-y: auto;
-
-    /* Hide scrollbar */
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  /* Only show fade when content is overflowing */
-  .text-content.overflowing {
-    mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 100%);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%, black 100%);
-  }
-
-  .text-content::-webkit-scrollbar {
-    display: none;
-  }
-
-  .text-display.final {
-    /* No change on success */
-  }
-
-  p {
-    color: #ffffff;
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 1.5;
-    text-align: center;
-    margin: 0;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-  }
-</style>

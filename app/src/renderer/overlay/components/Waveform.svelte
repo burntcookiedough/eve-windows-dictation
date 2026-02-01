@@ -34,26 +34,11 @@
   );
 </script>
 
-<div class="waveform" style={containerStyle} style:gap="{gap}px">
+<div class="flex items-center justify-center px-2" style={containerStyle} style:gap="{gap}px">
   {#each displayLevels as level}
     <div
-      class="bar"
+      class="shrink-0 min-h-[2px] bg-gradient-to-t from-zinc-300/60 to-zinc-100/90"
       style="{barStyle} height: {level * height}px;"
     ></div>
   {/each}
 </div>
-
-<style>
-  .waveform {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 8px;
-  }
-
-  .bar {
-    background: linear-gradient(to top, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.9));
-    min-height: 2px;
-    flex-shrink: 0;
-  }
-</style>
