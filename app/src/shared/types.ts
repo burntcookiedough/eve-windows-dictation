@@ -45,6 +45,9 @@ export interface Settings {
   silenceTimeout: number;
   serverUrl: string;
   theme: 'light' | 'dark' | 'system';
+  // Post-processing
+  appendPeriod: boolean;
+  appendSpace: boolean;
 }
 
 // Default settings for v0
@@ -56,4 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   silenceTimeout: 3,
   serverUrl: 'ws://localhost:51717/transcribe',
   theme: 'dark',
+  // Post-processing
+  appendPeriod: false,
+  appendSpace: false,
 };

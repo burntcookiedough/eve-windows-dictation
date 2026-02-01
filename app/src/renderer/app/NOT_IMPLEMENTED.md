@@ -2,6 +2,12 @@
 
 This file tracks UI elements that are built but not yet connected to backend functionality.
 
+## When Implementing a Feature
+
+When a feature is fully implemented:
+1. **Tick off** the checkbox (change `- [ ]` to `- [x]`) - do NOT remove the line
+2. **Remove the red border** from the UI by removing the `notImplemented` prop from the `<SettingsRow>` (or `border-red-900` class for custom elements)
+
 ## Settings - Activation Section
 - [ ] **Hotkey capture**: UI shows current hotkey but clicking doesn't open capture dialog. Needs: hotkey capture modal, IPC to update hotkey, re-register with hotkey service.
 - [ ] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
@@ -9,6 +15,10 @@ This file tracks UI elements that are built but not yet connected to backend fun
 ## Settings - Audio Section
 - [ ] **Input Device dropdown**: Shows hardcoded options. Needs: device enumeration API, settings persistence.
 - [ ] **Silence Timeout**: UI works but doesn't persist. Needs: settings persistence.
+
+## Settings - Post-Processing Section
+- [ ] **Append period**: Toggle works locally but doesn't persist or apply. Needs: settings persistence + transcription service to apply post-processing before copy/paste.
+- [ ] **Append space**: Toggle works locally but doesn't persist or apply. Needs: settings persistence + transcription service to apply post-processing before copy/paste.
 
 ## Settings - Behavior Section
 - [ ] **Auto-copy**: Toggle works locally but doesn't persist. Needs: settings persistence.
@@ -35,4 +45,4 @@ This file tracks UI elements that are built but not yet connected to backend fun
 - [ ] **Connection status**: Shows static "Connected". Needs: IPC subscription to connection state.
 
 ---
-Last updated: 2026-02-01
+Last updated: 2026-02-01 (Post-Processing section added)

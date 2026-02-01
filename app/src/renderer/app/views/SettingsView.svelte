@@ -14,6 +14,8 @@
     silenceTimeout: 3,
     serverUrl: 'ws://localhost:51717/transcribe',
     theme: 'dark',
+    appendPeriod: false,
+    appendSpace: false,
   });
 
   // TODO: Input devices from system enumeration
@@ -41,14 +43,14 @@
 
     <!-- Activation -->
     <SettingsSection title="Activation">
-      <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording">
+      <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording" notImplemented>
         <!-- TODO: Implement hotkey capture dialog -->
         <button class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer">
           {settings.hotkey}
         </button>
       </SettingsRow>
 
-      <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off">
+      <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off" notImplemented>
         <div class="flex gap-1 p-1 bg-zinc-800 rounded-lg">
           <button
             onclick={() => updateSetting('holdToTalk', true)}
@@ -70,7 +72,7 @@
 
     <!-- Audio -->
     <SettingsSection title="Audio">
-      <SettingsRow label="Input Device" description="Select microphone for recording">
+      <SettingsRow label="Input Device" description="Select microphone for recording" notImplemented>
         <!-- TODO: Populate with actual system audio devices -->
         <select
           bind:value={selectedDeviceId}
@@ -82,7 +84,7 @@
         </select>
       </SettingsRow>
 
-      <SettingsRow label="Silence Timeout" description="Seconds of silence before auto-stopping">
+      <SettingsRow label="Silence Timeout" description="Seconds of silence before auto-stopping" notImplemented>
         <select
           value={settings.silenceTimeout}
           onchange={(e) => updateSetting('silenceTimeout', parseFloat(e.currentTarget.value))}
@@ -97,9 +99,34 @@
       </SettingsRow>
     </SettingsSection>
 
+    <!-- Post-Processing -->
+    <SettingsSection title="Post-Processing">
+      <SettingsRow label="Append period" description="Add a period at the end of transcriptions" notImplemented>
+        <Toggle
+          enabled={settings.appendPeriod}
+          onchange={(v) => updateSetting('appendPeriod', v)}
+          label="Append period"
+        />
+      </SettingsRow>
+
+      <SettingsRow label="Append space" description="Add a trailing space after transcriptions" notImplemented>
+        <Toggle
+          enabled={settings.appendSpace}
+          onchange={(v) => updateSetting('appendSpace', v)}
+          label="Append space"
+        />
+      </SettingsRow>
+
+      <div class="p-4 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-700">
+        <p class="text-xs text-zinc-500 text-center">
+          More post-processing options coming soon
+        </p>
+      </div>
+    </SettingsSection>
+
     <!-- Behavior -->
     <SettingsSection title="Behavior">
-      <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically">
+      <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically" notImplemented>
         <Toggle
           enabled={settings.autoCopy}
           onchange={(v) => updateSetting('autoCopy', v)}
@@ -107,7 +134,7 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Auto-paste" description="Paste transcription into active window">
+      <SettingsRow label="Auto-paste" description="Paste transcription into active window" notImplemented>
         <Toggle
           enabled={settings.autoPaste}
           onchange={(v) => updateSetting('autoPaste', v)}
@@ -115,7 +142,7 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Launch on boot" description="Start application when system starts">
+      <SettingsRow label="Launch on boot" description="Start application when system starts" notImplemented>
         <!-- TODO: Implement launch on boot functionality -->
         <Toggle
           enabled={false}
@@ -124,7 +151,7 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Start minimized" description="Hide main window on application launch">
+      <SettingsRow label="Start minimized" description="Hide main window on application launch" notImplemented>
         <!-- TODO: Implement start minimized functionality -->
         <Toggle
           enabled={false}
@@ -136,7 +163,7 @@
 
     <!-- Server -->
     <SettingsSection title="Server">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
+      <div class="p-4 bg-zinc-900/50 rounded-xl w-full border border-red-900">
         <label for="server-url" class="text-sm text-zinc-200 block mb-1">
           Server URL
         </label>
