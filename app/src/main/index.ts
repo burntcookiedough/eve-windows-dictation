@@ -5,7 +5,7 @@ import { setupHotkeyService } from './services/hotkey.js';
 import { setupTray } from './services/tray.js';
 import { setupIpcHandlers } from './ipc/handlers.js';
 import { TranscriptionService } from './services/transcription.js';
-import { copyToClipboard } from './services/clipboard.js';
+import { copyToClipboard, simulatePaste } from './services/clipboard.js';
 import { DEFAULT_SETTINGS } from '../shared/types.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 
@@ -13,6 +13,7 @@ let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let isRecording = false;
+let pendingPaste = false;
 
 function log(...args: unknown[]) {
   const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -36,8 +37,13 @@ async function startRecording() {
 
   // Set up transcription callbacks
   transcriptionService.onFinal((text) => {
-    if (DEFAULT_SETTINGS.autoCopy && text) {
-      copyToClipboard(text);
+    if (text) {
+      if (DEFAULT_SETTINGS.autoCopy) {
+        copyToClipboard(text);
+      }
+      if (DEFAULT_SETTINGS.autoPaste) {
+        pendingPaste = true;
+      }
     }
   });
 
@@ -71,6 +77,17 @@ async function stopRecording() {
   setTimeout(() => {
     if (overlayWindow) {
       hideOverlay(overlayWindow);
+    }
+
+    // Paste after overlay is hidden and focus returns to previous app
+    if (pendingPaste) {
+      pendingPaste = false;
+      // Small delay to ensure focus has returned to the target window
+      setTimeout(() => {
+        simulatePaste().catch((err) => {
+          console.error('Auto-paste failed:', err);
+        });
+      }, 100);
     }
   }, 500);
 }

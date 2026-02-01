@@ -41,6 +41,7 @@ export interface Settings {
   hotkey: string;
   holdToTalk: boolean;
   autoCopy: boolean;
+  autoPaste: boolean;
   silenceTimeout: number;
   serverUrl: string;
   theme: 'light' | 'dark' | 'system';
@@ -51,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkey: 'F17',
   holdToTalk: true,
   autoCopy: true,
+  autoPaste: true,
   silenceTimeout: 3,
   serverUrl: 'ws://localhost:51717/transcribe',
   theme: 'dark',
