@@ -102,6 +102,7 @@
         <Toggle
           enabled={settings.autoCopy}
           onchange={(v) => updateSetting('autoCopy', v)}
+          label="Auto-copy"
         />
       </SettingsRow>
 
@@ -109,6 +110,7 @@
         <Toggle
           enabled={settings.autoPaste}
           onchange={(v) => updateSetting('autoPaste', v)}
+          label="Auto-paste"
         />
       </SettingsRow>
 
@@ -117,6 +119,7 @@
         <Toggle
           enabled={false}
           onchange={(v) => console.log('Launch on boot:', v)}
+          label="Launch on boot"
         />
       </SettingsRow>
 
@@ -125,6 +128,7 @@
         <Toggle
           enabled={false}
           onchange={(v) => console.log('Start minimized:', v)}
+          label="Start minimized"
         />
       </SettingsRow>
     </SettingsSection>
@@ -132,13 +136,14 @@
     <!-- Server -->
     <SettingsSection title="Server">
       <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
-        <label class="text-sm text-zinc-200 block mb-1">
+        <label for="server-url" class="text-sm text-zinc-200 block mb-1">
           Server URL
         </label>
         <p class="text-xs text-zinc-500 mb-3">
           URL of the Whisper transcription server
         </p>
         <input
+          id="server-url"
           type="text"
           value={settings.serverUrl}
           oninput={(e) => updateSetting('serverUrl', e.currentTarget.value)}

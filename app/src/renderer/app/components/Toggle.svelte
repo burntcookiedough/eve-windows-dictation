@@ -2,9 +2,10 @@
   interface Props {
     enabled: boolean;
     onchange?: (enabled: boolean) => void;
+    label?: string;
   }
 
-  let { enabled, onchange }: Props = $props();
+  let { enabled, onchange, label }: Props = $props();
 
   function handleClick() {
     onchange?.(!enabled);
@@ -18,6 +19,7 @@
     {enabled ? 'bg-emerald-600' : 'bg-zinc-700 hover:bg-zinc-600'}"
   role="switch"
   aria-checked={enabled}
+  aria-label={label}
 >
   <span
     class="block w-[18px] h-[18px] bg-white rounded-full shadow-sm
