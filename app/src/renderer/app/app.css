@@ -6,4 +6,32 @@
     padding: 0;
     box-sizing: border-box;
   }
+
+  /* Minimal custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(63 63 70 / 0.5); /* zinc-700 at 50% */
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(82 82 91 / 0.8); /* zinc-600 at 80% */
+  }
+
+  /* Hide the step buttons */
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }

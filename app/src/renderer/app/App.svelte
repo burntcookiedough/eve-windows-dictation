@@ -23,7 +23,7 @@
   <TitleBar />
 
   <!-- Header with Navigation Pills and Status -->
-  <header class="h-14 flex items-center justify-between px-4 shrink-0">
+  <header class="h-14 flex items-center justify-between px-6 mt-3 shrink-0">
     <!-- Navigation Pills -->
     <div class="flex items-center gap-1 p-1 bg-zinc-900 rounded-full">
       {#each tabs as tab}

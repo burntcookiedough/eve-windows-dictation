@@ -35,8 +35,9 @@
   }
 </script>
 
-<div class="h-full overflow-y-auto px-4 pb-4">
-  <div class="space-y-8">
+<div class="h-full p-6 pr-2">
+  <div class="h-full overflow-y-auto pr-4">
+    <div class="space-y-8">
 
     <!-- Activation -->
     <SettingsSection title="Activation">
@@ -155,5 +156,6 @@
       </div>
     </SettingsSection>
 
+    </div>
   </div>
 </div>

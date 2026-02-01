@@ -32,8 +32,9 @@
   }
 </script>
 
-<div class="h-full overflow-y-auto px-4 pb-4">
-  <div class="max-w-xl mx-auto">
+<div class="h-full p-6 pr-2">
+  <div class="h-full overflow-y-auto pr-4">
+    <div class="max-w-xl mx-auto">
 
     <!-- Record Button -->
     <div class="flex flex-col items-center py-12">
@@ -120,6 +121,7 @@
         </div>
       </div>
 
+      </div>
     </div>
   </div>
 </div>

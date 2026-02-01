@@ -39,9 +39,9 @@
   }
 </script>
 
-<div class="h-full flex flex-col">
+<div class="h-full flex flex-col p-6 pr-2">
   <!-- Search Bar -->
-  <div class="px-4 pb-4">
+  <div class="pb-4 pr-4">
     <div class="relative max-w-md">
       <svg
         class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
@@ -64,7 +64,7 @@
   </div>
 
   <!-- History List -->
-  <div class="flex-1 overflow-y-auto px-4 pb-4">
+  <div class="flex-1 overflow-y-auto pr-4">
     {#if filteredHistory.length === 0}
       <div class="text-center py-12 text-zinc-500 text-sm">
         {searchQuery ? 'No matching transcriptions' : 'No transcriptions yet'}
