@@ -13,7 +13,6 @@ let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let isRecording = false;
-let pendingPaste = false;
 
 function log(...args: unknown[]) {
   const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -42,7 +41,10 @@ async function startRecording() {
         copyToClipboard(text);
       }
       if (DEFAULT_SETTINGS.autoPaste) {
-        pendingPaste = true;
+        // Paste immediately - overlay is non-focusable so target app still has focus
+        simulatePaste().catch((err) => {
+          console.error('Auto-paste failed:', err);
+        });
       }
     }
   });
@@ -77,17 +79,6 @@ async function stopRecording() {
   setTimeout(() => {
     if (overlayWindow) {
       hideOverlay(overlayWindow);
-    }
-
-    // Paste after overlay is hidden and focus returns to previous app
-    if (pendingPaste) {
-      pendingPaste = false;
-      // Small delay to ensure focus has returned to the target window
-      setTimeout(() => {
-        simulatePaste().catch((err) => {
-          console.error('Auto-paste failed:', err);
-        });
-      }, 100);
     }
   }, 500);
 }
