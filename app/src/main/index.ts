@@ -92,6 +92,25 @@ function setupAudioHandler() {
   });
 }
 
+// Handle main window controls
+function setupMainWindowHandlers() {
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_CLOSE, () => {
+    mainWindow?.hide();
+  });
+
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MINIMIZE, () => {
+    mainWindow?.minimize();
+  });
+
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MAXIMIZE, () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow?.maximize();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
   log('Murmur starting...');
 
@@ -111,6 +130,7 @@ app.whenReady().then(async () => {
   // Set up IPC handlers
   setupIpcHandlers();
   setupAudioHandler();
+  setupMainWindowHandlers();
 
   // Set up global hotkey (hold-to-talk)
   setupHotkeyService(

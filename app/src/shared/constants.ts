@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   // Main window controls
   MAIN_WINDOW_CLOSE: 'main-window:close',
   MAIN_WINDOW_MINIMIZE: 'main-window:minimize',
+  MAIN_WINDOW_MAXIMIZE: 'main-window:maximize',
 
   // Request/Response
   GET_SETTINGS: 'get:settings',

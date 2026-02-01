@@ -85,7 +85,8 @@ Microphone → AudioWorklet → IPC → TranscriptionService → WebSocket → S
 
 - **Svelte 5** with runes (`$state`, `$derived`, `$effect`, `$props`)
 - **Tailwind CSS v4** (imported via `@import "tailwindcss"`)
-- CSS variables defined in each window's `app.css`
+- **IMPORTANT: Use Tailwind classes exclusively** - no custom CSS in `<style>` blocks. Use Tailwind utilities and arbitrary values (e.g., `w-[150px]`, `bg-[#0a0a0a]`) for all styling.
+- **Always use proper cursors** - buttons and clickable elements must have `cursor-pointer`, disabled elements `cursor-not-allowed`, draggable areas `cursor-grab`/`cursor-grabbing`, etc. Proper cursor feedback is critical for UX.
 - Path aliases: `$lib/` → `src/renderer/lib/`, `$shared/` → `src/shared/`
 
 ### Data Storage

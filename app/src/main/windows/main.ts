@@ -28,9 +28,9 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     minWidth: MAIN_WINDOW_CONFIG.MIN_WIDTH,
     minHeight: MAIN_WINDOW_CONFIG.MIN_HEIGHT,
     show: false,
-    frame: true,
-    titleBarStyle: 'default',
-    backgroundColor: '#1a1a1a',
+    frame: false,
+    transparent: false,
+    backgroundColor: '#0a0a0a',
     icon: getAppIcon(),
     webPreferences: {
       preload: preloadPath,

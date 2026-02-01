@@ -12,6 +12,10 @@ const murmurMainAPI = {
     ipcRenderer.send(IPC_CHANNELS.MAIN_WINDOW_MINIMIZE);
   },
 
+  maximizeWindow: () => {
+    ipcRenderer.send(IPC_CHANNELS.MAIN_WINDOW_MAXIMIZE);
+  },
+
   // Settings
   getSettings: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS);
