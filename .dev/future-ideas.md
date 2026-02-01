@@ -33,3 +33,33 @@ Detect significant pauses in the audio stream that likely indicate context break
 - What's the optimal silence duration to detect a "meaningful" pause?
 - How do transcription APIs handle very short audio clips?
 - Is there existing literature on VAD (Voice Activity Detection) for this use case?
+
+---
+
+## Voice Commands
+
+**Status:** Idea
+
+**Concept:**
+Use the transcription pipeline to detect and execute voice commands instead of (or in addition to) transcribing speech as text. The system would recognize specific phrases as commands and perform actions rather than pasting the transcribed text.
+
+**Example Commands:**
+- "Delete last transcription" - Remove the most recent entry from history
+- "Delete last 3 entries" - Remove the N most recent history entries
+- "Undo" - Revert the last paste action
+- "Cancel" - Abort the current transcription without pasting
+
+**Implementation Considerations:**
+- **Detection:** How to distinguish commands from regular dictation? Options:
+  - Dedicated hotkey for "command mode" vs "dictation mode"
+  - Keyword prefix (e.g., "Murmur, delete last entry")
+  - Pattern matching on transcribed text (risky - false positives)
+- **Execution:** Commands need access to app state (history, clipboard, etc.)
+- **Feedback:** User needs confirmation that a command was recognized and executed
+- **Extensibility:** Design command system to easily add new commands later
+
+**Potential Commands to Explore:**
+- History management (delete, search, copy previous)
+- Settings toggles ("enable/disable filler word removal")
+- Transcription control ("read that back", "start over")
+- Clipboard operations ("copy last 3 transcriptions")
