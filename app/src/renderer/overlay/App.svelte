@@ -3,12 +3,13 @@
   import Pill from './components/Pill.svelte';
   import TextDisplay from './components/TextDisplay.svelte';
   import { audioCapture } from './audio-capture';
+  import { AUDIO_CONFIG } from '../../shared/constants';
   import type { RecordingState, TranscriptionPayload } from '../../shared/types';
 
   let recordingState = $state<RecordingState>('idle');
   let transcriptionText = $state('');
   let transcriptionType = $state<'partial' | 'final'>('partial');
-  let audioLevels = $state<number[]>(new Array(40).fill(0));
+  let audioLevels = $state<number[]>(new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0));
   let isVisible = $state(false);
 
   let cleanupFns: Array<() => void> = [];
@@ -32,7 +33,7 @@
 
   function stopAudioCapture() {
     audioCapture.stop();
-    audioLevels = new Array(40).fill(0);
+    audioLevels = new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0);
   }
 
   onMount(() => {
@@ -92,7 +93,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 33px;
     opacity: 0;
     transform: translateY(20px);
     transition: opacity 150ms ease-out, transform 150ms ease-out;

@@ -3,10 +3,10 @@
     levels: number[];
     width?: number;      // Total width in px (default: auto)
     height?: number;     // Height in px (default: 30)
-    barWidth?: number;   // Bar width in px (default: 4)
+    barWidth?: number;   // Bar width in px (default: 3)
     gap?: number;        // Gap between bars in px (default: 2)
-    color?: string;      // Bar color or gradient (default: blue gradient)
-    minHeight?: number;  // Minimum bar height as fraction 0-1 (default: 0.1)
+    color?: string;      // Bar color or gradient (default: white gradient)
+    minHeight?: number;  // Minimum bar height as fraction 0-1 (default: 0.06)
   }
 
   let {
@@ -52,7 +52,7 @@
   }
 
   .bar {
-    background: linear-gradient(to top, #3b82f6, #60a5fa);
+    background: linear-gradient(to top, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.9));
     min-height: 2px;
     flex-shrink: 0;
   }

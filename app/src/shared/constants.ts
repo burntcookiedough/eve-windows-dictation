@@ -25,8 +25,8 @@ export const IPC_CHANNELS = {
 
 // Overlay window constants
 export const OVERLAY_CONFIG = {
-  WIDTH: 400,
-  HEIGHT: 200,
+  WIDTH: 700,
+  HEIGHT: 320,
   BOTTOM_MARGIN: 80,
 } as const;
 
@@ -35,7 +35,7 @@ export const AUDIO_CONFIG = {
   SAMPLE_RATE: 16000,
   FRAME_SIZE: 1600, // 100ms at 16kHz
   LEVEL_UPDATE_FPS: 30,
-  WAVEFORM_BARS: 32,
+  WAVEFORM_BARS: 26,
 } as const;
 
 // Main window constants

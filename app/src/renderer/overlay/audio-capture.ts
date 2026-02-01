@@ -2,6 +2,7 @@ import { AUDIO_CONFIG } from '../../shared/constants';
 import { createAudioFrame } from '../../shared/protocol';
 
 const TARGET_SAMPLE_RATE = AUDIO_CONFIG.SAMPLE_RATE;
+const WAVEFORM_BARS = AUDIO_CONFIG.WAVEFORM_BARS;
 
 export interface AudioCaptureOptions {
   historyLength?: number;
@@ -11,7 +12,7 @@ export interface AudioCaptureOptions {
 }
 
 const DEFAULTS: Required<AudioCaptureOptions> = {
-  historyLength: 40,
+  historyLength: WAVEFORM_BARS,
   historyUpdateMs: 40,
   normalizationSmooth: 0.97,
   responsiveRatio: 0.10,
