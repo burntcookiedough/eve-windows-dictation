@@ -24,6 +24,11 @@ export const IPC_CHANNELS = {
   GET_SETTINGS: 'get:settings',
   UPDATE_SETTING: 'update:setting',
 
+  // Hotkey capture
+  HOTKEY_START_CAPTURE: 'hotkey:start-capture',
+  HOTKEY_CANCEL_CAPTURE: 'hotkey:cancel-capture',
+  HOTKEY_GET_DISPLAY_NAME: 'hotkey:get-display-name',
+
   // History
   HISTORY_GET_ENTRIES: 'history:get-entries',
   HISTORY_DELETE: 'history:delete',

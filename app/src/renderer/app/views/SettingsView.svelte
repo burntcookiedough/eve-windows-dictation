@@ -3,11 +3,18 @@
   import Toggle from '../components/Toggle.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
-  import type { Settings } from '$shared/types';
+  import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
+  import type { Settings, Hotkey } from '$shared/types';
 
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
-    hotkey: 'F17',
+    hotkey: {
+      keycode: 100,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      metaKey: false,
+    },
     holdToTalk: true,
     autoCopy: true,
     autoPaste: true,
@@ -17,6 +24,28 @@
     appendPeriod: false,
     appendSpace: false,
   });
+
+  // Default hotkey (F17)
+  const DEFAULT_HOTKEY: Hotkey = {
+    keycode: 100,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+  };
+
+  // Hotkey display name (human-readable)
+  let hotkeyDisplayName = $state('F17');
+  let isHotkeyModalOpen = $state(false);
+
+  // Check if hotkey differs from default
+  let isHotkeyChanged = $derived(
+    settings.hotkey.keycode !== DEFAULT_HOTKEY.keycode ||
+    settings.hotkey.ctrlKey !== DEFAULT_HOTKEY.ctrlKey ||
+    settings.hotkey.altKey !== DEFAULT_HOTKEY.altKey ||
+    settings.hotkey.shiftKey !== DEFAULT_HOTKEY.shiftKey ||
+    settings.hotkey.metaKey !== DEFAULT_HOTKEY.metaKey
+  );
 
   // TODO: Input devices from system enumeration
   let inputDevices = $state([
@@ -28,11 +57,35 @@
     // Load settings from main process
     const loadedSettings = await window.murmurMain.getSettings();
     settings = loadedSettings;
+
+    // Get display name for current hotkey (use loadedSettings directly, not the $state)
+    hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
   });
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
     settings[key] = value;
     window.murmurMain.updateSetting(key, value);
+  }
+
+  function openHotkeyCapture() {
+    isHotkeyModalOpen = true;
+  }
+
+  function handleHotkeyCapture(hotkey: Hotkey, displayName: string) {
+    isHotkeyModalOpen = false;
+    settings.hotkey = hotkey;
+    hotkeyDisplayName = displayName;
+    window.murmurMain.updateSetting('hotkey', hotkey);
+  }
+
+  function handleHotkeyCancel() {
+    isHotkeyModalOpen = false;
+  }
+
+  async function resetHotkey() {
+    settings.hotkey = { ...DEFAULT_HOTKEY };
+    hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_HOTKEY);
+    window.murmurMain.updateSetting('hotkey', DEFAULT_HOTKEY);
   }
 </script>
 
@@ -42,11 +95,27 @@
 
     <!-- Activation -->
     <SettingsSection title="Activation">
-      <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording" notImplemented>
-        <!-- TODO: Implement hotkey capture dialog -->
-        <button class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer">
-          {settings.hotkey}
-        </button>
+      <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording">
+        <div class="flex items-center gap-2">
+          <button
+            onclick={openHotkeyCapture}
+            class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
+          >
+            {hotkeyDisplayName}
+          </button>
+          {#if isHotkeyChanged}
+            <button
+              onclick={resetHotkey}
+              class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+              title="Reset to F17"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
       </SettingsRow>
 
       <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off">
@@ -191,3 +260,9 @@
     </div>
   </div>
 </div>
+
+<HotkeyCaptureModal
+  isOpen={isHotkeyModalOpen}
+  onCapture={handleHotkeyCapture}
+  onCancel={handleHotkeyCancel}
+/>

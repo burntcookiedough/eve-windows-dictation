@@ -1,9 +1,11 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { HistoryFilters, Settings } from '../../shared/types.js';
+import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
 import { getSettings, updateSetting } from '../services/settings.js';
+import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
+import { formatHotkey } from '../services/keycodes.js';
 
 let historyServiceRef: HistoryService | null = null;
 
@@ -48,5 +50,19 @@ export function setupIpcHandlers(historyService?: HistoryService): void {
       return;
     }
     historyServiceRef.delete(id);
+  });
+
+  // Handle hotkey capture
+  ipcMain.handle(IPC_CHANNELS.HOTKEY_START_CAPTURE, async () => {
+    return startHotkeyCapture();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOTKEY_CANCEL_CAPTURE, () => {
+    cancelHotkeyCapture();
+  });
+
+  // Get display name for a hotkey (for initial render)
+  ipcMain.handle(IPC_CHANNELS.HOTKEY_GET_DISPLAY_NAME, (_event, hotkey: Hotkey) => {
+    return formatHotkey(hotkey);
   });
 }

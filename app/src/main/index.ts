@@ -133,14 +133,13 @@ app.whenReady().then(async () => {
 
   // Open DevTools in development
   if (process.env.NODE_ENV !== 'production') {
-    overlayWindow.webContents.openDevTools({ mode: 'detach' });
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
   setupAudioHandler();
   setupMainWindowHandlers();
 
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService(
-    getSetting('hotkey'),
     () => {
       // Key down handler
       if (getSetting('holdToTalk')) {

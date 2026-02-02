@@ -1,16 +1,42 @@
-import { uIOhook, UiohookKey } from 'uiohook-napi';
+import { uIOhook, UiohookKeyboardEvent } from 'uiohook-napi';
 import { app } from 'electron';
+import type { Hotkey } from '../../shared/types.js';
+import { getSetting } from './settings.js';
+import { isModifierKey, formatHotkey } from './keycodes.js';
 
 let keyDownCallback: (() => void) | null = null;
 let keyUpCallback: (() => void) | null = null;
 let isKeyDown = false;
 let isStarted = false;
+let activeKeycode: number | null = null; // Track which keycode triggered the keydown
 
-// F17 key code - UiohookKey.F17 = 0xFFCE (65486) for X11, 128 for Windows
-const F17_KEYCODE = 128; // Windows virtual key code for F17
+// Current hotkey configuration (read from settings on each key event)
+function getCurrentHotkey(): Hotkey {
+  return getSetting('hotkey');
+}
+
+/**
+ * Check if a keyboard event matches the configured hotkey (full match including modifiers)
+ */
+function matchesHotkeyDown(e: UiohookKeyboardEvent, hotkey: Hotkey): boolean {
+  return (
+    e.keycode === hotkey.keycode &&
+    e.ctrlKey === hotkey.ctrlKey &&
+    e.altKey === hotkey.altKey &&
+    e.shiftKey === hotkey.shiftKey &&
+    e.metaKey === hotkey.metaKey
+  );
+}
+
+/**
+ * Check if a keyboard event matches the keyup for the active hotkey.
+ * Only checks keycode, not modifiers, since user may release modifiers before main key.
+ */
+function matchesHotkeyUp(e: UiohookKeyboardEvent): boolean {
+  return activeKeycode !== null && e.keycode === activeKeycode;
+}
 
 export function setupHotkeyService(
-  _accelerator: string, // Ignored - we hardcode F17
   onKeyDown: () => void,
   onKeyUp: () => void
 ): void {
@@ -18,21 +44,23 @@ export function setupHotkeyService(
   keyUpCallback = onKeyUp;
 
   uIOhook.on('keydown', (e) => {
-    // Check if it's F17 (keycode 128 on Windows)
-    if (e.keycode === F17_KEYCODE || e.keycode === UiohookKey.F17) {
+    const hotkey = getCurrentHotkey();
+    if (matchesHotkeyDown(e, hotkey)) {
       if (!isKeyDown) {
         isKeyDown = true;
-        console.log(`[${timestamp()}] F17 keydown`);
+        activeKeycode = e.keycode;
+        console.log(`[${timestamp()}] Hotkey keydown (keycode: ${e.keycode})`);
         keyDownCallback?.();
       }
     }
   });
 
   uIOhook.on('keyup', (e) => {
-    if (e.keycode === F17_KEYCODE || e.keycode === UiohookKey.F17) {
+    if (matchesHotkeyUp(e)) {
       if (isKeyDown) {
         isKeyDown = false;
-        console.log(`[${timestamp()}] F17 keyup`);
+        activeKeycode = null;
+        console.log(`[${timestamp()}] Hotkey keyup (keycode: ${e.keycode})`);
         keyUpCallback?.();
       }
     }
@@ -41,7 +69,8 @@ export function setupHotkeyService(
   // Start the hook
   uIOhook.start();
   isStarted = true;
-  console.log(`[${timestamp()}] Global keyboard hook started (listening for F17)`);
+  const hotkey = getCurrentHotkey();
+  console.log(`[${timestamp()}] Global keyboard hook started (listening for keycode: ${hotkey.keycode})`);
 
   // Clean up on app quit
   app.on('will-quit', () => {
@@ -58,5 +87,72 @@ export function unregisterHotkey(): void {
     uIOhook.stop();
     isStarted = false;
     console.log(`[${timestamp()}] Global keyboard hook stopped`);
+  }
+}
+
+/**
+ * Reset the key state (useful when hotkey changes while key is held)
+ */
+export function resetKeyState(): void {
+  isKeyDown = false;
+  activeKeycode = null;
+}
+
+// --- Hotkey Capture ---
+
+let captureCallback: ((hotkey: Hotkey, displayName: string) => void) | null = null;
+let captureListener: ((e: UiohookKeyboardEvent) => void) | null = null;
+
+/**
+ * Start capturing a hotkey. The next non-modifier key press will be captured.
+ * Returns a promise that resolves with the captured hotkey and its display name.
+ */
+export function startHotkeyCapture(): Promise<{ hotkey: Hotkey; displayName: string }> {
+  return new Promise((resolve) => {
+    // Remove any existing capture listener
+    if (captureListener) {
+      uIOhook.off('keydown', captureListener);
+    }
+
+    captureListener = (e: UiohookKeyboardEvent) => {
+      // Ignore modifier-only key presses
+      if (isModifierKey(e.keycode)) {
+        return;
+      }
+
+      // Capture the hotkey
+      const hotkey: Hotkey = {
+        keycode: e.keycode,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+      };
+
+      const displayName = formatHotkey(hotkey);
+
+      // Clean up listener
+      if (captureListener) {
+        uIOhook.off('keydown', captureListener);
+        captureListener = null;
+      }
+
+      // Reset key state in case the captured key is also the current hotkey
+      resetKeyState();
+
+      resolve({ hotkey, displayName });
+    };
+
+    uIOhook.on('keydown', captureListener);
+  });
+}
+
+/**
+ * Cancel an in-progress hotkey capture
+ */
+export function cancelHotkeyCapture(): void {
+  if (captureListener) {
+    uIOhook.off('keydown', captureListener);
+    captureListener = null;
   }
 }

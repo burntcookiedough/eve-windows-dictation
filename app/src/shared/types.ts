@@ -58,9 +58,18 @@ export interface HistoryResponse {
   hasMore: boolean;
 }
 
+// Hotkey configuration
+export interface Hotkey {
+  keycode: number;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+}
+
 // Settings (v0 uses hardcoded values, but define the shape)
 export interface Settings {
-  hotkey: string;
+  hotkey: Hotkey;
   holdToTalk: boolean;
   autoCopy: boolean;
   autoPaste: boolean;
@@ -73,8 +82,15 @@ export interface Settings {
 }
 
 // Default settings for v0
+// F17 keycode: 0x0064 (100) in libuiohook, 128 on Windows
 export const DEFAULT_SETTINGS: Settings = {
-  hotkey: 'F17',
+  hotkey: {
+    keycode: 100, // F17 in libuiohook (0x0064)
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+  },
   holdToTalk: true,
   autoCopy: true,
   autoPaste: true,

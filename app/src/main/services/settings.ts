@@ -1,15 +1,44 @@
 import Store from 'electron-store';
-import { DEFAULT_SETTINGS, type Settings } from '../../shared/types.js';
+import { DEFAULT_SETTINGS, type Settings, type Hotkey } from '../../shared/types.js';
 
 const store = new Store<Settings>({
   name: 'settings',
   defaults: DEFAULT_SETTINGS,
+  migrations: {
+    // Migrate from string hotkey to object hotkey
+    '1.0.0': (store) => {
+      const hotkey = store.get('hotkey');
+      if (typeof hotkey === 'string') {
+        // Reset to default if old string format
+        store.set('hotkey', DEFAULT_SETTINGS.hotkey);
+      }
+    },
+  },
 });
 
+/**
+ * Validate that a hotkey object has the correct shape
+ */
+function isValidHotkey(hotkey: unknown): hotkey is Hotkey {
+  return (
+    typeof hotkey === 'object' &&
+    hotkey !== null &&
+    typeof (hotkey as Hotkey).keycode === 'number' &&
+    typeof (hotkey as Hotkey).ctrlKey === 'boolean' &&
+    typeof (hotkey as Hotkey).altKey === 'boolean' &&
+    typeof (hotkey as Hotkey).shiftKey === 'boolean' &&
+    typeof (hotkey as Hotkey).metaKey === 'boolean'
+  );
+}
+
 export function getSettings(): Settings {
+  // Get hotkey with validation (handles migration from old string format)
+  const storedHotkey = store.get('hotkey');
+  const hotkey = isValidHotkey(storedHotkey) ? storedHotkey : DEFAULT_SETTINGS.hotkey;
+
   // Return all settings, falling back to defaults for any missing keys
   return {
-    hotkey: store.get('hotkey'),
+    hotkey,
     holdToTalk: store.get('holdToTalk'),
     autoCopy: store.get('autoCopy'),
     autoPaste: store.get('autoPaste'),
@@ -22,6 +51,10 @@ export function getSettings(): Settings {
 }
 
 export function getSetting<K extends keyof Settings>(key: K): Settings[K] {
+  if (key === 'hotkey') {
+    const storedHotkey = store.get('hotkey');
+    return (isValidHotkey(storedHotkey) ? storedHotkey : DEFAULT_SETTINGS.hotkey) as Settings[K];
+  }
   return store.get(key);
 }
 
