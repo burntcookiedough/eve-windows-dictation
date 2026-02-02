@@ -54,6 +54,7 @@
     { id: 'default', label: 'Default' },
   ]);
   let isLoadingDevices = $state(true);
+  let settingsLoaded = $state(false);
 
   onMount(async () => {
     // Load settings from main process
@@ -86,6 +87,7 @@
       console.error('Failed to enumerate audio devices:', err);
     } finally {
       isLoadingDevices = false;
+      settingsLoaded = true;
     }
   });
 
@@ -118,6 +120,7 @@
 
 <div class="h-full p-6 pr-2">
   <div class="h-full overflow-y-auto pr-4">
+    {#if settingsLoaded}
     <div class="space-y-8">
 
     <!-- Activation -->
@@ -272,6 +275,7 @@
     </SettingsSection>
 
     </div>
+    {/if}
   </div>
 </div>
 
