@@ -81,6 +81,14 @@ export interface Settings {
   appendSpace: boolean;
 }
 
+// Window bounds for position/size persistence
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 // Default settings for v0
 // F17 keycode: 0x0064 (100) in libuiohook, 128 on Windows
 export const DEFAULT_SETTINGS: Settings = {

@@ -1,5 +1,10 @@
 import Store from 'electron-store';
-import { DEFAULT_SETTINGS, type Settings, type Hotkey } from '../../shared/types.js';
+import { DEFAULT_SETTINGS, type Settings, type Hotkey, type WindowBounds } from '../../shared/types.js';
+
+// Separate store for internal app state (not user-facing settings)
+const internalStore = new Store<{ mainWindowBounds?: WindowBounds }>({
+  name: 'internal',
+});
 
 const store = new Store<Settings>({
   name: 'settings',
@@ -66,4 +71,13 @@ export function updateSettings(settings: Partial<Settings>): void {
   for (const [key, value] of Object.entries(settings)) {
     store.set(key as keyof Settings, value);
   }
+}
+
+// Window bounds persistence (internal, not user-facing)
+export function getMainWindowBounds(): WindowBounds | undefined {
+  return internalStore.get('mainWindowBounds');
+}
+
+export function setMainWindowBounds(bounds: WindowBounds): void {
+  internalStore.set('mainWindowBounds', bounds);
 }
