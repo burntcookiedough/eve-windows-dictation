@@ -18,6 +18,42 @@
     { id: 'settings', label: 'Settings' },
     { id: 'test', label: 'Test' },
   ];
+
+  // Tab button refs for measuring pill position
+  let tabRefs = $state<Record<View, HTMLButtonElement | null>>({
+    history: null,
+    settings: null,
+    test: null,
+  });
+  let navContainer: HTMLDivElement | null = $state(null);
+
+  // Calculate pill position and clip-path for overlay
+  let pillStyle = $derived.by(() => {
+    const activeRef = tabRefs[activeView];
+    if (!activeRef || !navContainer) return '';
+
+    const containerRect = navContainer.getBoundingClientRect();
+    const tabRect = activeRef.getBoundingClientRect();
+
+    const left = tabRect.left - containerRect.left;
+    const width = tabRect.width;
+
+    return `left: ${left}px; width: ${width}px;`;
+  });
+
+  let clipPath = $derived.by(() => {
+    const activeRef = tabRefs[activeView];
+    if (!activeRef || !navContainer) return 'inset(0 100% 0 0 round 9999px)';
+
+    const containerWidth = navContainer.offsetWidth;
+    const tabLeft = activeRef.offsetLeft;
+    const tabWidth = activeRef.offsetWidth;
+
+    const leftPercent = (tabLeft / containerWidth) * 100;
+    const rightPercent = 100 - ((tabLeft + tabWidth) / containerWidth) * 100;
+
+    return `inset(0 ${rightPercent.toFixed(2)}% 0 ${leftPercent.toFixed(2)}% round 9999px)`;
+  });
 </script>
 
 <div class="flex flex-col h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
@@ -26,19 +62,34 @@
   <!-- Header with Navigation Pills and Status -->
   <header class="h-14 flex items-center justify-between px-6 mt-3 shrink-0">
     <!-- Navigation Pills -->
-    <div class="flex items-center gap-1 p-1 bg-zinc-900 rounded-full">
+    <div bind:this={navContainer} class="relative flex items-center gap-1 p-1 bg-zinc-900 rounded-full">
+      <div
+        class="absolute top-1 bottom-1 bg-zinc-100 rounded-full z-0 transition-[left,width] duration-200 ease-out
+          {pillStyle ? 'opacity-100' : 'opacity-0'}"
+        style={pillStyle}
+      ></div>
+
       {#each tabs as tab}
         <button
-          onclick={() => activeView = tab.id}
-          class="px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer
-            {activeView === tab.id
-              ? 'bg-zinc-100 text-zinc-900'
-              : 'text-zinc-400 hover:text-zinc-200'
-            }"
+          bind:this={tabRefs[tab.id]}
+          onclick={() => (activeView = tab.id)}
+          class="relative z-10 px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer text-zinc-400 hover:text-zinc-300"
         >
           {tab.label}
         </button>
       {/each}
+
+      <div
+        aria-hidden="true"
+        class="absolute inset-0 p-1 flex items-center gap-1 pointer-events-none z-20 transition-[clip-path] duration-200 ease-out"
+        style="clip-path: {clipPath};"
+      >
+        {#each tabs as tab}
+          <span class="px-4 py-1.5 text-sm font-medium text-zinc-900">
+            {tab.label}
+          </span>
+        {/each}
+      </div>
     </div>
 
     <!-- Status Indicators -->
