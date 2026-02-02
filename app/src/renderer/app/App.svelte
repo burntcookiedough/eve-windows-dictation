@@ -1,5 +1,6 @@
 <script lang="ts">
   import TitleBar from './components/TitleBar.svelte';
+  import Toasts from './components/Toasts.svelte';
   import HistoryView from './views/HistoryView.svelte';
   import SettingsView from './views/SettingsView.svelte';
   import TestView from './views/TestView.svelte';
@@ -73,3 +74,6 @@
     {/if}
   </main>
 </div>
+
+<!-- Toast notifications (outside main container for proper fixed positioning) -->
+<Toasts />

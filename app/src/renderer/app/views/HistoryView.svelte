@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { toast } from '$lib/toast.svelte';
   import type { HistoryEntryWithGroup, HistoryFilters } from '$shared/types';
 
   const BATCH_SIZE = 30;
@@ -148,6 +149,7 @@
   // Actions
   function handleCopy(text: string) {
     window.murmurMain.copyToClipboard(text);
+    toast('Copied to clipboard');
   }
 
   function handleDelete(id: string) {
@@ -159,8 +161,10 @@
     try {
       await window.murmurMain.deleteHistoryEntry(deleteConfirmId);
       history = history.filter((item) => item.id !== deleteConfirmId);
+      toast('Transcription deleted', 'info');
     } catch (err) {
       console.error('Failed to delete:', err);
+      toast('Failed to delete', 'error');
     }
     deleteConfirmId = null;
   }
