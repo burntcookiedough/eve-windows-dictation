@@ -9,10 +9,6 @@
 
   let activeView = $state<View>('history');
 
-  // TODO: Wire up to actual state via IPC
-  let isRecording = $state(false);
-  let isConnected = $state(true);
-
   const tabs: { id: View; label: string }[] = [
     { id: 'history', label: 'History' },
     { id: 'settings', label: 'Settings' },
@@ -89,27 +85,6 @@
             {tab.label}
           </span>
         {/each}
-      </div>
-    </div>
-
-    <!-- Status Indicators -->
-    <div class="flex items-center gap-5">
-      <!-- Recording Status -->
-      <div class="flex items-center gap-2">
-        <div class="w-2.5 h-2.5 rounded-full transition-colors
-          {isRecording ? 'bg-red-500 animate-pulse' : 'bg-zinc-700'}"></div>
-        <span class="text-xs text-zinc-500">
-          {isRecording ? 'Recording' : 'Idle'}
-        </span>
-      </div>
-
-      <!-- Connection Status -->
-      <div class="flex items-center gap-2">
-        <div class="w-2.5 h-2.5 rounded-full transition-colors
-          {isConnected ? 'bg-emerald-500' : 'bg-amber-500'}"></div>
-        <span class="text-xs text-zinc-500">
-          {isConnected ? 'Connected' : 'Offline'}
-        </span>
       </div>
     </div>
   </header>

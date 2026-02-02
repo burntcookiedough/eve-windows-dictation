@@ -44,9 +44,5 @@ When a feature is fully implemented:
 - [ ] **Final result display**: Placeholder text. Needs: IPC subscription to transcription state.
 - [ ] **Partial results stream**: Shows static mock data. Needs: IPC subscription to transcription state.
 
-## Status Indicators (Header)
-- [ ] **Recording status**: Shows static "Idle". Needs: IPC subscription to recording state.
-- [ ] **Connection status**: Shows static "Connected". Needs: IPC subscription to connection state.
-
 ---
 Last updated: 2026-02-02 (Input Device + cleanup of already-working settings)
