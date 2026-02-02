@@ -20,10 +20,11 @@
     autoPaste: true,
     silenceTimeout: 15,
     serverUrl: 'ws://localhost:51717/transcribe',
-    theme: 'dark',
     appendPeriod: false,
     appendSpace: false,
     selectedDeviceId: 'default',
+    launchOnBoot: false,
+    startMinimized: false,
   });
 
   // Default hotkey (F17)
@@ -231,20 +232,18 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Launch on boot" description="Start application when system starts" notImplemented>
-        <!-- TODO: Implement launch on boot functionality -->
+      <SettingsRow label="Launch on boot" description="Start application when system starts">
         <Toggle
-          enabled={false}
-          onchange={(v) => console.log('Launch on boot:', v)}
+          enabled={settings.launchOnBoot}
+          onchange={(v) => updateSetting('launchOnBoot', v)}
           label="Launch on boot"
         />
       </SettingsRow>
 
-      <SettingsRow label="Start minimized" description="Hide main window on application launch" notImplemented>
-        <!-- TODO: Implement start minimized functionality -->
+      <SettingsRow label="Start minimized" description="Hide main window on application launch">
         <Toggle
-          enabled={false}
-          onchange={(v) => console.log('Start minimized:', v)}
+          enabled={settings.startMinimized}
+          onchange={(v) => updateSetting('startMinimized', v)}
           label="Start minimized"
         />
       </SettingsRow>

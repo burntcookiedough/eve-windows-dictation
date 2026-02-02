@@ -128,9 +128,10 @@ app.whenReady().then(async () => {
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
   setupIpcHandlers(historyService);
 
-  // Create main window (shown on startup)
-  mainWindow = await createMainWindow();
-  log('Main window created');
+  // Create main window (respects startMinimized setting)
+  const startMinimized = getSetting('startMinimized');
+  mainWindow = await createMainWindow({ startMinimized });
+  log('Main window created', startMinimized ? '(minimized)' : '');
 
   // Create overlay window (pre-warmed, hidden)
   overlayWindow = await createOverlayWindow();

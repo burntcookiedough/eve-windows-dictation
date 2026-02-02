@@ -49,10 +49,11 @@ export function getSettings(): Settings {
     autoPaste: store.get('autoPaste'),
     silenceTimeout: store.get('silenceTimeout'),
     serverUrl: store.get('serverUrl'),
-    theme: store.get('theme'),
     appendPeriod: store.get('appendPeriod'),
     appendSpace: store.get('appendSpace'),
     selectedDeviceId: store.get('selectedDeviceId'),
+    launchOnBoot: store.get('launchOnBoot'),
+    startMinimized: store.get('startMinimized'),
   };
 }
 

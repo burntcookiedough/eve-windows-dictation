@@ -44,7 +44,11 @@ function areBoundsOnScreen(bounds: WindowBounds): boolean {
   return false;
 }
 
-export async function createMainWindow(): Promise<BrowserWindow> {
+export interface CreateMainWindowOptions {
+  startMinimized?: boolean;
+}
+
+export async function createMainWindow(options: CreateMainWindowOptions = {}): Promise<BrowserWindow> {
   const preloadPath = join(__dirname, 'preload/main.js');
 
   // Restore saved window bounds if valid, otherwise use defaults
@@ -80,10 +84,12 @@ export async function createMainWindow(): Promise<BrowserWindow> {
   mainWindow.on('moved', saveBounds);
   mainWindow.on('resized', saveBounds);
 
-  // Show when ready to avoid visual flash
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
+  // Show when ready to avoid visual flash (unless starting minimized)
+  if (!options.startMinimized) {
+    mainWindow.once('ready-to-show', () => {
+      mainWindow.show();
+    });
+  }
 
   // Hide on close unless app is quitting
   mainWindow.on('close', (event) => {

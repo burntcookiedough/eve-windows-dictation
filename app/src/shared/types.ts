@@ -75,12 +75,14 @@ export interface Settings {
   autoPaste: boolean;
   silenceTimeout: number;
   serverUrl: string;
-  theme: 'light' | 'dark' | 'system';
   // Post-processing
   appendPeriod: boolean;
   appendSpace: boolean;
   // Audio
   selectedDeviceId: string; // 'default' uses system default
+  // Startup behavior
+  launchOnBoot: boolean;
+  startMinimized: boolean;
 }
 
 // Window bounds for position/size persistence
@@ -106,10 +108,12 @@ export const DEFAULT_SETTINGS: Settings = {
   autoPaste: true,
   silenceTimeout: 15,
   serverUrl: 'ws://localhost:51717/transcribe',
-  theme: 'dark',
   // Post-processing
   appendPeriod: false,
   appendSpace: false,
   // Audio
   selectedDeviceId: 'default',
+  // Startup behavior
+  launchOnBoot: false,
+  startMinimized: false,
 };
