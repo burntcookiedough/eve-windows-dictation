@@ -27,6 +27,9 @@
   // Expanded item
   let expandedId: string | null = $state(null);
 
+  // Last updated timestamp
+  let lastUpdated: number | null = $state(null);
+
   // Sentinel element ref
   let sentinel: HTMLElement | undefined = $state(undefined);
 
@@ -87,6 +90,7 @@
       history = reset ? response.entries : [...history, ...response.entries];
       hasMore = response.hasMore;
       offset += response.entries.length;
+      lastUpdated = Date.now();
     } catch (err) {
       console.error('Failed to load history:', err);
     } finally {
@@ -232,6 +236,7 @@
       if (shouldAdd) {
         history = [entry, ...history];
         offset += 1;
+        lastUpdated = Date.now();
       }
     });
 
@@ -405,6 +410,7 @@
         {/if}
       </div>
     {/if}
+
   </div>
 
   <!-- History List -->
@@ -421,10 +427,15 @@
 
           <!-- Date Group Header -->
           {#if showHeader}
-            <div class="pt-4 pb-2 first:pt-0">
+            <div class="pt-4 pb-2 first:pt-0 flex items-center justify-between">
               <span class="text-xs font-medium text-zinc-500 uppercase tracking-wider">
                 {item.dateGroup}
               </span>
+              {#if index === 0 && lastUpdated}
+                <span class="text-xs text-zinc-600">
+                  Updated {formatFullDate(lastUpdated)}
+                </span>
+              {/if}
             </div>
           {/if}
 
