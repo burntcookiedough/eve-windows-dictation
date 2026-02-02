@@ -22,6 +22,7 @@ export const IPC_CHANNELS = {
 
   // Request/Response
   GET_SETTINGS: 'get:settings',
+  UPDATE_SETTING: 'update:setting',
 
   // History
   HISTORY_GET_ENTRIES: 'history:get-entries',

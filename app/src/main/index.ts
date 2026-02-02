@@ -7,7 +7,7 @@ import { setupIpcHandlers } from './ipc/handlers.js';
 import { TranscriptionService } from './services/transcription.js';
 import { HistoryService } from './services/history.js';
 import { processFinalTranscription } from './services/pipeline.js';
-import { DEFAULT_SETTINGS } from '../shared/types.js';
+import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 
@@ -32,8 +32,8 @@ async function startRecording() {
 
   // Initialize transcription service
   transcriptionService = new TranscriptionService(
-    DEFAULT_SETTINGS.serverUrl,
-    DEFAULT_SETTINGS.silenceTimeout,
+    getSetting('serverUrl'),
+    getSetting('silenceTimeout'),
     overlayWindow
   );
 
@@ -41,7 +41,7 @@ async function startRecording() {
   transcriptionService.onFinal(async (frame: TextFrameFinal) => {
     if (frame.text) {
       // Process through pipeline (post-processing, clipboard, paste, history)
-      const result = await processFinalTranscription(frame, DEFAULT_SETTINGS, historyService);
+      const result = await processFinalTranscription(frame, getSettings(), historyService);
 
       // Push new entry to main window if visible
       if (mainWindow && mainWindow.isVisible()) {
@@ -138,16 +138,34 @@ app.whenReady().then(async () => {
   setupAudioHandler();
   setupMainWindowHandlers();
 
-  // Set up global hotkey (hold-to-talk)
+  // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService(
-    DEFAULT_SETTINGS.hotkey,
+    getSetting('hotkey'),
     () => {
-      log('Recording started');
-      startRecording();
+      // Key down handler
+      if (getSetting('holdToTalk')) {
+        // Hold mode: start recording on key down
+        log('Recording started (hold mode)');
+        startRecording();
+      } else {
+        // Toggle mode: toggle recording on key down
+        if (isRecording) {
+          log('Recording stopped (toggle mode)');
+          stopRecording();
+        } else {
+          log('Recording started (toggle mode)');
+          startRecording();
+        }
+      }
     },
     () => {
-      log('Recording stopped');
-      stopRecording();
+      // Key up handler
+      if (getSetting('holdToTalk')) {
+        // Hold mode: stop recording on key up
+        log('Recording stopped (hold mode)');
+        stopRecording();
+      }
+      // Toggle mode: do nothing on key up
     }
   );
 

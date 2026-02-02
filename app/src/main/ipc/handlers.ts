@@ -1,9 +1,9 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import { DEFAULT_SETTINGS } from '../../shared/types.js';
-import type { HistoryFilters } from '../../shared/types.js';
+import type { HistoryFilters, Settings } from '../../shared/types.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
+import { getSettings, updateSetting } from '../services/settings.js';
 
 let historyServiceRef: HistoryService | null = null;
 
@@ -20,9 +20,16 @@ export function setupIpcHandlers(historyService?: HistoryService): void {
 
   // Handle settings requests
   ipcMain.handle(IPC_CHANNELS.GET_SETTINGS, () => {
-    // For v0, return hardcoded defaults
-    return DEFAULT_SETTINGS;
+    return getSettings();
   });
+
+  // Handle setting updates
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_SETTING,
+    (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
+      updateSetting(key, value);
+    }
+  );
 
   // Handle history get entries
   ipcMain.handle(

@@ -10,7 +10,7 @@ When a feature is fully implemented:
 
 ## Settings - Activation Section
 - [ ] **Hotkey capture**: UI shows current hotkey but clicking doesn't open capture dialog. Needs: hotkey capture modal, IPC to update hotkey, re-register with hotkey service.
-- [ ] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
+- [x] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
 
 ## Settings - Audio Section
 - [ ] **Input Device dropdown**: Shows hardcoded options. Needs: device enumeration API, settings persistence.

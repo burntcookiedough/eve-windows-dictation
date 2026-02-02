@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { HistoryFilters, HistoryResponse, HistoryEntryWithGroup } from '../../shared/types.js';
+import type { HistoryFilters, HistoryResponse, HistoryEntryWithGroup, Settings } from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
 const murmurMainAPI = {
@@ -20,6 +20,10 @@ const murmurMainAPI = {
   // Settings
   getSettings: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS);
+  },
+
+  updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    return ipcRenderer.invoke(IPC_CHANNELS.UPDATE_SETTING, key, value);
   },
 
   // History

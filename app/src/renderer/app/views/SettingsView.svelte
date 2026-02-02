@@ -32,8 +32,7 @@
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
     settings[key] = value;
-    // TODO: Persist to main process via IPC
-    console.log('Setting changed:', key, value);
+    window.murmurMain.updateSetting(key, value);
   }
 </script>
 
@@ -50,19 +49,25 @@
         </button>
       </SettingsRow>
 
-      <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off" notImplemented>
-        <div class="flex gap-1 p-1 bg-zinc-800 rounded-lg">
+      <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off">
+        <div class="relative grid grid-cols-2 p-1 bg-zinc-800 rounded-lg w-[120px]">
+          <!-- Sliding indicator -->
+          <div
+            class="absolute top-1 left-1 w-[calc(50%-4px)] h-[calc(100%-8px)] bg-zinc-700 rounded-md transition-all duration-150 ease-out
+              {!settings.holdToTalk ? 'translate-x-full' : ''}"
+          ></div>
+          <!-- Buttons -->
           <button
             onclick={() => updateSetting('holdToTalk', true)}
-            class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer
-              {settings.holdToTalk ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
+            class="relative z-10 py-1 text-xs text-center rounded-md cursor-pointer transition-colors duration-150
+              {settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Hold
           </button>
           <button
             onclick={() => updateSetting('holdToTalk', false)}
-            class="px-3 py-1 text-xs rounded-md transition-colors cursor-pointer
-              {!settings.holdToTalk ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
+            class="relative z-10 py-1 text-xs text-center rounded-md cursor-pointer transition-colors duration-150
+              {!settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Toggle
           </button>
