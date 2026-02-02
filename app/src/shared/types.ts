@@ -104,7 +104,7 @@ export const DEFAULT_SETTINGS: Settings = {
   holdToTalk: true,
   autoCopy: true,
   autoPaste: true,
-  silenceTimeout: 3,
+  silenceTimeout: 15,
   serverUrl: 'ws://localhost:51717/transcribe',
   theme: 'dark',
   // Post-processing

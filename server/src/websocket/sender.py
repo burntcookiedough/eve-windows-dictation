@@ -34,7 +34,7 @@ class FrameSender:
         """Send a ready control frame."""
         frame = ReadyFrame()
         await self._ws.send_json(frame.model_dump())
-        logger.debug("[%s] Sent ready frame", self._session_id)
+        logger.info("[%s] Sent ready frame", self._session_id)
 
     async def send_error(self, code: ErrorCode, message: str) -> None:
         """Send an error control frame.
@@ -57,7 +57,7 @@ class FrameSender:
         """
         frame = ClosingFrame(reason=reason)
         await self._ws.send_json(frame.model_dump())
-        logger.debug("[%s] Sent closing frame: %s", self._session_id, reason)
+        logger.info("[%s] Sent closing frame: %s", self._session_id, reason.value)
 
     async def send_partial(
         self,

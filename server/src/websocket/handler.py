@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -205,7 +206,14 @@ async def _handle_audio_frame(
 ) -> None:
     """Handle a binary audio frame."""
     if not context.state_machine.is_accepting_audio():
-        logger.warning("[%s] Audio received in invalid state", context.session_id)
+        # Only log once per invalid state to avoid spam
+        if not getattr(context, "_logged_invalid_audio", False):
+            logger.warning(
+                "[%s] Audio received in invalid state %s (suppressing further)",
+                context.session_id,
+                context.state_machine.state.value,
+            )
+            context._logged_invalid_audio = True  # type: ignore[attr-defined]
         return
 
     try:
@@ -217,9 +225,11 @@ async def _handle_audio_frame(
     # Add to buffer
     context.audio_buffer.append(frame.sequence, frame.samples)
 
-    # Transition to streaming if first audio
+    # Transition to streaming if first audio and record audio start time
     if context.state_machine.state == SessionState.STARTED:
+        context.audio_start_time = time.monotonic()
         context.state_machine.transition_to(SessionState.STREAMING)
+        logger.info("[%s] Audio streaming started", context.session_id)
 
 
 async def _handle_control_frame(
@@ -251,6 +261,7 @@ async def _handle_control_frame(
 
     # Handle stop
     if msg_type == "stop":
+        logger.info("[%s] Received stop frame from client", context.session_id)
         await _finalize_session(sender, context, processor, ClosingReason.STOP_RECEIVED)
         await websocket.close()
         return True
@@ -280,14 +291,24 @@ async def _partial_emission_loop(
 
         try:
             result = await processor.transcribe_partial()
-            if result is not None and not result.is_empty:
-                await sender.send_partial(
-                    result.text,
-                    result.confidence,
-                    result.transcription_time,
-                    result.audio_duration,
-                )
-                context.has_speech = True
+            if result is not None:
+                # Update last speech time if speech was detected
+                if (
+                    result.last_speech_end is not None
+                    and context.audio_start_time is not None
+                ):
+                    context.last_speech_time = (
+                        context.audio_start_time + result.last_speech_end
+                    )
+
+                if not result.is_empty:
+                    await sender.send_partial(
+                        result.text,
+                        result.confidence,
+                        result.transcription_time,
+                        result.audio_duration,
+                    )
+                    context.has_speech = True
         except Exception as e:
             logger.exception(
                 "[%s] Error in partial emission: %s", context.session_id, e
@@ -299,26 +320,60 @@ async def _silence_monitor_loop(
     context: SessionContext,
     processor: TranscriptionProcessor,
 ) -> None:
-    """Background task for monitoring silence timeout."""
+    """Background task for monitoring silence and audio reception timeouts.
+
+    Two timeout conditions are checked:
+    1. Speech-based silence: No speech detected for silence_timeout seconds
+    2. Audio reception: No audio frames received for silence_timeout seconds
+    """
     while context.state_machine.is_active():
         await asyncio.sleep(0.5)  # Check every 500ms
 
         if not context.state_machine.is_accepting_audio():
             continue
 
-        # Only check silence after we've received some audio
+        now = time.monotonic()
+
+        # Check 1: Audio reception timeout (client stopped sending audio)
+        # This uses the existing seconds_since_last_audio from the buffer
+        if context.audio_buffer.has_audio():
+            audio_gap = context.audio_buffer.seconds_since_last_audio
+            if audio_gap >= context.silence_timeout:
+                logger.info(
+                    "[%s] Audio reception timeout (no audio for %.1fs)",
+                    context.session_id,
+                    audio_gap,
+                )
+                context.state_machine.transition_to(SessionState.FINALIZING)
+                await _finalize_session(
+                    sender, context, processor, ClosingReason.SILENCE_TIMEOUT
+                )
+                return
+
+        # Check 2: Speech-based silence timeout
+        # Only check after we've received some audio
         if not context.audio_buffer.has_audio():
             continue
 
+        # Calculate silence duration based on speech detection
+        if context.last_speech_time is not None:
+            # Speech has been detected - check time since last speech
+            silence_duration = now - context.last_speech_time
+        elif context.started_at is not None:
+            # No speech detected yet - use session start as fallback
+            # This handles the case where user never speaks
+            silence_duration = now - context.started_at
+        else:
+            continue
+
         # Check if silence timeout exceeded
-        if context.audio_buffer.seconds_since_last_audio >= context.silence_timeout:
+        if silence_duration >= context.silence_timeout:
             logger.info(
-                "[%s] Silence timeout (%.1fs)",
+                "[%s] Speech silence timeout (%.1fs since %s)",
                 context.session_id,
                 context.silence_timeout,
+                "last speech" if context.last_speech_time else "session start",
             )
-            # Signal finalization - the main loop will handle cleanup
-            # We set a flag and let the handler notice
             context.state_machine.transition_to(SessionState.FINALIZING)
             await _finalize_session(
                 sender, context, processor, ClosingReason.SILENCE_TIMEOUT
@@ -336,6 +391,8 @@ async def _finalize_session(
     if context.state_machine.state == SessionState.CLOSED:
         return
 
+    logger.info("[%s] Finalizing session (reason=%s)", context.session_id, reason.value)
+
     # Transition to finalizing if not already
     if context.state_machine.state != SessionState.FINALIZING:
         context.state_machine.transition_to(SessionState.FINALIZING)
@@ -344,17 +401,27 @@ async def _finalize_session(
     try:
         result = await processor.transcribe_final()
         if not result.is_empty:
+            logger.info(
+                "[%s] Final transcription: %r (%.1fs audio)",
+                context.session_id,
+                result.text[:100] if len(result.text) > 100 else result.text,
+                result.audio_duration,
+            )
             await sender.send_final(
                 result.text,
                 result.confidence,
                 result.transcription_time,
                 result.audio_duration,
             )
+        else:
+            logger.info("[%s] No speech detected in session", context.session_id)
     except Exception as e:
         logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
 
     # Send closing frame
+    logger.info("[%s] Sending closing frame", context.session_id)
     await sender.send_closing(reason)
 
     # Mark closed
     context.state_machine.transition_to(SessionState.CLOSED)
+    logger.info("[%s] Session closed", context.session_id)

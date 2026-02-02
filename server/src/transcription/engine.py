@@ -22,6 +22,7 @@ class TranscribeResult:
 
     text: str
     confidence: float
+    last_speech_end: float | None  # Seconds from audio start, None if no speech
 
 
 class WhisperEngine:
@@ -68,18 +69,19 @@ class WhisperEngine:
             language=language,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
-            without_timestamps=True,
         )
 
-        # Collect all segments
+        # Collect all segments and track last speech end time
         text_parts = []
         total_prob = 0.0
         segment_count = 0
+        last_speech_end: float | None = None
 
         for segment in segments:
             text_parts.append(segment.text.strip())
             total_prob += segment.avg_logprob
             segment_count += 1
+            last_speech_end = segment.end
 
         text = " ".join(text_parts).strip()
         # Convert log probability to confidence (0-1 range)
@@ -90,7 +92,9 @@ class WhisperEngine:
             # Map roughly to 0-1 range
             avg_confidence = min(1.0, max(0.0, 1.0 + avg_log_prob / 2.0))
 
-        return TranscribeResult(text=text, confidence=avg_confidence)
+        return TranscribeResult(
+            text=text, confidence=avg_confidence, last_speech_end=last_speech_end
+        )
 
 
 def get_engine() -> WhisperEngine:

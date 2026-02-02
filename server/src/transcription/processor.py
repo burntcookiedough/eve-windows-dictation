@@ -36,6 +36,7 @@ class TranscriptionResult:
     is_empty: bool
     transcription_time: float
     audio_duration: float
+    last_speech_end: float | None  # Seconds from audio start, None if no speech
 
 
 class TranscriptionProcessor:
@@ -100,6 +101,7 @@ class TranscriptionProcessor:
             is_empty=len(result.text.strip()) == 0,
             transcription_time=transcription_time,
             audio_duration=audio_duration,
+            last_speech_end=result.last_speech_end,
         )
 
     async def transcribe_final(self) -> TranscriptionResult:
@@ -124,6 +126,7 @@ class TranscriptionProcessor:
                 is_empty=True,
                 transcription_time=0.0,
                 audio_duration=0.0,
+                last_speech_end=None,
             )
 
         # Run transcription in thread pool
@@ -144,6 +147,7 @@ class TranscriptionProcessor:
             is_empty=len(result.text.strip()) == 0,
             transcription_time=transcription_time,
             audio_duration=audio_duration,
+            last_speech_end=result.last_speech_end,
         )
 
 

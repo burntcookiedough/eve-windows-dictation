@@ -28,6 +28,10 @@ class SessionContext:
     created_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
 
+    # Speech timing for silence detection
+    audio_start_time: float | None = None  # Monotonic time when first audio arrived
+    last_speech_time: float | None = None  # Monotonic time when speech was last detected
+
     # Last transcription result (for partial emissions)
     last_partial_text: str = ""
 

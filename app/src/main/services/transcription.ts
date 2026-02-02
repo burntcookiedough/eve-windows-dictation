@@ -17,6 +17,7 @@ export class TranscriptionService {
   private overlayWindow: BrowserWindow;
   private sequenceNumber = 0;
   private isReady = false;
+  private serverClosing = false; // Server initiated close, don't send stop
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
 
@@ -73,6 +74,11 @@ export class TranscriptionService {
   }
 
   stop(): void {
+    // Don't send stop if server already initiated close
+    if (this.serverClosing) {
+      return;
+    }
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -113,7 +119,12 @@ export class TranscriptionService {
           break;
 
         case 'closing':
-          // Session is ending
+          // Server is ending the session - stop accepting audio
+          console.log('Server closing session:', frame.reason);
+          this.isReady = false;
+          this.serverClosing = true; // Don't send stop frame back
+          // Trigger close callback to clean up
+          this.onCloseCallback?.();
           break;
       }
     } else if (frame.frame === 'text') {

@@ -18,7 +18,7 @@
     holdToTalk: true,
     autoCopy: true,
     autoPaste: true,
-    silenceTimeout: 3,
+    silenceTimeout: 15,
     serverUrl: 'ws://localhost:51717/transcribe',
     theme: 'dark',
     appendPeriod: false,
@@ -186,20 +186,6 @@
         </select>
       </SettingsRow>
 
-      <SettingsRow label="Silence Timeout" description="Seconds of silence before auto-stopping (toggle mode only)">
-        <select
-          value={settings.silenceTimeout}
-          onchange={(e) => updateSetting('silenceTimeout', parseFloat(e.currentTarget.value))}
-          disabled={settings.holdToTalk}
-          class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <option value={1}>1.0s</option>
-          <option value={1.5}>1.5s</option>
-          <option value={2}>2.0s</option>
-          <option value={3}>3.0s</option>
-          <option value={5}>5.0s</option>
-        </select>
-      </SettingsRow>
     </SettingsSection>
 
     <!-- Post-Processing -->
