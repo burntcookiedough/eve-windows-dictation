@@ -31,9 +31,13 @@ async function startRecording() {
   showOverlay(overlayWindow);
 
   // Initialize transcription service
+  // Only use silence timeout in toggle mode; in hold mode use a very long timeout (user releases key to stop)
+  const isHoldMode = getSetting('holdToTalk');
+  const silenceTimeout = isHoldMode ? 300 : getSetting('silenceTimeout'); // 5 min fallback for hold mode
+
   transcriptionService = new TranscriptionService(
     getSetting('serverUrl'),
-    getSetting('silenceTimeout'),
+    silenceTimeout,
     overlayWindow
   );
 
@@ -57,8 +61,9 @@ async function startRecording() {
   // Connect to server
   try {
     await transcriptionService.connect();
-    // Tell overlay to start audio capture
-    overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING);
+    // Tell overlay to start audio capture with selected device
+    const deviceId = getSetting('selectedDeviceId');
+    overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
   } catch (error) {
     console.error('Failed to connect to transcription server:', error);
     stopRecording();

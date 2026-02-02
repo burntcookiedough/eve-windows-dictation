@@ -13,21 +13,21 @@ When a feature is fully implemented:
 - [x] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
 
 ## Settings - Audio Section
-- [ ] **Input Device dropdown**: Shows hardcoded options. Needs: device enumeration API, settings persistence.
-- [ ] **Silence Timeout**: UI works but doesn't persist. Needs: settings persistence.
+- [x] **Input Device dropdown**: Device enumeration API + settings persistence implemented.
+- [x] **Silence Timeout**: Already persisted and used by server.
 
 ## Settings - Post-Processing Section
-- [ ] **Append period**: Toggle works locally but doesn't persist or apply. Needs: settings persistence + transcription service to apply post-processing before copy/paste.
-- [ ] **Append space**: Toggle works locally but doesn't persist or apply. Needs: settings persistence + transcription service to apply post-processing before copy/paste.
+- [x] **Append period**: Persisted and applied in pipeline.ts before copy/paste.
+- [x] **Append space**: Persisted and applied in pipeline.ts before copy/paste.
 
 ## Settings - Behavior Section
-- [ ] **Auto-copy**: Toggle works locally but doesn't persist. Needs: settings persistence.
-- [ ] **Auto-paste**: Toggle works locally but doesn't persist. Needs: settings persistence.
+- [x] **Auto-copy**: Persisted and used in pipeline.ts.
+- [x] **Auto-paste**: Persisted and used in pipeline.ts.
 - [ ] **Launch on boot**: Toggle works locally but doesn't do anything. Needs: electron `app.setLoginItemSettings()` + settings persistence.
 - [ ] **Start minimized**: Toggle works locally but doesn't do anything. Needs: main window logic + settings persistence.
 
 ## Settings - Server Section
-- [ ] **Server URL**: Input works locally but doesn't persist. Needs: settings persistence.
+- [x] **Server URL**: Persisted, takes effect on next recording session.
 
 ## History View
 - [x] **History data**: SQLite history service implemented with IPC to fetch entries.
@@ -49,4 +49,4 @@ When a feature is fully implemented:
 - [ ] **Connection status**: Shows static "Connected". Needs: IPC subscription to connection state.
 
 ---
-Last updated: 2026-02-02 (History View implemented)
+Last updated: 2026-02-02 (Input Device + cleanup of already-working settings)

@@ -52,6 +52,7 @@ export function getSettings(): Settings {
     theme: store.get('theme'),
     appendPeriod: store.get('appendPeriod'),
     appendSpace: store.get('appendSpace'),
+    selectedDeviceId: store.get('selectedDeviceId'),
   };
 }
 

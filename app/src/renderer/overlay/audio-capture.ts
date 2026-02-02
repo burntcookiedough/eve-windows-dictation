@@ -9,6 +9,7 @@ export interface AudioCaptureOptions {
   historyUpdateMs?: number;
   normalizationSmooth?: number;
   responsiveRatio?: number;
+  deviceId?: string; // 'default' or undefined uses system default
 }
 
 const DEFAULTS: Required<AudioCaptureOptions> = {
@@ -16,6 +17,7 @@ const DEFAULTS: Required<AudioCaptureOptions> = {
   historyUpdateMs: 40,
   normalizationSmooth: 0.97,
   responsiveRatio: 0.10,
+  deviceId: 'default',
 };
 
 export class AudioCapture {
@@ -57,13 +59,19 @@ export class AudioCapture {
     this.lastHistoryUpdate = performance.now();
 
     try {
+      // Build audio constraints, using specific device if not 'default'
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleRate: TARGET_SAMPLE_RATE,
+        channelCount: 1,
+      };
+      if (this.options.deviceId && this.options.deviceId !== 'default') {
+        audioConstraints.deviceId = { exact: this.options.deviceId };
+      }
+
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: TARGET_SAMPLE_RATE,
-          channelCount: 1,
-        },
+        audio: audioConstraints,
       });
 
       this.audioContext = new AudioContext({

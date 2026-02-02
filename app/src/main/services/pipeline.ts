@@ -32,10 +32,12 @@ export function buildEntry(frame: TextFrameFinal): TranscriptionEntry {
 }
 
 /**
- * Apply post-processing to the entry text based on settings
+ * Apply post-processing to the entry text based on settings.
+ * Stores the raw transcribed text in originalText before modifications.
  */
 export function applyPostProcessing(entry: TranscriptionEntry, settings: Settings): TranscriptionEntry {
-  let text = entry.text;
+  const rawText = entry.text;
+  let text = rawText;
 
   // Append period if enabled and text doesn't already end with punctuation
   if (settings.appendPeriod && text.length > 0) {
@@ -53,6 +55,7 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   return {
     ...entry,
     text,
+    originalText: rawText, // Always store raw transcribed text
   };
 }
 

@@ -14,7 +14,7 @@
 
   let cleanupFns: Array<() => void> = [];
 
-  async function startAudioCapture() {
+  async function startAudioCapture(deviceId?: string) {
     try {
       await audioCapture.start(
         // On audio data - send to main process
@@ -24,7 +24,9 @@
         // On levels - update waveform
         (levels) => {
           audioLevels = levels;
-        }
+        },
+        // Options with device ID
+        { deviceId }
       );
     } catch (error) {
       console.error('Failed to start audio capture:', error);
@@ -61,8 +63,8 @@
 
     // Subscribe to start/stop commands from main process
     cleanupFns.push(
-      window.murmur.onStartRecording(() => {
-        startAudioCapture();
+      window.murmur.onStartRecording((deviceId) => {
+        startAudioCapture(deviceId);
       })
     );
 

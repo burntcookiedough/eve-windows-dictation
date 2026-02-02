@@ -79,6 +79,8 @@ export interface Settings {
   // Post-processing
   appendPeriod: boolean;
   appendSpace: boolean;
+  // Audio
+  selectedDeviceId: string; // 'default' uses system default
 }
 
 // Window bounds for position/size persistence
@@ -108,4 +110,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // Post-processing
   appendPeriod: false,
   appendSpace: false,
+  // Audio
+  selectedDeviceId: 'default',
 };

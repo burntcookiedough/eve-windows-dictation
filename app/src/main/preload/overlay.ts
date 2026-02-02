@@ -34,8 +34,8 @@ const murmurAPI = {
   },
 
   // Recording commands (Main → Renderer, tells overlay to start/stop audio capture)
-  onStartRecording: (callback: () => void) => {
-    const handler = () => callback();
+  onStartRecording: (callback: (deviceId?: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, deviceId?: string) => callback(deviceId);
     ipcRenderer.on(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
   },

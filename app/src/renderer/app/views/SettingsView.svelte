@@ -23,6 +23,7 @@
     theme: 'dark',
     appendPeriod: false,
     appendSpace: false,
+    selectedDeviceId: 'default',
   });
 
   // Default hotkey (F17)
@@ -47,11 +48,11 @@
     settings.hotkey.metaKey !== DEFAULT_HOTKEY.metaKey
   );
 
-  // TODO: Input devices from system enumeration
-  let inputDevices = $state([
+  // Input devices from system enumeration
+  let inputDevices = $state<Array<{ id: string; label: string }>>([
     { id: 'default', label: 'Default' },
   ]);
-  let selectedDeviceId = $state('default');
+  let isLoadingDevices = $state(true);
 
   onMount(async () => {
     // Load settings from main process
@@ -60,6 +61,31 @@
 
     // Get display name for current hotkey (use loadedSettings directly, not the $state)
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
+
+    // Enumerate audio input devices
+    try {
+      // Request permission first (required to get device labels)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release the microphone immediately after getting permission
+      stream.getTracks().forEach(track => track.stop());
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+
+      inputDevices = [
+        { id: 'default', label: 'Default' },
+        ...audioInputs
+          .filter(d => d.deviceId !== 'default') // Avoid duplicate default
+          .map(d => ({
+            id: d.deviceId,
+            label: d.label || `Microphone ${d.deviceId.slice(0, 8)}`,
+          })),
+      ];
+    } catch (err) {
+      console.error('Failed to enumerate audio devices:', err);
+    } finally {
+      isLoadingDevices = false;
+    }
   });
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -146,11 +172,13 @@
 
     <!-- Audio -->
     <SettingsSection title="Audio">
-      <SettingsRow label="Input Device" description="Select microphone for recording" notImplemented>
-        <!-- TODO: Populate with actual system audio devices -->
+      <SettingsRow label="Input Device" description="Select microphone for recording">
         <select
-          bind:value={selectedDeviceId}
-          class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+          value={settings.selectedDeviceId}
+          onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}
+          disabled={isLoadingDevices}
+          title={inputDevices.find(d => d.id === settings.selectedDeviceId)?.label ?? 'Default'}
+          class="max-w-[280px] truncate pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {#each inputDevices as device}
             <option value={device.id}>{device.label}</option>
@@ -158,11 +186,12 @@
         </select>
       </SettingsRow>
 
-      <SettingsRow label="Silence Timeout" description="Seconds of silence before auto-stopping" notImplemented>
+      <SettingsRow label="Silence Timeout" description="Seconds of silence before auto-stopping (toggle mode only)">
         <select
           value={settings.silenceTimeout}
           onchange={(e) => updateSetting('silenceTimeout', parseFloat(e.currentTarget.value))}
-          class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+          disabled={settings.holdToTalk}
+          class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <option value={1}>1.0s</option>
           <option value={1.5}>1.5s</option>
@@ -175,7 +204,7 @@
 
     <!-- Post-Processing -->
     <SettingsSection title="Post-Processing">
-      <SettingsRow label="Append period" description="Add a period at the end of transcriptions" notImplemented>
+      <SettingsRow label="Append period" description="Add a period at the end of transcriptions">
         <Toggle
           enabled={settings.appendPeriod}
           onchange={(v) => updateSetting('appendPeriod', v)}
@@ -183,7 +212,7 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Append space" description="Add a trailing space after transcriptions" notImplemented>
+      <SettingsRow label="Append space" description="Add a trailing space after transcriptions">
         <Toggle
           enabled={settings.appendSpace}
           onchange={(v) => updateSetting('appendSpace', v)}
@@ -200,7 +229,7 @@
 
     <!-- Behavior -->
     <SettingsSection title="Behavior">
-      <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically" notImplemented>
+      <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically">
         <Toggle
           enabled={settings.autoCopy}
           onchange={(v) => updateSetting('autoCopy', v)}
@@ -208,7 +237,7 @@
         />
       </SettingsRow>
 
-      <SettingsRow label="Auto-paste" description="Paste transcription into active window" notImplemented>
+      <SettingsRow label="Auto-paste" description="Paste transcription into active window">
         <Toggle
           enabled={settings.autoPaste}
           onchange={(v) => updateSetting('autoPaste', v)}
@@ -237,7 +266,7 @@
 
     <!-- Server -->
     <SettingsSection title="Server">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full border border-red-900">
+      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
         <label for="server-url" class="text-sm text-zinc-200 block mb-1">
           Server URL
         </label>
