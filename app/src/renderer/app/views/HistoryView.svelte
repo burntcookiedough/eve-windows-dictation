@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { slide } from 'svelte/transition';
+  import { quintOut } from 'svelte/easing';
   import { toast } from '$lib/toast.svelte';
   import type { HistoryEntryWithGroup, HistoryFilters } from '$shared/types';
 
@@ -315,7 +317,7 @@
 
     <!-- Expandable Filters -->
     {#if showFilters}
-      <div class="mt-3 p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl">
+      <div class="mt-3 p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl" transition:slide={{ duration: 200, easing: quintOut }}>
         <div class="grid grid-cols-2 gap-4">
           <!-- Date Range -->
           <label class="block">
@@ -495,7 +497,7 @@
               {@const wordCount = countWords(item.text)}
               {@const wpm = calcWordsPerMinute(item.text, item.audioDuration)}
               {@const perfRatio = calcPerformanceRatio(item.audioDuration, item.transcriptionTime)}
-              <div class="px-4 pb-4 pt-0">
+              <div class="px-4 pb-4 pt-0" transition:slide={{ duration: 200, easing: quintOut }}>
                 <div class="pt-3 border-t border-zinc-800">
                   <!-- Metadata Grid -->
                   <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-xs mb-4">
