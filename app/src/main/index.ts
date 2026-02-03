@@ -137,7 +137,7 @@ app.whenReady().then(async () => {
   log.info('Overlay window created');
 
   // Open DevTools in development
-  if (process.env.NODE_ENV !== 'production') {
+  if (['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '')) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
   setupAudioHandler();

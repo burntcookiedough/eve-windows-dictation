@@ -9,7 +9,7 @@
     "dev": "concurrently -k \"bun run dev:vite\" \"bun run dev:main\" \"bun run dev:electron\"",
     "dev:vite": "vite",
     "dev:main": "bun run build:main --watch",
-    "dev:electron": "node scripts/wait-for-vite.js && electron .",
+    "dev:electron": "NODE_ENV=development node scripts/wait-for-vite.js && electron .",
     "build": "bun run build:main && bun run build:renderer",
     "build:main": "node scripts/build-main.js",
     "build:renderer": "vite build",

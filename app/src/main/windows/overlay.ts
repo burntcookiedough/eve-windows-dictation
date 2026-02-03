@@ -6,7 +6,7 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Overlay');
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
 
 export async function createOverlayWindow(): Promise<BrowserWindow> {
   // __dirname at runtime is dist/main/, preload is at dist/main/preload/

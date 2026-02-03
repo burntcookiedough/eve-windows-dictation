@@ -6,7 +6,7 @@ import { getMainWindowBounds, setMainWindowBounds } from '../services/settings.j
 import type { WindowBounds } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
 
 function getAppIcon(): Electron.NativeImage | undefined {
   const iconPath = join(app.getAppPath(), 'resources', 'icon.ico');
