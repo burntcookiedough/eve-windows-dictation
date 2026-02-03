@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     ] = "auto"
 
     # Transcription settings
-    partial_emission_interval: float = 0.2  # Minimum seconds between partial emissions
+    partial_emission_interval: float = 0.25  # Minimum seconds between partial emissions
     min_audio_for_transcription: float = (
         0.5  # Minimum seconds of audio before transcribing
     )

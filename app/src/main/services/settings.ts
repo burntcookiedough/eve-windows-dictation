@@ -54,7 +54,6 @@ export function getSettings(): Settings {
     selectedDeviceId: store.get('selectedDeviceId'),
     launchOnBoot: store.get('launchOnBoot'),
     startMinimized: store.get('startMinimized'),
-    partialEmissionInterval: store.get('partialEmissionInterval'),
   };
 }
 

@@ -83,8 +83,6 @@ export interface Settings {
   // Startup behavior
   launchOnBoot: boolean;
   startMinimized: boolean;
-  // Transcription
-  partialEmissionInterval: number; // Minimum seconds between partial transcription updates
 }
 
 // Window bounds for position/size persistence
@@ -118,6 +116,4 @@ export const DEFAULT_SETTINGS: Settings = {
   // Startup behavior
   launchOnBoot: false,
   startMinimized: false,
-  // Transcription
-  partialEmissionInterval: 0.2, // 200ms default
 };
