@@ -10,17 +10,15 @@ import { processFinalTranscription } from './services/pipeline.js';
 import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
+import { createLogger } from './lib/logger.js';
+
+const log = createLogger('App');
 
 let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
 let isRecording = false;
-
-function log(...args: unknown[]) {
-  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
-  console.log(`[${ts}]`, ...args);
-}
 
 async function startRecording() {
   if (isRecording || !overlayWindow) return;
@@ -66,7 +64,7 @@ async function startRecording() {
     const deviceId = getSetting('selectedDeviceId');
     overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
   } catch (error) {
-    console.error('Failed to connect to transcription server:', error);
+    log.error('Failed to connect to transcription server', { error: error as Error });
     stopRecording();
   }
 }
@@ -119,12 +117,12 @@ function setupMainWindowHandlers() {
 }
 
 app.whenReady().then(async () => {
-  log('Murmur starting...');
+  log.info('Murmur starting');
 
   // Initialize history service early
   historyService = new HistoryService();
   historyService.initialize();
-  log('History service initialized');
+  log.info('History service initialized');
 
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
   setupIpcHandlers(historyService);
@@ -132,11 +130,11 @@ app.whenReady().then(async () => {
   // Create main window (respects startMinimized setting)
   const startMinimized = getSetting('startMinimized');
   mainWindow = await createMainWindow({ startMinimized });
-  log('Main window created', startMinimized ? '(minimized)' : '');
+  log.info('Main window created', { startMinimized });
 
   // Create overlay window (pre-warmed, hidden)
   overlayWindow = await createOverlayWindow();
-  log('Overlay window created');
+  log.info('Overlay window created');
 
   // Open DevTools in development
   if (process.env.NODE_ENV !== 'production') {
@@ -151,15 +149,15 @@ app.whenReady().then(async () => {
       // Key down handler
       if (getSetting('holdToTalk')) {
         // Hold mode: start recording on key down
-        log('Recording started (hold mode)');
+        log.info('Recording started (hold mode)');
         startRecording();
       } else {
         // Toggle mode: toggle recording on key down
         if (isRecording) {
-          log('Recording stopped (toggle mode)');
+          log.info('Recording stopped (toggle mode)');
           stopRecording();
         } else {
-          log('Recording started (toggle mode)');
+          log.info('Recording started (toggle mode)');
           startRecording();
         }
       }
@@ -168,7 +166,7 @@ app.whenReady().then(async () => {
       // Key up handler
       if (getSetting('holdToTalk')) {
         // Hold mode: stop recording on key up
-        log('Recording stopped (hold mode)');
+        log.info('Recording stopped (hold mode)');
         stopRecording();
       }
       // Toggle mode: do nothing on key up
@@ -181,7 +179,7 @@ app.whenReady().then(async () => {
       showMainWindow(mainWindow);
     }
   });
-  log('Murmur ready!');
+  log.info('Murmur ready');
 
   // Handle app lifecycle
   app.on('window-all-closed', () => {

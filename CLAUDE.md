@@ -106,6 +106,40 @@ Microphone → AudioWorklet → IPC → TranscriptionService → WebSocket → S
 | Shared types | `app/src/shared/types.ts` |
 | Protocol spec | `docs/protocol.md` |
 | UI planning | `app/plan.md` (note: main UI section at top is outdated) |
+| Logger | `app/src/main/lib/logger.ts` |
+
+## Logging (Main Process)
+
+Use the structured logger for all main process logging. Never use `console.log/warn/error` directly.
+
+```typescript
+import { createLogger } from '../lib/logger.js';
+const log = createLogger('ModuleName');
+
+log.trace('Very noisy details', { data });     // MURMUR_TRACE=1 to enable
+log.debug('Development info', { data });       // MURMUR_DEBUG=1 to enable
+log.info('Notable event', { data });           // Always shown
+log.warn('Something unexpected', { data });    // Always shown
+log.error('Failure', { error });               // Always shown
+```
+
+**Guidelines:**
+- Create one logger per module with a descriptive context name
+- Use structured data objects, not string interpolation: `log.info('Connecting', { url })` not `log.info(\`Connecting to ${url}\`)`
+- Pass `Error` objects directly: `log.error('Failed', { error })` - stack traces are formatted automatically
+- Use appropriate levels:
+  - `trace`: Internal state, loop iterations, very frequent events
+  - `debug`: Useful for development, input/output of functions
+  - `info`: Lifecycle events, user actions, notable state changes
+  - `warn`: Recoverable issues, unexpected but handled conditions
+  - `error`: Failures that affect functionality
+
+**Output format** (slog-style):
+```
+[2024-01-15 14:32:07] INFO  [Clipboard] Writing text length=12 text="Hello world"
+[2024-01-15 14:32:09] ERROR [Hotkey] Registration failed error="Access denied"
+    at registerHotkey (hotkey.ts:45)
+```
 
 ## Build Configuration
 

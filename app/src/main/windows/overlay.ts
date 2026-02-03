@@ -2,14 +2,16 @@ import { BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OVERLAY_CONFIG } from '../../shared/constants.js';
+import { createLogger } from '../lib/logger.js';
 
+const log = createLogger('Overlay');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV !== 'production';
 
 export async function createOverlayWindow(): Promise<BrowserWindow> {
   // __dirname at runtime is dist/main/, preload is at dist/main/preload/
   const preloadPath = join(__dirname, 'preload/overlay.js');
-  console.log('Preload path:', preloadPath);
+  log.debug('Creating overlay window', { preloadPath });
 
   const overlay = new BrowserWindow({
     width: OVERLAY_CONFIG.WIDTH,

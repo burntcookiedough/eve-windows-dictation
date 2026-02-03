@@ -3,6 +3,9 @@ import { app } from 'electron';
 import type { Hotkey } from '../../shared/types.js';
 import { getSetting } from './settings.js';
 import { isModifierKey, formatHotkey } from './keycodes.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Hotkey');
 
 let keyDownCallback: (() => void) | null = null;
 let keyUpCallback: (() => void) | null = null;
@@ -49,7 +52,7 @@ export function setupHotkeyService(
       if (!isKeyDown) {
         isKeyDown = true;
         activeKeycode = e.keycode;
-        console.log(`[${timestamp()}] Hotkey keydown (keycode: ${e.keycode})`);
+        log.debug('Keydown', { keycode: e.keycode });
         keyDownCallback?.();
       }
     }
@@ -60,7 +63,7 @@ export function setupHotkeyService(
       if (isKeyDown) {
         isKeyDown = false;
         activeKeycode = null;
-        console.log(`[${timestamp()}] Hotkey keyup (keycode: ${e.keycode})`);
+        log.debug('Keyup', { keycode: e.keycode });
         keyUpCallback?.();
       }
     }
@@ -70,7 +73,7 @@ export function setupHotkeyService(
   uIOhook.start();
   isStarted = true;
   const hotkey = getCurrentHotkey();
-  console.log(`[${timestamp()}] Global keyboard hook started (listening for keycode: ${hotkey.keycode})`);
+  log.info('Global keyboard hook started', { keycode: hotkey.keycode });
 
   // Clean up on app quit
   app.on('will-quit', () => {
@@ -78,15 +81,11 @@ export function setupHotkeyService(
   });
 }
 
-function timestamp(): string {
-  return new Date().toLocaleTimeString('en-US', { hour12: false });
-}
-
 export function unregisterHotkey(): void {
   if (isStarted) {
     uIOhook.stop();
     isStarted = false;
-    console.log(`[${timestamp()}] Global keyboard hook stopped`);
+    log.info('Global keyboard hook stopped');
   }
 }
 

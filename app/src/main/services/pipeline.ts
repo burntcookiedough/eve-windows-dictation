@@ -3,6 +3,9 @@ import type { TranscriptionEntry, Settings, HistoryEntryWithGroup } from '../../
 import type { TextFrameFinal } from '../../shared/protocol.js';
 import { copyToClipboard, simulatePaste } from './clipboard.js';
 import type { HistoryService } from './history.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Pipeline');
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -39,6 +42,8 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   const rawText = entry.text;
   let text = rawText;
 
+  log.debug('Post-processing', { appendPeriod: settings.appendPeriod, appendSpace: settings.appendSpace, input: rawText });
+
   // Append period if enabled and text doesn't already end with punctuation
   if (settings.appendPeriod && text.length > 0) {
     const lastChar = text.charAt(text.length - 1);
@@ -51,6 +56,8 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   if (settings.appendSpace && text.length > 0) {
     text += ' ';
   }
+
+  log.debug('Post-processing complete', { output: text });
 
   return {
     ...entry,
@@ -82,7 +89,7 @@ export async function dispatchToOutputs(
     try {
       await simulatePaste();
     } catch (err) {
-      console.error('Auto-paste failed:', err);
+      log.error('Auto-paste failed', { error: err as Error });
     }
   }
 
@@ -91,7 +98,7 @@ export async function dispatchToOutputs(
     try {
       historyService.save(entry);
     } catch (err) {
-      console.error('Failed to save to history:', err);
+      log.error('Failed to save to history', { error: err as Error });
     }
   }
 

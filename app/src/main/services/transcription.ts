@@ -9,6 +9,9 @@ import {
   type TextFrameFinal,
 } from '../../shared/protocol.js';
 import type { TranscriptionPayload, ConnectionStatePayload, RecordingStatePayload } from '../../shared/types.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger('Transcription');
 
 export class TranscriptionService {
   private ws: WebSocket | null = null;
@@ -51,7 +54,7 @@ export class TranscriptionService {
       });
 
       this.ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        log.error('WebSocket error', { error });
         this.sendConnectionState('error', error.message);
         reject(error);
       });
@@ -109,7 +112,7 @@ export class TranscriptionService {
   private handleMessage(data: string): void {
     const frame = parseServerFrame(data);
     if (!frame) {
-      console.warn('Failed to parse server frame:', data);
+      log.warn('Failed to parse server frame', { data });
       return;
     }
 
@@ -121,14 +124,14 @@ export class TranscriptionService {
           break;
 
         case 'error':
-          console.error('Server error:', frame.code, frame.message);
+          log.error('Server error', { code: frame.code, message: frame.message });
           this.sendConnectionState('error', frame.message);
           this.sendRecordingState('error');
           break;
 
         case 'closing':
           // Server is ending the session - stop accepting audio
-          console.log('Server closing session:', frame.reason);
+          log.info('Server closing session', { reason: frame.reason });
           this.isReady = false;
           this.serverClosing = true; // Don't send stop frame back
           // Trigger close callback to clean up
