@@ -6,6 +6,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "postinstall": "electron-rebuild",
     "dev": "concurrently -k \"bun run dev:vite\" \"bun run dev:main\" \"bun run dev:electron\"",
     "dev:vite": "vite",
     "dev:main": "bun run build:main --watch",
@@ -19,6 +20,7 @@
     "clear-data": "node scripts/clear-data.js"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tailwindcss/vite": "^4.1.18",
     "@types/better-sqlite3": "^7.6.13",
