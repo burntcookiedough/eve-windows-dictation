@@ -63,3 +63,40 @@ Use the transcription pipeline to detect and execute voice commands instead of (
 - Settings toggles ("enable/disable filler word removal")
 - Transcription control ("read that back", "start over")
 - Clipboard operations ("copy last 3 transcriptions")
+
+---
+
+## Custom Word List for Improved Recognition
+
+**Status:** Idea
+
+**Problem:**
+Speech recognition models sometimes consistently misrecognize certain words, especially domain-specific terms, technical jargon, names, or uncommon words. Users may notice the same word getting transcribed incorrectly over and over, with no way to correct the model's behavior.
+
+**Concept:**
+Allow users to maintain a custom word list that hints the transcription model toward specific spellings or terms. This isn't meant for high-frequency words used in every sentence, but rather for occasional terms that the model struggles with - words you notice repeatedly getting wrong.
+
+**Example Use Cases:**
+- Technical terms: "Kubernetes" always transcribed as "Cooper Netties"
+- Product names: "Svelte" transcribed as "svelt" or "felt"
+- Personal names: "Raikr" transcribed as "Raker" or "Ryker"
+- Acronyms: "IPC" transcribed as "I PC" or "IP see"
+- Domain jargon: Industry-specific terminology
+
+**Implementation Considerations:**
+- **UI:** Simple list management in settings - add, edit, remove words
+- **Whisper support:** Investigate `initial_prompt` parameter in faster-whisper which can bias the model toward certain vocabulary
+- **Format:** Should entries be just words, or word + common misrecognitions?
+- **Sync:** Store in settings so it persists and potentially syncs
+- **Scope:** Global list vs per-context lists (e.g., "coding mode" vs "medical mode")
+
+**Technical Research Needed:**
+- How effective is Whisper's `initial_prompt` for vocabulary biasing?
+- Are there other approaches (fine-tuning, post-processing corrections)?
+- What's the limit on how many words can be biased effectively?
+- Should misrecognized → correct mappings be used as post-processing replacements?
+
+**Potential Enhancements:**
+- Auto-suggest words to add based on frequent manual corrections in history
+- Import/export word lists for sharing
+- Categorized word lists (enable/disable groups based on context)
