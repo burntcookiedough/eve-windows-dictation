@@ -24,6 +24,14 @@ class StartFrame(ControlFrameBase):
     silence_timeout: Annotated[
         float, Field(gt=0, description="Seconds of silence before auto-stop")
     ]
+    partial_emission_interval: Annotated[
+        float | None,
+        Field(
+            default=None,
+            gt=0,
+            description="Minimum seconds between partial emissions (uses server default if not provided)",
+        ),
+    ] = None
 
 
 class StopFrame(ControlFrameBase):

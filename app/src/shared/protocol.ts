@@ -5,6 +5,7 @@ export interface ControlFrameStart {
   frame: 'control';
   type: 'start';
   silence_timeout: number;
+  partial_emission_interval?: number;
 }
 
 export interface ControlFrameStop {

@@ -23,6 +23,7 @@ class SessionContext:
 
     # Configuration from start frame
     silence_timeout: float = 5.0
+    partial_emission_interval: float | None = None  # None = use server default
 
     # Timestamps
     created_at: float = field(default_factory=time.monotonic)

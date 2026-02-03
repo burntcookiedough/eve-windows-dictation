@@ -14,6 +14,7 @@ export class TranscriptionService {
   private ws: WebSocket | null = null;
   private serverUrl: string;
   private silenceTimeout: number;
+  private partialEmissionInterval: number;
   private overlayWindow: BrowserWindow;
   private sequenceNumber = 0;
   private isReady = false;
@@ -21,9 +22,15 @@ export class TranscriptionService {
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
 
-  constructor(serverUrl: string, silenceTimeout: number, overlayWindow: BrowserWindow) {
+  constructor(
+    serverUrl: string,
+    silenceTimeout: number,
+    partialEmissionInterval: number,
+    overlayWindow: BrowserWindow
+  ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
+    this.partialEmissionInterval = partialEmissionInterval;
     this.overlayWindow = overlayWindow;
   }
 
@@ -61,6 +68,7 @@ export class TranscriptionService {
       frame: 'control',
       type: 'start',
       silence_timeout: this.silenceTimeout,
+      partial_emission_interval: this.partialEmissionInterval,
     };
     this.ws?.send(JSON.stringify(frame));
   }

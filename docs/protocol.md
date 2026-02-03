@@ -82,7 +82,8 @@ Initiates a transcription session.
 {
   "frame": "control",
   "type": "start",
-  "silence_timeout": 5
+  "silence_timeout": 5,
+  "partial_emission_interval": 0.2
 }
 ```
 
@@ -91,6 +92,7 @@ Initiates a transcription session.
 | `frame` | string | yes | `"control"` |
 | `type` | string | yes | `"start"` |
 | `silence_timeout` | number | yes | Seconds of silence before auto-stop |
+| `partial_emission_interval` | number | no | Minimum seconds between partial emissions (default: 0.2) |
 
 **Server behavior:**
 - Valid: respond with `ready`, begin accepting audio frames

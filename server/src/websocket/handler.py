@@ -54,11 +54,16 @@ async def websocket_handler(websocket: WebSocket) -> None:
         # Create transcription processor
         processor = TranscriptionProcessor(context)
 
+        # Determine partial emission interval (client override or server default)
+        partial_interval = (
+            context.partial_emission_interval
+            if context.partial_emission_interval is not None
+            else settings.partial_emission_interval
+        )
+
         # Start background tasks
         partial_task = asyncio.create_task(
-            _partial_emission_loop(
-                sender, context, processor, settings.partial_emission_interval
-            )
+            _partial_emission_loop(sender, context, processor, partial_interval)
         )
         silence_task = asyncio.create_task(
             _silence_monitor_loop(sender, context, processor)
@@ -153,15 +158,19 @@ async def _wait_for_start(
 
     # Update context with start frame config
     context.silence_timeout = start_frame.silence_timeout
+    context.partial_emission_interval = start_frame.partial_emission_interval
     context.mark_started()
     context.state_machine.transition_to(SessionState.STARTED)
 
     # Send ready
     await sender.send_ready()
     logger.info(
-        "[%s] Session started (silence_timeout=%.1fs)",
+        "[%s] Session started (silence_timeout=%.1fs, partial_interval=%s)",
         context.session_id,
         context.silence_timeout,
+        f"{context.partial_emission_interval:.2f}s"
+        if context.partial_emission_interval
+        else "default",
     )
 
     return True
@@ -280,13 +289,19 @@ async def _partial_emission_loop(
     sender: FrameSender,
     context: SessionContext,
     processor: TranscriptionProcessor,
-    interval: float,
+    min_interval: float,
 ) -> None:
-    """Background task for emitting partial transcription results."""
+    """Background task for emitting partial transcription results.
+
+    Uses adaptive timing: sleeps only for the remaining time after transcription
+    completes, ensuring cycle time = max(min_interval, transcription_time).
+    """
     while context.state_machine.is_active():
-        await asyncio.sleep(interval)
+        cycle_start = time.monotonic()
 
         if not context.state_machine.is_accepting_audio():
+            # Not ready for audio yet, use fixed sleep
+            await asyncio.sleep(min_interval)
             continue
 
         try:
@@ -309,10 +324,26 @@ async def _partial_emission_loop(
                         result.audio_duration,
                     )
                     context.has_speech = True
+
+                # Log cycle timing at debug level
+                cycle_time = time.monotonic() - cycle_start
+                logger.debug(
+                    "[%s] Partial emission: transcribe=%.0fms, cycle=%.0fms, audio=%.1fs",
+                    context.session_id,
+                    result.transcription_time * 1000,
+                    cycle_time * 1000,
+                    result.audio_duration,
+                )
         except Exception as e:
             logger.exception(
                 "[%s] Error in partial emission: %s", context.session_id, e
             )
+
+        # Adaptive sleep: only wait for remaining time to hit min_interval
+        elapsed = time.monotonic() - cycle_start
+        remaining = min_interval - elapsed
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
 
 async def _silence_monitor_loop(

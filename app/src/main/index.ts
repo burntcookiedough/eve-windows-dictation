@@ -38,6 +38,7 @@ async function startRecording() {
   transcriptionService = new TranscriptionService(
     getSetting('serverUrl'),
     silenceTimeout,
+    getSetting('partialEmissionInterval'),
     overlayWindow
   );
 

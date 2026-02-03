@@ -25,6 +25,7 @@
     selectedDeviceId: 'default',
     launchOnBoot: false,
     startMinimized: false,
+    partialEmissionInterval: 0.2,
   });
 
   // Default hotkey (F17)
@@ -254,6 +255,19 @@
 
     <!-- Server -->
     <SettingsSection title="Server">
+      <SettingsRow label="Update speed" description="How often live transcription updates appear">
+        <select
+          value={settings.partialEmissionInterval}
+          onchange={(e) => updateSetting('partialEmissionInterval', parseFloat(e.currentTarget.value))}
+          class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+        >
+          <option value={0.1}>100ms (Fastest)</option>
+          <option value={0.2}>200ms (Recommended)</option>
+          <option value={0.3}>300ms</option>
+          <option value={0.5}>500ms (Slower)</option>
+        </select>
+      </SettingsRow>
+
       <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
         <label for="server-url" class="text-sm text-zinc-200 block mb-1">
           Server URL
