@@ -207,6 +207,50 @@ sequenceDiagram
 
 See the full [Protocol Specification](docs/protocol.md) for details.
 
+## Configuration
+
+### Server Environment Variables
+
+All server settings can be configured via environment variables prefixed with `MURMUR_`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MURMUR_HOST` | `0.0.0.0` | Server bind address |
+| `MURMUR_PORT` | `51717` | Server port |
+| `MURMUR_MAX_SESSIONS` | `10` | Maximum concurrent sessions |
+| `MURMUR_START_TIMEOUT` | `10.0` | Seconds to wait for start frame |
+| `MURMUR_WHISPER_MODEL` | `large-v3-turbo` | Whisper model to use |
+| `MURMUR_WHISPER_DEVICE` | `auto` | Device: `auto`, `cpu`, or `cuda` |
+| `MURMUR_WHISPER_COMPUTE_TYPE` | `auto` | Compute type: `auto`, `int8`, `float16`, etc. |
+| `MURMUR_PARTIAL_EMISSION_INTERVAL` | `0.2` | Minimum seconds between partial transcription updates |
+| `MURMUR_MIN_AUDIO_FOR_TRANSCRIPTION` | `0.5` | Minimum audio (seconds) before transcribing |
+| `MURMUR_LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `MURMUR_LOG_BINARY` | `false` | Enable verbose binary frame logging (very spammy) |
+
+<details>
+<summary><strong>Example: Running with debug logging</strong></summary>
+
+```powershell
+# PowerShell
+$env:MURMUR_LOG_LEVEL="DEBUG"; uv run murmur
+
+# Also enable binary frame logging (very verbose)
+$env:MURMUR_LOG_LEVEL="DEBUG"; $env:MURMUR_LOG_BINARY="true"; uv run murmur
+```
+
+</details>
+
+### App Settings
+
+App settings are configured through the Settings UI (accessible from the system tray). Settings include:
+
+- **Hotkey** — Keyboard shortcut to trigger recording
+- **Activation Mode** — Hold-to-talk or toggle
+- **Input Device** — Microphone selection
+- **Auto-copy/Auto-paste** — Clipboard behavior
+- **Update Speed** — How often partial transcriptions update (100-500ms)
+- **Server URL** — WebSocket endpoint for the transcription server
+
 ## Contributing
 
 Contributions are welcome. Please open an issue first to discuss what you'd like to change.

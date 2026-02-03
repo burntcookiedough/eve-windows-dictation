@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_binary: bool = False  # Log verbose binary frame details (very spammy)
 
 
 @lru_cache

@@ -181,3 +181,6 @@ Or keep both names with deprecation if needed for compatibility.
   - 200ms (Recommended) - default
   - 300ms
   - 500ms (Slower)
+
+**Documentation**:
+- `README.md` - Added Configuration section with all server environment variables
