@@ -519,7 +519,7 @@
                     </div>
                     <div>
                       <span class="text-zinc-500">Processing</span>
-                      <span class="text-zinc-300 ml-2">{item.transcriptionTime.toFixed(3)}ms</span>
+                      <span class="text-zinc-300 ml-2">{Math.round(item.transcriptionTime)}ms</span>
                     </div>
                     <div>
                       <span class="text-zinc-500">Performance</span>
