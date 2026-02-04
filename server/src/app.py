@@ -1,6 +1,8 @@
 """FastAPI application factory."""
 
+import asyncio
 import logging
+import signal
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -69,5 +71,22 @@ def create_app() -> FastAPI:
     async def transcribe(websocket: WebSocket) -> None:
         """WebSocket endpoint for live transcription."""
         await websocket_handler(websocket)
+
+    @app.post("/shutdown")
+    async def shutdown() -> dict:
+        """Trigger graceful server shutdown.
+
+        Used by the Electron app to stop the server when managed.
+        The endpoint returns immediately, and shutdown occurs after a brief delay.
+        """
+        logger.info("Shutdown requested via API")
+
+        def trigger_shutdown() -> None:
+            # Use SIGINT for cleaner uvicorn shutdown
+            signal.raise_signal(signal.SIGINT)
+
+        # Schedule shutdown after response is sent
+        asyncio.get_event_loop().call_later(0.5, trigger_shutdown)
+        return {"status": "shutting_down"}
 
     return app

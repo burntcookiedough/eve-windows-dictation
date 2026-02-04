@@ -40,7 +40,7 @@ export async function createOverlayWindow(): Promise<BrowserWindow> {
   if (isDev) {
     await overlay.loadURL('http://localhost:5173/overlay/index.html');
   } else {
-    await overlay.loadFile(join(__dirname, '../../renderer/overlay/index.html'));
+    await overlay.loadFile(join(__dirname, '../renderer/overlay/index.html'));
   }
 
   return overlay;

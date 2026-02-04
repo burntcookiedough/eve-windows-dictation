@@ -25,6 +25,7 @@
     selectedDeviceId: 'default',
     launchOnBoot: false,
     startMinimized: false,
+    serverAutoStart: true,
   });
 
   // Default hotkey (F17)

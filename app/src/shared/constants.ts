@@ -33,6 +33,17 @@ export const IPC_CHANNELS = {
   HISTORY_GET_ENTRIES: 'history:get-entries',
   HISTORY_DELETE: 'history:delete',
   HISTORY_NEW_ENTRY: 'history:new-entry',
+
+  // Server management - Request/Response
+  SERVER_GET_STATUS: 'server:get-status',
+  SERVER_START: 'server:start',
+  SERVER_STOP: 'server:stop',
+  SERVER_RESTART: 'server:restart',
+  SERVER_GET_LOGS: 'server:get-logs',
+
+  // Server management - Push (main → renderer)
+  SERVER_STATE_CHANGE: 'server:state-change',
+  SERVER_LOG: 'server:log',
 } as const;
 
 // Overlay window constants

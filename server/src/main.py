@@ -1,10 +1,12 @@
 """Entry point for running the murmur with uvicorn."""
 
 import logging
+import os
 
 import uvicorn
 
 from config import get_settings
+from pidfile import register_cleanup, remove_pid_file, write_pid_file
 
 
 def configure_logging(log_level: str) -> None:
@@ -32,17 +34,25 @@ def main() -> None:
     # Configure logging before uvicorn starts
     configure_logging(settings.log_level)
 
+    # Write PID file and register cleanup
+    write_pid_file(os.getpid(), settings.port)
+    register_cleanup()
+
     # Uvicorn log level: use app level only if log_binary is enabled,
     # otherwise keep uvicorn at INFO to suppress WebSocket frame spam
     uvicorn_log_level = settings.log_level.lower() if settings.log_binary else "info"
 
-    uvicorn.run(
-        "app:create_app",
-        factory=True,
-        host=settings.host,
-        port=settings.port,
-        log_level=uvicorn_log_level,
-    )
+    try:
+        uvicorn.run(
+            "app:create_app",
+            factory=True,
+            host=settings.host,
+            port=settings.port,
+            log_level=uvicorn_log_level,
+        )
+    finally:
+        # Ensure PID file is removed even if uvicorn exits abnormally
+        remove_pid_file()
 
 
 if __name__ == "__main__":

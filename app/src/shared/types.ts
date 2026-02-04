@@ -3,6 +3,31 @@ export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+// Server management states
+export type ServerStatus = 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
+
+export interface ServerPidFile {
+  pid: number;
+  port: number;
+  startedAt: number;
+}
+
+export interface ServerStatePayload {
+  status: ServerStatus;
+  pid?: number;
+  port?: number;
+  uptime?: number;
+  error?: string;
+  wsUrl?: string;
+  managed: boolean; // false in dev mode (externally running server)
+}
+
+export interface ServerLogEntry {
+  timestamp: number;
+  level: 'stdout' | 'stderr';
+  message: string;
+}
+
 // IPC State payloads
 export interface RecordingStatePayload {
   state: RecordingState;
@@ -83,6 +108,8 @@ export interface Settings {
   // Startup behavior
   launchOnBoot: boolean;
   startMinimized: boolean;
+  // Server management
+  serverAutoStart: boolean; // Auto-start server in production mode
 }
 
 // Window bounds for position/size persistence
@@ -116,4 +143,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // Startup behavior
   launchOnBoot: false,
   startMinimized: false,
+  // Server management
+  serverAutoStart: true,
 };

@@ -52,6 +52,21 @@
       "dist/**/*",
       "resources/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../server",
+        "to": "server",
+        "filter": [
+          "src/**/*",
+          ".venv/**/*",
+          "!.venv/**/pip*",
+          "!.venv/**/wheel*",
+          "!.venv/**/setuptools*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "resources/icon.ico"

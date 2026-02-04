@@ -103,7 +103,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
   if (isDev) {
     await mainWindow.loadURL('http://localhost:5173/app/index.html');
   } else {
-    await mainWindow.loadFile(join(__dirname, '../../renderer/app/index.html'));
+    await mainWindow.loadFile(join(__dirname, '../renderer/app/index.html'));
   }
 
   return mainWindow;

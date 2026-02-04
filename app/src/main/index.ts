@@ -6,6 +6,7 @@ import { setupTray } from './services/tray.js';
 import { setupIpcHandlers } from './ipc/handlers.js';
 import { TranscriptionService } from './services/transcription.js';
 import { HistoryService } from './services/history.js';
+import { ServerManager } from './services/server-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
 import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
@@ -18,6 +19,7 @@ let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
+let serverManager: ServerManager | null = null;
 let isRecording = false;
 
 async function startRecording() {
@@ -33,8 +35,12 @@ async function startRecording() {
   const isHoldMode = getSetting('holdToTalk');
   const silenceTimeout = isHoldMode ? 300 : getSetting('silenceTimeout'); // 5 min fallback for hold mode
 
+  // Use server manager's discovered URL if available, otherwise fall back to settings
+  const serverState = serverManager?.getState();
+  const serverUrl = serverState?.wsUrl ?? getSetting('serverUrl');
+
   transcriptionService = new TranscriptionService(
-    getSetting('serverUrl'),
+    serverUrl,
     silenceTimeout,
     overlayWindow
   );
@@ -149,13 +155,20 @@ app.whenReady().then(async () => {
   historyService.initialize();
   log.info('History service initialized');
 
+  // Initialize server manager
+  serverManager = new ServerManager();
+  log.info('Server manager initialized');
+
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
-  setupIpcHandlers(historyService);
+  setupIpcHandlers(historyService, serverManager);
 
   // Create main window (respects startMinimized setting)
   const startMinimized = getSetting('startMinimized');
   mainWindow = await createMainWindow({ startMinimized });
   log.info('Main window created', { startMinimized });
+
+  // Give server manager reference to main window for state broadcasts
+  serverManager.setMainWindow(mainWindow);
 
   // Create overlay window (pre-warmed, hidden)
   overlayWindow = await createOverlayWindow();
@@ -205,6 +218,26 @@ app.whenReady().then(async () => {
       showMainWindow(mainWindow);
     }
   });
+
+  // Handle server lifecycle based on environment
+  // Use app.isPackaged (true when running from asar/built app, false in dev)
+  const isDev = !app.isPackaged;
+
+  if (isDev) {
+    // Development mode: just detect existing server, don't spawn
+    log.info('Development mode: detecting existing server');
+    await serverManager.detectExisting();
+  } else {
+    // Production mode: auto-start if enabled
+    if (getSetting('serverAutoStart')) {
+      log.info('Production mode: auto-starting server');
+      await serverManager.start();
+    } else {
+      log.info('Production mode: server auto-start disabled, detecting existing');
+      await serverManager.detectExisting();
+    }
+  }
+
   log.info('Murmur ready');
 
   // Handle app lifecycle
@@ -221,10 +254,17 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('will-quit', () => {
+app.on('will-quit', async (event) => {
+  // Prevent immediate quit to allow async cleanup
+  event.preventDefault();
+
   // Cleanup
   transcriptionService?.stop();
   historyService?.close();
+  await serverManager?.cleanup();
+
+  // Now actually quit
+  app.exit(0);
 });
 
 // Prevent multiple instances

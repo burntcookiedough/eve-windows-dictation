@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
+import type { ServerManager } from '../services/server-manager.js';
 import { getSettings, updateSetting } from '../services/settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
@@ -17,11 +18,15 @@ function applyLaunchOnBoot(enabled: boolean): void {
 }
 
 let historyServiceRef: HistoryService | null = null;
+let serverManagerRef: ServerManager | null = null;
 
-export function setupIpcHandlers(historyService?: HistoryService): void {
-  // Store reference to history service
+export function setupIpcHandlers(historyService?: HistoryService, serverManager?: ServerManager): void {
+  // Store references to services
   if (historyService) {
     historyServiceRef = historyService;
+  }
+  if (serverManager) {
+    serverManagerRef = serverManager;
   }
 
   // Sync launch-on-boot setting with OS on startup
@@ -82,5 +87,44 @@ export function setupIpcHandlers(historyService?: HistoryService): void {
   // Get display name for a hotkey (for initial render)
   ipcMain.handle(IPC_CHANNELS.HOTKEY_GET_DISPLAY_NAME, (_event, hotkey: Hotkey) => {
     return formatHotkey(hotkey);
+  });
+
+  // Server management handlers
+  ipcMain.handle(IPC_CHANNELS.SERVER_GET_STATUS, () => {
+    if (!serverManagerRef) {
+      return { status: 'idle', managed: false };
+    }
+    return serverManagerRef.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SERVER_START, async () => {
+    if (!serverManagerRef) {
+      throw new Error('Server manager not initialized');
+    }
+    await serverManagerRef.start();
+    return serverManagerRef.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SERVER_STOP, async () => {
+    if (!serverManagerRef) {
+      throw new Error('Server manager not initialized');
+    }
+    await serverManagerRef.stop();
+    return serverManagerRef.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SERVER_RESTART, async () => {
+    if (!serverManagerRef) {
+      throw new Error('Server manager not initialized');
+    }
+    await serverManagerRef.restart();
+    return serverManagerRef.getState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SERVER_GET_LOGS, () => {
+    if (!serverManagerRef) {
+      return [];
+    }
+    return serverManagerRef.getLogs();
   });
 }

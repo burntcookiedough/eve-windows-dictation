@@ -4,8 +4,9 @@
   import HistoryView from './views/HistoryView.svelte';
   import SettingsView from './views/SettingsView.svelte';
   import TestView from './views/TestView.svelte';
+  import ServerView from './views/ServerView.svelte';
 
-  type View = 'history' | 'settings' | 'test';
+  type View = 'history' | 'settings' | 'test' | 'server';
 
   let activeView = $state<View>('history');
 
@@ -13,6 +14,7 @@
     { id: 'history', label: 'History' },
     { id: 'settings', label: 'Settings' },
     { id: 'test', label: 'Test' },
+    { id: 'server', label: 'Server' },
   ];
 
   // Tab button refs for measuring pill position
@@ -20,6 +22,7 @@
     history: null,
     settings: null,
     test: null,
+    server: null,
   });
   let navContainer: HTMLDivElement | null = $state(null);
 
@@ -97,6 +100,8 @@
       <SettingsView />
     {:else if activeView === 'test'}
       <TestView />
+    {:else if activeView === 'server'}
+      <ServerView />
     {/if}
   </main>
 </div>

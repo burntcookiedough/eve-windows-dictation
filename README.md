@@ -251,6 +251,10 @@ App settings are configured through the Settings UI (accessible from the system 
 - **Update Speed** — How often partial transcriptions update (100-500ms)
 - **Server URL** — WebSocket endpoint for the transcription server
 
+## Building
+
+See [BUILDING.md](BUILDING.md) for the full development setup, production packaging, and troubleshooting guide.
+
 ## Contributing
 
 Contributions are welcome. Please open an issue first to discuss what you'd like to change.

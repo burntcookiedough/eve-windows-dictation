@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { HistoryFilters, HistoryResponse, HistoryEntryWithGroup, Settings, Hotkey } from '../../shared/types.js';
+import type {
+  HistoryFilters,
+  HistoryResponse,
+  HistoryEntryWithGroup,
+  Settings,
+  Hotkey,
+  ServerStatePayload,
+  ServerLogEntry,
+} from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
 const murmurMainAPI = {
@@ -63,9 +71,49 @@ const murmurMainAPI = {
     ipcRenderer.send(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
   },
 
+  // Server management
+  getServerStatus: (): Promise<ServerStatePayload> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SERVER_GET_STATUS);
+  },
+
+  startServer: (): Promise<ServerStatePayload> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SERVER_START);
+  },
+
+  stopServer: (): Promise<ServerStatePayload> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SERVER_STOP);
+  },
+
+  restartServer: (): Promise<ServerStatePayload> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SERVER_RESTART);
+  },
+
+  getServerLogs: (): Promise<ServerLogEntry[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.SERVER_GET_LOGS);
+  },
+
+  onServerStateChange: (callback: (state: ServerStatePayload) => void): void => {
+    ipcRenderer.on(IPC_CHANNELS.SERVER_STATE_CHANGE, (_event, state) => {
+      callback(state);
+    });
+  },
+
+  onServerLog: (callback: (entry: ServerLogEntry) => void): void => {
+    ipcRenderer.on(IPC_CHANNELS.SERVER_LOG, (_event, entry) => {
+      callback(entry);
+    });
+  },
+
+  removeServerListeners: (): void => {
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);
+  },
+
   // Cleanup
   removeAllListeners: () => {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);
   },
 };
 
