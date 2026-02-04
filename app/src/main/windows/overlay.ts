@@ -56,6 +56,13 @@ export function positionOverlayOnActiveDisplay(overlay: BrowserWindow): void {
   const x = workArea.x + Math.round((workArea.width - OVERLAY_CONFIG.WIDTH) / 2);
   const y = workArea.y + workArea.height - OVERLAY_CONFIG.HEIGHT - OVERLAY_CONFIG.BOTTOM_MARGIN;
 
+  log.debug('Positioning overlay', {
+    cursor: cursorPoint,
+    displayId: display.id,
+    workArea,
+    position: { x, y }
+  });
+
   overlay.setPosition(x, y);
 }
 

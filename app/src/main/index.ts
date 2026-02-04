@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { createOverlayWindow, showOverlay, hideOverlay, positionOverlayOnActiveDisplay } from './windows/overlay.js';
 import { createMainWindow, showMainWindow } from './windows/main.js';
 import { setupHotkeyService } from './services/hotkey.js';
@@ -115,6 +115,32 @@ function setupMainWindowHandlers() {
   });
 }
 
+// Handle display configuration changes (monitors added/removed/changed)
+function setupDisplayChangeHandlers() {
+  screen.on('display-removed', (_event, oldDisplay) => {
+    log.info('Display removed', { displayId: oldDisplay.id, bounds: oldDisplay.bounds });
+    if (isRecording && overlayWindow) {
+      // Reposition overlay to ensure it's on a valid display
+      positionOverlayOnActiveDisplay(overlayWindow);
+      log.debug('Repositioned overlay after display removal');
+    }
+  });
+
+  screen.on('display-added', (_event, newDisplay) => {
+    log.info('Display added', { displayId: newDisplay.id, bounds: newDisplay.bounds });
+    // No action needed - overlay will position correctly on next show
+  });
+
+  screen.on('display-metrics-changed', (_event, display, changedMetrics) => {
+    log.info('Display metrics changed', { displayId: display.id, changedMetrics });
+    if (isRecording && overlayWindow) {
+      // Reposition overlay in case work area changed
+      positionOverlayOnActiveDisplay(overlayWindow);
+      log.debug('Repositioned overlay after display metrics change');
+    }
+  });
+}
+
 app.whenReady().then(async () => {
   log.info('Murmur starting');
 
@@ -141,6 +167,7 @@ app.whenReady().then(async () => {
   }
   setupAudioHandler();
   setupMainWindowHandlers();
+  setupDisplayChangeHandlers();
 
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService(

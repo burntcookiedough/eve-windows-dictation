@@ -30,7 +30,7 @@ export function buildEntry(frame: TextFrameFinal): TranscriptionEntry {
     text: frame.text,
     confidence: frame.confidence,
     audioDuration: frame.audio_duration,
-    transcriptionTime: frame.transcription_time,
+    transcriptionTime: frame.transcription_time * 1000, // Server sends seconds, we store ms
   };
 }
 
