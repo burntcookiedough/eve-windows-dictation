@@ -56,6 +56,7 @@
   ]);
   let isLoadingDevices = $state(true);
   let settingsLoaded = $state(false);
+  const isDevBuild = import.meta.env.DEV;
 
   onMount(async () => {
     // Load settings from main process
@@ -253,27 +254,29 @@
       </SettingsRow>
     </SettingsSection>
 
-    <!-- Server -->
-    <SettingsSection title="Server">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
-        <label for="server-url" class="text-sm text-zinc-200 block mb-1">
-          Server URL
-        </label>
-        <p class="text-xs text-zinc-500 mb-3">
-          URL of the Whisper transcription server
-        </p>
-        <input
-          id="server-url"
-          type="text"
-          value={settings.serverUrl}
-          oninput={(e) => updateSetting('serverUrl', e.currentTarget.value)}
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
-            px-3 py-2.5 text-sm text-zinc-300 font-mono
-            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-          placeholder="ws://localhost:51717/transcribe"
-        />
-      </div>
-    </SettingsSection>
+    {#if isDevBuild}
+      <!-- Server -->
+      <SettingsSection title="Server">
+        <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
+          <label for="server-url" class="text-sm text-zinc-200 block mb-1">
+            Server URL
+          </label>
+          <p class="text-xs text-zinc-500 mb-3">
+            URL of the Whisper transcription server
+          </p>
+          <input
+            id="server-url"
+            type="text"
+            value={settings.serverUrl}
+            oninput={(e) => updateSetting('serverUrl', e.currentTarget.value)}
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
+              px-3 py-2.5 text-sm text-zinc-300 font-mono
+              focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+            placeholder="ws://localhost:51717/transcribe"
+          />
+        </div>
+      </SettingsSection>
+    {/if}
 
     </div>
     {/if}

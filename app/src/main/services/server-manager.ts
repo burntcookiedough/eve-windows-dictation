@@ -323,6 +323,8 @@ export class ServerManager {
     this.logs = []; // Clear logs for new session
 
     try {
+      const spawnStartedAt = Date.now();
+
       this.childProcess = spawn(serverCmd.command, serverCmd.args, {
         cwd: serverCmd.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -331,6 +333,7 @@ export class ServerManager {
         env: {
           ...process.env,
           MURMUR_PID_FILE: this.getPidFilePath(),
+          MURMUR_PORT: '0',
         },
       });
 
@@ -359,8 +362,13 @@ export class ServerManager {
         this.startedAt = null;
 
         if (this.status !== 'stopping') {
-          // Unexpected exit
-          this.updateStatus('error', `Server exited unexpectedly (code: ${code})`);
+          // Preserve explicit startup/runtime errors already set by start()/stop() logic.
+          if (this.status !== 'error') {
+            this.updateStatus(
+              'error',
+              `Server exited unexpectedly (code: ${String(code)}, signal: ${String(signal)})`
+            );
+          }
         } else {
           this.updateStatus('stopped');
         }
@@ -373,7 +381,7 @@ export class ServerManager {
       });
 
       // Wait for PID file to appear (indicates server is ready)
-      const pidData = await this.waitForPidFile(START_TIMEOUT_MS);
+      const pidData = await this.waitForPidFile(START_TIMEOUT_MS, spawnStartedAt);
       if (!pidData) {
         throw new Error('Server did not write PID file within timeout');
       }
@@ -405,11 +413,17 @@ export class ServerManager {
   /**
    * Wait for the PID file to appear.
    */
-  private async waitForPidFile(timeoutMs: number): Promise<ServerPidFile | null> {
+  private async waitForPidFile(
+    timeoutMs: number,
+    expectedStartedAfterMs?: number
+  ): Promise<ServerPidFile | null> {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       const pidData = this.readPidFile();
-      if (pidData) {
+      if (
+        pidData &&
+        (expectedStartedAfterMs === undefined || pidData.startedAt >= expectedStartedAfterMs)
+      ) {
         return pidData;
       }
       await new Promise((resolve) => setTimeout(resolve, 200));

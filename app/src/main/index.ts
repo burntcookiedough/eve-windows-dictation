@@ -24,6 +24,18 @@ let isRecording = false;
 
 async function startRecording() {
   if (isRecording || !overlayWindow) return;
+
+  // In packaged builds, only trust server URL discovered from the running server.
+  const serverState = serverManager?.getState();
+  const discoveredServerUrl = serverState?.wsUrl;
+  if (app.isPackaged && !discoveredServerUrl) {
+    log.error('Cannot start recording: managed server URL unavailable', {
+      serverStatus: serverState?.status,
+      managed: serverState?.managed,
+    });
+    return;
+  }
+
   isRecording = true;
 
   // Position and show overlay
@@ -35,9 +47,8 @@ async function startRecording() {
   const isHoldMode = getSetting('holdToTalk');
   const silenceTimeout = isHoldMode ? 300 : getSetting('silenceTimeout'); // 5 min fallback for hold mode
 
-  // Use server manager's discovered URL if available, otherwise fall back to settings
-  const serverState = serverManager?.getState();
-  const serverUrl = serverState?.wsUrl ?? getSetting('serverUrl');
+  // In development, allow settings fallback for manually started external servers.
+  const serverUrl = discoveredServerUrl ?? getSetting('serverUrl');
 
   transcriptionService = new TranscriptionService(
     serverUrl,
