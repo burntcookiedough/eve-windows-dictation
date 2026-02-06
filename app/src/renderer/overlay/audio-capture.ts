@@ -78,8 +78,25 @@ export class AudioCapture {
         sampleRate: TARGET_SAMPLE_RATE,
       });
 
-      const workletUrl = new URL('./audio-processor.worklet.ts', import.meta.url);
+      // Use a Blob URL for the worklet to avoid Vite inlining raw TypeScript
+      // as a data: URL (which AudioWorklet can't execute). Blob URLs work
+      // reliably in both dev and packaged Electron builds.
+      const workletCode = `
+class AudioProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    if (input && input[0] && input[0].length > 0) {
+      this.port.postMessage({ audioData: input[0] });
+    }
+    return true;
+  }
+}
+registerProcessor('audio-processor', AudioProcessor);
+`;
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(blob);
       await this.audioContext.audioWorklet.addModule(workletUrl);
+      URL.revokeObjectURL(workletUrl);
 
       this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
 

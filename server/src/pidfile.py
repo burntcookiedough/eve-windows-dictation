@@ -26,9 +26,15 @@ class PidFileData(TypedDict):
 def get_pid_file_path() -> Path:
     """Get the path to the PID file.
 
-    Uses LOCALAPPDATA on Windows (matches Electron's app.getPath('userData')).
-    Falls back to ~/.local/share/murmur on Linux.
+    When spawned by the Electron app, MURMUR_PID_FILE is set to ensure both
+    processes agree on the path. Falls back to platform-specific defaults
+    when running standalone (e.g. development).
     """
+    # Electron passes the exact path so both sides always agree
+    override = os.environ.get("MURMUR_PID_FILE")
+    if override:
+        return Path(override)
+
     if os.name == "nt":
         # Windows: %LOCALAPPDATA%/murmur
         local_app_data = os.environ.get("LOCALAPPDATA")

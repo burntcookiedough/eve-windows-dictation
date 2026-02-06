@@ -35,7 +35,6 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "@nut-tree-fork/nut-js": "^4.2.6",
     "better-sqlite3": "^12.6.2",
     "electron-store": "^11.0.2",
     "svelte": "^5.49.1",

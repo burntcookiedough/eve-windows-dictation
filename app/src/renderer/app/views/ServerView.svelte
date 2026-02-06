@@ -15,6 +15,7 @@
   let autoStart = $state(true);
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
+  let logsCopied = $state(false);
 
   // Status badge colors and labels
   const statusConfig: Record<
@@ -103,10 +104,25 @@
     window.murmurMain.updateSetting('serverAutoStart', enabled);
   }
 
+  function isScrolledToBottom(): boolean {
+    if (!logsContainer) return true;
+    const threshold = 40; // px from bottom to consider "at bottom"
+    return logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < threshold;
+  }
+
   function scrollLogsToBottom() {
     if (logsContainer) {
       logsContainer.scrollTop = logsContainer.scrollHeight;
     }
+  }
+
+  function copyLogs() {
+    const text = logs
+      .map((l) => `${formatLogTime(l.timestamp)} ${l.message}`)
+      .join('\n');
+    window.murmurMain.copyToClipboard(text);
+    logsCopied = true;
+    setTimeout(() => (logsCopied = false), 2000);
   }
 
   onMount(async () => {
@@ -124,14 +140,16 @@
     });
 
     window.murmurMain.onServerLog((entry) => {
+      // Check scroll position before mutating logs (which triggers DOM update)
+      const shouldScroll = showLogs && isScrolledToBottom();
+
       logs = [...logs, entry];
       // Keep logs bounded
       if (logs.length > 500) {
         logs = logs.slice(-500);
       }
-      // Auto-scroll if logs panel is open
-      if (showLogs) {
-        // Use setTimeout to wait for DOM update
+      // Only auto-scroll if user was already at the bottom
+      if (shouldScroll) {
         setTimeout(scrollLogsToBottom, 0);
       }
     });
@@ -286,9 +304,29 @@
         </button>
 
         {#if showLogs}
+          <div class="mt-2 flex items-center justify-end px-1">
+            <button
+              onclick={(e: MouseEvent) => { e.stopPropagation(); copyLogs(); }}
+              disabled={logs.length === 0}
+              class="flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors
+                {logs.length === 0
+                  ? 'text-zinc-600 cursor-not-allowed'
+                  : logsCopied
+                    ? 'text-emerald-400 cursor-default'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer'}"
+            >
+              {#if logsCopied}
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Copied
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                Copy
+              {/if}
+            </button>
+          </div>
           <div
             bind:this={logsContainer}
-            class="mt-2 h-64 overflow-y-auto bg-zinc-950 rounded-xl border border-zinc-800 p-3 font-mono text-xs"
+            class="mt-1 h-64 overflow-y-auto bg-zinc-950 rounded-xl border border-zinc-800 p-3 font-mono text-xs"
           >
             {#if logs.length === 0}
               <p class="text-zinc-500 text-center py-8">No logs yet</p>

@@ -328,6 +328,10 @@ export class ServerManager {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         windowsHide: true,
+        env: {
+          ...process.env,
+          MURMUR_PID_FILE: this.getPidFilePath(),
+        },
       });
 
       // Capture stdout

@@ -17,7 +17,6 @@ const commonOptions = {
     'better-sqlite3',
     'ws',
     'uiohook-napi',
-    '@nut-tree-fork/nut-js',
   ],
   sourcemap: true,
   logLevel: 'info',
