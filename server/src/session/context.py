@@ -24,6 +24,7 @@ class SessionContext:
     # Configuration from start frame
     silence_timeout: float = 5.0
     partial_emission_interval: float | None = None  # None = use server default
+    hotwords: str | None = None
 
     # Timestamps
     created_at: float = field(default_factory=time.monotonic)
@@ -31,7 +32,9 @@ class SessionContext:
 
     # Speech timing for silence detection
     audio_start_time: float | None = None  # Monotonic time when first audio arrived
-    last_speech_time: float | None = None  # Monotonic time when speech was last detected
+    last_speech_time: float | None = (
+        None  # Monotonic time when speech was last detected
+    )
 
     # Last transcription result (for partial emissions)
     last_partial_text: str = ""

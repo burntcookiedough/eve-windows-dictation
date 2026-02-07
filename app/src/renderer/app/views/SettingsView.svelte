@@ -5,6 +5,7 @@
   import SettingsSection from '../components/SettingsSection.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import type { Settings, Hotkey } from '$shared/types';
+  import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
@@ -26,6 +27,8 @@
     launchOnBoot: false,
     startMinimized: false,
     serverAutoStart: true,
+    hotwordsEnabled: false,
+    hotwordsCsl: '',
   });
 
   // Default hotkey (F17)
@@ -57,6 +60,11 @@
   let isLoadingDevices = $state(true);
   let settingsLoaded = $state(false);
   const isDevBuild = import.meta.env.DEV;
+  let hotwordsFileMessage = $state('');
+
+  let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
+  let hotwordCount = $derived(hotwordEntries.length);
+  let hasHotwordOverflowWarning = $derived(hotwordCount > HOTWORDS_WARNING_THRESHOLD);
 
   onMount(async () => {
     // Load settings from main process
@@ -98,6 +106,12 @@
     window.murmurMain.updateSetting(key, value);
   }
 
+  function updateHotwordsCsl(value: string) {
+    settings.hotwordsCsl = value;
+    window.murmurMain.updateSetting('hotwordsCsl', value);
+    hotwordsFileMessage = '';
+  }
+
   function openHotkeyCapture() {
     isHotkeyModalOpen = true;
   }
@@ -117,6 +131,22 @@
     settings.hotkey = { ...DEFAULT_HOTKEY };
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_HOTKEY);
     window.murmurMain.updateSetting('hotkey', DEFAULT_HOTKEY);
+  }
+
+  async function importHotwords() {
+    const imported = await window.murmurMain.importHotwordsFromFile();
+    if (imported === null) {
+      return;
+    }
+
+    const normalized = formatHotwordsCsl(parseHotwordsCsl(imported));
+    updateHotwordsCsl(normalized);
+    hotwordsFileMessage = `Imported ${parseHotwordsCsl(normalized).length} terms`;
+  }
+
+  async function exportHotwords() {
+    const ok = await window.murmurMain.exportHotwordsToFile(settings.hotwordsCsl);
+    hotwordsFileMessage = ok ? 'Exported hotwords list' : 'Export canceled';
   }
 </script>
 
@@ -216,6 +246,63 @@
         <p class="text-xs text-zinc-500 text-center">
           More post-processing options coming soon
         </p>
+      </div>
+    </SettingsSection>
+
+    <!-- Recognition -->
+    <SettingsSection title="Recognition">
+      <SettingsRow label="Enable hotwords" description="Bias transcription toward your custom terms">
+        <Toggle
+          enabled={settings.hotwordsEnabled}
+          onchange={(v) => updateSetting('hotwordsEnabled', v)}
+          label="Enable hotwords"
+        />
+      </SettingsRow>
+
+      <div class="w-full rounded-xl border p-4 transition-colors
+        {hasHotwordOverflowWarning ? 'border-amber-500/70 bg-amber-950/10' : 'border-zinc-700 bg-zinc-900/50'}">
+        <label for="hotwords-csl" class="text-sm text-zinc-200 block mb-1">Custom hotwords (comma-separated)</label>
+        <p class="text-xs text-zinc-500 mb-3">
+          Add terms that are often transcribed incorrectly, such as product names, acronyms, and proper nouns.
+          Avoid very long lists; large lists can reduce quality.
+        </p>
+        <textarea
+          id="hotwords-csl"
+          value={settings.hotwordsCsl}
+          oninput={(e) => updateHotwordsCsl(e.currentTarget.value)}
+          rows="4"
+          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
+            px-3 py-2.5 text-sm text-zinc-300
+            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+          placeholder="Svelte, IPC, Claude"
+        ></textarea>
+
+        <div class="mt-3 flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-xs {hasHotwordOverflowWarning ? 'text-amber-300' : 'text-zinc-500'}">
+            {hotwordCount} {hotwordCount === 1 ? 'term' : 'terms'}
+            {#if hasHotwordOverflowWarning}
+              - You have a lot of entries. Recognition quality may degrade.
+            {/if}
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              onclick={importHotwords}
+              class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors cursor-pointer"
+            >
+              Import
+            </button>
+            <button
+              onclick={exportHotwords}
+              class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors cursor-pointer"
+            >
+              Export
+            </button>
+          </div>
+        </div>
+
+        {#if hotwordsFileMessage}
+          <p class="mt-2 text-xs text-zinc-500">{hotwordsFileMessage}</p>
+        {/if}
       </div>
     </SettingsSection>
 

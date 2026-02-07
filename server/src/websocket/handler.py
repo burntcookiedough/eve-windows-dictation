@@ -159,18 +159,24 @@ async def _wait_for_start(
     # Update context with start frame config
     context.silence_timeout = start_frame.silence_timeout
     context.partial_emission_interval = start_frame.partial_emission_interval
+    context.hotwords = (
+        start_frame.hotwords.strip()
+        if start_frame.hotwords is not None and start_frame.hotwords.strip()
+        else None
+    )
     context.mark_started()
     context.state_machine.transition_to(SessionState.STARTED)
 
     # Send ready
     await sender.send_ready()
     logger.info(
-        "[%s] Session started (silence_timeout=%.1fs, partial_interval=%s)",
+        "[%s] Session started (silence_timeout=%.1fs, partial_interval=%s, hotwords=%s)",
         context.session_id,
         context.silence_timeout,
         f"{context.partial_emission_interval:.2f}s"
         if context.partial_emission_interval
         else "default",
+        "enabled" if context.hotwords else "disabled",
     )
 
     return True

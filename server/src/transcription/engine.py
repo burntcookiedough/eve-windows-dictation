@@ -54,12 +54,14 @@ class WhisperEngine:
         audio: NDArray,
         *,
         language: str | None = None,
+        hotwords: str | None = None,
     ) -> TranscribeResult:
         """Transcribe audio samples.
 
         Args:
             audio: Audio samples as float32 normalized to [-1.0, 1.0].
             language: Optional language code (e.g., "en"). Auto-detect if None.
+            hotwords: Optional hint phrases to bias transcription.
 
         Returns:
             TranscribeResult with text and confidence score.
@@ -67,6 +69,7 @@ class WhisperEngine:
         segments, info = self._model.transcribe(
             audio,
             language=language,
+            hotwords=hotwords,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
         )

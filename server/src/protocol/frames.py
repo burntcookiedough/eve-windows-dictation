@@ -32,6 +32,13 @@ class StartFrame(ControlFrameBase):
             description="Minimum seconds between partial emissions (uses server default if not provided)",
         ),
     ] = None
+    hotwords: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional hotwords to bias transcription toward custom terms",
+        ),
+    ] = None
 
 
 class StopFrame(ControlFrameBase):

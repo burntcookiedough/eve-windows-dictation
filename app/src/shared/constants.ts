@@ -23,6 +23,8 @@ export const IPC_CHANNELS = {
   // Request/Response
   GET_SETTINGS: 'get:settings',
   UPDATE_SETTING: 'update:setting',
+  HOTWORDS_IMPORT: 'hotwords:import',
+  HOTWORDS_EXPORT: 'hotwords:export',
 
   // Hotkey capture
   HOTKEY_START_CAPTURE: 'hotkey:start-capture',

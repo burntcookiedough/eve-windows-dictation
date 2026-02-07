@@ -110,6 +110,9 @@ export interface Settings {
   startMinimized: boolean;
   // Server management
   serverAutoStart: boolean; // Auto-start server in production mode
+  // Recognition vocabulary hints
+  hotwordsEnabled: boolean;
+  hotwordsCsl: string;
 }
 
 // Window bounds for position/size persistence
@@ -145,4 +148,7 @@ export const DEFAULT_SETTINGS: Settings = {
   startMinimized: false,
   // Server management
   serverAutoStart: true,
+  // Recognition vocabulary hints
+  hotwordsEnabled: false,
+  hotwordsCsl: '',
 };

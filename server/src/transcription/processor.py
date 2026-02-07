@@ -82,7 +82,7 @@ class TranscriptionProcessor:
 
         result = await loop.run_in_executor(
             get_executor(),
-            lambda: engine.transcribe(audio),
+            lambda: engine.transcribe(audio, hotwords=self._context.hotwords),
         )
 
         # Stop timing
@@ -135,7 +135,7 @@ class TranscriptionProcessor:
 
         result = await loop.run_in_executor(
             get_executor(),
-            lambda: engine.transcribe(audio),
+            lambda: engine.transcribe(audio, hotwords=self._context.hotwords),
         )
 
         # Stop timing

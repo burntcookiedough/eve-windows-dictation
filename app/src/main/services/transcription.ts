@@ -17,6 +17,7 @@ export class TranscriptionService {
   private ws: WebSocket | null = null;
   private serverUrl: string;
   private silenceTimeout: number;
+  private hotwords: string | undefined;
   private overlayWindow: BrowserWindow;
   private sequenceNumber = 0;
   private isReady = false;
@@ -27,11 +28,13 @@ export class TranscriptionService {
   constructor(
     serverUrl: string,
     silenceTimeout: number,
-    overlayWindow: BrowserWindow
+    overlayWindow: BrowserWindow,
+    hotwords?: string
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
     this.overlayWindow = overlayWindow;
+    this.hotwords = hotwords;
   }
 
   async connect(): Promise<void> {
@@ -69,6 +72,11 @@ export class TranscriptionService {
       type: 'start',
       silence_timeout: this.silenceTimeout,
     };
+
+    if (this.hotwords) {
+      frame.hotwords = this.hotwords;
+    }
+
     this.ws?.send(JSON.stringify(frame));
   }
 

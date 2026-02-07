@@ -11,6 +11,7 @@ import { processFinalTranscription } from './services/pipeline.js';
 import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
+import { buildHotwordsPrompt } from '../shared/hotwords.js';
 import { createLogger } from './lib/logger.js';
 
 const log = createLogger('App');
@@ -46,6 +47,8 @@ async function startRecording() {
   // Only use silence timeout in toggle mode; in hold mode use a very long timeout (user releases key to stop)
   const isHoldMode = getSetting('holdToTalk');
   const silenceTimeout = isHoldMode ? 300 : getSetting('silenceTimeout'); // 5 min fallback for hold mode
+  const settings = getSettings();
+  const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
 
   // In development, allow settings fallback for manually started external servers.
   const serverUrl = discoveredServerUrl ?? getSetting('serverUrl');
@@ -53,7 +56,8 @@ async function startRecording() {
   transcriptionService = new TranscriptionService(
     serverUrl,
     silenceTimeout,
-    overlayWindow
+    overlayWindow,
+    hotwords
   );
 
   // Set up transcription callbacks

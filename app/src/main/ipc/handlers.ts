@@ -1,6 +1,8 @@
-import { app, ipcMain } from 'electron';
+import { app, dialog, ipcMain } from 'electron';
+import { readFile, writeFile } from 'node:fs/promises';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
+import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
@@ -55,6 +57,43 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       }
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.HOTWORDS_IMPORT, async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Import Hotwords',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Text and CSV', extensions: ['txt', 'csv'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const content = await readFile(result.filePaths[0]!, 'utf-8');
+    return formatHotwordsCsl(parseHotwordsCsl(content));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HOTWORDS_EXPORT, async (_event, hotwordsCsl: string) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Export Hotwords',
+      defaultPath: 'murmur-hotwords.csv',
+      filters: [
+        { name: 'CSV', extensions: ['csv'] },
+        { name: 'Text', extensions: ['txt'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return false;
+    }
+
+    const normalized = formatHotwordsCsl(parseHotwordsCsl(hotwordsCsl));
+    await writeFile(result.filePath, normalized, 'utf-8');
+    return true;
+  });
 
   // Handle history get entries
   ipcMain.handle(

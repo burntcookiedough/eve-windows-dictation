@@ -33,10 +33,18 @@ class TestStartFrame:
             "frame": "control",
             "type": "start",
             "silence_timeout": 10.0,
+            "hotwords": "Kubernetes, Svelte",
         }
         frame = StartFrame.model_validate(data)
 
         assert frame.silence_timeout == 10.0
+        assert frame.hotwords == "Kubernetes, Svelte"
+
+    def test_start_frame_with_hotwords(self) -> None:
+        """Start frame accepts optional hotwords."""
+        frame = StartFrame(silence_timeout=5.0, hotwords="Svelte, IPC, Claude")
+
+        assert frame.hotwords == "Svelte, IPC, Claude"
 
     def test_start_frame_missing_timeout(self) -> None:
         """Start frame requires silence_timeout."""
@@ -62,6 +70,8 @@ class TestStartFrame:
             "frame": "control",
             "type": "start",
             "silence_timeout": 5.0,
+            "partial_emission_interval": None,
+            "hotwords": None,
         }
 
 
@@ -147,7 +157,12 @@ class TestPartialTextFrame:
 
     def test_valid_partial_frame(self) -> None:
         """Create a valid partial text frame."""
-        frame = PartialTextFrame(text="hello world", confidence=0.85)
+        frame = PartialTextFrame(
+            text="hello world",
+            confidence=0.85,
+            transcription_time=0.1,
+            audio_duration=1.0,
+        )
 
         assert frame.frame == "text"
         assert frame.type == "partial"
@@ -156,20 +171,39 @@ class TestPartialTextFrame:
 
     def test_partial_frame_empty_text(self) -> None:
         """Partial frame can have empty text."""
-        frame = PartialTextFrame(text="", confidence=0.0)
+        frame = PartialTextFrame(
+            text="",
+            confidence=0.0,
+            transcription_time=0.1,
+            audio_duration=1.0,
+        )
 
         assert frame.text == ""
 
     def test_partial_frame_confidence_bounds(self) -> None:
         """Partial frame confidence must be 0-1."""
-        PartialTextFrame(text="test", confidence=0.0)
-        PartialTextFrame(text="test", confidence=1.0)
+        PartialTextFrame(
+            text="test", confidence=0.0, transcription_time=0.1, audio_duration=1.0
+        )
+        PartialTextFrame(
+            text="test", confidence=1.0, transcription_time=0.1, audio_duration=1.0
+        )
 
         with pytest.raises(ValidationError):
-            PartialTextFrame(text="test", confidence=-0.1)
+            PartialTextFrame(
+                text="test",
+                confidence=-0.1,
+                transcription_time=0.1,
+                audio_duration=1.0,
+            )
 
         with pytest.raises(ValidationError):
-            PartialTextFrame(text="test", confidence=1.1)
+            PartialTextFrame(
+                text="test",
+                confidence=1.1,
+                transcription_time=0.1,
+                audio_duration=1.0,
+            )
 
 
 class TestFinalTextFrame:
@@ -177,7 +211,12 @@ class TestFinalTextFrame:
 
     def test_valid_final_frame(self) -> None:
         """Create a valid final text frame."""
-        frame = FinalTextFrame(text="hello world", confidence=0.95)
+        frame = FinalTextFrame(
+            text="hello world",
+            confidence=0.95,
+            transcription_time=0.1,
+            audio_duration=1.0,
+        )
 
         assert frame.frame == "text"
         assert frame.type == "final"
@@ -187,15 +226,31 @@ class TestFinalTextFrame:
     def test_final_frame_requires_non_empty_text(self) -> None:
         """Final frame cannot have empty text."""
         with pytest.raises(ValidationError):
-            FinalTextFrame(text="", confidence=0.9)
+            FinalTextFrame(
+                text="", confidence=0.9, transcription_time=0.1, audio_duration=1.0
+            )
 
     def test_final_frame_confidence_bounds(self) -> None:
         """Final frame confidence must be 0-1."""
-        FinalTextFrame(text="test", confidence=0.0)
-        FinalTextFrame(text="test", confidence=1.0)
+        FinalTextFrame(
+            text="test", confidence=0.0, transcription_time=0.1, audio_duration=1.0
+        )
+        FinalTextFrame(
+            text="test", confidence=1.0, transcription_time=0.1, audio_duration=1.0
+        )
 
         with pytest.raises(ValidationError):
-            FinalTextFrame(text="test", confidence=-0.1)
+            FinalTextFrame(
+                text="test",
+                confidence=-0.1,
+                transcription_time=0.1,
+                audio_duration=1.0,
+            )
 
         with pytest.raises(ValidationError):
-            FinalTextFrame(text="test", confidence=1.1)
+            FinalTextFrame(
+                text="test",
+                confidence=1.1,
+                transcription_time=0.1,
+                audio_duration=1.0,
+            )

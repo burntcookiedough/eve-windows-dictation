@@ -34,6 +34,14 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.UPDATE_SETTING, key, value);
   },
 
+  importHotwordsFromFile: (): Promise<string | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HOTWORDS_IMPORT);
+  },
+
+  exportHotwordsToFile: (hotwordsCsl: string): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HOTWORDS_EXPORT, hotwordsCsl);
+  },
+
   // Hotkey capture
   startHotkeyCapture: (): Promise<{ hotkey: Hotkey; displayName: string }> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HOTKEY_START_CAPTURE);

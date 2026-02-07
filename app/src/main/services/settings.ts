@@ -55,6 +55,8 @@ export function getSettings(): Settings {
     launchOnBoot: store.get('launchOnBoot'),
     startMinimized: store.get('startMinimized'),
     serverAutoStart: store.get('serverAutoStart'),
+    hotwordsEnabled: store.get('hotwordsEnabled'),
+    hotwordsCsl: store.get('hotwordsCsl'),
   };
 }
 
