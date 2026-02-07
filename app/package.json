@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Desktop voice transcription app",
   "main": "dist/main/index.js",
   "type": "module",

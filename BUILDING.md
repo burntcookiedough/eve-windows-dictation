@@ -264,7 +264,7 @@ In production (`app.isPackaged === true`), the Electron app:
 3. Waits for the server to write a PID file and respond to health checks
 4. Begins health polling every 3 seconds
 
-The server writes a PID file to `%LOCALAPPDATA%/murmur/server.pid` (JSON with `pid`, `port`, `startedAt`) so the app can track it.
+The server writes a PID file to `%APPDATA%/murmur/server.pid` (JSON with `pid`, `port`, `startedAt`) so the app can track it.
 
 ### 5. Server lifecycle in production
 

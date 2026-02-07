@@ -14,15 +14,15 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows-blue?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/version-0.0.2-orange?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/status-work_in_progress-yellow?style=flat-square" alt="Status">
+  <img src="https://img.shields.io/badge/version-0.1.0-orange?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/status-alpha-yellow?style=flat-square" alt="Status">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
 ---
 
 > [!CAUTION]
-> **Murmur is in early development.** The core transcription pipeline works, but the user experience is incomplete. Expect rough edges, missing features, and breaking changes. Not ready for daily use yet.
+> **Murmur is in early development.** The core transcription pipeline works, but the user experience is still evolving. Expect rough edges and breaking changes between versions.
 
 ## What is Murmur?
 
