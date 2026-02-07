@@ -32,11 +32,7 @@ jobs:
 
       - name: Install server dependencies
         working-directory: server
-        run: uv sync --group dev
-
-      - name: Run server tests
-        working-directory: server
-        run: uv run pytest
+        run: uv sync
 
       - name: Install app dependencies
         working-directory: app

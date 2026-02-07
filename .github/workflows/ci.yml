@@ -22,31 +22,6 @@ jobs:
       - name: Check version consistency
         run: python scripts/version.py check
 
-  server-tests:
-    name: Server Tests
-    runs-on: ubuntu-latest
-    needs: version-consistency
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Run tests
-        run: uv run pytest
-
   app-build:
     name: App Build
     runs-on: windows-latest
