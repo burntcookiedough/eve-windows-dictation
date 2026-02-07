@@ -1,128 +1,153 @@
-# Research: Custom Word List for Improved Recognition
+# Research: Custom Word List for Improved Recognition (Evidence-Backed)
 
-Date: 2026-02-06
+Date: 2026-02-07
 
-## Goal
+## Scope
 
-Evaluate how to support a user-defined word list that improves transcription accuracy for names, jargon, product terms, and acronyms.
+Determine the most effective and lowest-risk way to improve recognition of domain words (names, acronyms, product terms, jargon) in Murmur, with explicit references for every design claim.
 
-## Current State in Murmur
+## Executive Findings
 
-- The app sends a `start` control frame with `silence_timeout` (and optional `partial_emission_interval`) only.
-- Server transcription currently calls `WhisperModel.transcribe(...)` without `initial_prompt` or `hotwords`.
-- No settings field exists yet for custom vocabulary.
+1. Murmur is currently not passing any vocabulary biasing signals to the backend model; start frames only carry timeout/interval controls. [C1][C2][C3][C4][C5]
+2. Murmur runs `faster-whisper==1.2.1` with `ctranslate2==4.6.3`; this version supports both `initial_prompt` and `hotwords`. [C7][C8][E1]
+3. For this feature, `hotwords` is a better v1 primitive than `initial_prompt` because it is explicitly intended as hint phrases and applied repeatedly in prompt construction logic. [E1][E2][E4]
+4. Hotword effectiveness is bounded by prompt budget: faster-whisper hard-limits prompt length (`max_length=448`) and truncates hotwords to half-context. [E2]
+5. Biasing improves target-term recall but can increase false positives/hallucination behavior if over-weighted or over-long; this is echoed in cloud provider guidance and faster-whisper field reports. [E4][E5][E6][E7]
+6. Strongest path is phased: (a) hotword biasing v1, (b) evaluate with WER + term recall, (c) add optional deterministic replacement mapping only if benchmark data shows persistent misses. [E11][C9][C10]
 
-Relevant files:
-- `app/src/shared/protocol.ts`
-- `app/src/main/services/transcription.ts`
-- `server/src/protocol/frames.py`
-- `server/src/websocket/handler.py`
-- `server/src/transcription/engine.py`
-- `app/src/shared/types.ts`
+## Current Murmur Baseline (What Exists Today)
 
-## Findings from faster-whisper
+- Client start frame schema has `silence_timeout` and optional `partial_emission_interval`; no vocabulary field. [C1]
+- Client sends only `silence_timeout` in practice from `TranscriptionService.sendStartFrame`. [C2]
+- Server `StartFrame` validates timeout/interval only; no vocabulary field today. [C3]
+- Session context stores timeout/interval from start frame; no vocabulary state carried per session. [C4]
+- Whisper engine call uses `WhisperModel.transcribe(audio, language, vad_filter, vad_parameters)` without `hotwords`/`initial_prompt`. [C5]
+- App settings model has no `customWords` field yet. [C6]
 
-Murmur is locked to `faster-whisper 1.2.1` in `server/uv.lock`, which supports both `initial_prompt` and `hotwords`.
+Conclusion: the feature is absent in protocol, settings, session context, and engine call path. [C1][C2][C3][C4][C5][C6]
 
-Key behavior from upstream implementation:
+## External Evidence on Biasing Mechanisms
 
-1. `hotwords` is a first-class `transcribe(...)` argument.
-2. `hotwords` is injected into prompt construction for decoding windows.
-3. `hotwords` has no effect if `prefix` is set (not relevant for Murmur if we do not use `prefix`).
-4. Prompt context budget is limited (`max_length = 448`; effective carried prompt slice is about half-context).
-5. Overly long hints are truncated to fit prompt budget.
+### 1) `initial_prompt` behavior
 
-Practical implication: use concise high-value hints, not long dictionaries.
+- OpenAI Whisper documents `initial_prompt` as prompt text for the first window; `carry_initial_prompt` is a separate control if you want to prepend it repeatedly. [E3]
+- In practical long-form usage, first-window-only prompting is often insufficient for terms that appear later. [E4]
 
-## Initial Prompt vs Hotwords
+### 2) `hotwords` behavior in faster-whisper
 
-### `initial_prompt`
+- `hotwords` is a first-class argument on `WhisperModel.transcribe`. [E1]
+- Upstream docs state `hotwords` has no effect if `prefix` is set. [E1]
+- Prompt construction path injects hotwords under `sot_prev` context and truncates to half of `max_length`; with `max_length=448`, effective hotword budget is about 223 tokens before truncation. [E2]
+- This means very long lists will silently lose tail entries, so list prioritization/ranking matters. [E2][E4]
 
-- Good for style/context priming and vocabulary nudging.
-- In Whisper ecosystems, can help proper nouns and jargon, but effect varies by audio quality and utterance length.
-- Less explicit for "term boosting" than `hotwords`.
+### 3) Real-world reports from faster-whisper upstream
 
-### `hotwords`
+- PR #731 reports practical gains on domain terms (e.g., "comfyUI" corrected from repeated misrecognitions). [E4]
+- Same thread contains reports of occasional hallucination-side effects or altered segmentation/timestamps under some workloads. [E5]
+- Additional user reports mention quality drop for long hotword lists; consistent with code-level truncation. [E4][E2]
 
-- Explicit feature for hint phrases.
-- Better semantic fit for this idea than `initial_prompt`.
-- More direct integration path in Murmur because we can pass it per session.
+## Industry Patterns (How Mature ASR Systems Handle This)
 
-## Candidate Approaches
+- Google Speech adaptation uses PhraseSets/CustomClass and optional boost, with explicit warning that stronger bias can increase false positives. [E6]
+- Azure phrase list is described as just-in-time and lightweight, supports weighting, and recommends custom models for very large lists; phrase list guidance includes practical cap guidance. [E7]
+- AWS Transcribe provides custom vocabulary for domain terms and gives concrete file/entry limits plus explicit privacy caution not to upload sensitive data into vocabulary artifacts. [E8]
 
-### A) Bias only (recommended first)
+Implication for Murmur: list-based adaptation is standard industry practice, but bounded lists + tunable strength + privacy guardrails are table stakes. [E6][E7][E8]
 
-- Store user custom terms.
-- Send as `hotwords` in start frame.
-- Pass through to `WhisperModel.transcribe(hotwords=...)`.
+## Option Analysis
 
-Pros: low complexity, minimal protocol/UI impact, reversible.
-Cons: probabilistic, not guaranteed corrections.
+### Option A: Hotword biasing only (recommended v1)
 
-### B) Replacement map only
+- Pros: minimal architecture change; aligns with available faster-whisper primitive; no model retraining cycle. [E1][E2][C1][C5]
+- Cons: probabilistic, not deterministic; long lists degrade due to prompt budget; potential false-positive/hallucination pressure. [E2][E4][E5][E6]
 
-- Post-process final text using explicit replacement rules (`wrong -> correct`).
+### Option B: Deterministic post-processing map only (`wrong -> right`)
 
-Pros: deterministic and testable.
-Cons: can introduce false replacements; hard to generalize.
+- Pros: predictable behavior, easy to test and rollback in app pipeline. [C9][C10]
+- Cons: can over-correct in unrelated contexts (false replacements), requires curated rule maintenance. [E6]
 
-### C) Hybrid (likely best long-term)
+### Option C: Fine-tuning / custom model
 
-- Use `hotwords` for recall.
-- Optional replacement map for persistent misses.
+- Pros: can materially improve domain adaptation when enough labeled data exists. [E10][E9]
+- Cons: operationally heavier (data, training, model hosting/updates, eval lifecycle), and likely overkill for first release. [E10]
 
-## Suggested Data Model (v1)
+## Recommended Technical Direction
 
-Keep v1 intentionally small:
+### v1 Design (bias-only)
 
-- `customWords: string[]`
-- Normalize on save: trim, dedupe, preserve original casing.
-- Reject empty entries.
-- Soft limit by count and total length (token budget safety).
+1. Add `customWords: string[]` in app settings model and persist in existing settings store. [C6]
+2. Extend start frame with optional vocabulary payload (prefer `hotwords` string for direct backend use). [C1][C2][C3]
+3. Store per-session hotwords in server session context and thread into both partial/final transcription calls. [C4][C5]
+4. Pass `hotwords` into faster-whisper transcribe call. [E1][E2][C5]
+5. Enforce normalization + constraints before send: trim, dedupe, stable order, and a hard cap to stay within practical token budget. [E2]
 
-Do not add replacement rules in v1 unless needed by test results.
+### Guardrails (required)
 
-## Protocol / Pipeline Proposal
+- Limit total serialized hotword length and count to reduce truncation risk and latency increase. [E2][E4]
+- Add privacy warning in UX/docs: do not store secrets/PII/PHI in custom words. [E8]
+- Add kill-switch in settings to disable vocabulary bias quickly if regressions occur. [E6][E7]
 
-1. Extend start frame schema with optional `hotwords` string (or `custom_words` array, serialized server-side).
-2. Store in `SessionContext`.
-3. Thread through `TranscriptionProcessor` to `WhisperEngine.transcribe(...)`.
-4. Apply to both partial and final transcription calls.
+## Evaluation Plan (with measurable thresholds)
 
-Compatibility note:
-- Current protocol rules already favor forward compatibility; unknown fields are ignored by clients/servers that do not use them.
+### Metrics
 
-## Risks and Constraints
+- `WER` (primary global quality metric). [E11]
+- `Term Recall@Exact` for curated custom-word set (primary feature metric), consistent with phrase-specific adaptation goals in cloud ASR systems. [E6][E7][E8]
+- `False Insert Rate` of custom words when absent in reference (safety metric), aligned with biasing false-positive risk guidance. [E6]
+- P50/P95 inference time deltas for partial/final outputs (performance metric), motivated by additional prompt processing and known runtime sensitivity to decoding settings. [E2][E4]
 
-- Prompt budget is finite: too many words can dilute effectiveness.
-- False positives: model may over-prefer hinted spellings in nearby words.
-- Acronym behavior can be inconsistent (e.g., "IPC" vs spaced variants).
-- Multi-language sessions may need language-scoped lists later.
+### Data
 
-## Validation Plan
+- Curated in-domain test set: 200-500 utterances containing target terms + confusable negatives (to mirror adaptation use-cases focused on confusable terms). [E6][E7]
+- Generic regression set (e.g., LibriSpeech test slices) to monitor non-target degradation. [E12]
 
-Run a small benchmark before and after biasing:
+### Experiment Matrix
 
-1. Build a phrase set (20-50 terms) with expected spellings.
-2. Record short audio clips containing those terms in realistic sentences.
-3. Measure:
-   - term-level exact match rate
-   - sentence-level WER (or simple edit distance if WER tooling is unavailable)
-   - latency impact on partial and final transcribe times
-4. Compare baseline vs `hotwords` with varying list sizes.
+- Baseline (no hotwords). [E1]
+- Top-20, Top-50, Top-100 custom word sets (to detect truncation knee-point). [E2][E4]
+- Priority ordering strategies (frequency-based vs recency-based) to manage prompt budget. [E2]
+- Optional: with/without lightweight replacement rules. [C9]
 
-Success criteria for v1:
+### v1 Success Criteria
 
-- Meaningful lift in target-term accuracy.
-- No major regression in unrelated text quality.
-- No unacceptable latency increase.
+- >= 20% relative lift in `Term Recall@Exact` (feature objective based on adaptation intent). [E6][E7]
+- <= 1.0 absolute WER regression on generic set (global quality guardrail). [E11][E12]
+- <= 10% increase in P95 final inference time (performance guardrail). [E2][E4]
+- No significant rise in false insertions of biased terms (safety guardrail for over-bias). [E6]
 
-## Recommendation
+## Open Questions That Need Empirical Answering
 
-Implement a narrow v1 around `hotwords` first, then evaluate whether deterministic replacements are necessary.
+1. Optimal list size before diminishing returns for Murmur audio profile and model sizes. [E2][E4]
+2. Whether acronym-heavy lists need formatting heuristics (e.g., `IPC` vs `I P C`). [E6][E7]
+3. Whether language-specific lists are needed for multilingual usage. [E9]
+4. Whether deterministic replacements are needed after bias-only v1, or if recall gains are sufficient. [C9][E11]
 
-If metrics are good, follow with:
+## References
 
-1. UI management in Settings (add/edit/remove).
-2. Import/export JSON word lists.
-3. Optional categories (future: mode-specific lists).
+### Codebase References
+
+- [C1] `app/src/shared/protocol.ts:4` (`ControlFrameStart` fields)
+- [C2] `app/src/main/services/transcription.ts:66` (`sendStartFrame` payload)
+- [C3] `server/src/protocol/frames.py:20` (`StartFrame` schema)
+- [C4] `server/src/websocket/handler.py:159` (store start config in session context)
+- [C5] `server/src/transcription/engine.py:67` (current transcribe call)
+- [C6] `app/src/shared/types.ts:96` (`Settings` type, no custom words)
+- [C7] `server/uv.lock:257` (`faster-whisper==1.2.1`)
+- [C8] `server/uv.lock:199` (`ctranslate2==4.6.3`)
+- [C9] `app/src/main/services/pipeline.ts:41` (post-processing architecture)
+- [C10] `app/src/main/services/history.ts:37` (history schema, editable text fields)
+
+### External References
+
+- [E1] faster-whisper README + API entry points: https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/README.md
+- [E2] faster-whisper `transcribe.py` (`hotwords`, prompt building, truncation logic): https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py#L1532
+- [E3] OpenAI Whisper `transcribe.py` docs (`initial_prompt`, `carry_initial_prompt`): https://raw.githubusercontent.com/openai/whisper/main/whisper/transcribe.py
+- [E4] faster-whisper PR #731 (rationale, examples, long-form issues): https://github.com/SYSTRAN/faster-whisper/pull/731
+- [E5] faster-whisper PR #731 comments on hallucination/side effects: https://github.com/SYSTRAN/faster-whisper/pull/731#issuecomment-1986870368
+- [E6] Google Speech-to-Text model adaptation (PhraseSet/boost/false positives): https://cloud.google.com/speech-to-text/docs/adaptation-model
+- [E7] Azure Speech phrase list guidance (just-in-time, weighting, limits): https://learn.microsoft.com/en-us/azure/ai-services/speech-service/improve-accuracy-phrase-list
+- [E8] AWS Transcribe custom vocabulary (limits + privacy warning): https://docs.aws.amazon.com/transcribe/latest/dg/custom-vocabulary.html
+- [E9] Whisper paper (680k hours, multilingual robustness): https://arxiv.org/abs/2212.04356
+- [E10] Hugging Face Whisper fine-tuning guide (operational cost/flow): https://huggingface.co/blog/fine-tune-whisper
+- [E11] WER metric definition and formula: https://huggingface.co/spaces/evaluate-metric/wer/blob/main/README.md
+- [E12] LibriSpeech corpus details (1000h benchmark corpus): https://www.openslr.org/12
