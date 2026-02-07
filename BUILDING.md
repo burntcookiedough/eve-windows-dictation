@@ -59,6 +59,62 @@ Release workflow tags must match the repository version (`vX.Y.Z`).
 
 ---
 
+## Release (GitHub Releases)
+
+The release workflow runs only when you push a Git tag matching `v*`.
+
+### Step-by-step (release current version)
+
+Use this when the current repo version is already correct and you do not want to bump.
+
+```bash
+# 1) Verify all version surfaces are in sync
+python scripts/version.py check
+
+# 2) Read current version from app/package.json
+VERSION=$(python -c "import json;print(json.load(open('app/package.json'))['version'])")
+
+# 3) Push trunk first
+git push origin trunk
+
+# 4) Tag and push (this triggers .github/workflows/release.yml)
+git tag -a "v$VERSION" -m "Release v$VERSION"
+git push origin "v$VERSION"
+```
+
+### Step-by-step (release with a new version)
+
+Use this when you want to bump before releasing.
+
+```bash
+# 1) Bump all managed version files together
+python scripts/version.py bump 1.0.0
+
+# 2) Commit version changes
+git add app/package.json server/pyproject.toml server/src/version.py README.md
+git commit -m "release: prepare v1.0.0"
+
+# 3) Push trunk
+git push origin trunk
+
+# 4) Tag and push
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+### What happens after tag push
+
+1. GitHub Actions validates that tag version matches repository version.
+2. Workflow builds the Windows installer.
+3. Workflow creates/publishes a GitHub Release and uploads release assets.
+
+### If a release run fails
+
+- If it is a transient CI issue, re-run the workflow from GitHub Actions.
+- If code changes are needed, fix on `trunk` and release a new patch version/tag.
+
+---
+
 ## Development Setup
 
 ### 1. Server
