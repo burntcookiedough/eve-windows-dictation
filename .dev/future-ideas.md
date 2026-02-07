@@ -68,9 +68,14 @@ Use the transcription pipeline to detect and execute voice commands instead of (
 
 ## Custom Word List for Improved Recognition
 
-**Status:** Idea
+**Status:** Partially Implemented (Hotwords v1)
 
 **Research notes:** See `.dev/research-custom-word-list.md`
+
+**What Exists Today:**
+- Users can enable hotwords and provide a comma-separated custom term list in Settings
+- Hotwords are passed from app -> protocol start frame -> backend transcription engine
+- Import/export for hotwords is available in Settings
 
 **Problem:**
 Speech recognition models sometimes consistently misrecognize certain words, especially domain-specific terms, technical jargon, names, or uncommon words. Users may notice the same word getting transcribed incorrectly over and over, with no way to correct the model's behavior.
@@ -86,14 +91,14 @@ Allow users to maintain a custom word list that hints the transcription model to
 - Domain jargon: Industry-specific terminology
 
 **Implementation Considerations:**
-- **UI:** Simple list management in settings - add, edit, remove words
-- **Whisper support:** Investigate `initial_prompt` parameter in faster-whisper which can bias the model toward certain vocabulary
+- **UI:** Improve list UX beyond comma-separated input (add/edit/remove rows)
+- **Whisper support:** Evaluate whether additional tuning beyond hotwords is needed (`initial_prompt`, mappings, etc.)
 - **Format:** Should entries be just words, or word + common misrecognitions?
 - **Sync:** Store in settings so it persists and potentially syncs
 - **Scope:** Global list vs per-context lists (e.g., "coding mode" vs "medical mode")
 
 **Technical Research Needed:**
-- How effective is Whisper's `initial_prompt` for vocabulary biasing?
+- How much incremental value does `initial_prompt` add on top of hotwords?
 - Are there other approaches (fine-tuning, post-processing corrections)?
 - What's the limit on how many words can be biased effectively?
 - Should misrecognized → correct mappings be used as post-processing replacements?
