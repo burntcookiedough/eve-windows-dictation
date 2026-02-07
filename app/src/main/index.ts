@@ -28,31 +28,42 @@ let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
 let isRecording = false;
+let recordingSource: 'lab' | 'normal' | null = null;
+let isStopping = false;
 let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false };
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
 
-function broadcastState<T>(channel: string, payload: T): void {
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.webContents.send(channel, payload);
-  }
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
+function broadcastLabState<T>(channel: string, payload: T): void {
+  if (recordingSource === 'lab' && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
 }
 
 function updateRecordingState(payload: RecordingStatePayload): void {
   currentRecordingState = payload;
-  broadcastState(IPC_CHANNELS.STATE_RECORDING, payload);
+  broadcastLabState(IPC_CHANNELS.STATE_RECORDING, payload);
 }
 
 function updateConnectionState(payload: ConnectionStatePayload): void {
   currentConnectionState = payload;
-  broadcastState(IPC_CHANNELS.STATE_CONNECTION, payload);
+  broadcastLabState(IPC_CHANNELS.STATE_CONNECTION, payload);
+}
+
+function updateTranscription(payload: TranscriptionPayload): void {
+  latestTranscription = payload;
+  broadcastLabState(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
 }
 
 function getRecordingDebugState(): RecordingDebugState {
+  if (recordingSource !== 'lab') {
+    return {
+      recording: { state: 'idle', isRecording: false },
+      connection: { status: 'disconnected' },
+      transcription: null,
+    };
+  }
+
   return {
     recording: currentRecordingState,
     connection: currentConnectionState,
@@ -60,8 +71,8 @@ function getRecordingDebugState(): RecordingDebugState {
   };
 }
 
-async function startRecording() {
-  if (isRecording || !overlayWindow) return;
+async function startRecording(source: 'lab' | 'normal') {
+  if (isRecording || isStopping || !overlayWindow) return;
 
   // In packaged builds, only trust server URL discovered from the running server.
   const serverState = serverManager?.getState();
@@ -75,6 +86,7 @@ async function startRecording() {
   }
 
   isRecording = true;
+  recordingSource = source;
   latestTranscription = null;
   updateConnectionState({ status: 'connecting' });
   updateRecordingState({ state: 'processing', isRecording: true });
@@ -93,28 +105,35 @@ async function startRecording() {
   // In development, allow settings fallback for manually started external servers.
   const serverUrl = discoveredServerUrl ?? getSetting('serverUrl');
 
-  transcriptionService = new TranscriptionService(
+  const service = new TranscriptionService(
     serverUrl,
     silenceTimeout,
     overlayWindow,
-    hotwords,
-    mainWindow
+    hotwords
   );
+  transcriptionService = service;
 
-  transcriptionService.onRecordingState((payload) => {
-    currentRecordingState = payload;
+  service.onRecordingState((payload) => {
+    if (transcriptionService !== service) return;
+    updateRecordingState(payload);
   });
 
-  transcriptionService.onConnectionState((payload) => {
-    currentConnectionState = payload;
+  service.onConnectionState((payload) => {
+    if (transcriptionService !== service) return;
+    updateConnectionState(payload);
   });
 
-  transcriptionService.onTranscription((payload) => {
-    latestTranscription = payload;
+  service.onTranscription((payload) => {
+    if (transcriptionService !== service) return;
+    updateTranscription(payload);
   });
 
   // Set up transcription callbacks
-  transcriptionService.onFinal(async (frame: TextFrameFinal) => {
+  service.onFinal(async (frame: TextFrameFinal) => {
+    if (source !== 'normal') {
+      return;
+    }
+
     if (frame.text) {
       // Process through pipeline (post-processing, clipboard, paste, history)
       const result = await processFinalTranscription(frame, getSettings(), historyService);
@@ -126,13 +145,23 @@ async function startRecording() {
     }
   });
 
-  transcriptionService.onClose(() => {
-    stopRecording();
+  service.onClose(() => {
+    if (transcriptionService !== service) return;
+
+    isRecording = false;
+    isStopping = false;
+    transcriptionService = null;
+    latestTranscription = null;
+    recordingSource = null;
+
+    if (overlayWindow) {
+      hideOverlay(overlayWindow);
+    }
   });
 
   // Connect to server
   try {
-    await transcriptionService.connect();
+    await service.connect();
     // Tell overlay to start audio capture with selected device
     const deviceId = getSetting('selectedDeviceId');
     overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
@@ -145,13 +174,13 @@ async function startRecording() {
 async function stopRecording() {
   if (!isRecording) return;
   isRecording = false;
+  isStopping = true;
 
   // Tell overlay to stop audio capture
   overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING);
 
   // Send stop to server
   transcriptionService?.stop();
-  transcriptionService = null;
   updateRecordingState({ state: 'idle', isRecording: false });
   updateConnectionState({ status: 'disconnected' });
 
@@ -195,7 +224,13 @@ function setupMainWindowHandlers() {
   });
 
   ipcMain.handle(IPC_CHANNELS.RECORDING_START, async () => {
-    await startRecording();
+    if (isRecording && recordingSource !== 'lab') {
+      throw new Error('Cannot start Lab session while regular recording is active');
+    }
+    if (isStopping) {
+      throw new Error('Recording is stopping, please wait a moment');
+    }
+    await startRecording('lab');
     return getRecordingDebugState();
   });
 
@@ -205,10 +240,13 @@ function setupMainWindowHandlers() {
   });
 
   ipcMain.handle(IPC_CHANNELS.RECORDING_TOGGLE, async () => {
+    if (isStopping) {
+      throw new Error('Recording is stopping, please wait a moment');
+    }
     if (isRecording) {
       await stopRecording();
     } else {
-      await startRecording();
+      await startRecording('lab');
     }
     return getRecordingDebugState();
   });
@@ -282,7 +320,7 @@ app.whenReady().then(async () => {
       if (getSetting('holdToTalk')) {
         // Hold mode: start recording on key down
         log.info('Recording started (hold mode)');
-        startRecording();
+        startRecording('normal');
       } else {
         // Toggle mode: toggle recording on key down
         if (isRecording) {
@@ -290,7 +328,7 @@ app.whenReady().then(async () => {
           stopRecording();
         } else {
           log.info('Recording started (toggle mode)');
-          startRecording();
+          startRecording('normal');
         }
       }
     },

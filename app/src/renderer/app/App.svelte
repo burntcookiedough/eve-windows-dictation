@@ -13,7 +13,7 @@
   const tabs: { id: View; label: string }[] = [
     { id: 'history', label: 'History' },
     { id: 'settings', label: 'Settings' },
-    { id: 'test', label: 'Test' },
+    { id: 'test', label: 'Lab' },
     { id: 'server', label: 'Server' },
   ];
 

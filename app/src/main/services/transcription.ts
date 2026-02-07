@@ -19,7 +19,6 @@ export class TranscriptionService {
   private silenceTimeout: number;
   private hotwords: string | undefined;
   private overlayWindow: BrowserWindow;
-  private mainWindow: BrowserWindow | null;
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
@@ -33,14 +32,12 @@ export class TranscriptionService {
     serverUrl: string,
     silenceTimeout: number,
     overlayWindow: BrowserWindow,
-    hotwords?: string,
-    mainWindow?: BrowserWindow | null
+    hotwords?: string
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
     this.overlayWindow = overlayWindow;
     this.hotwords = hotwords;
-    this.mainWindow = mainWindow ?? null;
   }
 
   async connect(): Promise<void> {
@@ -131,13 +128,9 @@ export class TranscriptionService {
     this.onTranscriptionCallback = callback;
   }
 
-  private broadcastToWindows<T>(channel: string, payload: T): void {
+  private broadcastToOverlay<T>(channel: string, payload: T): void {
     if (!this.overlayWindow.isDestroyed()) {
       this.overlayWindow.webContents.send(channel, payload);
-    }
-
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send(channel, payload);
     }
   }
 
@@ -182,7 +175,7 @@ export class TranscriptionService {
       confidence: frame.confidence,
     };
 
-    this.broadcastToWindows(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
+    this.broadcastToOverlay(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
     this.onTranscriptionCallback?.(payload);
 
     if (frame.type === 'partial') {
@@ -195,7 +188,7 @@ export class TranscriptionService {
 
   private sendConnectionState(status: ConnectionStatePayload['status'], error?: string): void {
     const payload: ConnectionStatePayload = { status, error };
-    this.broadcastToWindows(IPC_CHANNELS.STATE_CONNECTION, payload);
+    this.broadcastToOverlay(IPC_CHANNELS.STATE_CONNECTION, payload);
     this.onConnectionStateCallback?.(payload);
   }
 
@@ -204,7 +197,7 @@ export class TranscriptionService {
       state,
       isRecording: state !== 'idle',
     };
-    this.broadcastToWindows(IPC_CHANNELS.STATE_RECORDING, payload);
+    this.broadcastToOverlay(IPC_CHANNELS.STATE_RECORDING, payload);
     this.onRecordingStateCallback?.(payload);
   }
 }
