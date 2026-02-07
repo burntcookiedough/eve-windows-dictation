@@ -1,0 +1,57 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build And Publish Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Validate tag version matches repository version
+        run: python scripts/version.py check --tag "${{ github.ref_name }}"
+
+      - name: Install server dependencies
+        working-directory: server
+        run: uv sync --group dev
+
+      - name: Run server tests
+        working-directory: server
+        run: uv run pytest
+
+      - name: Install app dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      - name: Build Windows installer
+        working-directory: app
+        run: bun run package:win
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            app/release/*.exe
+            app/release/*.blockmap
+            app/release/*.yml

@@ -43,6 +43,22 @@ murmur/
 
 ---
 
+## Versioning
+
+Use the repo's version script to keep app/server/version badge values in sync.
+
+```bash
+# Verify consistency across all managed version files
+python scripts/version.py check
+
+# Bump all managed version files together
+python scripts/version.py bump 1.0.0
+```
+
+Release workflow tags must match the repository version (`vX.Y.Z`).
+
+---
+
 ## Development Setup
 
 ### 1. Server

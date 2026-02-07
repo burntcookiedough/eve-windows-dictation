@@ -234,11 +234,17 @@
 
         <!-- Details Grid (when running) -->
         {#if serverState.status === 'running' && (serverState.pid || serverState.port || serverState.uptime)}
-          <div class="grid grid-cols-3 gap-4 pt-4 border-t border-zinc-800">
+          <div class="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
             {#if serverState.port}
               <div>
                 <p class="text-xs text-zinc-500 mb-1">Port</p>
                 <p class="text-sm font-mono text-zinc-300">{serverState.port}</p>
+              </div>
+            {/if}
+            {#if serverState.version}
+              <div>
+                <p class="text-xs text-zinc-500 mb-1">Version</p>
+                <p class="text-sm font-mono text-zinc-300">v{serverState.version}</p>
               </div>
             {/if}
             {#if serverState.pid}

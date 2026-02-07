@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   MAIN_WINDOW_MAXIMIZE: 'main-window:maximize',
 
   // Request/Response
+  GET_APP_VERSION: 'get:app-version',
   GET_SETTINGS: 'get:settings',
   UPDATE_SETTING: 'update:setting',
   HOTWORDS_IMPORT: 'hotwords:import',

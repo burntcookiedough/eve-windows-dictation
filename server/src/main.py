@@ -8,6 +8,7 @@ import uvicorn
 
 from config import get_settings
 from pidfile import register_cleanup, remove_pid_file, write_pid_file
+from version import SERVER_VERSION
 
 
 def configure_logging(log_level: str) -> None:
@@ -34,6 +35,8 @@ def main() -> None:
 
     # Configure logging before uvicorn starts
     configure_logging(settings.log_level)
+    logger = logging.getLogger(__name__)
+    logger.info("Murmur server version %s", SERVER_VERSION)
 
     # Uvicorn log level: use app level only if log_binary is enabled,
     # otherwise keep uvicorn at INFO to suppress WebSocket frame spam

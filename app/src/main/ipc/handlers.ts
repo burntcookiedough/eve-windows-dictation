@@ -41,6 +41,10 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   });
 
   // Handle settings requests
+  ipcMain.handle(IPC_CHANNELS.GET_APP_VERSION, () => {
+    return app.getVersion();
+  });
+
   ipcMain.handle(IPC_CHANNELS.GET_SETTINGS, () => {
     return getSettings();
   });

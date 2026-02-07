@@ -13,6 +13,11 @@ const HEALTH_POLL_INTERVAL_MS = 3000;
 const START_TIMEOUT_MS = 30000;
 const STOP_TIMEOUT_MS = 10000;
 
+interface HealthState {
+  healthy: boolean;
+  version?: string;
+}
+
 export class ServerManager {
   private status: ServerStatus = 'idle';
   private childProcess: ChildProcess | null = null;
@@ -22,6 +27,7 @@ export class ServerManager {
   private mainWindow: BrowserWindow | null = null;
   private managed = false; // Whether we spawned the server (production) vs detected it (dev)
   private startedAt: number | null = null;
+  private serverVersion: string | null = null;
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -75,7 +81,7 @@ export class ServerManager {
   /**
    * Check server health by hitting the /health endpoint.
    */
-  private async checkHealth(port: number): Promise<boolean> {
+  private async getHealthState(port: number): Promise<HealthState> {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2000);
@@ -85,9 +91,17 @@ export class ServerManager {
       });
       clearTimeout(timeout);
 
-      return response.ok;
+      if (!response.ok) {
+        return { healthy: false };
+      }
+
+      const data = (await response.json()) as { version?: unknown };
+      return {
+        healthy: true,
+        version: typeof data.version === 'string' ? data.version : undefined,
+      };
     } catch {
-      return false;
+      return { healthy: false };
     }
   }
 
@@ -97,10 +111,16 @@ export class ServerManager {
   private startHealthPolling(port: number): void {
     this.stopHealthPolling();
     this.healthPollInterval = setInterval(async () => {
-      const healthy = await this.checkHealth(port);
-      if (!healthy && this.status === 'running') {
+      const health = await this.getHealthState(port);
+      if (!health.healthy && this.status === 'running') {
         log.warn('Server health check failed');
         this.updateStatus('error', 'Health check failed');
+        return;
+      }
+
+      if (health.version && health.version !== this.serverVersion) {
+        this.serverVersion = health.version;
+        this.broadcastState();
       }
     }, HEALTH_POLL_INTERVAL_MS);
   }
@@ -170,6 +190,7 @@ export class ServerManager {
       status: this.status,
       pid: this.pidFile?.pid,
       port: this.pidFile?.port,
+      version: this.serverVersion ?? undefined,
       uptime,
       error: errorOverride,
       wsUrl: this.pidFile?.port
@@ -196,6 +217,7 @@ export class ServerManager {
     const pidData = this.readPidFile();
     if (!pidData) {
       log.info('No PID file found');
+      this.serverVersion = null;
       this.updateStatus('stopped');
       return false;
     }
@@ -204,14 +226,16 @@ export class ServerManager {
     if (!this.isProcessAlive(pidData.pid)) {
       log.info('PID file exists but process is dead, cleaning up');
       this.cleanupStalePidFile();
+      this.serverVersion = null;
       this.updateStatus('stopped');
       return false;
     }
 
     // Check health
-    const healthy = await this.checkHealth(pidData.port);
-    if (!healthy) {
+    const health = await this.getHealthState(pidData.port);
+    if (!health.healthy) {
       log.warn('Server process alive but not responding to health checks');
+      this.serverVersion = null;
       this.updateStatus('error', 'Server not responding');
       return false;
     }
@@ -219,6 +243,7 @@ export class ServerManager {
     // Found a healthy server
     this.pidFile = pidData;
     this.startedAt = pidData.startedAt;
+    this.serverVersion = health.version ?? null;
     this.managed = false; // External server
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
@@ -290,11 +315,12 @@ export class ServerManager {
     // Check for existing server first
     const existingPid = this.readPidFile();
     if (existingPid && this.isProcessAlive(existingPid.pid)) {
-      const healthy = await this.checkHealth(existingPid.port);
-      if (healthy) {
+      const health = await this.getHealthState(existingPid.port);
+      if (health.healthy) {
         log.info('Found existing healthy server, adopting');
         this.pidFile = existingPid;
         this.startedAt = existingPid.startedAt;
+        this.serverVersion = health.version ?? null;
         this.managed = false;
         this.updateStatus('running');
         this.startHealthPolling(existingPid.port);
@@ -320,6 +346,7 @@ export class ServerManager {
     log.info('Starting server', { command: serverCmd.command, cwd: serverCmd.cwd });
     this.updateStatus('starting');
     this.managed = true;
+    this.serverVersion = null;
     this.logs = []; // Clear logs for new session
 
     try {
@@ -360,6 +387,7 @@ export class ServerManager {
         this.stopHealthPolling();
         this.pidFile = null;
         this.startedAt = null;
+        this.serverVersion = null;
 
         if (this.status !== 'stopping') {
           // Preserve explicit startup/runtime errors already set by start()/stop() logic.
@@ -387,13 +415,14 @@ export class ServerManager {
       }
 
       // Wait for health check to pass
-      const healthy = await this.waitForHealth(pidData.port, START_TIMEOUT_MS);
-      if (!healthy) {
+      const health = await this.waitForHealth(pidData.port, START_TIMEOUT_MS);
+      if (!health) {
         throw new Error('Server health check did not pass within timeout');
       }
 
       this.pidFile = pidData;
       this.startedAt = pidData.startedAt;
+      this.serverVersion = health.version ?? null;
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
@@ -434,16 +463,16 @@ export class ServerManager {
   /**
    * Wait for health check to pass.
    */
-  private async waitForHealth(port: number, timeoutMs: number): Promise<boolean> {
+  private async waitForHealth(port: number, timeoutMs: number): Promise<HealthState | null> {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
-      const healthy = await this.checkHealth(port);
-      if (healthy) {
-        return true;
+      const health = await this.getHealthState(port);
+      if (health.healthy) {
+        return health;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    return false;
+    return null;
   }
 
   /**
@@ -498,6 +527,7 @@ export class ServerManager {
               this.childProcess = null;
               this.pidFile = null;
               this.startedAt = null;
+              this.serverVersion = null;
               this.updateStatus('stopped');
               return;
             }
@@ -531,6 +561,7 @@ export class ServerManager {
       this.childProcess = null;
       this.pidFile = null;
       this.startedAt = null;
+      this.serverVersion = null;
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });

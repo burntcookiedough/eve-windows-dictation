@@ -60,6 +60,7 @@
   let isLoadingDevices = $state(true);
   let settingsLoaded = $state(false);
   const isDevBuild = import.meta.env.DEV;
+  let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
@@ -67,6 +68,8 @@
   let hasHotwordOverflowWarning = $derived(hotwordCount > HOTWORDS_WARNING_THRESHOLD);
 
   onMount(async () => {
+    appVersion = await window.murmurMain.getAppVersion();
+
     // Load settings from main process
     const loadedSettings = await window.murmurMain.getSettings();
     settings = loadedSettings;
@@ -338,6 +341,14 @@
           onchange={(v) => updateSetting('startMinimized', v)}
           label="Start minimized"
         />
+      </SettingsRow>
+    </SettingsSection>
+
+    <SettingsSection title="About">
+      <SettingsRow label="Version" description="Installed Murmur build version">
+        <span class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300">
+          v{appVersion}
+        </span>
       </SettingsRow>
     </SettingsSection>
 

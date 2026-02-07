@@ -12,6 +12,7 @@ from config import get_settings
 from session.manager import get_session_manager
 from transcription.engine import get_engine, shutdown_engine
 from transcription.processor import shutdown_executor
+from version import SERVER_VERSION
 from websocket.handler import websocket_handler
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Murmur",
         description="WebSocket-based live voice transcription server",
-        version="0.1.0",
+        version=SERVER_VERSION,
         lifespan=lifespan,
     )
 
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
         manager = get_session_manager()
         return {
             "status": "healthy",
+            "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
         }

@@ -26,6 +26,10 @@ const murmurMainAPI = {
   },
 
   // Settings
+  getAppVersion: (): Promise<string> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_APP_VERSION);
+  },
+
   getSettings: () => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS);
   },

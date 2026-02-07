@@ -16,6 +16,7 @@ export interface ServerStatePayload {
   status: ServerStatus;
   pid?: number;
   port?: number;
+  version?: string;
   uptime?: number;
   error?: string;
   wsUrl?: string;
