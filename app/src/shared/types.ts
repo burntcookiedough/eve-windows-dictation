@@ -50,6 +50,12 @@ export interface TranscriptionPayload {
   confidence: number;
 }
 
+export interface RecordingDebugState {
+  recording: RecordingStatePayload;
+  connection: ConnectionStatePayload;
+  transcription: TranscriptionPayload | null;
+}
+
 // Transcription history entry
 export interface TranscriptionEntry {
   id: string;

@@ -12,6 +12,12 @@ import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 import { buildHotwordsPrompt } from '../shared/hotwords.js';
+import type {
+  RecordingStatePayload,
+  ConnectionStatePayload,
+  TranscriptionPayload,
+  RecordingDebugState,
+} from '../shared/types.js';
 import { createLogger } from './lib/logger.js';
 
 const log = createLogger('App');
@@ -22,6 +28,37 @@ let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
 let isRecording = false;
+let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false };
+let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
+let latestTranscription: TranscriptionPayload | null = null;
+
+function broadcastState<T>(channel: string, payload: T): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send(channel, payload);
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function updateRecordingState(payload: RecordingStatePayload): void {
+  currentRecordingState = payload;
+  broadcastState(IPC_CHANNELS.STATE_RECORDING, payload);
+}
+
+function updateConnectionState(payload: ConnectionStatePayload): void {
+  currentConnectionState = payload;
+  broadcastState(IPC_CHANNELS.STATE_CONNECTION, payload);
+}
+
+function getRecordingDebugState(): RecordingDebugState {
+  return {
+    recording: currentRecordingState,
+    connection: currentConnectionState,
+    transcription: latestTranscription,
+  };
+}
 
 async function startRecording() {
   if (isRecording || !overlayWindow) return;
@@ -38,6 +75,9 @@ async function startRecording() {
   }
 
   isRecording = true;
+  latestTranscription = null;
+  updateConnectionState({ status: 'connecting' });
+  updateRecordingState({ state: 'processing', isRecording: true });
 
   // Position and show overlay
   positionOverlayOnActiveDisplay(overlayWindow);
@@ -57,8 +97,21 @@ async function startRecording() {
     serverUrl,
     silenceTimeout,
     overlayWindow,
-    hotwords
+    hotwords,
+    mainWindow
   );
+
+  transcriptionService.onRecordingState((payload) => {
+    currentRecordingState = payload;
+  });
+
+  transcriptionService.onConnectionState((payload) => {
+    currentConnectionState = payload;
+  });
+
+  transcriptionService.onTranscription((payload) => {
+    latestTranscription = payload;
+  });
 
   // Set up transcription callbacks
   transcriptionService.onFinal(async (frame: TextFrameFinal) => {
@@ -99,6 +152,8 @@ async function stopRecording() {
   // Send stop to server
   transcriptionService?.stop();
   transcriptionService = null;
+  updateRecordingState({ state: 'idle', isRecording: false });
+  updateConnectionState({ status: 'disconnected' });
 
   // Hide overlay after brief delay to show final state
   setTimeout(() => {
@@ -133,6 +188,29 @@ function setupMainWindowHandlers() {
     } else {
       mainWindow?.maximize();
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RECORDING_GET_STATE, () => {
+    return getRecordingDebugState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RECORDING_START, async () => {
+    await startRecording();
+    return getRecordingDebugState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RECORDING_STOP, async () => {
+    await stopRecording();
+    return getRecordingDebugState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RECORDING_TOGGLE, async () => {
+    if (isRecording) {
+      await stopRecording();
+    } else {
+      await startRecording();
+    }
+    return getRecordingDebugState();
   });
 }
 

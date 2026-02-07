@@ -37,6 +37,12 @@ export const IPC_CHANNELS = {
   HISTORY_DELETE: 'history:delete',
   HISTORY_NEW_ENTRY: 'history:new-entry',
 
+  // Recording test controls
+  RECORDING_GET_STATE: 'recording:get-state',
+  RECORDING_START: 'recording:start',
+  RECORDING_STOP: 'recording:stop',
+  RECORDING_TOGGLE: 'recording:toggle',
+
   // Server management - Request/Response
   SERVER_GET_STATUS: 'server:get-status',
   SERVER_START: 'server:start',

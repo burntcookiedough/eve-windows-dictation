@@ -19,22 +19,28 @@ export class TranscriptionService {
   private silenceTimeout: number;
   private hotwords: string | undefined;
   private overlayWindow: BrowserWindow;
+  private mainWindow: BrowserWindow | null;
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
+  private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
+  private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
+  private onTranscriptionCallback: ((payload: TranscriptionPayload) => void) | null = null;
 
   constructor(
     serverUrl: string,
     silenceTimeout: number,
     overlayWindow: BrowserWindow,
-    hotwords?: string
+    hotwords?: string,
+    mainWindow?: BrowserWindow | null
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
     this.overlayWindow = overlayWindow;
     this.hotwords = hotwords;
+    this.mainWindow = mainWindow ?? null;
   }
 
   async connect(): Promise<void> {
@@ -113,6 +119,28 @@ export class TranscriptionService {
     this.onCloseCallback = callback;
   }
 
+  onRecordingState(callback: (payload: RecordingStatePayload) => void): void {
+    this.onRecordingStateCallback = callback;
+  }
+
+  onConnectionState(callback: (payload: ConnectionStatePayload) => void): void {
+    this.onConnectionStateCallback = callback;
+  }
+
+  onTranscription(callback: (payload: TranscriptionPayload) => void): void {
+    this.onTranscriptionCallback = callback;
+  }
+
+  private broadcastToWindows<T>(channel: string, payload: T): void {
+    if (!this.overlayWindow.isDestroyed()) {
+      this.overlayWindow.webContents.send(channel, payload);
+    }
+
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send(channel, payload);
+    }
+  }
+
   private handleMessage(data: string): void {
     const frame = parseServerFrame(data);
     if (!frame) {
@@ -154,7 +182,8 @@ export class TranscriptionService {
       confidence: frame.confidence,
     };
 
-    this.overlayWindow.webContents.send(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
+    this.broadcastToWindows(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
+    this.onTranscriptionCallback?.(payload);
 
     if (frame.type === 'partial') {
       this.sendRecordingState('transcribing');
@@ -166,7 +195,8 @@ export class TranscriptionService {
 
   private sendConnectionState(status: ConnectionStatePayload['status'], error?: string): void {
     const payload: ConnectionStatePayload = { status, error };
-    this.overlayWindow.webContents.send(IPC_CHANNELS.STATE_CONNECTION, payload);
+    this.broadcastToWindows(IPC_CHANNELS.STATE_CONNECTION, payload);
+    this.onConnectionStateCallback?.(payload);
   }
 
   private sendRecordingState(state: RecordingStatePayload['state']): void {
@@ -174,6 +204,7 @@ export class TranscriptionService {
       state,
       isRecording: state !== 'idle',
     };
-    this.overlayWindow.webContents.send(IPC_CHANNELS.STATE_RECORDING, payload);
+    this.broadcastToWindows(IPC_CHANNELS.STATE_RECORDING, payload);
+    this.onRecordingStateCallback?.(payload);
   }
 }

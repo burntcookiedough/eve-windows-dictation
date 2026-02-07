@@ -8,6 +8,10 @@ import type {
   Hotkey,
   ServerStatePayload,
   ServerLogEntry,
+  RecordingDebugState,
+  RecordingStatePayload,
+  ConnectionStatePayload,
+  TranscriptionPayload,
 } from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
@@ -83,6 +87,53 @@ const murmurMainAPI = {
     ipcRenderer.send(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
   },
 
+  // Recording controls and state (for Test view)
+  getRecordingDebugState: (): Promise<RecordingDebugState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECORDING_GET_STATE);
+  },
+
+  startRecording: (): Promise<RecordingDebugState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECORDING_START);
+  },
+
+  stopRecording: (): Promise<RecordingDebugState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECORDING_STOP);
+  },
+
+  toggleRecording: (): Promise<RecordingDebugState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.RECORDING_TOGGLE);
+  },
+
+  onRecordingState: (callback: (payload: RecordingStatePayload) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: RecordingStatePayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.STATE_RECORDING, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_RECORDING, handler);
+  },
+
+  onConnectionState: (callback: (payload: ConnectionStatePayload) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ConnectionStatePayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.STATE_CONNECTION, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_CONNECTION, handler);
+  },
+
+  onTranscription: (callback: (payload: TranscriptionPayload) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: TranscriptionPayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.STATE_TRANSCRIPTION, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_TRANSCRIPTION, handler);
+  },
+
+  removeRecordingListeners: (): void => {
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_RECORDING);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_CONNECTION);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_TRANSCRIPTION);
+  },
+
   // Server management
   getServerStatus: (): Promise<ServerStatePayload> => {
     return ipcRenderer.invoke(IPC_CHANNELS.SERVER_GET_STATUS);
@@ -126,6 +177,9 @@ const murmurMainAPI = {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_RECORDING);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_CONNECTION);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_TRANSCRIPTION);
   },
 };
 
