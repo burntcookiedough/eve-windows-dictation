@@ -1,7 +1,8 @@
 // Wait for Vite dev server to be ready before starting Electron
 import http from 'http';
 
-const VITE_URL = 'http://localhost:5173/overlay/index.html';
+const VITE_PORT = process.env.MURMUR_DEV_PORT ?? '5173';
+const VITE_URL = `http://localhost:${VITE_PORT}/overlay/index.html`;
 const MAX_RETRIES = 60;
 const RETRY_INTERVAL = 500;
 

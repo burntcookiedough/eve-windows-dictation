@@ -3,6 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'path';
 
+const devPort = Number.parseInt(process.env.MURMUR_DEV_PORT ?? '5173', 10);
+
 export default defineConfig({
   plugins: [
     svelte({
@@ -29,7 +31,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: Number.isFinite(devPort) ? devPort : 5173,
     strictPort: true,
   },
 });

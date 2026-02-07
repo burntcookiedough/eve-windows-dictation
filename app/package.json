@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "postinstall": "electron-rebuild",
-    "dev": "concurrently -k \"bun run dev:vite\" \"bun run dev:main\" \"bun run dev:electron\"",
+    "dev": "node scripts/dev.js",
     "dev:vite": "vite",
     "dev:main": "bun run build:main --watch",
     "dev:electron": "NODE_ENV=development node scripts/wait-for-vite.js && electron .",

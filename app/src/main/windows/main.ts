@@ -7,6 +7,7 @@ import type { WindowBounds } from '../../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
+const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
 
 function getAppIcon(): Electron.NativeImage | undefined {
   const iconPath = join(app.getAppPath(), 'resources', 'icon.ico');
@@ -101,7 +102,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
 
   // Load the app page
   if (isDev) {
-    await mainWindow.loadURL('http://localhost:5173/app/index.html');
+    await mainWindow.loadURL(`${devServerOrigin}/app/index.html`);
   } else {
     await mainWindow.loadFile(join(__dirname, '../renderer/app/index.html'));
   }
