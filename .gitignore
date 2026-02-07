@@ -20,6 +20,10 @@ lib64/
 # Keep Electron main-process source lib tracked
 !app/src/main/lib/
 !app/src/main/lib/**
+
+# Keep renderer source lib tracked
+!app/src/renderer/lib/
+!app/src/renderer/lib/**
 parts/
 sdist/
 var/
