@@ -70,6 +70,8 @@ Use the transcription pipeline to detect and execute voice commands instead of (
 
 **Status:** Idea
 
+**Research notes:** See `.dev/research-custom-word-list.md`
+
 **Problem:**
 Speech recognition models sometimes consistently misrecognize certain words, especially domain-specific terms, technical jargon, names, or uncommon words. Users may notice the same word getting transcribed incorrectly over and over, with no way to correct the model's behavior.
 
