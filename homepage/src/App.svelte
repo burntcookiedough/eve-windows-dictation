@@ -54,18 +54,18 @@
         MURMUR
       </h1>
       <div class="mt-4 sm:mt-6">
-        <p class="text-[10px] sm:text-xs tracking-[0.5em] uppercase text-[#F0E6D0]/50 font-mono">
+        <p class="text-sm tracking-[0.5em] uppercase text-[#F0E6D0]/50 font-mono">
           voice &rarr; text
         </p>
       </div>
       <div class="mt-16 sm:mt-20">
-        <p class="text-[9px] tracking-[0.3em] uppercase text-[#F0E6D0]/20 font-mono">
+        <p class="text-xs tracking-[0.3em] uppercase text-[#F0E6D0]/20 font-mono">
           Desktop dictation for Windows &mdash; 100% local &mdash; MIT license
         </p>
       </div>
     </div>
 
-    <div class="absolute bottom-8 left-1/2 -translate-x-1/2 text-[#F0E6D0]/20 text-[10px] tracking-[0.4em] uppercase font-mono select-none">
+    <div class="absolute bottom-8 left-1/2 -translate-x-1/2 text-[#F0E6D0]/20 text-xs tracking-[0.4em] uppercase font-mono select-none">
       scroll
     </div>
   </section>
@@ -84,14 +84,14 @@
       </p>
 
       <div class="mt-12 sm:mt-16 max-w-md rotate-[-2deg] origin-left">
-        <p class="text-[10px] sm:text-xs tracking-[0.15em] uppercase text-[#F0E6D0]/70 font-mono leading-relaxed">
+        <p class="text-xs sm:text-sm tracking-[0.15em] uppercase text-[#F0E6D0]/70 font-mono leading-relaxed">
           Hold your hotkey.<br/>
           Speak naturally into your mic.<br/>
           Release the key.<br/>
           Your words appear where your cursor is.
         </p>
         <div class="mt-6 w-16 h-[1px] bg-[#F0E6D0]/30"></div>
-        <p class="mt-4 text-[9px] tracking-[0.2em] uppercase text-[#F0E6D0]/40 font-mono">
+        <p class="mt-4 text-xs tracking-[0.2em] uppercase text-[#F0E6D0]/40 font-mono">
           Real-time partial transcription overlay while you speak
         </p>
       </div>
@@ -107,7 +107,7 @@
     </div>
 
     <div class="relative z-10 text-center px-6">
-      <p class="text-[10px] tracking-[0.6em] uppercase text-[#3E0D0D]/30 font-mono mb-4">
+      <p class="text-xs tracking-[0.6em] uppercase text-[#3E0D0D]/30 font-mono mb-4">
         Nothing leaves your machine
       </p>
 
@@ -116,7 +116,7 @@
       </h2>
 
       <div class="mt-10 sm:mt-14 max-w-sm mx-auto">
-        <p class="text-[10px] sm:text-xs tracking-[0.15em] uppercase text-[#3E0D0D]/40 font-mono leading-loose">
+        <p class="text-xs sm:text-sm tracking-[0.15em] uppercase text-[#3E0D0D]/40 font-mono leading-loose">
           Powered by faster-whisper &mdash; runs entirely on your hardware.
           No cloud. No API calls. No data collection. No internet required.
           Your voice never leaves your computer.
@@ -157,10 +157,10 @@
           ['OPEN SOURCE', 'MIT licensed, fully free'],
         ] as [title, desc]}
           <div class="group">
-            <p class="text-xs sm:text-sm font-black tracking-[0.15em] uppercase text-[#F0E6D0]/90">
+            <p class="text-sm sm:text-base font-black tracking-[0.15em] uppercase text-[#F0E6D0]/90">
               {title}
             </p>
-            <p class="text-[9px] sm:text-[10px] tracking-[0.1em] uppercase text-[#F0E6D0]/30 font-mono mt-1">
+            <p class="text-xs sm:text-sm tracking-[0.1em] uppercase text-[#F0E6D0]/30 font-mono mt-1">
               {desc}
             </p>
           </div>
@@ -190,14 +190,14 @@
 
       <div class="mt-10 sm:mt-14">
         <div class="inline-block border-2 border-[#F0E6D0]/40 px-5 py-2 rotate-[2deg]">
-          <p class="text-[10px] sm:text-xs tracking-[0.4em] uppercase font-mono text-[#F0E6D0]/80">
+          <p class="text-sm tracking-[0.4em] uppercase font-mono text-[#F0E6D0]/80">
             MIT License
           </p>
         </div>
       </div>
 
       <div class="mt-8 max-w-xs mx-auto">
-        <p class="text-[9px] tracking-[0.15em] uppercase text-[#F0E6D0]/40 font-mono leading-loose">
+        <p class="text-xs tracking-[0.15em] uppercase text-[#F0E6D0]/40 font-mono leading-loose">
           No subscription. No trial. No freemium.
           No usage limits. No premium tier.
           Free and open source. Period.
@@ -233,7 +233,7 @@
           href="https://github.com/moeenm/murmur"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-[10px] sm:text-xs tracking-[0.3em] uppercase text-[#F0E6D0]/30 font-mono hover:text-[#F0E6D0]/60 transition-colors duration-150 cursor-pointer"
+          class="text-xs sm:text-sm tracking-[0.3em] uppercase text-[#F0E6D0]/30 font-mono hover:text-[#F0E6D0]/60 transition-colors duration-150 cursor-pointer"
         >
           View source on GitHub
         </a>
@@ -243,7 +243,7 @@
     <div class="absolute bottom-8 left-0 right-0 text-center">
       <div class="flex flex-col items-center gap-2">
         <div class="w-12 h-[1px] bg-[#F0E6D0]/10"></div>
-        <p class="text-[8px] tracking-[0.4em] uppercase text-[#F0E6D0]/15 font-mono">
+        <p class="text-xs tracking-[0.4em] uppercase text-[#F0E6D0]/15 font-mono">
           Murmur v0.1.0 &mdash; MIT &mdash; Made for Windows
         </p>
       </div>
