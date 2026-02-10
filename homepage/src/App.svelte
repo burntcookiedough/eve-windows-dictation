@@ -7,6 +7,9 @@
 
   const noiseUrl = `url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
 
+  // Coarser grain — more visible, fewer octaves, for accent elements
+  const noiseCoarseUrl = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
+
   function getSectionCounterColor(section: number): string {
     if (section === 2) return 'text-[#3E0D0D]/40';
     return 'text-[#F0E6D0]/40';
@@ -43,8 +46,8 @@
 
   <!-- POSTER 1: MURMUR — Black bg, icon hero -->
   <section class="min-h-screen bg-[#0A0A0A] text-[#F0E6D0] relative overflow-hidden flex flex-col items-center justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-overlay" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.18] pointer-events-none select-none mix-blend-soft-light" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture}
     </div>
 
@@ -73,8 +76,8 @@
 
   <!-- POSTER 2: SPEAK — Bright red bg -->
   <section class="min-h-screen bg-[#BF1D1D] text-[#F0E6D0] relative overflow-hidden flex flex-col justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-overlay" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.25] pointer-events-none select-none mix-blend-soft-light" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')} {Array(300).fill('SPEAK').join(' ')}
     </div>
 
@@ -90,7 +93,10 @@
           Release the key.<br/>
           Your words appear where your cursor is.
         </p>
-        <div class="mt-6 w-16 h-[1px] bg-[#F0E6D0]/30"></div>
+        <div class="mt-6 w-24 h-[3px] relative overflow-hidden">
+          <div class="absolute inset-0 bg-[#F0E6D0]/50"></div>
+          <div class="absolute inset-0 opacity-[0.7] mix-blend-soft-light" style="background-image: {noiseCoarseUrl};"></div>
+        </div>
         <p class="mt-4 text-xs tracking-[0.2em] uppercase text-[#F0E6D0]/40 font-mono">
           Real-time partial transcription overlay while you speak
         </p>
@@ -101,8 +107,8 @@
 
   <!-- POSTER 3: LOCAL — Cream bg, dark text -->
   <section class="min-h-screen bg-[#F0E6D0] text-[#3E0D0D] relative overflow-hidden flex flex-col items-center justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-multiply" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[5px] leading-[7px] text-[#3E0D0D]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.15] pointer-events-none select-none mix-blend-multiply" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[5px] leading-[7px] text-[#3E0D0D]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')} {Array(400).fill('LOCAL').join(' ')}
     </div>
 
@@ -123,8 +129,11 @@
         </p>
       </div>
 
-      <div class="mt-12 inline-block border-4 border-[#3E0D0D] px-6 py-3 rotate-[-3deg]">
-        <p class="text-sm sm:text-base font-black tracking-[0.3em] uppercase">
+      <div class="mt-12 inline-block relative rotate-[-3deg]">
+        <div class="absolute inset-0 bg-[#BF1D1D]"></div>
+        <div class="absolute inset-0 opacity-[0.4] mix-blend-multiply pointer-events-none" style="background-image: {noiseCoarseUrl};"></div>
+        <div class="absolute inset-0 border-4 border-[#3E0D0D]"></div>
+        <p class="relative z-10 text-sm sm:text-base font-black tracking-[0.3em] uppercase text-[#F0E6D0] px-6 py-3">
           Zero telemetry
         </p>
       </div>
@@ -134,8 +143,8 @@
 
   <!-- POSTER 4: FEATURES — Black bg, grid -->
   <section class="min-h-screen bg-[#0A0A0A] text-[#F0E6D0] relative overflow-hidden flex flex-col justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-overlay" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[5px] leading-[7px] text-[#F0E6D0]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.18] pointer-events-none select-none mix-blend-soft-light" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[5px] leading-[7px] text-[#F0E6D0]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture}
     </div>
 
@@ -156,7 +165,11 @@
           ['SYSTEM TRAY', 'Runs quietly in background'],
           ['OPEN SOURCE', 'MIT licensed, fully free'],
         ] as [title, desc]}
-          <div class="group">
+          <div class="group relative pl-4">
+            <div class="absolute left-0 top-0 bottom-0 w-[3px] overflow-hidden">
+              <div class="absolute inset-0 bg-[#BF1D1D]/70"></div>
+              <div class="absolute inset-0 opacity-[0.6] mix-blend-soft-light" style="background-image: {noiseCoarseUrl};"></div>
+            </div>
             <p class="text-sm sm:text-base font-black tracking-[0.15em] uppercase text-[#F0E6D0]/90">
               {title}
             </p>
@@ -175,8 +188,8 @@
 
   <!-- POSTER 5: $0 FOREVER — Bright red bg -->
   <section class="min-h-screen bg-[#BF1D1D] text-[#F0E6D0] relative overflow-hidden flex flex-col items-center justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-overlay" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.25] pointer-events-none select-none mix-blend-soft-light" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')} {Array(350).fill('FREE').join(' ')}
     </div>
 
@@ -189,8 +202,10 @@
       </p>
 
       <div class="mt-10 sm:mt-14">
-        <div class="inline-block border-2 border-[#F0E6D0]/40 px-5 py-2 rotate-[2deg]">
-          <p class="text-sm tracking-[0.4em] uppercase font-mono text-[#F0E6D0]/80">
+        <div class="inline-block relative border-2 border-[#F0E6D0]/40 rotate-[2deg] overflow-hidden">
+          <div class="absolute inset-0 bg-[#0A0A0A]/50"></div>
+          <div class="absolute inset-0 opacity-[0.35] mix-blend-soft-light pointer-events-none" style="background-image: {noiseCoarseUrl};"></div>
+          <p class="relative z-10 text-sm tracking-[0.4em] uppercase font-mono text-[#F0E6D0]/80 px-5 py-2">
             MIT License
           </p>
         </div>
@@ -209,8 +224,8 @@
 
   <!-- POSTER 6: GET IT — Black bg, download -->
   <section class="min-h-screen bg-[#0A0A0A] text-[#F0E6D0] relative overflow-hidden flex flex-col items-center justify-center">
-    <div class="absolute inset-0 opacity-[0.06] pointer-events-none select-none mix-blend-overlay" aria-hidden="true" style="background-image: {noiseUrl};"></div>
-    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.03] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
+    <div class="absolute inset-0 opacity-[0.18] pointer-events-none select-none mix-blend-soft-light" aria-hidden="true" style="background-image: {noiseUrl};"></div>
+    <div class="absolute inset-0 text-[6px] leading-[8px] text-[#F0E6D0]/[0.06] break-all font-mono select-none pointer-events-none p-2 overflow-hidden" aria-hidden="true">
       {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture} {murmurTexture}
     </div>
 
@@ -220,17 +235,18 @@
       </h2>
 
       <a
-        href="https://github.com/moeenm/murmur/releases"
+        href="https://github.com/dikkadev/murmur/releases"
         target="_blank"
         rel="noopener noreferrer"
-        class="inline-block bg-[#F0E6D0] text-[#3E0D0D] px-10 sm:px-14 py-4 sm:py-5 font-black text-sm sm:text-base tracking-[0.3em] uppercase cursor-pointer hover:bg-[#0A0A0A] hover:text-[#F0E6D0] transition-colors duration-150 select-none"
+        class="relative inline-block bg-[#F0E6D0] text-[#3E0D0D] px-10 sm:px-14 py-4 sm:py-5 font-black text-sm sm:text-base tracking-[0.3em] uppercase cursor-pointer hover:bg-[#BF1D1D] hover:text-[#F0E6D0] transition-colors duration-150 select-none overflow-hidden"
       >
-        Download for Windows
+        <span class="absolute inset-0 opacity-[0.25] mix-blend-multiply pointer-events-none" style="background-image: {noiseCoarseUrl};"></span>
+        <span class="relative z-10">Download for Windows</span>
       </a>
 
       <div class="mt-6">
         <a
-          href="https://github.com/moeenm/murmur"
+          href="https://github.com/dikkadev/murmur"
           target="_blank"
           rel="noopener noreferrer"
           class="text-xs sm:text-sm tracking-[0.3em] uppercase text-[#F0E6D0]/30 font-mono hover:text-[#F0E6D0]/60 transition-colors duration-150 cursor-pointer"
@@ -242,7 +258,10 @@
 
     <div class="absolute bottom-8 left-0 right-0 text-center">
       <div class="flex flex-col items-center gap-2">
-        <div class="w-12 h-[1px] bg-[#F0E6D0]/10"></div>
+        <div class="w-16 h-[3px] relative overflow-hidden">
+          <div class="absolute inset-0 bg-[#F0E6D0]/20"></div>
+          <div class="absolute inset-0 opacity-[0.6] mix-blend-soft-light" style="background-image: {noiseCoarseUrl};"></div>
+        </div>
         <p class="text-xs tracking-[0.4em] uppercase text-[#F0E6D0]/15 font-mono">
           Murmur v0.1.0 &mdash; MIT &mdash; Made for Windows
         </p>
