@@ -2,7 +2,7 @@ name: Deploy Homepage
 
 on:
   push:
-    branches: [main]
+    branches: [trunk]
     paths:
       - 'homepage/**'
   workflow_dispatch:
