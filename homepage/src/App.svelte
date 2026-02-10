@@ -52,7 +52,7 @@
     </div>
 
     <div class="relative z-10 text-center px-4">
-      <img src="/icon.png" alt="Murmur" class="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl mb-8 drop-shadow-2xl mx-auto" />
+      <img src="{import.meta.env.BASE_URL}icon.png" alt="Murmur" class="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl mb-8 drop-shadow-2xl mx-auto" />
       <h1 class="text-[18vw] sm:text-[16vw] md:text-[15vw] font-black leading-[0.85] tracking-[-0.04em] uppercase select-none">
         MURMUR
       </h1>
