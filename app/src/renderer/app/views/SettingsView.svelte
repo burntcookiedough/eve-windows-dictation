@@ -7,6 +7,10 @@
   import type { Settings, Hotkey } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
+  const DEFAULT_SERVER_HOST = 'localhost';
+  const DEFAULT_SERVER_PORT = 51717;
+  const TRANSCRIBE_PATH = '/transcribe';
+
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
     hotkey: {
@@ -27,6 +31,7 @@
     launchOnBoot: false,
     startMinimized: false,
     serverAutoStart: true,
+    useExternalServer: false,
     hotwordsEnabled: false,
     hotwordsCsl: '',
   });
@@ -59,13 +64,87 @@
   ]);
   let isLoadingDevices = $state(true);
   let settingsLoaded = $state(false);
-  const isDevBuild = import.meta.env.DEV;
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
+  let externalServerHost = $state(DEFAULT_SERVER_HOST);
+  let externalServerPort = $state(String(DEFAULT_SERVER_PORT));
+  let externalServerError = $state('');
+  let externalServerCard: HTMLDivElement | null = $state(null);
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
   let hotwordCount = $derived(hotwordEntries.length);
   let hasHotwordOverflowWarning = $derived(hotwordCount > HOTWORDS_WARNING_THRESHOLD);
+
+  function parseServerUrl(url: string): { host: string; port: string } {
+    try {
+      const parsed = new URL(url);
+      return {
+        host: parsed.hostname || DEFAULT_SERVER_HOST,
+        port: parsed.port || String(DEFAULT_SERVER_PORT),
+      };
+    } catch {
+      return {
+        host: DEFAULT_SERVER_HOST,
+        port: String(DEFAULT_SERVER_PORT),
+      };
+    }
+  }
+
+  function parseHostPaste(input: string): { host: string; port?: string } {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return { host: '' };
+    }
+
+    try {
+      const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
+        ? trimmed
+        : `ws://${trimmed}`;
+      const parsed = new URL(withProtocol);
+      return {
+        host: parsed.hostname,
+        port: parsed.port || undefined,
+      };
+    } catch {
+      const hostPortMatch = trimmed.match(/^([^/:\s]+):(\d{1,5})$/);
+      if (hostPortMatch) {
+        return {
+          host: hostPortMatch[1] ?? '',
+          port: hostPortMatch[2],
+        };
+      }
+      return { host: trimmed };
+    }
+  }
+
+  function syncExternalServerFields(url: string): void {
+    const parsed = parseServerUrl(url);
+    externalServerHost = parsed.host;
+    externalServerPort = parsed.port;
+  }
+
+  function buildExternalServerUrl(host: string, port: number): string {
+    return `ws://${host}:${port}${TRANSCRIBE_PATH}`;
+  }
+
+  function updateExternalServerUrl(): void {
+    const host = externalServerHost.trim();
+    const port = Number(externalServerPort);
+    const isValidPort = Number.isInteger(port) && port > 0 && port <= 65535;
+
+    if (!host) {
+      externalServerError = 'Host is required';
+      return;
+    }
+
+    if (!isValidPort) {
+      externalServerError = 'Port must be a number between 1 and 65535';
+      return;
+    }
+
+    externalServerError = '';
+    updateSetting('serverUrl', buildExternalServerUrl(host, port));
+  }
 
   onMount(async () => {
     appVersion = await window.murmurMain.getAppVersion();
@@ -73,6 +152,7 @@
     // Load settings from main process
     const loadedSettings = await window.murmurMain.getSettings();
     settings = loadedSettings;
+    syncExternalServerFields(loadedSettings.serverUrl);
 
     // Get display name for current hotkey (use loadedSettings directly, not the $state)
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
@@ -113,6 +193,38 @@
     settings.hotwordsCsl = value;
     window.murmurMain.updateSetting('hotwordsCsl', value);
     hotwordsFileMessage = '';
+  }
+
+  function runWithViewTransition(update: () => void): void {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      update();
+      return;
+    }
+
+    const docWithTransitions = document as Document & {
+      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+    };
+
+    if (!docWithTransitions.startViewTransition) {
+      update();
+      return;
+    }
+
+    docWithTransitions.startViewTransition(() => {
+      update();
+    });
+  }
+
+  function updateUseExternalServer(enabled: boolean) {
+    runWithViewTransition(() => {
+      updateSetting('useExternalServer', enabled);
+    });
+    if (enabled) {
+      updateExternalServerUrl();
+      setTimeout(() => {
+        externalServerCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    }
   }
 
   function openHotkeyCapture() {
@@ -352,29 +464,88 @@
       </SettingsRow>
     </SettingsSection>
 
-    {#if isDevBuild}
-      <!-- Server -->
-      <SettingsSection title="Server">
-        <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
-          <label for="server-url" class="text-sm text-zinc-200 block mb-1">
-            Server URL
-          </label>
-          <p class="text-xs text-zinc-500 mb-3">
-            URL of the Whisper transcription server
-          </p>
-          <input
-            id="server-url"
-            type="text"
-            value={settings.serverUrl}
-            oninput={(e) => updateSetting('serverUrl', e.currentTarget.value)}
-            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
-              px-3 py-2.5 text-sm text-zinc-300 font-mono
-              focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-            placeholder="ws://localhost:51717/transcribe"
-          />
-        </div>
-      </SettingsSection>
-    {/if}
+    <SettingsSection title="Server">
+      <SettingsRow
+        label="Use external server"
+        description="Connect to your own server and disable built-in server management"
+      >
+        <Toggle
+          enabled={settings.useExternalServer}
+          onchange={updateUseExternalServer}
+          label="Use external server"
+        />
+      </SettingsRow>
+
+      <div class="overflow-hidden [view-transition-name:external-server-panel]">
+        {#if settings.useExternalServer}
+          <div bind:this={externalServerCard} class="mt-2 p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 w-full">
+            <p class="text-sm text-zinc-200 mb-1">Custom server endpoint</p>
+            <p class="text-xs text-zinc-500 mb-3">
+              Set the host and port for your transcription server. Murmur connects to <span class="font-mono">/transcribe</span>.
+            </p>
+
+            {#if externalServerError}
+              <p class="mb-3 text-xs text-red-300">{externalServerError}</p>
+            {:else}
+              <p class="mb-3 text-xs text-zinc-500">
+                Using endpoint <span class="font-mono text-zinc-300">{settings.serverUrl}</span>
+              </p>
+            {/if}
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="external-server-host" class="text-xs text-zinc-500 block mb-1">Host</label>
+                <input
+                  id="external-server-host"
+                  type="text"
+                  value={externalServerHost}
+                  onpaste={(e) => {
+                    const pasted = e.clipboardData?.getData('text') ?? '';
+                    if (!pasted) {
+                      return;
+                    }
+                    const parsed = parseHostPaste(pasted);
+                    if (parsed.host) {
+                      e.preventDefault();
+                      externalServerHost = parsed.host;
+                      if (parsed.port) {
+                        externalServerPort = parsed.port;
+                      }
+                      updateExternalServerUrl();
+                    }
+                  }}
+                  oninput={(e) => {
+                    externalServerHost = e.currentTarget.value;
+                    updateExternalServerUrl();
+                  }}
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
+                    px-3 py-2 text-sm text-zinc-300 font-mono
+                    focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                  placeholder="localhost"
+                />
+              </div>
+
+              <div>
+                <label for="external-server-port" class="text-xs text-zinc-500 block mb-1">Port</label>
+                <input
+                  id="external-server-port"
+                  type="text"
+                  value={externalServerPort}
+                  oninput={(e) => {
+                    externalServerPort = e.currentTarget.value;
+                    updateExternalServerUrl();
+                  }}
+                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
+                    px-3 py-2 text-sm text-zinc-300 font-mono
+                    focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                  placeholder="51717"
+                />
+              </div>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </SettingsSection>
 
     </div>
     {/if}

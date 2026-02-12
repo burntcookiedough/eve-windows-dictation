@@ -34,4 +34,19 @@
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+
+  ::view-transition-group(external-server-panel) {
+    animation-duration: 220ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  ::view-transition-old(external-server-panel),
+  ::view-transition-new(external-server-panel) {
+    animation: none;
+  }
 }

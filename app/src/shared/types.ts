@@ -117,6 +117,7 @@ export interface Settings {
   startMinimized: boolean;
   // Server management
   serverAutoStart: boolean; // Auto-start server in production mode
+  useExternalServer: boolean; // Bypass managed server and use custom serverUrl
   // Recognition vocabulary hints
   hotwordsEnabled: boolean;
   hotwordsCsl: string;
@@ -155,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
   startMinimized: false,
   // Server management
   serverAutoStart: true,
+  useExternalServer: false,
   // Recognition vocabulary hints
   hotwordsEnabled: false,
   hotwordsCsl: '',

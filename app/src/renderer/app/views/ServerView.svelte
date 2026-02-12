@@ -13,6 +13,7 @@
   let logs = $state<ServerLogEntry[]>([]);
   let showLogs = $state(false);
   let autoStart = $state(true);
+  let useExternalServer = $state(false);
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
@@ -53,13 +54,19 @@
 
   // Can start/stop based on status and management mode
   let canStart = $derived(
+    !useExternalServer &&
     !isLoading &&
     (serverState.status === 'stopped' || serverState.status === 'idle' || serverState.status === 'error')
   );
   let canStop = $derived(
+    !useExternalServer &&
     !isLoading && serverState.managed && serverState.status === 'running'
   );
   let canRestart = $derived(
+    !useExternalServer &&
+    !isLoading && serverState.managed && serverState.status === 'running'
+  );
+  let canShutdownManaged = $derived(
     !isLoading && serverState.managed && serverState.status === 'running'
   );
 
@@ -133,6 +140,7 @@
     // Load settings
     const settings = await window.murmurMain.getSettings();
     autoStart = settings.serverAutoStart;
+    useExternalServer = settings.useExternalServer;
 
     // Subscribe to state changes
     window.murmurMain.onServerStateChange((state) => {
@@ -163,6 +171,33 @@
 <div class="h-full p-6 pr-2">
   <div class="h-full overflow-y-auto pr-4">
     <div class="space-y-8">
+
+    {#if useExternalServer}
+      <div class="rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm text-amber-200">External server mode is enabled</p>
+            <p class="mt-1 text-xs text-amber-300/80">
+              Managed server controls are disabled. Configure host and port in Settings > Server.
+            </p>
+          </div>
+          {#if serverState.managed && serverState.status === 'running'}
+            <button
+              onclick={handleStop}
+              disabled={!canShutdownManaged}
+              class="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+                {canShutdownManaged
+                  ? 'bg-red-900/60 hover:bg-red-900 text-red-100 cursor-pointer'
+                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
+            >
+              Shut down server
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    <div class="space-y-8 {useExternalServer ? 'opacity-45 pointer-events-none select-none' : ''}">
 
     <!-- Status Card -->
     <SettingsSection title="Status">
@@ -350,6 +385,8 @@
         {/if}
       </div>
     </SettingsSection>
+
+    </div>
 
     </div>
   </div>

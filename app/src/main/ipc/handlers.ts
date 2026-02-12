@@ -6,7 +6,7 @@ import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
-import { getSettings, updateSetting } from '../services/settings.js';
+import { getSetting, getSettings, updateSetting } from '../services/settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
 
@@ -52,12 +52,16 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   // Handle setting updates
   ipcMain.handle(
     IPC_CHANNELS.UPDATE_SETTING,
-    (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
+    async (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
       updateSetting(key, value);
 
       // Apply launch-on-boot immediately when changed
       if (key === 'launchOnBoot') {
         applyLaunchOnBoot(value as boolean);
+      }
+
+      if (key === 'useExternalServer' && value === true && serverManagerRef) {
+        await serverManagerRef.stop();
       }
     }
   );
@@ -141,6 +145,9 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   });
 
   ipcMain.handle(IPC_CHANNELS.SERVER_START, async () => {
+    if (getSetting('useExternalServer')) {
+      throw new Error('Server management is disabled while external server mode is enabled');
+    }
     if (!serverManagerRef) {
       throw new Error('Server manager not initialized');
     }
@@ -157,6 +164,9 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   });
 
   ipcMain.handle(IPC_CHANNELS.SERVER_RESTART, async () => {
+    if (getSetting('useExternalServer')) {
+      throw new Error('Server management is disabled while external server mode is enabled');
+    }
     if (!serverManagerRef) {
       throw new Error('Server manager not initialized');
     }

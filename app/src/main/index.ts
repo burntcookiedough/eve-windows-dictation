@@ -74,10 +74,12 @@ function getRecordingDebugState(): RecordingDebugState {
 async function startRecording(source: 'lab' | 'normal') {
   if (isRecording || isStopping || !overlayWindow) return;
 
-  // In packaged builds, only trust server URL discovered from the running server.
+  const useExternalServer = getSetting('useExternalServer');
+
+  // In packaged builds, require managed server discovery unless external mode is enabled.
   const serverState = serverManager?.getState();
   const discoveredServerUrl = serverState?.wsUrl;
-  if (app.isPackaged && !discoveredServerUrl) {
+  if (app.isPackaged && !useExternalServer && !discoveredServerUrl) {
     log.error('Cannot start recording: managed server URL unavailable', {
       serverStatus: serverState?.status,
       managed: serverState?.managed,
@@ -102,8 +104,9 @@ async function startRecording(source: 'lab' | 'normal') {
   const settings = getSettings();
   const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
 
-  // In development, allow settings fallback for manually started external servers.
-  const serverUrl = discoveredServerUrl ?? getSetting('serverUrl');
+  const serverUrl = useExternalServer
+    ? getSetting('serverUrl')
+    : (discoveredServerUrl ?? getSetting('serverUrl'));
 
   const service = new TranscriptionService(
     serverUrl,
@@ -357,6 +360,9 @@ app.whenReady().then(async () => {
   if (isDev) {
     // Development mode: just detect existing server, don't spawn
     log.info('Development mode: detecting existing server');
+    await serverManager.detectExisting();
+  } else if (getSetting('useExternalServer')) {
+    log.info('Production mode: using external server, skipping managed auto-start');
     await serverManager.detectExisting();
   } else {
     // Production mode: auto-start if enabled
