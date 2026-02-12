@@ -4,6 +4,7 @@
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
+  import { toast } from '$lib/toast.svelte';
   import type { Settings, Hotkey } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
@@ -263,6 +264,12 @@
     const ok = await window.murmurMain.exportHotwordsToFile(settings.hotwordsCsl);
     hotwordsFileMessage = ok ? 'Exported hotwords list' : 'Export canceled';
   }
+
+  function copyVersionToClipboard() {
+    const versionLabel = `v${appVersion}`;
+    window.murmurMain.copyToClipboard(versionLabel);
+    toast(`Copied ${versionLabel}`);
+  }
 </script>
 
 <div class="h-full p-6 pr-2">
@@ -458,9 +465,14 @@
 
     <SettingsSection title="About">
       <SettingsRow label="Version" description="Installed Murmur build version">
-        <span class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300">
+        <button
+          type="button"
+          onclick={copyVersionToClipboard}
+          title="Click to copy version"
+          class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
+        >
           v{appVersion}
-        </span>
+        </button>
       </SettingsRow>
     </SettingsSection>
 
