@@ -1,0 +1,25 @@
+[project]
+name = "nemotron-poc"
+version = "0.1.0"
+description = "PoC for NVIDIA Nemotron Speech cache-aware streaming transcription"
+requires-python = ">=3.11"
+dependencies = [
+    "nemo_toolkit[asr]>=2.2.0",
+    "soundfile>=0.12.0",
+    "tabulate>=0.9.0",
+    "torch>=2.0",
+    "torchaudio>=2.0",
+]
+
+[tool.uv]
+# Only use the PyTorch CUDA index for torch/torchaudio/torchvision packages.
+# Everything else comes from PyPI to avoid platform-incompatible wheels.
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
