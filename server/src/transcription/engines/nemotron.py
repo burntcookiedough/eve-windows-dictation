@@ -1,6 +1,5 @@
 """NVIDIA Nemotron Speech batch engine."""
 
-import gc
 import logging
 import os
 import tempfile
@@ -18,8 +17,14 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 
-# Loggers to suppress during model.transcribe() calls
-_NOISY_LOGGERS = ["nemo_logger", "nemo", "lhotse", "lhotse.cut", "lhotse.dataset", "root"]
+
+class _NemoLogFilter(logging.Filter):
+    """Block noisy NeMo/Lhotse messages from the root logger."""
+    _BLOCKED = ("Lhotse CutSet", "Initializing Lhotse")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(s in msg for s in self._BLOCKED)
 
 
 class NemotronEngine:
@@ -39,9 +44,24 @@ class NemotronEngine:
 
         self._model_name = model_name
         self._device = resolved_device
+        self._use_cuda = resolved_device != "cpu" and torch.cuda.is_available()
         # Serialize model.transcribe() calls — NeMo's internal freeze/unfreeze
         # state corrupts when two calls overlap on the same model.
         self._model_lock = threading.Lock()
+
+        # Suppress [NeMo W] messages via NeMo's own logging API
+        from nemo.utils import logging as nemo_logging
+        nemo_logging.setLevel(logging.ERROR)
+
+        # Suppress NeMo/Lhotse warnings (Python warnings module)
+        warnings.filterwarnings("ignore", message=".*Lhotse.*")
+        warnings.filterwarnings("ignore", message=".*non-tarred dataset.*")
+        warnings.filterwarnings("ignore", message=".*Megatron.*")
+
+        # Block noisy messages from root logger + NeMo/Lhotse loggers
+        logging.getLogger().addFilter(_NemoLogFilter())
+        for name in ["nemo_logger", "nemo", "lhotse", "lhotse.cut", "lhotse.dataset"]:
+            logging.getLogger(name).setLevel(logging.ERROR)
 
         logger.info("Nemotron model loaded successfully")
 
@@ -94,27 +114,17 @@ class NemotronSession:
             os.close(tmp_fd)
             sf.write(tmp_path, audio, SAMPLE_RATE)
 
-            # Suppress noisy NeMo/Lhotse loggers during transcription
-            saved_levels = {}
-            for name in _NOISY_LOGGERS:
-                lg = logging.getLogger(name)
-                saved_levels[name] = lg.level
-                lg.setLevel(logging.ERROR)
-
-            try:
-                with self._model_lock:
-                    # Freeze encoder before each call — NeMo's _transcribe_on_end()
-                    # calls encoder.unfreeze(partial=True) which requires _frozen=True.
-                    # Without this, the second+ call fails with ValueError.
-                    self._model.encoder.freeze()
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", module="nemo")
-                        warnings.filterwarnings("ignore", module="lhotse")
-                        with torch.no_grad():
-                            output = self._model.transcribe([tmp_path])
-            finally:
-                for name, level in saved_levels.items():
-                    logging.getLogger(name).setLevel(level)
+            with self._model_lock:
+                # Set the _frozen flag so _transcribe_on_end()'s call to
+                # encoder.unfreeze(partial=True) won't raise ValueError.
+                # Don't call freeze() — that changes requires_grad on all
+                # params which breaks CUDA kernel selection and crashes.
+                if hasattr(self._model, "encoder"):
+                    self._model.encoder._frozen = True
+                with torch.no_grad():
+                    output = self._model.transcribe(
+                        [tmp_path], verbose=False,
+                    )
 
             # Extract text — output format varies by NeMo version
             text = ""
@@ -124,6 +134,9 @@ class NemotronSession:
             if isinstance(result, list) and len(result) > 0:
                 item = result[0]
                 text = getattr(item, "text", str(item))
+
+            # Drop references to NeMo output so gc can free CUDA tensors
+            del output, result
         finally:
             try:
                 os.unlink(tmp_path)
@@ -144,9 +157,3 @@ class NemotronSession:
         if self._closed:
             return
         self._closed = True
-        # Release CUDA memory: gc.collect() frees NeMo DataLoader/CutSet
-        # references, empty_cache() returns blocks to CUDA allocator.
-        import torch
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
