@@ -17,7 +17,6 @@ from protocol.frames import ClosingReason, StartFrame
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
-from transcription.base import AudioMode
 from transcription.factory import get_engine_manager
 from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
@@ -59,12 +58,8 @@ async def websocket_handler(websocket: WebSocket) -> None:
         processor = TranscriptionProcessor(context)
 
         # Determine partial emission interval
-        # For incremental engines (Nemotron), use a tight loop since each call
-        # only processes new audio and is very fast (~50ms per chunk).
         if context.partial_emission_interval is not None:
             partial_interval = context.partial_emission_interval
-        elif processor.audio_mode == AudioMode.INCREMENTAL:
-            partial_interval = 0.05  # 50ms — emit as fast as chunks arrive
         else:
             partial_interval = settings.partial_emission_interval
 

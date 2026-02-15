@@ -8,7 +8,7 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from transcription.base import AudioMode, EngineInfo, EngineSession, TranscriptionEngine
+from transcription.base import EngineInfo, EngineSession, TranscriptionEngine
 
 if TYPE_CHECKING:
     from config import Settings
@@ -25,17 +25,17 @@ def discover_engines() -> list[dict]:
             "id": "nemotron",
             "name": "Nemotron Speech",
             "available": True,
-            "description": "True streaming with constant ~44ms latency. English only.",
+            "description": "Fast batch retranscribe, ~93x real-time. English only.",
             "model_size_gb": 2.3,
             "languages": ["en"],
-            "features": ["true_streaming", "constant_latency"],
+            "features": ["fast_batch", "constant_latency"],
         })
     except ImportError:
         available.append({
             "id": "nemotron",
             "name": "Nemotron Speech",
             "available": False,
-            "description": "True streaming with constant ~44ms latency. English only.",
+            "description": "Fast batch retranscribe, ~93x real-time. English only.",
             "install_hint": "uv sync --extra nemotron",
         })
 
@@ -45,7 +45,7 @@ def discover_engines() -> list[dict]:
             "id": "whisper",
             "name": "Faster-Whisper",
             "available": True,
-            "description": "Legacy re-transcribe mode. 25+ languages.",
+            "description": "Batch retranscribe mode. 25+ languages.",
             "model_size_gb": 1.5,
             "languages": ["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
             "features": ["multilingual", "hotwords"],
@@ -55,7 +55,7 @@ def discover_engines() -> list[dict]:
             "id": "whisper",
             "name": "Faster-Whisper",
             "available": False,
-            "description": "Legacy re-transcribe mode. 25+ languages.",
+            "description": "Batch retranscribe mode. 25+ languages.",
             "install_hint": "uv sync --extra whisper",
         })
 
@@ -78,7 +78,6 @@ def _create_engine(settings: Settings) -> TranscriptionEngine:
             )
         return NemotronEngine(
             model_name=settings.nemotron_model,
-            chunk_ms=settings.nemotron_chunk_ms,
             device=settings.nemotron_device,
         )
 
@@ -148,10 +147,6 @@ class EngineManager:
     @property
     def engine_info(self) -> EngineInfo:
         return self.engine.engine_info
-
-    @property
-    def audio_mode(self) -> AudioMode:
-        return self.engine.audio_mode
 
     def get_status(self) -> EngineStatus:
         info = self._engine.engine_info if self._engine else None

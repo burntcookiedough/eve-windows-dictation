@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from config import get_settings
-from transcription.base import AudioMode, EngineSession
+from transcription.base import EngineSession
 from transcription.factory import get_engine_manager
 
 if TYPE_CHECKING:
@@ -44,29 +44,19 @@ class TranscriptionProcessor:
 
         manager = get_engine_manager()
         self._session: EngineSession = manager.create_session(context.session_id)
-        self._audio_mode = manager.audio_mode
         self._session_id = context.session_id
 
-    @property
-    def audio_mode(self) -> AudioMode:
-        return self._audio_mode
-
     async def transcribe_partial(self) -> TranscriptionResult | None:
-        # Minimum duration check only for full-buffer mode
-        if self._audio_mode == AudioMode.FULL_BUFFER:
-            if (
-                self._context.audio_buffer.duration_seconds
-                < self._settings.min_audio_for_transcription
-            ):
-                return None
+        if (
+            self._context.audio_buffer.duration_seconds
+            < self._settings.min_audio_for_transcription
+        ):
+            return None
 
         start_time = time.perf_counter()
         audio_duration = self._context.audio_buffer.duration_seconds
 
-        if self._audio_mode == AudioMode.FULL_BUFFER:
-            audio = self._context.audio_buffer.get_audio_float32()
-        else:
-            audio = self._context.audio_buffer.get_new_audio_float32()
+        audio = self._context.audio_buffer.get_audio_float32()
 
         if len(audio) == 0:
             return None
@@ -97,31 +87,22 @@ class TranscriptionProcessor:
         start_time = time.perf_counter()
         audio_duration = self._context.audio_buffer.duration_seconds
 
-        loop = asyncio.get_running_loop()
+        audio = self._context.audio_buffer.get_audio_float32()
+        if len(audio) == 0:
+            return TranscriptionResult(
+                text="",
+                confidence=0.0,
+                is_empty=True,
+                transcription_time=0.0,
+                audio_duration=0.0,
+                last_speech_end=None,
+            )
 
-        if self._audio_mode == AudioMode.FULL_BUFFER:
-            audio = self._context.audio_buffer.get_audio_float32()
-            if len(audio) == 0:
-                return TranscriptionResult(
-                    text="",
-                    confidence=0.0,
-                    is_empty=True,
-                    transcription_time=0.0,
-                    audio_duration=0.0,
-                    last_speech_end=None,
-                )
-            result = await loop.run_in_executor(
-                get_executor(),
-                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-            )
-        else:
-            # For incremental engines: pass the full audio buffer so finalize
-            # can do a fresh batch pass for higher quality final text
-            full_audio = self._context.audio_buffer.get_audio_float32()
-            result = await loop.run_in_executor(
-                get_executor(),
-                lambda: self._session.finalize(full_audio=full_audio),
-            )
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            get_executor(),
+            lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+        )
 
         transcription_time = time.perf_counter() - start_time
 

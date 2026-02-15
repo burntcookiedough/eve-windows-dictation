@@ -18,7 +18,6 @@ class AudioBuffer:
 
     _chunks: list[NDArray[np.int16]] = field(default_factory=list)
     _total_samples: int = 0
-    _cursor: int = 0  # Sample offset for incremental reads
     _last_sequence: int | None = None
     _sequence_gaps: int = 0
     _last_audio_time: float = field(default_factory=time.monotonic)
@@ -68,19 +67,6 @@ class AudioBuffer:
         if len(samples) == 0:
             return np.array([], dtype=np.float32)
         return samples.astype(np.float32) / 32768.0
-
-    def get_new_audio_float32(self) -> NDArray[np.float32]:
-        """Get audio added since the last call to this method.
-
-        Returns float32 normalized to [-1.0, 1.0]. Advances the cursor.
-        Used by incremental engines (Nemotron).
-        """
-        all_audio = self.get_audio()
-        if self._cursor >= len(all_audio):
-            return np.array([], dtype=np.float32)
-        new_samples = all_audio[self._cursor:]
-        self._cursor = len(all_audio)
-        return new_samples.astype(np.float32) / 32768.0
 
     def clear(self) -> None:
         """Clear all accumulated audio."""

@@ -501,22 +501,6 @@
         </div>
 
         <!-- Conditional settings based on selected engine -->
-        {#if serverSettings.nemotron_chunk_ms && isVisible(serverSettings.nemotron_chunk_ms)}
-          <SettingsRow label={serverSettings.nemotron_chunk_ms.label} description={serverSettings.nemotron_chunk_ms.description}>
-            <select
-              value={getSettingValue('nemotron_chunk_ms') ?? serverSettings.nemotron_chunk_ms.value}
-              onchange={(e) => updateEngineSetting('nemotron_chunk_ms', Number(e.currentTarget.value))}
-              class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
-            >
-              {#each getOptions('nemotron_chunk_ms') as option}
-                <option value={option.value}>
-                  {option.label}{option.description ? ` - ${option.description}` : ''}
-                </option>
-              {/each}
-            </select>
-          </SettingsRow>
-        {/if}
-
         {#if serverSettings.whisper_model && isVisible(serverSettings.whisper_model)}
           <SettingsRow label={serverSettings.whisper_model.label} description={serverSettings.whisper_model.description}>
             <select

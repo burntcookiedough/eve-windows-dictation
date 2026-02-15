@@ -48,12 +48,11 @@ class Settings(BaseSettings):
 
     # Nemotron settings
     nemotron_model: str = "nvidia/nemotron-speech-streaming-en-0.6b"
-    nemotron_chunk_ms: Literal[160, 560, 1120] = 560
     nemotron_device: Literal["auto", "cpu", "cuda"] = "auto"
 
     # Transcription settings
     partial_emission_interval: float = 0.25
-    min_audio_for_transcription: float = 0.5
+    min_audio_for_transcription: float = 0.15
 
     # Hot-swap
     unload_before_swap: bool = False
@@ -70,8 +69,8 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "The speech recognition engine to use",
         "type": "select",
         "options": [
-            {"value": "nemotron", "label": "Nemotron Speech", "description": "True streaming, constant 44ms latency. English. ~2.3 GB model."},
-            {"value": "whisper", "label": "Faster-Whisper", "description": "Legacy re-transcribe mode. 25+ languages. ~1.5 GB model."},
+            {"value": "nemotron", "label": "Nemotron Speech", "description": "Fast batch retranscribe, ~93x real-time. English. ~2.3 GB model."},
+            {"value": "whisper", "label": "Faster-Whisper", "description": "Batch retranscribe mode. 25+ languages. ~1.5 GB model."},
         ],
         "requires_reload": True,
         "category": "engine",
@@ -80,19 +79,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "label": "Nemotron Model",
         "description": "Model name or path for Nemotron engine",
         "type": "text",
-        "requires_reload": True,
-        "category": "engine",
-        "visible_when": {"engine": "nemotron"},
-    },
-    "nemotron_chunk_ms": {
-        "label": "Chunk Size",
-        "description": "Audio chunk size for streaming. Smaller = more frequent updates. Does not affect final output quality.",
-        "type": "select",
-        "options": [
-            {"value": 560, "label": "560ms", "description": "Stable updates, ~2/sec (recommended)"},
-            {"value": 160, "label": "160ms", "description": "Most frequent updates, ~6/sec, may feel hesitant"},
-            {"value": 1120, "label": "1120ms", "description": "Fewest updates, ~1/sec"},
-        ],
         "requires_reload": True,
         "category": "engine",
         "visible_when": {"engine": "nemotron"},

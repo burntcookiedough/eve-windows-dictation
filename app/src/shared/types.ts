@@ -140,10 +140,8 @@ export interface EngineInfo {
   id: string;
   name: string;
   model: string;
-  mode: 'streaming' | 'batch-retranscribe';
   supports_hotwords: boolean;
   languages: string[];
-  chunk_ms: number | null;
   model_size_gb: number;
 }
 

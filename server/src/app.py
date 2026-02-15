@@ -45,6 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "faster_whisper", "nemo_logger", "matplotlib", "matplotlib.font_manager",
         "graphviz", "graphviz._tools", "torio", "torio._extension",
         "datasets", "numexpr", "nv_one_logger",
+        "lhotse", "lhotse.cut", "lhotse.dataset",
+        "nemo", "nemo.collections",
     ]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 

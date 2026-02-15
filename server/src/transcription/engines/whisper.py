@@ -6,7 +6,7 @@ from faster_whisper import WhisperModel
 from numpy.typing import NDArray
 import numpy as np
 
-from transcription.base import AudioMode, EngineInfo, EngineSession, TranscriptionEngine
+from transcription.base import EngineInfo
 from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,6 @@ _MODEL_SIZES: dict[str, float] = {
 
 
 class WhisperEngine:
-    audio_mode = AudioMode.FULL_BUFFER
-
     def __init__(self, model: str, device: str, compute_type: str) -> None:
         logger.info(
             "Loading Whisper model: %s (device=%s, compute_type=%s)",
@@ -41,10 +39,8 @@ class WhisperEngine:
             id="whisper",
             name="Faster-Whisper",
             model=self._model_name,
-            mode="batch-retranscribe",
             supports_hotwords=True,
             languages=["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
-            chunk_ms=None,
             model_size_gb=_MODEL_SIZES.get(self._model_name, 1.5),
         )
 
@@ -96,9 +92,7 @@ class WhisperSession:
         )
         return self._last_result
 
-    def finalize(
-        self, full_audio: NDArray[np.float32] | None = None,
-    ) -> TranscribeResult:
+    def finalize(self) -> TranscribeResult:
         return self._last_result
 
     def close(self) -> None:
