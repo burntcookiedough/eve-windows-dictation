@@ -212,14 +212,28 @@ class NemotronSession:
         import os
         import soundfile as sf
 
+        audio_duration = len(audio) / SAMPLE_RATE
+        audio_rms = float(np.sqrt(np.mean(audio ** 2)))
+        logger.info(
+            "Batch retranscribe: %.1fs audio, rms=%.4f, peak=%.3f",
+            audio_duration, audio_rms, float(np.max(np.abs(audio))),
+        )
+
         # Write audio to temp WAV for the batch API
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav")
         try:
             os.close(tmp_fd)
             sf.write(tmp_path, audio, SAMPLE_RATE)
 
-            with torch.no_grad():
-                output = self._model.transcribe([tmp_path])
+            # Suppress noisy NeMo/Lhotse warnings during batch transcription
+            nemo_log = logging.getLogger("nemo_logger")
+            prev_level = nemo_log.level
+            nemo_log.setLevel(logging.ERROR)
+            try:
+                with torch.no_grad():
+                    output = self._model.transcribe([tmp_path])
+            finally:
+                nemo_log.setLevel(prev_level)
 
             # Extract text — output format varies by NeMo version
             text = ""
@@ -229,6 +243,8 @@ class NemotronSession:
             if isinstance(result, list) and len(result) > 0:
                 item = result[0]
                 text = getattr(item, "text", str(item))
+
+            logger.info("Batch retranscribe result: %r", text[:200] if text else "(empty)")
         finally:
             # Always restore streaming config, even if transcribe() failed
             _apply_streaming_config(self._model, self._att_context)
@@ -236,8 +252,6 @@ class NemotronSession:
                 os.unlink(tmp_path)
             except OSError:
                 pass
-
-        audio_duration = len(audio) / SAMPLE_RATE
         return TranscribeResult(
             text=text.strip(),
             confidence=0.95,
