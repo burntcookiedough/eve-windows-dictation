@@ -1,7 +1,7 @@
 """Pydantic models for all protocol frame types."""
 
 from enum import StrEnum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,7 @@ class ReadyFrame(ControlFrameBase):
     """Server -> Client: Confirms session started, server is accepting audio."""
 
     type: Literal["ready"] = "ready"
+    engine: dict[str, Any] | None = None
 
 
 class ErrorFrame(ControlFrameBase):

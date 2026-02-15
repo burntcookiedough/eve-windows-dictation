@@ -122,6 +122,60 @@ export interface Settings {
   hotwordsCsl: string;
 }
 
+// Server settings types (fetched from server REST API)
+export interface ServerSetting<T> {
+  value: T;
+  label: string;
+  description: string;
+  type: 'select' | 'number' | 'bool' | 'text';
+  options?: Array<{ value: T; label: string; description?: string }>;
+  range?: [number, number];
+  requires_reload: boolean;
+  category: string;
+  visible_when?: Record<string, unknown>;
+  readonly?: boolean;
+}
+
+export interface EngineInfo {
+  id: string;
+  name: string;
+  model: string;
+  mode: 'streaming' | 'batch-retranscribe';
+  supports_hotwords: boolean;
+  languages: string[];
+  chunk_ms: number | null;
+  model_size_gb: number;
+}
+
+export interface EngineStatus {
+  current: string;
+  status: 'loading' | 'ready' | 'error';
+  info?: EngineInfo;
+  message?: string;
+  pending?: {
+    engine: string;
+    status: 'loading' | 'ready' | 'error';
+    message?: string;
+  };
+}
+
+export interface ServerSettingsResponse {
+  settings: Record<string, ServerSetting<unknown>>;
+  engine_status: EngineStatus;
+  available_engines: string[];
+}
+
+export interface AvailableEngine {
+  id: string;
+  name: string;
+  available: boolean;
+  description: string;
+  model_size_gb: number;
+  languages: string[];
+  features: string[];
+  install_hint?: string;
+}
+
 // Window bounds for position/size persistence
 export interface WindowBounds {
   x: number;

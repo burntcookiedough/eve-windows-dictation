@@ -1,0 +1,105 @@
+"""Faster-Whisper engine adapter."""
+
+import logging
+
+from faster_whisper import WhisperModel
+from numpy.typing import NDArray
+import numpy as np
+
+from transcription.base import AudioMode, EngineInfo, EngineSession, TranscriptionEngine
+from transcription.types import TranscribeResult
+
+logger = logging.getLogger(__name__)
+
+# Approximate on-disk model sizes in GB
+_MODEL_SIZES: dict[str, float] = {
+    "large-v3-turbo": 1.5,
+    "large-v3": 2.9,
+    "large-v2": 2.9,
+    "medium": 1.4,
+    "small": 0.5,
+    "base": 0.1,
+    "tiny": 0.07,
+}
+
+
+class WhisperEngine:
+    audio_mode = AudioMode.FULL_BUFFER
+
+    def __init__(self, model: str, device: str, compute_type: str) -> None:
+        logger.info(
+            "Loading Whisper model: %s (device=%s, compute_type=%s)",
+            model, device, compute_type,
+        )
+        self._model = WhisperModel(model, device=device, compute_type=compute_type)
+        self._model_name = model
+        logger.info("Whisper model loaded successfully")
+
+    @property
+    def engine_info(self) -> EngineInfo:
+        return EngineInfo(
+            id="whisper",
+            name="Faster-Whisper",
+            model=self._model_name,
+            mode="batch-retranscribe",
+            supports_hotwords=True,
+            languages=["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
+            chunk_ms=None,
+            model_size_gb=_MODEL_SIZES.get(self._model_name, 1.5),
+        )
+
+    def create_session(self) -> "WhisperSession":
+        return WhisperSession(self._model)
+
+    def shutdown(self) -> None:
+        pass
+
+
+class WhisperSession:
+    def __init__(self, model: WhisperModel) -> None:
+        self._model = model
+        self._last_result = TranscribeResult(text="", confidence=0.0, last_speech_end=None)
+
+    def transcribe(
+        self,
+        audio: NDArray[np.float32],
+        *,
+        hotwords: str | None = None,
+    ) -> TranscribeResult:
+        segments, info = self._model.transcribe(
+            audio,
+            language=None,
+            hotwords=hotwords,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+        )
+
+        text_parts: list[str] = []
+        total_prob = 0.0
+        segment_count = 0
+        last_speech_end: float | None = None
+
+        for segment in segments:
+            text_parts.append(segment.text.strip())
+            total_prob += segment.avg_logprob
+            segment_count += 1
+            last_speech_end = segment.end
+
+        text = " ".join(text_parts).strip()
+        avg_confidence = 0.0
+        if segment_count > 0:
+            avg_log_prob = total_prob / segment_count
+            avg_confidence = min(1.0, max(0.0, 1.0 + avg_log_prob / 2.0))
+
+        self._last_result = TranscribeResult(
+            text=text, confidence=avg_confidence, last_speech_end=last_speech_end,
+        )
+        return self._last_result
+
+    def finalize(
+        self, full_audio: NDArray[np.float32] | None = None,
+    ) -> TranscribeResult:
+        return self._last_result
+
+    def close(self) -> None:
+        pass

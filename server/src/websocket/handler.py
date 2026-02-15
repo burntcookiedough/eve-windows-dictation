@@ -5,6 +5,8 @@ import json
 import logging
 import time
 
+from dataclasses import asdict
+
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -15,6 +17,8 @@ from protocol.frames import ClosingReason, StartFrame
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
+from transcription.base import AudioMode
+from transcription.factory import get_engine_manager
 from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
 
@@ -54,12 +58,15 @@ async def websocket_handler(websocket: WebSocket) -> None:
         # Create transcription processor
         processor = TranscriptionProcessor(context)
 
-        # Determine partial emission interval (client override or server default)
-        partial_interval = (
-            context.partial_emission_interval
-            if context.partial_emission_interval is not None
-            else settings.partial_emission_interval
-        )
+        # Determine partial emission interval
+        # For incremental engines (Nemotron), use a tight loop since each call
+        # only processes new audio and is very fast (~50ms per chunk).
+        if context.partial_emission_interval is not None:
+            partial_interval = context.partial_emission_interval
+        elif processor.audio_mode == AudioMode.INCREMENTAL:
+            partial_interval = 0.05  # 50ms — emit as fast as chunks arrive
+        else:
+            partial_interval = settings.partial_emission_interval
 
         # Start background tasks
         partial_task = asyncio.create_task(
@@ -84,6 +91,8 @@ async def websocket_handler(websocket: WebSocket) -> None:
                 await silence_task
             except asyncio.CancelledError:
                 pass
+            # Release per-session engine resources
+            processor.close()
 
     except WebSocketDisconnect:
         logger.info("[%s] Client disconnected", context.session_id)
@@ -167,8 +176,13 @@ async def _wait_for_start(
     context.mark_started()
     context.state_machine.transition_to(SessionState.STARTED)
 
-    # Send ready
-    await sender.send_ready()
+    # Send ready with engine info
+    try:
+        engine_mgr = get_engine_manager()
+        engine_info_dict = asdict(engine_mgr.engine_info)
+    except Exception:
+        engine_info_dict = None
+    await sender.send_ready(engine_info=engine_info_dict)
     logger.info(
         "[%s] Session started (silence_timeout=%.1fs, partial_interval=%s, hotwords=%s)",
         context.session_id,

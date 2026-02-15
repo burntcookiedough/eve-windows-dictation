@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from config import get_settings
-from transcription.engine import get_engine
+from transcription.base import AudioMode, EngineSession
+from transcription.factory import get_engine_manager
 
 if TYPE_CHECKING:
     from session.context import SessionContext
@@ -20,7 +21,6 @@ _executor: ThreadPoolExecutor | None = None
 
 
 def get_executor() -> ThreadPoolExecutor:
-    """Get the shared thread pool executor for transcription."""
     global _executor
     if _executor is None:
         _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="transcribe")
@@ -29,70 +29,59 @@ def get_executor() -> ThreadPoolExecutor:
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionResult:
-    """Result of a transcription operation."""
-
     text: str
     confidence: float
     is_empty: bool
     transcription_time: float
     audio_duration: float
-    last_speech_end: float | None  # Seconds from audio start, None if no speech
+    last_speech_end: float | None
 
 
 class TranscriptionProcessor:
-    """Handles transcription of audio from a session context."""
-
     def __init__(self, context: "SessionContext") -> None:
-        """Initialize the processor.
-
-        Args:
-            context: Session context containing audio buffer.
-        """
         self._context = context
         self._settings = get_settings()
 
+        manager = get_engine_manager()
+        self._session: EngineSession = manager.create_session(context.session_id)
+        self._audio_mode = manager.audio_mode
+        self._session_id = context.session_id
+
+    @property
+    def audio_mode(self) -> AudioMode:
+        return self._audio_mode
+
     async def transcribe_partial(self) -> TranscriptionResult | None:
-        """Transcribe current audio buffer for partial emission.
+        # Minimum duration check only for full-buffer mode
+        if self._audio_mode == AudioMode.FULL_BUFFER:
+            if (
+                self._context.audio_buffer.duration_seconds
+                < self._settings.min_audio_for_transcription
+            ):
+                return None
 
-        Returns:
-            TranscriptionResult if there's enough audio and new text,
-            None if there's not enough audio or no change.
-        """
-        # Check minimum audio duration
-        if (
-            self._context.audio_buffer.duration_seconds
-            < self._settings.min_audio_for_transcription
-        ):
-            return None
-
-        # Start timing
         start_time = time.perf_counter()
-
-        # Capture audio duration before transcription
         audio_duration = self._context.audio_buffer.duration_seconds
 
-        # Get audio as float32 for Whisper
-        audio = self._context.audio_buffer.get_audio_float32()
+        if self._audio_mode == AudioMode.FULL_BUFFER:
+            audio = self._context.audio_buffer.get_audio_float32()
+        else:
+            audio = self._context.audio_buffer.get_new_audio_float32()
+
         if len(audio) == 0:
             return None
 
-        # Run transcription in thread pool
         loop = asyncio.get_running_loop()
-        engine = get_engine()
-
         result = await loop.run_in_executor(
             get_executor(),
-            lambda: engine.transcribe(audio, hotwords=self._context.hotwords),
+            lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
         )
 
-        # Stop timing
         transcription_time = time.perf_counter() - start_time
 
-        # Check if text changed from last partial
         if result.text == self._context.last_partial_text:
             return None
 
-        # Update last partial
         self._context.last_partial_text = result.text
 
         return TranscriptionResult(
@@ -105,40 +94,35 @@ class TranscriptionProcessor:
         )
 
     async def transcribe_final(self) -> TranscriptionResult:
-        """Transcribe final audio for session end.
-
-        Returns:
-            TranscriptionResult with final transcription.
-        """
-        # Start timing
         start_time = time.perf_counter()
-
-        # Capture audio duration before transcription
         audio_duration = self._context.audio_buffer.duration_seconds
 
-        # Get audio as float32 for Whisper
-        audio = self._context.audio_buffer.get_audio_float32()
+        loop = asyncio.get_running_loop()
 
-        if len(audio) == 0:
-            return TranscriptionResult(
-                text="",
-                confidence=0.0,
-                is_empty=True,
-                transcription_time=0.0,
-                audio_duration=0.0,
-                last_speech_end=None,
+        if self._audio_mode == AudioMode.FULL_BUFFER:
+            audio = self._context.audio_buffer.get_audio_float32()
+            if len(audio) == 0:
+                return TranscriptionResult(
+                    text="",
+                    confidence=0.0,
+                    is_empty=True,
+                    transcription_time=0.0,
+                    audio_duration=0.0,
+                    last_speech_end=None,
+                )
+            result = await loop.run_in_executor(
+                get_executor(),
+                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+            )
+        else:
+            # For incremental engines: pass the full audio buffer so finalize
+            # can do a fresh batch pass for higher quality final text
+            full_audio = self._context.audio_buffer.get_audio_float32()
+            result = await loop.run_in_executor(
+                get_executor(),
+                lambda: self._session.finalize(full_audio=full_audio),
             )
 
-        # Run transcription in thread pool
-        loop = asyncio.get_running_loop()
-        engine = get_engine()
-
-        result = await loop.run_in_executor(
-            get_executor(),
-            lambda: engine.transcribe(audio, hotwords=self._context.hotwords),
-        )
-
-        # Stop timing
         transcription_time = time.perf_counter() - start_time
 
         return TranscriptionResult(
@@ -150,9 +134,12 @@ class TranscriptionProcessor:
             last_speech_end=result.last_speech_end,
         )
 
+    def close(self) -> None:
+        self._session.close()
+        get_engine_manager().release_session(self._session_id)
+
 
 def shutdown_executor() -> None:
-    """Shutdown the transcription thread pool."""
     global _executor
     if _executor is not None:
         _executor.shutdown(wait=True)

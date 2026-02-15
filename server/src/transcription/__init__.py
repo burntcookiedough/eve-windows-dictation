@@ -1,11 +1,18 @@
 """Transcription engine and processing utilities."""
 
-from transcription.engine import WhisperEngine, get_engine
+from transcription.base import AudioMode, EngineInfo, TranscriptionEngine
+from transcription.factory import get_engine_manager, init_engine_manager, shutdown_engine_manager
 from transcription.processor import TranscriptionProcessor, TranscriptionResult
+from transcription.types import TranscribeResult
 
 __all__ = [
+    "AudioMode",
+    "EngineInfo",
+    "TranscribeResult",
+    "TranscriptionEngine",
     "TranscriptionProcessor",
     "TranscriptionResult",
-    "WhisperEngine",
-    "get_engine",
+    "get_engine_manager",
+    "init_engine_manager",
+    "shutdown_engine_manager",
 ]

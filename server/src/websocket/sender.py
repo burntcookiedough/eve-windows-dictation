@@ -1,6 +1,7 @@
 """Helper for sending protocol frames over WebSocket."""
 
 import logging
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -30,10 +31,11 @@ class FrameSender:
         self._ws = websocket
         self._session_id = session_id
 
-    async def send_ready(self) -> None:
+    async def send_ready(self, engine_info: dict[str, Any] | None = None) -> None:
         """Send a ready control frame."""
-        frame = ReadyFrame()
-        await self._ws.send_json(frame.model_dump())
+        frame = ReadyFrame(engine=engine_info)
+        data = frame.model_dump(exclude_none=True)
+        await self._ws.send_json(data)
         logger.info("[%s] Sent ready frame", self._session_id)
 
     async def send_error(self, code: ErrorCode, message: str) -> None:
@@ -82,9 +84,10 @@ class FrameSender:
         )
         await self._ws.send_json(frame.model_dump())
         logger.debug(
-            "[%s] Sent partial: %r (conf=%.2f, time=%.3fs)",
+            "[%s] Sent partial (%d chars): ...%r (conf=%.2f, time=%.3fs)",
             self._session_id,
-            text[:50],
+            len(text),
+            text[-60:],
             confidence,
             transcription_time,
         )

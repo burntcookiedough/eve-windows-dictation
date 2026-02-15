@@ -12,6 +12,9 @@ import type {
   RecordingStatePayload,
   ConnectionStatePayload,
   TranscriptionPayload,
+  ServerSettingsResponse,
+  EngineStatus,
+  AvailableEngine,
 } from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
@@ -170,6 +173,23 @@ const murmurMainAPI = {
   removeServerListeners: (): void => {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);
+  },
+
+  // Server settings (REST API proxy)
+  getServerSettings: (): Promise<ServerSettingsResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_SERVER_SETTINGS);
+  },
+
+  updateServerSettings: (patch: Record<string, unknown>): Promise<ServerSettingsResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.UPDATE_SERVER_SETTINGS, patch);
+  },
+
+  getEngineStatus: (): Promise<EngineStatus> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_ENGINE_STATUS);
+  },
+
+  getAvailableEngines: (): Promise<AvailableEngine[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_AVAILABLE_ENGINES);
   },
 
   // Cleanup

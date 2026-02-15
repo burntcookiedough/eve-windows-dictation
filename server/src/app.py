@@ -4,13 +4,26 @@ import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from dataclasses import asdict
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, WebSocket
 
-from config import get_settings
+from config import (
+    API_KEYS,
+    RELOAD_KEYS,
+    Settings,
+    get_settings,
+    get_settings_with_metadata,
+    update_settings,
+)
 from session.manager import get_session_manager
-from transcription.engine import get_engine, shutdown_engine
+from transcription.factory import (
+    discover_engines,
+    get_engine_manager,
+    init_engine_manager,
+    shutdown_engine_manager,
+)
 from transcription.processor import shutdown_executor
 from version import SERVER_VERSION
 from websocket.handler import websocket_handler
@@ -20,37 +33,37 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan context manager."""
     settings = get_settings()
 
-    # Configure logging
     logging.basicConfig(
         level=getattr(logging, settings.log_level),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # Reduce noise from faster_whisper (logs every audio chunk at INFO)
-    logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+    # Reduce noise from engine libraries and their transitive dependencies
+    for noisy_logger in [
+        "faster_whisper", "nemo_logger", "matplotlib", "matplotlib.font_manager",
+        "graphviz", "graphviz._tools", "torio", "torio._extension",
+        "datasets", "numexpr", "nv_one_logger",
+    ]:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
     logger.info("Starting murmur...")
-    logger.info("Loading Whisper model (this may take a moment)...")
+    logger.info("Loading transcription engine (this may take a moment)...")
 
-    # Pre-load Whisper model at startup
-    get_engine()
+    init_engine_manager(settings)
 
     logger.info("Murmur ready")
 
     yield
 
-    # Shutdown
     logger.info("Shutting down murmur...")
     shutdown_executor()
-    shutdown_engine()
+    shutdown_engine_manager()
     logger.info("Murmur stopped")
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
     app = FastAPI(
         title="Murmur",
         description="WebSocket-based live voice transcription server",
@@ -60,35 +73,120 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check() -> dict:
-        """Health check endpoint."""
         manager = get_session_manager()
+        engine_mgr = get_engine_manager()
+        status = engine_mgr.get_status()
         return {
             "status": "healthy",
             "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
+            "engine": {
+                "current": status.current,
+                "status": status.status,
+                "info": asdict(status.info) if status.info else None,
+            },
         }
+
+    @app.get("/settings")
+    async def get_server_settings() -> dict:
+        settings = get_settings()
+        engine_mgr = get_engine_manager()
+        status = engine_mgr.get_status()
+        available = [e["id"] for e in discover_engines() if e["available"]]
+
+        return {
+            "settings": get_settings_with_metadata(settings),
+            "engine_status": {
+                "current": status.current,
+                "status": status.status,
+                "info": asdict(status.info) if status.info else None,
+                **({"pending": status.pending} if status.pending else {}),
+            },
+            "available_engines": available,
+        }
+
+    @app.patch("/settings")
+    async def update_server_settings(body: dict[str, Any]) -> dict:
+        # Filter to only API-managed keys
+        patch = {k: v for k, v in body.items() if k in API_KEYS}
+        if not patch:
+            return {"error": "No valid settings provided"}
+
+        # Check if reload is needed
+        needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)
+
+        new_settings = update_settings(patch)
+        engine_mgr = get_engine_manager()
+
+        reload_started = False
+        if needs_reload:
+            reload_started = True
+            asyncio.create_task(_swap_engine_background(engine_mgr, new_settings))
+
+        status = engine_mgr.get_status()
+        session_mgr = get_session_manager()
+
+        response: dict[str, Any] = {
+            "settings": get_settings_with_metadata(new_settings),
+            "engine_status": {
+                "current": status.current,
+                "status": status.status,
+                "info": asdict(status.info) if status.info else None,
+                **({"pending": status.pending} if status.pending else {}),
+            },
+            "reload_required": needs_reload,
+            "reload_started": reload_started,
+        }
+
+        if session_mgr.active_count > 0 and needs_reload:
+            response["active_sessions"] = session_mgr.active_count
+            response["note"] = "New engine loading in background. Active sessions will finish with current engine."
+
+        return response
+
+    @app.get("/engines")
+    async def get_available_engines() -> dict:
+        engines = discover_engines()
+        engine_mgr = get_engine_manager()
+        status = engine_mgr.get_status()
+        return {
+            "engines": engines,
+            "current": status.current,
+        }
+
+    @app.get("/engine/status")
+    async def get_engine_status() -> dict:
+        engine_mgr = get_engine_manager()
+        status = engine_mgr.get_status()
+        result: dict[str, Any] = {
+            "current": status.current,
+            "status": status.status,
+            "info": asdict(status.info) if status.info else None,
+        }
+        if status.pending:
+            result["pending"] = status.pending
+        return result
 
     @app.websocket("/transcribe")
     async def transcribe(websocket: WebSocket) -> None:
-        """WebSocket endpoint for live transcription."""
         await websocket_handler(websocket)
 
     @app.post("/shutdown")
     async def shutdown() -> dict:
-        """Trigger graceful server shutdown.
-
-        Used by the Electron app to stop the server when managed.
-        The endpoint returns immediately, and shutdown occurs after a brief delay.
-        """
         logger.info("Shutdown requested via API")
 
         def trigger_shutdown() -> None:
-            # Use SIGINT for cleaner uvicorn shutdown
             signal.raise_signal(signal.SIGINT)
 
-        # Schedule shutdown after response is sent
         asyncio.get_event_loop().call_later(0.5, trigger_shutdown)
         return {"status": "shutting_down"}
 
     return app
+
+
+async def _swap_engine_background(engine_mgr: Any, settings: Settings) -> None:
+    try:
+        await engine_mgr.swap_engine(settings)
+    except Exception as e:
+        logger.error("Background engine swap failed: %s", e)
