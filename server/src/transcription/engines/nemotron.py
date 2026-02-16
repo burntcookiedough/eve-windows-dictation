@@ -1,7 +1,9 @@
 """NVIDIA Nemotron Speech batch engine."""
 
+import faulthandler
 import logging
 import os
+import sys
 import tempfile
 import threading
 import warnings
@@ -17,20 +19,72 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 
+# Enable faulthandler so native crashes (SIGSEGV, SIGABRT) print a
+# Python traceback to stderr instead of silently exiting with code 1.
+faulthandler.enable(file=sys.stderr)
 
-class _NemoLogFilter(logging.Filter):
-    """Block noisy NeMo/Lhotse messages from the root logger."""
-    _BLOCKED = ("Lhotse CutSet", "Initializing Lhotse")
+
+class _BlockAllFilter(logging.Filter):
+    """Block all log records. Attached to NeMo's handlers to silence spam.
+
+    We use handler-level filters (not logger-level setLevel) because NeMo's
+    _transcribe_on_begin() resets handler *levels* to WARNING on every call,
+    but it never touches handler *filters*.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return False
+
+
+class _BlockNemoRootFilter(logging.Filter):
+    """Block NeMo/Lhotse messages that leak to the root logger."""
+
+    _BLOCKED = (
+        "Initializing Lhotse",
+        "Lhotse CutSet",
+        "Lhotse dataloader",
+    )
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         return not any(s in msg for s in self._BLOCKED)
 
 
+def _suppress_nemo_logging() -> None:
+    """Silence NeMo/Lhotse/nv_one_logger output permanently."""
+    block = _BlockAllFilter()
+
+    # Block [NeMo W/I] messages by filtering NeMo's own StreamHandlers.
+    nemo_log = logging.getLogger("nemo_logger")
+    for handler in nemo_log.handlers:
+        handler.addFilter(block)
+
+    # Suppress related loggers via level (these don't get reset by NeMo).
+    for name in ["nv_one_logger", "lhotse", "lhotse.cut", "lhotse.dataset"]:
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+    # Block Lhotse messages that leak to root logger (not through nemo_logger).
+    logging.getLogger().addFilter(_BlockNemoRootFilter())
+
+
 class NemotronEngine:
     def __init__(self, model_name: str, device: str = "auto") -> None:
         import torch
+
+        # Suppress Python warnings from NeMo/Lhotse before import triggers them.
+        warnings.filterwarnings("ignore", message=".*Lhotse.*")
+        warnings.filterwarnings("ignore", message=".*non-tarred.*")
+        warnings.filterwarnings("ignore", message=".*Megatron.*")
+        warnings.filterwarnings("ignore", message=".*OneLogger.*")
+
+        # Pre-suppress nv_one_logger before NeMo import fires warnings.
+        logging.getLogger("nv_one_logger").setLevel(logging.ERROR)
+
         import nemo.collections.asr as nemo_asr
+
+        # Now that NeMo's Logger singleton exists with its handlers,
+        # add blocking filters that persist across transcribe() calls.
+        _suppress_nemo_logging()
 
         resolved_device = device
         if device == "auto":
@@ -42,26 +96,20 @@ class NemotronEngine:
         self._model.eval()
         self._model = self._model.to(resolved_device)
 
+        # Disable persistent dataloader workers to reduce CUDA memory pressure.
+        from omegaconf import open_dict
+
+        with open_dict(self._model.cfg):
+            for ds_key in ["test_ds", "validation_ds", "train_ds"]:
+                if ds_key in self._model.cfg:
+                    self._model.cfg[ds_key].num_workers = 0
+
         self._model_name = model_name
         self._device = resolved_device
         self._use_cuda = resolved_device != "cpu" and torch.cuda.is_available()
         # Serialize model.transcribe() calls — NeMo's internal freeze/unfreeze
         # state corrupts when two calls overlap on the same model.
         self._model_lock = threading.Lock()
-
-        # Suppress [NeMo W] messages via NeMo's own logging API
-        from nemo.utils import logging as nemo_logging
-        nemo_logging.setLevel(logging.ERROR)
-
-        # Suppress NeMo/Lhotse warnings (Python warnings module)
-        warnings.filterwarnings("ignore", message=".*Lhotse.*")
-        warnings.filterwarnings("ignore", message=".*non-tarred dataset.*")
-        warnings.filterwarnings("ignore", message=".*Megatron.*")
-
-        # Block noisy messages from root logger + NeMo/Lhotse loggers
-        logging.getLogger().addFilter(_NemoLogFilter())
-        for name in ["nemo_logger", "nemo", "lhotse", "lhotse.cut", "lhotse.dataset"]:
-            logging.getLogger(name).setLevel(logging.ERROR)
 
         logger.info("Nemotron model loaded successfully")
 
@@ -77,12 +125,17 @@ class NemotronEngine:
         )
 
     def create_session(self) -> "NemotronSession":
+        # NOTE: Do NOT call torch.cuda.empty_cache() or gc.collect() here.
+        # Both crash the NeMo model on the next transcribe() call (native
+        # SIGSEGV, exit code 1). VRAM stays at peak between sessions but
+        # this is the only stable approach. See memory notes for details.
         return NemotronSession(self._model, self._device, self._model_lock)
 
     def shutdown(self) -> None:
         logger.info("Shutting down Nemotron engine")
         del self._model
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -121,10 +174,19 @@ class NemotronSession:
                 # params which breaks CUDA kernel selection and crashes.
                 if hasattr(self._model, "encoder"):
                     self._model.encoder._frozen = True
-                with torch.no_grad():
-                    output = self._model.transcribe(
-                        [tmp_path], verbose=False,
+
+                try:
+                    with torch.no_grad():
+                        output = self._model.transcribe(
+                            [tmp_path], verbose=False,
+                        )
+                except Exception:
+                    logger.error(
+                        "model.transcribe() failed (audio=%.1fs)",
+                        audio_duration,
+                        exc_info=True,
                     )
+                    return self._last_result
 
             # Extract text — output format varies by NeMo version
             text = ""
