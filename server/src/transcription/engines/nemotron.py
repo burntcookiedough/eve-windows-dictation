@@ -125,10 +125,16 @@ class NemotronEngine:
         )
 
     def create_session(self) -> "NemotronSession":
-        # NOTE: Do NOT call torch.cuda.empty_cache() or gc.collect() here.
-        # Both crash the NeMo model on the next transcribe() call (native
-        # SIGSEGV, exit code 1). VRAM stays at peak between sessions but
-        # this is the only stable approach. See memory notes for details.
+        # Reclaim VRAM from previous sessions.  NeMo's RNNT decoder uses
+        # CUDA graphs that hold GPU memory references — calling empty_cache()
+        # without disabling them first causes a native crash (SIGSEGV).
+        # See: https://github.com/NVIDIA-NeMo/NeMo/issues/14727
+        if self._use_cuda:
+            import torch
+
+            self._model.disable_cuda_graphs()
+            torch.cuda.empty_cache()
+            self._model.maybe_enable_cuda_graphs()
         return NemotronSession(self._model, self._device, self._model_lock)
 
     def shutdown(self) -> None:
