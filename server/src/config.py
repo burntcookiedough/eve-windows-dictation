@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     # Engine selection (Nemotron is default)
     engine: Literal["nemotron", "whisper"] = "nemotron"
+    # Internal: whether engine choice should be treated as automatic/default
+    # selection or an explicit user override.
+    engine_preference_mode: Literal["auto", "manual"] = "auto"
 
     # Whisper settings
     whisper_model: str = "large-v3-turbo"
@@ -161,6 +164,7 @@ RELOAD_KEYS = {k for k, v in SETTINGS_METADATA.items() if v.get("requires_reload
 
 # Keys exposed via REST API (excludes server-internal settings)
 API_KEYS = set(SETTINGS_METADATA.keys())
+PERSISTED_INTERNAL_KEYS = {"engine_preference_mode"}
 
 
 def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
@@ -204,7 +208,7 @@ def _persist_settings(settings: Settings) -> None:
     current_dict = settings.model_dump()
     # Only persist values that differ from defaults
     diff: dict[str, Any] = {}
-    for key in API_KEYS:
+    for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
         if key in current_dict and current_dict[key] != default_dict.get(key):
             diff[key] = current_dict[key]
     try:

@@ -62,6 +62,21 @@ class ErrorFrame(ControlFrameBase):
     message: str
 
 
+class WarningCode(StrEnum):
+    """Machine-readable warning codes sent in non-fatal warning frames."""
+
+    VRAM_EXHAUSTED = "vram_exhausted"
+    """GPU VRAM was exhausted during transcription."""
+
+
+class WarningFrame(ControlFrameBase):
+    """Server -> Client: Non-fatal warning; session continues."""
+
+    type: Literal["warning"] = "warning"
+    code: WarningCode
+    message: str
+
+
 class ClosingReason(StrEnum):
     """Reasons for closing a session."""
 
@@ -80,7 +95,14 @@ class ClosingFrame(ControlFrameBase):
 
 
 # Union type for all control frames
-ControlFrame = Union[StartFrame, StopFrame, ReadyFrame, ErrorFrame, ClosingFrame]
+ControlFrame = Union[
+    StartFrame,
+    StopFrame,
+    ReadyFrame,
+    ErrorFrame,
+    WarningFrame,
+    ClosingFrame,
+]
 
 
 # --- Text Frames ---

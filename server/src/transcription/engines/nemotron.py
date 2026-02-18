@@ -13,6 +13,7 @@ import soundfile as sf
 from numpy.typing import NDArray
 
 from transcription.base import EngineInfo
+from transcription.errors import VramExhaustedError
 from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,13 @@ class NemotronSession:
                         output = self._model.transcribe(
                             [tmp_path], verbose=False,
                         )
+                except torch.cuda.OutOfMemoryError as error:
+                    logger.warning(
+                        "CUDA OOM during model.transcribe() (audio=%.1fs); "
+                        "falling back to last successful result",
+                        audio_duration,
+                    )
+                    raise VramExhaustedError(last_result=self._last_result) from error
                 except Exception:
                     logger.error(
                         "model.transcribe() failed (audio=%.1fs)",

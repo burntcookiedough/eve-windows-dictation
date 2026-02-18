@@ -175,6 +175,34 @@ Fatal error. Connection will close immediately after.
 
 **Client behavior:** Log the error. Connection will close.
 
+### warning (Server → Client)
+
+Non-fatal warning. Session continues and connection remains open.
+
+```json
+{
+  "frame": "control",
+  "type": "warning",
+  "code": "vram_exhausted",
+  "message": "GPU VRAM exhausted during transcription; using last successful result."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `frame` | string | `"control"` |
+| `type` | string | `"warning"` |
+| `code` | string | Machine-readable warning code |
+| `message` | string | Human-readable warning message |
+
+#### Warning Codes
+
+| Code | Meaning |
+|------|---------|
+| `vram_exhausted` | GPU VRAM exhausted during transcription; server falls back to last successful text |
+
+**Client behavior:** Surface warning to user and continue sending audio normally.
+
 ### closing (Server → Client)
 
 Server is about to close the connection. Sent after final text frame (if any).
@@ -323,3 +351,5 @@ A session ends when any of the following occur:
 3. **Client closes connection** — Server treats as implicit stop, cleans up resources.
 
 4. **Fatal error** — Server sends `error`, closes connection immediately. No `final` or `closing` frame is sent.
+
+5. **Non-fatal warning** — Server may send `warning` at any time during an active session. Session continues.

@@ -13,6 +13,8 @@ from protocol.frames import (
     FinalTextFrame,
     PartialTextFrame,
     ReadyFrame,
+    WarningCode,
+    WarningFrame,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,14 @@ class FrameSender:
         await self._ws.send_json(frame.model_dump())
         logger.warning(
             "[%s] Sent error frame: %s - %s", self._session_id, code, message
+        )
+
+    async def send_warning(self, code: WarningCode, message: str) -> None:
+        """Send a non-fatal warning control frame."""
+        frame = WarningFrame(code=code, message=message)
+        await self._ws.send_json(frame.model_dump())
+        logger.warning(
+            "[%s] Sent warning frame: %s - %s", self._session_id, code, message
         )
 
     async def send_closing(self, reason: ClosingReason) -> None:

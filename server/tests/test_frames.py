@@ -13,6 +13,8 @@ from protocol.frames import (
     ReadyFrame,
     StartFrame,
     StopFrame,
+    WarningCode,
+    WarningFrame,
 )
 
 
@@ -149,6 +151,37 @@ class TestClosingFrame:
             "frame": "control",
             "type": "closing",
             "reason": "silence_timeout",
+        }
+
+
+class TestWarningFrame:
+    """Tests for WarningFrame."""
+
+    def test_valid_warning_frame(self) -> None:
+        """Create a valid warning frame."""
+        frame = WarningFrame(
+            code=WarningCode.VRAM_EXHAUSTED,
+            message="GPU VRAM exhausted",
+        )
+
+        assert frame.frame == "control"
+        assert frame.type == "warning"
+        assert frame.code == WarningCode.VRAM_EXHAUSTED
+        assert frame.message == "GPU VRAM exhausted"
+
+    def test_warning_frame_serialization(self) -> None:
+        """Warning frame serializes correctly."""
+        frame = WarningFrame(
+            code=WarningCode.VRAM_EXHAUSTED,
+            message="GPU VRAM exhausted",
+        )
+        data = frame.model_dump()
+
+        assert data == {
+            "frame": "control",
+            "type": "warning",
+            "code": "vram_exhausted",
+            "message": "GPU VRAM exhausted",
         }
 
 

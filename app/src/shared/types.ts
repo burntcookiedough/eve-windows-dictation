@@ -40,6 +40,11 @@ export interface ConnectionStatePayload {
   error?: string;
 }
 
+export interface RecordingWarningPayload {
+  code: string;
+  message: string;
+}
+
 export interface AudioLevelPayload {
   levels: number[]; // RMS values for waveform bars
 }
@@ -143,6 +148,9 @@ export interface EngineInfo {
   supports_hotwords: boolean;
   languages: string[];
   model_size_gb: number;
+  gpu_name?: string | null;
+  gpu_vram_gb?: number | null;
+  estimated_max_duration_s?: number | null;
 }
 
 export interface EngineStatus {

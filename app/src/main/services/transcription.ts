@@ -8,7 +8,12 @@ import {
   type TextFrame,
   type TextFrameFinal,
 } from '../../shared/protocol.js';
-import type { TranscriptionPayload, ConnectionStatePayload, RecordingStatePayload } from '../../shared/types.js';
+import type {
+  TranscriptionPayload,
+  ConnectionStatePayload,
+  RecordingStatePayload,
+  RecordingWarningPayload,
+} from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Transcription');
@@ -27,6 +32,7 @@ export class TranscriptionService {
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
   private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
   private onTranscriptionCallback: ((payload: TranscriptionPayload) => void) | null = null;
+  private onWarningCallback: ((payload: RecordingWarningPayload) => void) | null = null;
 
   constructor(
     serverUrl: string,
@@ -128,6 +134,10 @@ export class TranscriptionService {
     this.onTranscriptionCallback = callback;
   }
 
+  onWarning(callback: (payload: RecordingWarningPayload) => void): void {
+    this.onWarningCallback = callback;
+  }
+
   private broadcastToOverlay<T>(channel: string, payload: T): void {
     if (!this.overlayWindow.isDestroyed()) {
       this.overlayWindow.webContents.send(channel, payload);
@@ -153,6 +163,17 @@ export class TranscriptionService {
           this.sendConnectionState('error', frame.message);
           this.sendRecordingState('error');
           break;
+
+        case 'warning': {
+          const payload: RecordingWarningPayload = {
+            code: frame.code,
+            message: frame.message,
+          };
+          log.warn('Server warning', payload);
+          this.broadcastToOverlay(IPC_CHANNELS.STATE_WARNING, payload);
+          this.onWarningCallback?.(payload);
+          break;
+        }
 
         case 'closing':
           // Server is ending the session - stop accepting audio

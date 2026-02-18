@@ -17,6 +17,9 @@ class EngineInfo:
     supports_hotwords: bool
     languages: list[str] = field(default_factory=lambda: ["en"])
     model_size_gb: float = 0.0
+    gpu_name: str | None = None
+    gpu_vram_gb: float | None = None
+    estimated_max_duration_s: int | None = None
 
 
 @runtime_checkable

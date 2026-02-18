@@ -13,10 +13,11 @@ from pydantic import ValidationError
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
 from protocol.errors import ErrorCode
-from protocol.frames import ClosingReason, StartFrame
+from protocol.frames import ClosingReason, StartFrame, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
+from transcription.errors import VramExhaustedError
 from transcription.factory import get_engine_manager
 from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
@@ -311,6 +312,8 @@ async def _partial_emission_loop(
     Uses adaptive timing: sleeps only for the remaining time after transcription
     completes, ensuring cycle time = max(min_interval, transcription_time).
     """
+    warning_sent = False
+
     while context.state_machine.is_active():
         cycle_start = time.monotonic()
 
@@ -349,6 +352,15 @@ async def _partial_emission_loop(
                     cycle_time * 1000,
                     result.audio_duration,
                 )
+        except VramExhaustedError as e:
+            logger.warning(
+                "[%s] VRAM exhausted during partial transcription: %s",
+                context.session_id,
+                e.message,
+            )
+            if not warning_sent:
+                warning_sent = True
+                await sender.send_warning(WarningCode.VRAM_EXHAUSTED, e.message)
         except Exception as e:
             logger.exception(
                 "[%s] Error in partial emission: %s", context.session_id, e

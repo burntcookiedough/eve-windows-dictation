@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from config import get_settings
 from transcription.base import EngineSession
+from transcription.errors import VramExhaustedError
 from transcription.factory import get_engine_manager
 
 if TYPE_CHECKING:
@@ -99,10 +100,18 @@ class TranscriptionProcessor:
             )
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            get_executor(),
-            lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-        )
+        try:
+            result = await loop.run_in_executor(
+                get_executor(),
+                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+            )
+        except VramExhaustedError as error:
+            logger.warning(
+                "[%s] VRAM exhausted during final transcription; "
+                "returning last successful result",
+                self._session_id,
+            )
+            result = error.last_result or self._session.finalize()
 
         transcription_time = time.perf_counter() - start_time
 

@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from transcription.base import EngineInfo, EngineSession, TranscriptionEngine
+from transcription.vram import (
+    detect_gpu_capabilities,
+    estimate_max_duration_s,
+    get_vram_profile,
+)
 
 if TYPE_CHECKING:
     from config import Settings
@@ -66,6 +71,14 @@ def _get_available_engine_ids() -> list[str]:
     return [e["id"] for e in discover_engines() if e["available"]]
 
 
+def _get_engine_device(settings: Settings, engine_id: str) -> str:
+    if engine_id == "nemotron":
+        return settings.nemotron_device
+    if engine_id == "whisper":
+        return settings.whisper_device
+    return "auto"
+
+
 def _create_engine(settings: Settings) -> TranscriptionEngine:
     engine_id = settings.engine
 
@@ -116,27 +129,123 @@ class EngineManager:
         self._pending_engine_id: str | None = None
         self._pending_message: str | None = None
         self._swap_error: str | None = None
+        self._gpu_name: str | None = None
+        self._gpu_vram_gb: float | None = None
+        self._estimated_max_duration_s: int | None = None
+
+    def _resolve_engine_availability(
+        self,
+        settings: Settings,
+        available: list[str],
+    ) -> None:
+        engine_id = settings.engine
+        if engine_id in available:
+            return
+
+        fallback = "whisper" if engine_id == "nemotron" else "nemotron"
+        if fallback in available:
+            logger.warning("%s not available, falling back to %s", engine_id, fallback)
+            settings.engine = fallback  # type: ignore[assignment]
+            return
+
+        raise RuntimeError(
+            "No transcription engines available. "
+            "Install at least one: uv sync --extra nemotron  or  uv sync --extra whisper"
+        )
+
+    def _apply_vram_policy(self, settings: Settings, available: list[str]) -> None:
+        if settings.engine != "nemotron":
+            return
+
+        profile = get_vram_profile("nemotron")
+        if profile is None:
+            return
+
+        capabilities = detect_gpu_capabilities(settings.nemotron_device)
+        total_vram_gb = capabilities.total_vram_gb
+        estimated_s = estimate_max_duration_s("nemotron", total_vram_gb)
+
+        if (
+            profile.min_recommended_vram_gb is not None
+            and total_vram_gb is not None
+            and total_vram_gb < profile.min_recommended_vram_gb
+        ):
+            if settings.engine_preference_mode == "manual":
+                logger.warning(
+                    "Nemotron explicitly selected on low-VRAM GPU "
+                    "(gpu=%s, vram=%.1f GB, estimated_max=~%ss).",
+                    capabilities.name or "unknown",
+                    total_vram_gb,
+                    estimated_s if estimated_s is not None else "unknown",
+                )
+                return
+
+            if "whisper" in available:
+                logger.warning(
+                    "Detected %.1f GB VRAM for Nemotron (recommended >= %.1f GB); "
+                    "auto-falling back to whisper.",
+                    total_vram_gb,
+                    profile.min_recommended_vram_gb,
+                )
+                settings.engine = "whisper"
+                return
+
+            raise RuntimeError(
+                "Nemotron selected but detected VRAM is below recommended minimum "
+                f"({total_vram_gb:.1f} GB < {profile.min_recommended_vram_gb:.1f} GB), "
+                "and whisper fallback is unavailable."
+            )
+
+        if total_vram_gb is not None and estimated_s is not None:
+            logger.info(
+                "Nemotron VRAM estimate: gpu=%s vram=%.1f GB estimated_max=~%ss",
+                capabilities.name or "unknown",
+                total_vram_gb,
+                estimated_s,
+            )
+        elif capabilities.reason:
+            logger.info("Nemotron VRAM estimate unavailable: %s", capabilities.reason)
+
+    def _prepare_engine_selection(
+        self,
+        settings: Settings,
+        available: list[str],
+    ) -> None:
+        self._resolve_engine_availability(settings, available)
+        self._apply_vram_policy(settings, available)
+
+    def _update_runtime_metadata(self, settings: Settings) -> None:
+        device = _get_engine_device(settings, settings.engine)
+        capabilities = detect_gpu_capabilities(device)
+        estimated_max_duration_s = estimate_max_duration_s(
+            settings.engine,
+            capabilities.total_vram_gb,
+        )
+
+        self._gpu_name = capabilities.name
+        self._gpu_vram_gb = capabilities.total_vram_gb
+        self._estimated_max_duration_s = estimated_max_duration_s
+
+        if capabilities.total_vram_gb is not None:
+            logger.info(
+                "Engine ready: %s (gpu=%s, vram=%.1f GB, estimated_max=~%ss)",
+                settings.engine,
+                capabilities.name or "unknown",
+                capabilities.total_vram_gb,
+                estimated_max_duration_s if estimated_max_duration_s is not None else "unknown",
+            )
+        elif capabilities.reason:
+            logger.info(
+                "Engine ready: %s (gpu info unavailable: %s)",
+                settings.engine,
+                capabilities.reason,
+            )
 
     def load_initial_engine(self) -> None:
-        engine_id = self._settings.engine
         available = _get_available_engine_ids()
-
-        if engine_id not in available:
-            # Fallback logic: nemotron → whisper
-            fallback = "whisper" if engine_id == "nemotron" else "nemotron"
-            if fallback in available:
-                logger.warning(
-                    "%s not available, falling back to %s", engine_id, fallback
-                )
-                engine_id = fallback
-                self._settings.engine = fallback  # type: ignore[assignment]
-            else:
-                raise RuntimeError(
-                    f"No transcription engines available. "
-                    f"Install at least one: uv sync --extra nemotron  or  uv sync --extra whisper"
-                )
-
+        self._prepare_engine_selection(self._settings, available)
         self._engine = _create_engine(self._settings)
+        self._update_runtime_metadata(self._settings)
 
     @property
     def engine(self) -> TranscriptionEngine:
@@ -146,10 +255,15 @@ class EngineManager:
 
     @property
     def engine_info(self) -> EngineInfo:
-        return self.engine.engine_info
+        return replace(
+            self.engine.engine_info,
+            gpu_name=self._gpu_name,
+            gpu_vram_gb=self._gpu_vram_gb,
+            estimated_max_duration_s=self._estimated_max_duration_s,
+        )
 
     def get_status(self) -> EngineStatus:
-        info = self._engine.engine_info if self._engine else None
+        info = self.engine_info if self._engine else None
         status = EngineStatus(
             current=self._settings.engine,
             status="ready" if self._engine and not self._pending_status else "loading",
@@ -191,13 +305,15 @@ class EngineManager:
             return len(self._active_sessions)
 
     async def swap_engine(self, new_settings: Settings) -> None:
-        self._pending_engine_id = new_settings.engine
-        self._pending_status = "loading"
-        self._pending_message = f"Loading {new_settings.engine} engine..."
-
-        unload_first = getattr(new_settings, "unload_before_swap", False)
-
         try:
+            available = _get_available_engine_ids()
+            self._prepare_engine_selection(new_settings, available)
+
+            self._pending_engine_id = new_settings.engine
+            self._pending_status = "loading"
+            self._pending_message = f"Loading {new_settings.engine} engine..."
+
+            unload_first = getattr(new_settings, "unload_before_swap", False)
             loop = asyncio.get_running_loop()
 
             if unload_first and self._engine is not None:
@@ -219,6 +335,8 @@ class EngineManager:
 
                 # Check if old engine has active sessions
                 has_active = old_engine is not None and old_engine in self._active_sessions.values()
+
+            self._update_runtime_metadata(new_settings)
 
             if old_engine is not None and not has_active:
                 await loop.run_in_executor(None, old_engine.shutdown)

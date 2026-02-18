@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   STATE_RECORDING: 'state:recording',
   STATE_CONNECTION: 'state:connection',
   STATE_TRANSCRIPTION: 'state:transcription',
+  STATE_WARNING: 'state:warning',
 
   // Main → Renderer (commands to start/stop audio capture)
   COMMAND_START_RECORDING: 'command:start-recording',

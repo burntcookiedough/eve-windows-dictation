@@ -115,6 +115,10 @@ def create_app() -> FastAPI:
         if not patch:
             return {"error": "No valid settings provided"}
 
+        # Track explicit engine overrides separately from default/auto selection.
+        if "engine" in patch:
+            patch["engine_preference_mode"] = "manual"
+
         # Check if reload is needed
         needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)
 

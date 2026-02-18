@@ -111,6 +111,16 @@
     return (serverSettings?.[key]?.options as Array<{ value: unknown; label: string; description?: string }>) ?? [];
   }
 
+  function formatEstimatedDuration(seconds: number): string {
+    if (seconds < 60) {
+      return `~${seconds}s`;
+    }
+    if (seconds < 120) {
+      return `~${(seconds / 60).toFixed(1)} min`;
+    }
+    return `~${Math.round(seconds / 60)} min`;
+  }
+
   onMount(async () => {
     appVersion = await window.murmurMain.getAppVersion();
 
@@ -645,7 +655,19 @@
               {/if}
             </div>
             {#if engineStatus.info}
-              <span class="text-xs text-zinc-500">~{engineStatus.info.model_size_gb} GB</span>
+              <div class="flex flex-col items-end gap-0.5">
+                <span class="text-xs text-zinc-500">~{engineStatus.info.model_size_gb} GB model</span>
+                {#if engineStatus.info.gpu_vram_gb != null}
+                  <span class="max-w-[260px] truncate text-xs text-zinc-500" title={engineStatus.info.gpu_name ?? 'GPU'}>
+                    {engineStatus.info.gpu_name ?? 'GPU'} • {engineStatus.info.gpu_vram_gb.toFixed(1)} GB VRAM
+                  </span>
+                {/if}
+                {#if engineStatus.info.estimated_max_duration_s != null}
+                  <span class="text-xs text-zinc-400">
+                    Est. max per recording: {formatEstimatedDuration(engineStatus.info.estimated_max_duration_s)}
+                  </span>
+                {/if}
+              </div>
             {/if}
           </div>
         {/if}
