@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import sys
 import threading
+import time
+import urllib.request
+from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -20,12 +26,94 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# region agent log
+_DEBUG_LOG_PATH_RAW = "/home/dikka/raikr/Documents/projs/murmur/nemotron/.cursor/debug-46f840.log"
+_DEBUG_SESSION_ID = "46f840"
+_DEBUG_RUN_ID = "startup-nemotron-availability"
+_DEBUG_SERVER_ENDPOINT = "http://127.0.0.1:7298/ingest/10253f83-4bde-4571-ac40-abb1de60ac60"
+
+
+def _resolve_debug_log_path() -> str:
+    # In Windows runtime, map to the repo-local .cursor log path.
+    if os.name == "nt":
+        return str(Path(__file__).resolve().parents[3] / ".cursor" / "debug-46f840.log")
+    return _DEBUG_LOG_PATH_RAW
+
+
+_DEBUG_LOG_PATH = _resolve_debug_log_path()
+
+
+def _debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict,
+) -> None:
+    payload = {
+        "sessionId": _DEBUG_SESSION_ID,
+        "runId": _DEBUG_RUN_ID,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        os.makedirs(os.path.dirname(_DEBUG_LOG_PATH), exist_ok=True)
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_file:
+            debug_file.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        return
+    except Exception:
+        pass
+    try:
+        request = urllib.request.Request(
+            _DEBUG_SERVER_ENDPOINT,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": _DEBUG_SESSION_ID,
+            },
+            data=json.dumps(payload, ensure_ascii=True).encode("utf-8"),
+        )
+        with urllib.request.urlopen(request, timeout=1):
+            return
+    except Exception:
+        # Never break engine startup because of debug logging.
+        return
+
+# endregion
+
 
 def discover_engines() -> list[dict]:
     available = []
+    # region agent log
+    _debug_log(
+        "H3-environment-mismatch",
+        "transcription/factory.py:discover_engines:entry",
+        "Engine discovery started",
+        {
+            "python_executable": sys.executable,
+            "python_version": sys.version.split()[0],
+            "cwd": os.getcwd(),
+            "os_name": os.name,
+            "debug_log_path": _DEBUG_LOG_PATH,
+            "path_head": sys.path[:5],
+        },
+    )
+    # endregion
 
     try:
-        import nemo.collections.asr  # noqa: F401
+        import nemo.collections.asr as nemo_asr  # noqa: F401
+        # region agent log
+        _debug_log(
+            "H1-nemo-package-missing",
+            "transcription/factory.py:discover_engines:nemo:success",
+            "Nemotron dependency import succeeded",
+            {
+                "module_file": getattr(nemo_asr, "__file__", None),
+            },
+        )
+        # endregion
         available.append({
             "id": "nemotron",
             "name": "Nemotron Speech",
@@ -35,7 +123,20 @@ def discover_engines() -> list[dict]:
             "languages": ["en"],
             "features": ["fast_batch", "constant_latency"],
         })
-    except ImportError:
+    except ImportError as error:
+        # region agent log
+        _debug_log(
+            "H2-nemo-transitive-importerror",
+            "transcription/factory.py:discover_engines:nemo:importerror",
+            "Nemotron dependency import failed",
+            {
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "missing_name": getattr(error, "name", None),
+                "missing_path": getattr(error, "path", None),
+            },
+        )
+        # endregion
         available.append({
             "id": "nemotron",
             "name": "Nemotron Speech",
@@ -45,7 +146,17 @@ def discover_engines() -> list[dict]:
         })
 
     try:
-        import faster_whisper  # noqa: F401
+        import faster_whisper as faster_whisper_module  # noqa: F401
+        # region agent log
+        _debug_log(
+            "H3-environment-mismatch",
+            "transcription/factory.py:discover_engines:whisper:success",
+            "Whisper dependency import succeeded",
+            {
+                "module_file": getattr(faster_whisper_module, "__file__", None),
+            },
+        )
+        # endregion
         available.append({
             "id": "whisper",
             "name": "Faster-Whisper",
@@ -55,7 +166,20 @@ def discover_engines() -> list[dict]:
             "languages": ["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
             "features": ["multilingual", "hotwords"],
         })
-    except ImportError:
+    except ImportError as error:
+        # region agent log
+        _debug_log(
+            "H3-environment-mismatch",
+            "transcription/factory.py:discover_engines:whisper:importerror",
+            "Whisper dependency import failed",
+            {
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "missing_name": getattr(error, "name", None),
+                "missing_path": getattr(error, "path", None),
+            },
+        )
+        # endregion
         available.append({
             "id": "whisper",
             "name": "Faster-Whisper",
@@ -64,6 +188,17 @@ def discover_engines() -> list[dict]:
             "install_hint": "uv sync --extra whisper",
         })
 
+    # region agent log
+    _debug_log(
+        "H4-discovery-selection-mismatch",
+        "transcription/factory.py:discover_engines:result",
+        "Engine discovery completed",
+        {
+            "available_ids": [engine["id"] for engine in available if engine["available"]],
+            "all_engines": available,
+        },
+    )
+    # endregion
     return available
 
 
@@ -116,7 +251,7 @@ class EngineStatus:
     status: str  # "ready", "loading", "error"
     info: EngineInfo | None = None
     pending: dict | None = None
-    error_message: str | None = None
+    message: str | None = None
 
 
 class EngineManager:
@@ -139,15 +274,50 @@ class EngineManager:
         available: list[str],
     ) -> None:
         engine_id = settings.engine
+        # region agent log
+        _debug_log(
+            "H4-discovery-selection-mismatch",
+            "transcription/factory.py:_resolve_engine_availability:entry",
+            "Resolving selected engine availability",
+            {
+                "requested_engine": engine_id,
+                "available_ids": available,
+                "engine_preference_mode": getattr(settings, "engine_preference_mode", None),
+            },
+        )
+        # endregion
         if engine_id in available:
             return
 
         fallback = "whisper" if engine_id == "nemotron" else "nemotron"
         if fallback in available:
+            # region agent log
+            _debug_log(
+                "H4-discovery-selection-mismatch",
+                "transcription/factory.py:_resolve_engine_availability:fallback",
+                "Requested engine unavailable, applying fallback",
+                {
+                    "requested_engine": engine_id,
+                    "fallback_engine": fallback,
+                    "available_ids": available,
+                },
+            )
+            # endregion
             logger.warning("%s not available, falling back to %s", engine_id, fallback)
             settings.engine = fallback  # type: ignore[assignment]
             return
 
+        # region agent log
+        _debug_log(
+            "H4-discovery-selection-mismatch",
+            "transcription/factory.py:_resolve_engine_availability:none-available",
+            "No engines available after discovery",
+            {
+                "requested_engine": engine_id,
+                "available_ids": available,
+            },
+        )
+        # endregion
         raise RuntimeError(
             "No transcription engines available. "
             "Install at least one: uv sync --extra nemotron  or  uv sync --extra whisper"
@@ -264,9 +434,18 @@ class EngineManager:
 
     def get_status(self) -> EngineStatus:
         info = self.engine_info if self._engine else None
+        if self._pending_status:
+            status_value = "loading"
+        elif self._swap_error:
+            status_value = "error"
+        elif self._engine:
+            status_value = "ready"
+        else:
+            status_value = "loading"
+
         status = EngineStatus(
             current=self._settings.engine,
-            status="ready" if self._engine and not self._pending_status else "loading",
+            status=status_value,
             info=info,
         )
         if self._pending_status:
@@ -276,8 +455,7 @@ class EngineManager:
                 "message": self._pending_message,
             }
         if self._swap_error:
-            status.error_message = self._swap_error
-            self._swap_error = None
+            status.message = self._swap_error
         return status
 
     def create_session(self, session_id: str) -> EngineSession:
@@ -306,6 +484,7 @@ class EngineManager:
 
     async def swap_engine(self, new_settings: Settings) -> None:
         try:
+            self._swap_error = None
             available = _get_available_engine_ids()
             self._prepare_engine_selection(new_settings, available)
 
@@ -344,6 +523,7 @@ class EngineManager:
             self._pending_status = None
             self._pending_engine_id = None
             self._pending_message = None
+            self._swap_error = None
             logger.info("Engine swap complete: now using %s", new_settings.engine)
 
         except Exception as e:

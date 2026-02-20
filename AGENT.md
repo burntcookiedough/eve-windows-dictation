@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL: WSL Environment — Read First
+
+**This workspace is opened from WSL but targets Windows.** Both the Electron app and the Python server run on Windows, not Linux.
+
+### Rules for ALL commands (uv, bun, npm, pytest, pip, etc.)
+
+1. **NEVER run `uv`, `bun`, `npm`, `pytest`, `pip`, or any package manager directly from WSL.** Running `uv run`, `uv sync`, `uv pip`, `bun install`, etc. from WSL will create a Linux `.venv`/`node_modules` that **destroys the Windows environment** and breaks the running server.
+2. **ALWAYS use PowerShell** for any command that touches runtime, dependencies, or builds:
+   ```bash
+   /mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "<command>"
+   ```
+3. **Safe from WSL:** Reading/writing source files, `git` operations, searching code (grep/rg/find). These do not touch the runtime environment.
+4. **Unsafe from WSL (MUST use PowerShell):** `uv run`, `uv sync`, `uv pip`, `uv add`, `pytest`, `bun run`, `bun install`, `npm install`, `pip install`, or ANY command that reads/writes `.venv`, `node_modules`, or produces platform-specific artifacts.
+
+### Why this matters
+
+The `.venv` and `node_modules` directories contain Windows-specific binaries (`.dll`, `.exe`, `.pyd`). Running `uv sync` or `bun install` from WSL replaces them with Linux binaries, silently breaking the Windows runtime. If a server is running, it will crash on the next operation that touches a replaced file.
+
 ## Project Overview
 
 Murmur is a desktop voice transcription app with two components:
@@ -15,28 +33,24 @@ Communication between them uses a custom WebSocket protocol on port 51717 (docum
 ### App (Electron) - uses `bun`
 
 Commands must run on Windows (PowerShell), not WSL:
-```powershell
-# From app/ directory
-bun run dev          # Development mode (hot reload)
-bun run build        # Production build
-bun run package:win  # Build Windows installer
-bun run clear-data   # Clear local app data
-```
-
-From WSL, prefix with PowerShell:
 ```bash
-/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd C:\path\to\app; bun run dev"
+/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd C:\Users\raikr\Documents\projs\murmur\nemotron\app; bun run dev"
 ```
 
 ### Server (Python) - uses `uv` and `just`
 
-From `server/` directory (commands run via PowerShell automatically):
+Commands must run on Windows (PowerShell), not WSL:
 ```bash
+# Use just (which internally runs via PowerShell):
 just start      # Start server (foreground)
 just start-bg   # Start server (background)
 just stop       # Stop server (kills port 51717)
 just status     # Check if server is running
 just test       # Run pytest
+
+# Or use PowerShell directly:
+/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd C:\Users\raikr\Documents\projs\murmur\nemotron\server; uv run python -m main"
+/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd C:\Users\raikr\Documents\projs\murmur\nemotron\server; uv run pytest"
 ```
 
 ## Architecture

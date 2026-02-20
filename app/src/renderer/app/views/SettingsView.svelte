@@ -73,6 +73,8 @@
   let serverConnected = $state(false);
   let engineAdvancedOpen = $state(false);
   let engineApplying = $state(false);
+  let availableEngines = $state<string[]>([]);
+  let engineApplyError = $state('');
 
   // Local engine settings (track pending changes before apply)
   let pendingEngine = $state<Record<string, unknown>>({});
@@ -111,6 +113,13 @@
     return (serverSettings?.[key]?.options as Array<{ value: unknown; label: string; description?: string }>) ?? [];
   }
 
+  function isEngineAvailable(engineId: unknown): boolean {
+    if (typeof engineId !== 'string') return true;
+    // Backward compatibility with older servers that do not return availability metadata.
+    if (availableEngines.length === 0) return true;
+    return availableEngines.includes(engineId);
+  }
+
   function formatEstimatedDuration(seconds: number): string {
     if (seconds < 60) {
       return `~${seconds}s`;
@@ -136,6 +145,7 @@
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
       engineStatus = serverData.engine_status;
+      availableEngines = serverData.available_engines ?? [];
       serverConnected = true;
     } catch {
       serverConnected = false;
@@ -223,19 +233,28 @@
   async function applyEngineSettings() {
     if (engineApplying || Object.keys(pendingEngine).length === 0) return;
     engineApplying = true;
+    engineApplyError = '';
 
     try {
-      const response = await window.murmurMain.updateServerSettings(pendingEngine);
+      // Svelte $state objects are Proxies; IPC requires plain cloneable values.
+      const patch = Object.fromEntries(Object.entries(pendingEngine));
+      const response = await window.murmurMain.updateServerSettings(patch);
       serverSettings = response.settings;
       engineStatus = response.engine_status;
+      availableEngines = response.available_engines ?? availableEngines;
       pendingEngine = {};
 
-      // Poll engine status if loading
-      if (response.engine_status.status === 'loading' || response.engine_status.pending) {
+      // Poll when a reload has started (or is already visible as pending/loading).
+      if (
+        response.reload_started ||
+        response.engine_status.status === 'loading' ||
+        response.engine_status.pending
+      ) {
         pollEngineStatus();
       }
-    } catch {
+    } catch (error) {
       // Keep pending changes on failure so user can retry
+      engineApplyError = error instanceof Error ? error.message : 'Failed to apply engine settings.';
     } finally {
       engineApplying = false;
     }
@@ -253,13 +272,24 @@
           const data = await window.murmurMain.getServerSettings();
           serverSettings = data.settings;
           engineStatus = data.engine_status;
+          availableEngines = data.available_engines ?? availableEngines;
           return;
         }
-        if (status.status === 'error') return;
+        if (status.status === 'error') {
+          engineApplyError = status.message ?? 'Engine reload failed.';
+          const data = await window.murmurMain.getServerSettings();
+          serverSettings = data.settings;
+          engineStatus = data.engine_status;
+          availableEngines = data.available_engines ?? availableEngines;
+          return;
+        }
       } catch {
+        engineApplyError = 'Failed while checking engine status.';
         return;
       }
     }
+
+    engineApplyError = 'Timed out waiting for engine reload to finish.';
   }
 </script>
 
@@ -490,24 +520,38 @@
           <div class="space-y-2">
             {#each getOptions('engine') as option}
               <label class="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors
-                {selectedEngine === option.value ? 'bg-zinc-800' : 'hover:bg-zinc-800/50'}">
+                {!isEngineAvailable(option.value)
+                  ? 'opacity-50 cursor-not-allowed bg-zinc-800/30'
+                  : selectedEngine === option.value
+                    ? 'bg-zinc-800'
+                    : 'hover:bg-zinc-800/50'}">
                 <input
                   type="radio"
                   name="engine"
                   value={option.value}
                   checked={selectedEngine === option.value}
-                  onchange={() => updateEngineSetting('engine', option.value)}
-                  class="mt-0.5 cursor-pointer accent-emerald-500"
+                  disabled={!isEngineAvailable(option.value)}
+                  onchange={() => isEngineAvailable(option.value) && updateEngineSetting('engine', option.value)}
+                  class="mt-0.5 accent-emerald-500
+                    {isEngineAvailable(option.value) ? 'cursor-pointer' : 'cursor-not-allowed'}"
                 />
                 <div>
                   <p class="text-sm text-zinc-200">{option.label}</p>
                   {#if option.description}
                     <p class="text-xs text-zinc-500 mt-0.5">{option.description}</p>
                   {/if}
+                  {#if !isEngineAvailable(option.value)}
+                    <p class="text-xs text-amber-300 mt-0.5">Not available in the currently running server environment.</p>
+                  {/if}
                 </div>
               </label>
             {/each}
           </div>
+          {#if getOptions('engine').some((option) => !isEngineAvailable(option.value))}
+            <p class="text-xs text-zinc-500 mt-3">
+              Install missing engine dependencies and restart the server to enable those options.
+            </p>
+          {/if}
         </div>
 
         <!-- Conditional settings based on selected engine -->
@@ -629,6 +673,9 @@
                 Apply & Reload Engine
               {/if}
             </button>
+            {#if engineApplyError}
+              <p class="mt-2 text-xs text-red-400">{engineApplyError}</p>
+            {/if}
           </div>
         {/if}
 

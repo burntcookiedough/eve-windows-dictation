@@ -11,6 +11,17 @@ from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
 
+_NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """Detect TLS/network errors that local-only loading can recover from."""
+    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+        msg = str(e)
+        if any(marker.lower() in msg.lower() for marker in _NETWORK_ERROR_MARKERS):
+            return True
+    return False
+
 # Approximate on-disk model sizes in GB
 _MODEL_SIZES: dict[str, float] = {
     "large-v3-turbo": 1.5,
@@ -29,7 +40,19 @@ class WhisperEngine:
             "Loading Whisper model: %s (device=%s, compute_type=%s)",
             model, device, compute_type,
         )
-        self._model = WhisperModel(model, device=device, compute_type=compute_type)
+        try:
+            self._model = WhisperModel(model, device=device, compute_type=compute_type)
+        except Exception as exc:
+            if _is_network_error(exc):
+                logger.warning(
+                    "Network/TLS error loading model, retrying with local cache: %s", exc,
+                )
+                self._model = WhisperModel(
+                    model, device=device, compute_type=compute_type,
+                    local_files_only=True,
+                )
+            else:
+                raise
         self._model_name = model
         logger.info("Whisper model loaded successfully")
 

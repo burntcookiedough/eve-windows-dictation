@@ -18,6 +18,17 @@ from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
 
+_NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """Detect TLS/network errors that offline loading can recover from."""
+    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+        msg = str(e)
+        if any(marker.lower() in msg.lower() for marker in _NETWORK_ERROR_MARKERS):
+            return True
+    return False
+
 SAMPLE_RATE = 16000
 
 # Enable faulthandler so native crashes (SIGSEGV, SIGABRT) print a
@@ -93,7 +104,24 @@ class NemotronEngine:
 
         logger.info("Loading Nemotron model: %s (device=%s)", model_name, resolved_device)
 
-        self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+        try:
+            self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+        except Exception as exc:
+            if _is_network_error(exc):
+                logger.warning(
+                    "Network/TLS error loading model, retrying with local cache: %s", exc,
+                )
+                old_val = os.environ.get("HF_HUB_OFFLINE")
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                try:
+                    self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+                finally:
+                    if old_val is None:
+                        os.environ.pop("HF_HUB_OFFLINE", None)
+                    else:
+                        os.environ["HF_HUB_OFFLINE"] = old_val
+            else:
+                raise
         self._model.eval()
         self._model = self._model.to(resolved_device)
 

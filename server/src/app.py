@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 
 from config import (
     API_KEYS,
@@ -73,6 +73,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    def serialize_engine_status(status: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "current": status.current,
+            "status": status.status,
+            "info": asdict(status.info) if status.info else None,
+        }
+        if status.pending:
+            payload["pending"] = status.pending
+        if status.message:
+            payload["message"] = status.message
+        return payload
+
     @app.get("/health")
     async def health_check() -> dict:
         manager = get_session_manager()
@@ -83,11 +95,7 @@ def create_app() -> FastAPI:
             "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
-            "engine": {
-                "current": status.current,
-                "status": status.status,
-                "info": asdict(status.info) if status.info else None,
-            },
+            "engine": serialize_engine_status(status),
         }
 
     @app.get("/settings")
@@ -99,12 +107,7 @@ def create_app() -> FastAPI:
 
         return {
             "settings": get_settings_with_metadata(settings),
-            "engine_status": {
-                "current": status.current,
-                "status": status.status,
-                "info": asdict(status.info) if status.info else None,
-                **({"pending": status.pending} if status.pending else {}),
-            },
+            "engine_status": serialize_engine_status(status),
             "available_engines": available,
         }
 
@@ -115,8 +118,19 @@ def create_app() -> FastAPI:
         if not patch:
             return {"error": "No valid settings provided"}
 
+        discovered_engines = discover_engines()
+        available_engines = [e["id"] for e in discovered_engines if e["available"]]
+        discovered_by_id = {e["id"]: e for e in discovered_engines}
+
         # Track explicit engine overrides separately from default/auto selection.
         if "engine" in patch:
+            requested_engine = str(patch["engine"])
+            if requested_engine not in available_engines:
+                detail = f'Engine "{requested_engine}" is not available on this server.'
+                install_hint = discovered_by_id.get(requested_engine, {}).get("install_hint")
+                if install_hint:
+                    detail = f"{detail} Install with: {install_hint}"
+                raise HTTPException(status_code=400, detail=detail)
             patch["engine_preference_mode"] = "manual"
 
         # Check if reload is needed
@@ -135,12 +149,8 @@ def create_app() -> FastAPI:
 
         response: dict[str, Any] = {
             "settings": get_settings_with_metadata(new_settings),
-            "engine_status": {
-                "current": status.current,
-                "status": status.status,
-                "info": asdict(status.info) if status.info else None,
-                **({"pending": status.pending} if status.pending else {}),
-            },
+            "engine_status": serialize_engine_status(status),
+            "available_engines": available_engines,
             "reload_required": needs_reload,
             "reload_started": reload_started,
         }
@@ -165,14 +175,7 @@ def create_app() -> FastAPI:
     async def get_engine_status() -> dict:
         engine_mgr = get_engine_manager()
         status = engine_mgr.get_status()
-        result: dict[str, Any] = {
-            "current": status.current,
-            "status": status.status,
-            "info": asdict(status.info) if status.info else None,
-        }
-        if status.pending:
-            result["pending"] = status.pending
-        return result
+        return serialize_engine_status(status)
 
     @app.websocket("/transcribe")
     async def transcribe(websocket: WebSocket) -> None:

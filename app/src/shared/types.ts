@@ -168,7 +168,11 @@ export interface EngineStatus {
 export interface ServerSettingsResponse {
   settings: Record<string, ServerSetting<unknown>>;
   engine_status: EngineStatus;
-  available_engines: string[];
+  available_engines?: string[];
+  reload_required?: boolean;
+  reload_started?: boolean;
+  active_sessions?: number;
+  note?: string;
 }
 
 export interface AvailableEngine {
