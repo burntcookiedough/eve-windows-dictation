@@ -256,12 +256,16 @@ class TestFinalTextFrame:
         assert frame.text == "hello world"
         assert frame.confidence == 0.95
 
-    def test_final_frame_requires_non_empty_text(self) -> None:
-        """Final frame cannot have empty text."""
-        with pytest.raises(ValidationError):
-            FinalTextFrame(
-                text="", confidence=0.9, transcription_time=0.1, audio_duration=1.0
-            )
+    def test_final_frame_can_have_empty_text(self) -> None:
+        """Final frame allows empty text when no speech was recognized."""
+        frame = FinalTextFrame(
+            text="",
+            confidence=0.0,
+            transcription_time=0.1,
+            audio_duration=1.0,
+        )
+
+        assert frame.text == ""
 
     def test_final_frame_confidence_bounds(self) -> None:
         """Final frame confidence must be 0-1."""

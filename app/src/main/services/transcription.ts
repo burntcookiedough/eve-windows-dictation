@@ -33,6 +33,9 @@ export class TranscriptionService {
   private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
   private onTranscriptionCallback: ((payload: TranscriptionPayload) => void) | null = null;
   private onWarningCallback: ((payload: RecordingWarningPayload) => void) | null = null;
+  private lastTextFrame: TextFrame | null = null;
+  private didReceiveFinal = false;
+  private didReceiveReady = false;
 
   constructor(
     serverUrl: string,
@@ -48,6 +51,11 @@ export class TranscriptionService {
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      this.isReady = false;
+      this.serverClosing = false;
+      this.lastTextFrame = null;
+      this.didReceiveFinal = false;
+      this.didReceiveReady = false;
       this.sendConnectionState('connecting');
 
       this.ws = new WebSocket(this.serverUrl);
@@ -69,6 +77,7 @@ export class TranscriptionService {
       });
 
       this.ws.on('close', () => {
+        this.maybeEmitSyntheticFinal('socket_closed');
         this.sendConnectionState('disconnected');
         this.onCloseCallback?.();
       });
@@ -154,6 +163,7 @@ export class TranscriptionService {
     if (frame.frame === 'control') {
       switch (frame.type) {
         case 'ready':
+          this.didReceiveReady = true;
           this.isReady = true;
           this.sendRecordingState('listening');
           break;
@@ -178,6 +188,7 @@ export class TranscriptionService {
         case 'closing':
           // Server is ending the session - stop accepting audio
           log.info('Server closing session', { reason: frame.reason });
+          this.maybeEmitSyntheticFinal('server_closing');
           this.isReady = false;
           this.serverClosing = true; // Don't send stop frame back
           // Trigger close callback to clean up
@@ -190,6 +201,7 @@ export class TranscriptionService {
   }
 
   private handleTextFrame(frame: TextFrame): void {
+    this.lastTextFrame = frame;
     const payload: TranscriptionPayload = {
       type: frame.type,
       text: frame.text,
@@ -202,9 +214,37 @@ export class TranscriptionService {
     if (frame.type === 'partial') {
       this.sendRecordingState('transcribing');
     } else if (frame.type === 'final') {
+      this.didReceiveFinal = true;
       this.sendRecordingState('success');
       this.onFinalCallback?.(frame);
     }
+  }
+
+  private maybeEmitSyntheticFinal(source: 'server_closing' | 'socket_closed'): void {
+    if (this.didReceiveFinal) {
+      return;
+    }
+    if (!this.didReceiveReady && this.lastTextFrame == null) {
+      return;
+    }
+
+    const fallback = this.lastTextFrame;
+    const syntheticFinal: TextFrameFinal = {
+      frame: 'text',
+      type: 'final',
+      text: fallback?.text ?? '',
+      confidence: fallback?.confidence ?? 0.0,
+      transcription_time: 0.0,
+      audio_duration: fallback?.audio_duration ?? 0.0,
+    };
+
+    log.warn('Synthesizing final frame from best available text', {
+      source,
+      hadTextFrame: fallback != null,
+      sourceFrameType: fallback?.type ?? 'none',
+      textLength: syntheticFinal.text.length,
+    });
+    this.handleTextFrame(syntheticFinal);
   }
 
   private sendConnectionState(status: ConnectionStatePayload['status'], error?: string): void {

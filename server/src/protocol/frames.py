@@ -128,7 +128,9 @@ class FinalTextFrame(TextFrameBase):
     """Server -> Client: Committed transcription result (will not change)."""
 
     type: Literal["final"] = "final"
-    text: Annotated[str, Field(min_length=1)]  # Never empty
+    # Can be empty when no speech was recognized; final frame is still emitted
+    # so clients can reliably treat it as the session's terminal text payload.
+    text: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
     transcription_time: Annotated[float, Field(ge=0.0)]
     audio_duration: Annotated[float, Field(ge=0.0)]

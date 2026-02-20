@@ -445,7 +445,7 @@ async def _finalize_session(
     processor: TranscriptionProcessor,
     reason: ClosingReason,
 ) -> None:
-    """Finalize session: send final text (if any) and closing frame."""
+    """Finalize session: always send final text frame, then closing frame."""
     if context.state_machine.state == SessionState.CLOSED:
         return
 
@@ -455,26 +455,52 @@ async def _finalize_session(
     if context.state_machine.state != SessionState.FINALIZING:
         context.state_machine.transition_to(SessionState.FINALIZING)
 
-    # Get final transcription
+    # Get final transcription. If final transcription fails, fall back to the
+    # last emitted partial so the client still receives a terminal text frame.
+    final_text = ""
+    final_confidence = 0.0
+    final_transcription_time = 0.0
+    final_audio_duration = context.audio_buffer.duration_seconds
+
     try:
         result = await processor.transcribe_final()
-        if not result.is_empty:
+        final_text = result.text
+        final_confidence = result.confidence
+        final_transcription_time = result.transcription_time
+        final_audio_duration = result.audio_duration
+
+        if result.is_empty and context.last_partial_text:
+            logger.warning(
+                "[%s] Final transcription empty, using last partial as terminal text",
+                context.session_id,
+            )
+            final_text = context.last_partial_text
+            final_confidence = 0.0
+
+        if final_text:
             logger.info(
                 "[%s] Final transcription: %r (%.1fs audio)",
                 context.session_id,
-                result.text[:100] if len(result.text) > 100 else result.text,
-                result.audio_duration,
-            )
-            await sender.send_final(
-                result.text,
-                result.confidence,
-                result.transcription_time,
-                result.audio_duration,
+                final_text[:100] if len(final_text) > 100 else final_text,
+                final_audio_duration,
             )
         else:
-            logger.info("[%s] No speech detected in session", context.session_id)
+            logger.info("[%s] Final transcription is empty (no speech detected)", context.session_id)
     except Exception as e:
         logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
+        if context.last_partial_text:
+            final_text = context.last_partial_text
+            logger.warning(
+                "[%s] Falling back to last partial as terminal text after finalization error",
+                context.session_id,
+            )
+
+    await sender.send_final(
+        final_text,
+        final_confidence,
+        final_transcription_time,
+        final_audio_duration,
+    )
 
     # Send closing frame
     logger.info("[%s] Sending closing frame", context.session_id)

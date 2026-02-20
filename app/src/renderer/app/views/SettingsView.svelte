@@ -130,6 +130,20 @@
     return `~${Math.round(seconds / 60)} min`;
   }
 
+  function estimatedDurationTooltip(info: NonNullable<EngineStatus['info']>): string {
+    const vram = info.gpu_vram_gb != null ? `${info.gpu_vram_gb.toFixed(1)} GB` : 'available';
+    return [
+      `${info.name} allocates GPU memory proportional to recording length.`,
+      `The longer a recording runs, the more VRAM it needs.`,
+      ``,
+      `This estimate is derived from your GPU's ${vram} total VRAM`,
+      `minus the model's base memory footprint, divided by its`,
+      `per-second memory growth rate.`,
+      ``,
+      `Actual limits may vary depending on other GPU workloads.`,
+    ].join('\n');
+  }
+
   onMount(async () => {
     appVersion = await window.murmurMain.getAppVersion();
 
@@ -710,7 +724,10 @@
                   </span>
                 {/if}
                 {#if engineStatus.info.estimated_max_duration_s != null}
-                  <span class="text-xs text-zinc-400">
+                  <span
+                    class="text-xs text-zinc-400 cursor-help border-b border-dotted border-zinc-600"
+                    title={estimatedDurationTooltip(engineStatus.info)}
+                  >
                     Est. max per recording: {formatEstimatedDuration(engineStatus.info.estimated_max_duration_s)}
                   </span>
                 {/if}
