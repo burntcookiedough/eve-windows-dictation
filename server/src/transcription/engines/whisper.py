@@ -71,7 +71,14 @@ class WhisperEngine:
         return WhisperSession(self._model)
 
     def shutdown(self) -> None:
-        pass
+        logger.info("Shutting down Whisper engine")
+        del self._model
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
 
 class WhisperSession:
