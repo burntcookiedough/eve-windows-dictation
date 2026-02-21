@@ -1,18 +1,21 @@
 """Faster-Whisper engine adapter."""
 
 import logging
+import os
 
 from faster_whisper import WhisperModel
 from numpy.typing import NDArray
 import numpy as np
 
 from transcription.base import EngineInfo
+from transcription.model_download import is_repo_cached, update_model_download_state
 from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
 
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
 _CUDA_DLL_ERROR_MARKERS = ("cublas", "cudart", "cufft", "cudnn", "cuda")
+_MODEL_REPO_PREFIX = "Systran/faster-whisper-"
 
 
 def _is_network_error(exc: BaseException) -> bool:
@@ -32,6 +35,15 @@ def _is_cuda_dll_error(exc: BaseException) -> bool:
             return True
     return False
 
+
+def _resolve_repo_id(model: str) -> str | None:
+    if os.path.exists(model):
+        return None
+    if "/" in model:
+        return model
+    return f"{_MODEL_REPO_PREFIX}{model}"
+
+
 # Approximate on-disk model sizes in GB
 _MODEL_SIZES: dict[str, float] = {
     "large-v3-turbo": 1.5,
@@ -46,6 +58,40 @@ _MODEL_SIZES: dict[str, float] = {
 
 class WhisperEngine:
     def __init__(self, model: str, device: str, compute_type: str) -> None:
+        model_size_gb = _MODEL_SIZES.get(model, 1.5)
+        repo_id = _resolve_repo_id(model)
+        preflight_cached: bool | None = None
+
+        if repo_id:
+            preflight_cached = is_repo_cached(repo_id)
+            if preflight_cached:
+                update_model_download_state(
+                    model=model,
+                    size_gb=model_size_gb,
+                    status="ready",
+                    cached=True,
+                    detail="cached",
+                )
+            else:
+                update_model_download_state(
+                    model=model,
+                    size_gb=model_size_gb,
+                    status="downloading",
+                    cached=False,
+                    detail="download started",
+                )
+                logger.info(
+                    "Whisper model not found in cache; downloading (~%.1f GB).", model_size_gb,
+                )
+        else:
+            update_model_download_state(
+                model=model,
+                size_gb=model_size_gb,
+                status="ready",
+                cached=True,
+                detail="local model",
+            )
+
         logger.info(
             "Loading Whisper model: %s (device=%s, compute_type=%s)",
             model, device, compute_type,
@@ -57,10 +103,21 @@ class WhisperEngine:
                 logger.warning(
                     "Network/TLS error loading model, retrying with local cache: %s", exc,
                 )
-                self._model = WhisperModel(
-                    model, device=device, compute_type=compute_type,
-                    local_files_only=True,
-                )
+                try:
+                    self._model = WhisperModel(
+                        model, device=device, compute_type=compute_type,
+                        local_files_only=True,
+                    )
+                except Exception as fallback_exc:
+                    if preflight_cached is False:
+                        update_model_download_state(
+                            model=model,
+                            size_gb=model_size_gb,
+                            status="error",
+                            cached=False,
+                            detail="download failed: network error",
+                        )
+                    raise fallback_exc from exc
             elif _is_cuda_dll_error(exc):
                 logger.error(
                     "CUDA runtime DLLs missing while loading Whisper. "
@@ -71,8 +128,25 @@ class WhisperEngine:
                     "CUDA runtime DLLs are missing. Install/update the NVIDIA driver or switch to CPU mode."
                 ) from exc
             else:
+                if preflight_cached is False:
+                    update_model_download_state(
+                        model=model,
+                        size_gb=model_size_gb,
+                        status="error",
+                        cached=False,
+                        detail="download failed",
+                    )
                 raise
         self._model_name = model
+        update_model_download_state(
+            model=model,
+            size_gb=model_size_gb,
+            status="ready",
+            cached=True,
+            detail="downloaded" if preflight_cached is False else "cached",
+        )
+        if preflight_cached is False:
+            logger.info("Whisper model download complete.")
         logger.info("Whisper model loaded successfully")
 
     @property

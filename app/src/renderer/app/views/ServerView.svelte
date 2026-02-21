@@ -33,6 +33,9 @@
 
   let statusDisplay = $derived(statusConfig[serverState.status]);
   let diagnosticWarnings = $derived(serverState.diagnostics?.warnings ?? []);
+  let modelDownload = $derived(serverState.modelDownload);
+  let isDownloadingModel = $derived(modelDownload?.status === 'downloading');
+  let modelDownloadError = $derived(modelDownload?.status === 'error');
 
   // Format uptime as human-readable string
   function formatUptime(ms: number): string {
@@ -51,6 +54,12 @@
   function formatLogTime(timestamp: number): string {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', { hour12: false });
+  }
+
+  function formatModelSize(sizeGb?: number): string {
+    if (!sizeGb || Number.isNaN(sizeGb)) return '';
+    const rounded = Math.round(sizeGb * 10) / 10;
+    return `${rounded} GB`;
   }
 
   // Can start/stop based on status and management mode
@@ -265,6 +274,37 @@
         {#if serverState.error}
           <div class="mb-4 p-3 bg-red-950/50 border border-red-900/50 rounded-lg">
             <p class="text-sm text-red-300">{serverState.error}</p>
+          </div>
+        {/if}
+
+        {#if isDownloadingModel}
+          <div class="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+            <p class="text-sm text-amber-200">
+              Downloading {modelDownload?.model ?? 'model'}
+              {#if modelDownload?.size_gb}
+                <span class="text-amber-300/80">({formatModelSize(modelDownload.size_gb)})</span>
+              {/if}
+            </p>
+            <p class="mt-1 text-xs text-amber-300/80">
+              First run downloads can take a few minutes. Keep the app open while the model is fetched.
+            </p>
+            <p class="mt-2 text-xs text-amber-300/80">
+              If the download stalls, check your connection and use Restart to retry.
+            </p>
+          </div>
+        {/if}
+
+        {#if modelDownloadError}
+          <div class="mb-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
+            <p class="text-sm text-red-300">
+              Model download failed
+              {#if modelDownload?.model}
+                <span class="text-red-300/80">({modelDownload.model})</span>
+              {/if}
+            </p>
+            <p class="mt-1 text-xs text-red-300/80">
+              {modelDownload?.detail ?? 'Check your connection and restart the server to retry.'}
+            </p>
           </div>
         {/if}
 

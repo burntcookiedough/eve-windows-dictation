@@ -9,6 +9,7 @@ import type {
   ServerStatePayload,
   ServerLogEntry,
   ServerDiagnostics,
+  ModelDownloadState,
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -23,6 +24,7 @@ interface HealthState {
   healthy: boolean;
   version?: string;
   diagnostics?: ServerDiagnostics;
+  modelDownload?: ModelDownloadState;
 }
 
 export class ServerManager {
@@ -36,6 +38,7 @@ export class ServerManager {
   private startedAt: number | null = null;
   private serverVersion: string | null = null;
   private diagnostics: ServerDiagnostics | null = null;
+  private modelDownload: ModelDownloadState | null = null;
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -108,10 +111,15 @@ export class ServerManager {
         data.diagnostics && typeof data.diagnostics === 'object'
           ? (data.diagnostics as ServerDiagnostics)
           : undefined;
+      const modelDownload =
+        data.model_download && typeof data.model_download === 'object'
+          ? (data.model_download as ModelDownloadState)
+          : undefined;
       return {
         healthy: true,
         version: typeof data.version === 'string' ? data.version : undefined,
         diagnostics,
+        modelDownload,
       };
     } catch {
       return { healthy: false };
@@ -128,12 +136,14 @@ export class ServerManager {
       if (!health.healthy && this.status === 'running') {
         log.warn('Server health check failed');
         this.setDiagnostics(undefined);
+        this.setModelDownload(undefined);
         this.updateStatus('error', 'Health check failed');
         return;
       }
 
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
-      let shouldBroadcast = diagnosticsChanged;
+      const downloadChanged = this.setModelDownload(health.modelDownload);
+      let shouldBroadcast = diagnosticsChanged || downloadChanged;
 
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
@@ -154,6 +164,17 @@ export class ServerManager {
       return false;
     }
     this.diagnostics = nextValue;
+    return true;
+  }
+
+  private setModelDownload(next?: ModelDownloadState): boolean {
+    const nextValue = next ?? null;
+    const currentSerialized = JSON.stringify(this.modelDownload);
+    const nextSerialized = JSON.stringify(nextValue);
+    if (currentSerialized === nextSerialized) {
+      return false;
+    }
+    this.modelDownload = nextValue;
     return true;
   }
 
@@ -230,6 +251,7 @@ export class ServerManager {
         : undefined,
       managed: this.managed,
       diagnostics: this.diagnostics ?? undefined,
+      modelDownload: this.modelDownload ?? undefined,
     };
   }
 
@@ -252,6 +274,7 @@ export class ServerManager {
       log.info('No PID file found');
       this.serverVersion = null;
       this.setDiagnostics(undefined);
+      this.setModelDownload(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -262,6 +285,7 @@ export class ServerManager {
       this.cleanupStalePidFile();
       this.serverVersion = null;
       this.setDiagnostics(undefined);
+      this.setModelDownload(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -272,6 +296,7 @@ export class ServerManager {
       log.warn('Server process alive but not responding to health checks');
       this.serverVersion = null;
       this.setDiagnostics(undefined);
+      this.setModelDownload(undefined);
       this.updateStatus('error', 'Server not responding');
       return false;
     }
@@ -281,6 +306,7 @@ export class ServerManager {
     this.startedAt = pidData.startedAt;
     this.serverVersion = health.version ?? null;
     this.setDiagnostics(health.diagnostics);
+    this.setModelDownload(health.modelDownload);
     this.managed = false; // External server
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
@@ -359,6 +385,7 @@ export class ServerManager {
         this.startedAt = existingPid.startedAt;
         this.serverVersion = health.version ?? null;
         this.setDiagnostics(health.diagnostics);
+        this.setModelDownload(health.modelDownload);
         this.managed = false;
         this.updateStatus('running');
         this.startHealthPolling(existingPid.port);
@@ -386,6 +413,7 @@ export class ServerManager {
     this.managed = true;
     this.serverVersion = null;
     this.setDiagnostics(undefined);
+    this.setModelDownload(undefined);
     this.logs = []; // Clear logs for new session
 
     try {
@@ -428,6 +456,7 @@ export class ServerManager {
         this.startedAt = null;
         this.serverVersion = null;
         this.setDiagnostics(undefined);
+        this.setModelDownload(undefined);
 
         if (this.status !== 'stopping') {
           // Preserve explicit startup/runtime errors already set by start()/stop() logic.
@@ -464,6 +493,7 @@ export class ServerManager {
       this.startedAt = pidData.startedAt;
       this.serverVersion = health.version ?? null;
       this.setDiagnostics(health.diagnostics);
+      this.setModelDownload(health.modelDownload);
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
@@ -570,6 +600,7 @@ export class ServerManager {
               this.startedAt = null;
               this.serverVersion = null;
               this.setDiagnostics(undefined);
+              this.setModelDownload(undefined);
               this.updateStatus('stopped');
               return;
             }
@@ -605,6 +636,7 @@ export class ServerManager {
       this.startedAt = null;
       this.serverVersion = null;
       this.setDiagnostics(undefined);
+      this.setModelDownload(undefined);
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });

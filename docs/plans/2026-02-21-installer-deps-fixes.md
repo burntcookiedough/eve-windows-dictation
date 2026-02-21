@@ -57,11 +57,11 @@ Switch the Windows installer to nsis-web to bypass the NSIS 2GB limit, ensure re
 - Modify: `app/src/shared/types.ts`
 - Modify: `app/src/renderer/app/views/ServerView.svelte`
 
-- [ ] Add a model preflight check that detects whether required models are present in the HF cache before loading
-- [ ] Expose model download state via server API and emit logs or status updates when a download is occurring
-- [ ] Add UI messaging for first-run model download with size estimates, progress or “downloading” state, and retry guidance
-- [ ] Add/update tests for model status detection and UI state handling
-- [ ] Run test suite and ensure it passes before Task 4
+- [x] Add a model preflight check that detects whether required models are present in the HF cache before loading
+- [x] Expose model download state via server API and emit logs or status updates when a download is occurring
+- [x] Add UI messaging for first-run model download with size estimates, progress or “downloading” state, and retry guidance
+- [x] Add/update tests for model status detection and UI state handling
+- [x] Run test suite and ensure it passes before Task 4
 
 ### Task 4: Verify Acceptance Criteria
 

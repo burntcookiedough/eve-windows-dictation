@@ -22,6 +22,7 @@ export interface ServerStatePayload {
   wsUrl?: string;
   managed: boolean; // false in dev mode (externally running server)
   diagnostics?: ServerDiagnostics;
+  modelDownload?: ModelDownloadState;
 }
 
 export interface ServerLogEntry {
@@ -72,6 +73,15 @@ export interface ServerDiagnostics {
   nvidia_driver: NvidiaDriverDiagnostics;
   vc_redist: VcRedistDiagnostics;
   warnings: DiagnosticWarning[];
+}
+
+export interface ModelDownloadState {
+  model: string;
+  size_gb: number;
+  status: 'ready' | 'downloading' | 'error';
+  cached?: boolean;
+  detail?: string;
+  updated_at?: string;
 }
 
 // IPC State payloads

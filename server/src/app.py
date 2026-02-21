@@ -25,6 +25,7 @@ from transcription.factory import (
     init_engine_manager,
     shutdown_engine_manager,
 )
+from transcription.model_download import get_model_download_state
 from transcription.processor import shutdown_executor
 from version import SERVER_VERSION
 from websocket.handler import websocket_handler
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
             "max_sessions": manager.max_sessions,
             "engine": serialize_engine_status(status),
             "diagnostics": collect_diagnostics(settings),
+            "model_download": get_model_download_state(),
         }
 
     @app.get("/diagnostics")
