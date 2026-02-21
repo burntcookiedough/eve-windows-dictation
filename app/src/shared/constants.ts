@@ -4,6 +4,7 @@ export const IPC_CHANNELS = {
   STATE_RECORDING: 'state:recording',
   STATE_CONNECTION: 'state:connection',
   STATE_TRANSCRIPTION: 'state:transcription',
+  STATE_WARNING: 'state:warning',
 
   // Main → Renderer (commands to start/stop audio capture)
   COMMAND_START_RECORDING: 'command:start-recording',
@@ -53,6 +54,12 @@ export const IPC_CHANNELS = {
   // Server management - Push (main → renderer)
   SERVER_STATE_CHANGE: 'server:state-change',
   SERVER_LOG: 'server:log',
+
+  // Server settings (REST API proxy)
+  GET_SERVER_SETTINGS: 'server:get-settings',
+  UPDATE_SERVER_SETTINGS: 'server:update-settings',
+  GET_ENGINE_STATUS: 'server:engine-status',
+  GET_AVAILABLE_ENGINES: 'server:engines',
 } as const;
 
 // Overlay window constants

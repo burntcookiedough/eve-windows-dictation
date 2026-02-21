@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nemotron Speech vs faster-whisper | Murmur Transcription Engine</title>
+<style>
+  /* ===== RESET & BASE ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --nv-green: #76b900;
+    --nv-green-dim: #5a8f00;
+    --nv-green-glow: rgba(118, 185, 0, 0.25);
+    --nv-green-subtle: rgba(118, 185, 0, 0.08);
+    --bg-deep: #0a0e1a;
+    --bg-card: #111827;
+    --bg-card-alt: #1a2236;
+    --bg-surface: #0f1629;
+    --text-primary: #e8ecf4;
+    --text-secondary: #8892a8;
+    --text-dim: #5a6478;
+    --whisper-blue: #3b82f6;
+    --whisper-blue-dim: #2563eb;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --success: #22c55e;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    --slide-transition: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== SLIDE ENGINE ===== */
+  .deck {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 80px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(60px);
+    transition: opacity var(--slide-transition), transform var(--slide-transition), visibility 0s 0.5s;
+    overflow-y: auto;
+  }
+
+  .slide.active {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+    transition: opacity var(--slide-transition), transform var(--slide-transition), visibility 0s 0s;
+  }
+
+  .slide.exit-left {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(-60px);
+  }
+
+  .slide-inner {
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  /* ===== PROGRESS BAR ===== */
+  .progress-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.05);
+    z-index: 1000;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--nv-green), #a3e635);
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 12px var(--nv-green-glow);
+  }
+
+  /* ===== SLIDE COUNTER ===== */
+  .slide-counter {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    z-index: 1000;
+    letter-spacing: 0.5px;
+  }
+
+  .slide-counter .current { color: var(--nv-green); font-weight: 600; }
+
+  /* ===== NAV ARROWS ===== */
+  .nav-btn {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(17, 24, 39, 0.6);
+    backdrop-filter: blur(8px);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: all 0.2s;
+    font-size: 18px;
+  }
+
+  .nav-btn:hover { border-color: var(--nv-green); color: var(--nv-green); background: var(--nv-green-subtle); }
+  .nav-btn:active { transform: translateY(-50%) scale(0.95); }
+  .nav-btn.disabled { opacity: 0.2; pointer-events: none; }
+  .nav-prev { left: 20px; }
+  .nav-next { right: 20px; }
+
+  /* ===== MINI NAV DOTS ===== */
+  .nav-dots {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 1000;
+  }
+
+  .nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.12);
+    cursor: pointer;
+    transition: all 0.3s;
+    border: none;
+  }
+
+  .nav-dot:hover { background: rgba(255,255,255,0.3); }
+  .nav-dot.active { background: var(--nv-green); box-shadow: 0 0 8px var(--nv-green-glow); width: 24px; border-radius: 4px; }
+
+  /* ===== TYPOGRAPHY ===== */
+  .slide-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: var(--nv-green);
+    margin-bottom: 12px;
+    opacity: 0.8;
+  }
+
+  h1 {
+    font-size: 52px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    font-size: 38px;
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    line-height: 1.2;
+    margin-bottom: 20px;
+  }
+
+  h3 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin-bottom: 12px;
+  }
+
+  .subtitle {
+    font-size: 20px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: 640px;
+  }
+
+  .highlight { color: var(--nv-green); }
+  .highlight-blue { color: var(--whisper-blue); }
+
+  /* ===== CARDS ===== */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius);
+    padding: 28px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .card:hover {
+    border-color: rgba(255,255,255,0.12);
+  }
+
+  .card-green {
+    border-color: rgba(118, 185, 0, 0.2);
+    background: linear-gradient(135deg, var(--bg-card), rgba(118, 185, 0, 0.04));
+  }
+
+  .card-blue {
+    border-color: rgba(59, 130, 246, 0.2);
+    background: linear-gradient(135deg, var(--bg-card), rgba(59, 130, 246, 0.04));
+  }
+
+  /* ===== GRID ===== */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* ===== BADGE ===== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  .badge-green { background: rgba(118, 185, 0, 0.15); color: var(--nv-green); }
+  .badge-blue { background: rgba(59, 130, 246, 0.15); color: var(--whisper-blue); }
+  .badge-yellow { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+  .badge-red { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+
+  /* ===== BAR CHARTS ===== */
+  .bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .bar-label {
+    min-width: 140px;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: right;
+    color: var(--text-secondary);
+  }
+
+  .bar-track {
+    flex: 1;
+    height: 36px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: white;
+    position: relative;
+    width: 0;
+    transition: width 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .bar-fill.green { background: linear-gradient(90deg, var(--nv-green-dim), var(--nv-green)); }
+  .bar-fill.blue { background: linear-gradient(90deg, var(--whisper-blue-dim), var(--whisper-blue)); }
+
+  .bar-value {
+    min-width: 80px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .bar-value.green-text { color: var(--nv-green); }
+  .bar-value.blue-text { color: var(--whisper-blue); }
+
+  /* ===== METRIC CARDS ===== */
+  .metric-big {
+    font-family: var(--font-mono);
+    font-size: 48px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -2px;
+  }
+
+  .metric-unit {
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0;
+  }
+
+  .metric-label {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ===== VERSUS ===== */
+  .vs-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    padding: 0 12px;
+  }
+
+  /* ===== DIAGRAMS ===== */
+  .diagram-box {
+    background: var(--bg-card-alt);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius-sm);
+    padding: 12px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+    white-space: nowrap;
+    position: relative;
+  }
+
+  .diagram-box.green-border { border-color: rgba(118, 185, 0, 0.4); }
+  .diagram-box.blue-border { border-color: rgba(59, 130, 246, 0.4); }
+
+  .diagram-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 20px;
+    padding: 0 4px;
+  }
+
+  .diagram-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .diagram-flow-vertical {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .diagram-arrow-down {
+    color: var(--text-dim);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  /* ===== TABLE ===== */
+  .comparison-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+  }
+
+  .comparison-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .comparison-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: top;
+  }
+
+  .comparison-table tr:last-child td { border-bottom: none; }
+  .comparison-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .comparison-table .col-feature { color: var(--text-secondary); width: 200px; }
+
+  /* ===== STAGGER ANIMATIONS ===== */
+  .slide.active .stagger > * {
+    opacity: 0;
+    transform: translateY(16px);
+    animation: staggerIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  .slide.active .stagger > *:nth-child(1) { animation-delay: 0.08s; }
+  .slide.active .stagger > *:nth-child(2) { animation-delay: 0.16s; }
+  .slide.active .stagger > *:nth-child(3) { animation-delay: 0.24s; }
+  .slide.active .stagger > *:nth-child(4) { animation-delay: 0.32s; }
+  .slide.active .stagger > *:nth-child(5) { animation-delay: 0.40s; }
+  .slide.active .stagger > *:nth-child(6) { animation-delay: 0.48s; }
+  .slide.active .stagger > *:nth-child(7) { animation-delay: 0.56s; }
+  .slide.active .stagger > *:nth-child(8) { animation-delay: 0.64s; }
+
+  @keyframes staggerIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===== ANIMATE BARS on slide enter ===== */
+  .slide.active .bar-fill { width: var(--bar-w); }
+
+  /* ===== PULSE GLOW ===== */
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 0 0 var(--nv-green-glow); }
+    50% { box-shadow: 0 0 20px 4px var(--nv-green-glow); }
+  }
+
+  .glow-pulse { animation: pulseGlow 2.5s ease-in-out infinite; }
+
+  /* ===== TITLE SLIDE EXTRAS ===== */
+  .title-hero {
+    position: relative;
+  }
+
+  .title-hero::before {
+    content: '';
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--nv-green-glow) 0%, transparent 70%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.5;
+  }
+
+  .title-logo {
+    width: 80px;
+    height: 80px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, var(--nv-green), #4ade80);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 900;
+    color: var(--bg-deep);
+    margin-bottom: 32px;
+    box-shadow: 0 8px 32px var(--nv-green-glow);
+  }
+
+  /* ===== CODE BLOCK ===== */
+  .code-block {
+    background: #0d1117;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius-sm);
+    padding: 20px 24px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: #c9d1d9;
+    overflow-x: auto;
+  }
+
+  .code-comment { color: #6e7681; }
+  .code-keyword { color: #ff7b72; }
+  .code-string { color: #a5d6ff; }
+  .code-type { color: #79c0ff; }
+  .code-func { color: #d2a8ff; }
+  .code-green { color: var(--nv-green); }
+
+  /* ===== TIMELINE ===== */
+  .timeline {
+    position: relative;
+    padding-left: 32px;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 7px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--nv-green), rgba(118, 185, 0, 0.2));
+  }
+
+  .timeline-item {
+    position: relative;
+    padding-bottom: 28px;
+  }
+
+  .timeline-item:last-child { padding-bottom: 0; }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -29px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-deep);
+    border: 2px solid var(--nv-green);
+  }
+
+  .timeline-item.done::before {
+    background: var(--nv-green);
+  }
+
+  .timeline-phase {
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+
+  .timeline-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ===== ICON CIRCLES ===== */
+  .icon-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 14px;
+    flex-shrink: 0;
+  }
+
+  .icon-circle.green { background: rgba(118, 185, 0, 0.15); }
+  .icon-circle.blue { background: rgba(59, 130, 246, 0.15); }
+  .icon-circle.yellow { background: rgba(245, 158, 11, 0.15); }
+  .icon-circle.red { background: rgba(239, 68, 68, 0.15); }
+  .icon-circle.purple { background: rgba(168, 85, 247, 0.15); }
+
+  /* ===== TAG ===== */
+  .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    letter-spacing: 0.5px;
+  }
+
+  .tag-green { background: rgba(118, 185, 0, 0.15); color: var(--nv-green); }
+  .tag-blue { background: rgba(59, 130, 246, 0.15); color: var(--whisper-blue); }
+
+  /* ===== RECOMMENDATION BOX ===== */
+  .rec-box {
+    background: linear-gradient(135deg, rgba(118, 185, 0, 0.08), rgba(118, 185, 0, 0.02));
+    border: 1px solid rgba(118, 185, 0, 0.25);
+    border-radius: var(--radius);
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .rec-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--nv-green);
+  }
+
+  /* ===== KEYBOARD HINT ===== */
+  .keyboard-hint {
+    position: fixed;
+    bottom: 20px;
+    left: 32px;
+    font-size: 11px;
+    color: var(--text-dim);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0.6;
+  }
+
+  kbd {
+    display: inline-block;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    color: var(--text-secondary);
+  }
+
+  /* ===== SPACER ===== */
+  .spacer-sm { height: 12px; }
+  .spacer-md { height: 24px; }
+  .spacer-lg { height: 40px; }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 900px) {
+    .slide { padding: 40px 32px; }
+    h1 { font-size: 36px; }
+    h2 { font-size: 28px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .metric-big { font-size: 36px; }
+    .nav-btn { display: none; }
+  }
+
+  /* ===== WAVEFORM DECORATION ===== */
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 32px;
+  }
+
+  .waveform-bar {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--nv-green);
+    animation: waveAnim 1.2s ease-in-out infinite;
+  }
+
+  @keyframes waveAnim {
+    0%, 100% { height: 8px; opacity: 0.4; }
+    50% { height: 28px; opacity: 1; }
+  }
+
+  /* ===== CHECK/CROSS ICONS ===== */
+  .icon-check { color: var(--success); }
+  .icon-cross { color: var(--danger); }
+  .icon-warn { color: var(--warning); }
+
+  /* ===== LIST ===== */
+  .feature-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .feature-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .feature-list li .bullet {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--nv-green);
+    margin-top: 7px;
+  }
+
+  /* ===== SPLIT LAYOUT ===== */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+
+  /* ===== ARCH DIAGRAM ===== */
+  .arch-container {
+    background: var(--bg-surface);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius);
+    padding: 32px;
+  }
+
+  .arch-layer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .arch-node {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius-sm);
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+    min-width: 120px;
+  }
+
+  .arch-node.primary {
+    border-color: var(--nv-green);
+    background: rgba(118, 185, 0, 0.08);
+    color: var(--nv-green);
+    font-weight: 700;
+  }
+
+  .arch-node.secondary {
+    border-color: var(--whisper-blue);
+    background: rgba(59, 130, 246, 0.08);
+    color: var(--whisper-blue);
+    font-weight: 700;
+  }
+
+  .arch-connector {
+    display: flex;
+    justify-content: center;
+    padding: 4px 0;
+    color: var(--text-dim);
+    font-size: 16px;
+  }
+
+  /* ===== SEPARATOR LINE ===== */
+  .sep {
+    width: 60px;
+    height: 3px;
+    background: var(--nv-green);
+    border-radius: 2px;
+    margin: 16px 0;
+    opacity: 0.6;
+  }
+
+  /* ===== CONTENDER HEADER ===== */
+  .contender-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .contender-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 18px;
+  }
+
+  .contender-icon.green-bg {
+    background: linear-gradient(135deg, var(--nv-green), #4ade80);
+    color: var(--bg-deep);
+  }
+
+  .contender-icon.blue-bg {
+    background: linear-gradient(135deg, var(--whisper-blue), #60a5fa);
+    color: white;
+  }
+
+  /* ===== SPARKLINE GLOW BAR ===== */
+  .glow-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--nv-green), transparent);
+    margin-top: 8px;
+    opacity: 0.5;
+  }
+
+  /* ===== FOOTER BRANDING ===== */
+  .branding {
+    position: fixed;
+    top: 16px;
+    left: 24px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    z-index: 1000;
+    text-transform: uppercase;
+  }
+
+  /* ===== WER TABLE ===== */
+  .wer-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 24px;
+    font-size: 14px;
+  }
+
+  .wer-dataset {
+    color: var(--text-secondary);
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .wer-score {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    text-align: right;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .wer-excellent { color: var(--success); }
+  .wer-good { color: var(--nv-green); }
+  .wer-fair { color: var(--warning); }
+
+</style>
+</head>
+<body>
+
+<div class="branding">Murmur</div>
+
+<div class="progress-container">
+  <div class="progress-bar" id="progressBar"></div>
+</div>
+
+<button class="nav-btn nav-prev" id="btnPrev" aria-label="Previous slide">&#8592;</button>
+<button class="nav-btn nav-next" id="btnNext" aria-label="Next slide">&#8594;</button>
+
+<div class="nav-dots" id="navDots"></div>
+
+<div class="slide-counter">
+  <span class="current" id="counterCurrent">01</span>
+  <span> / </span>
+  <span id="counterTotal">12</span>
+</div>
+
+<div class="keyboard-hint">
+  <kbd>&#8592;</kbd> <kbd>&#8594;</kbd> navigate
+  <kbd>Space</kbd> next
+</div>
+
+<!-- ============================================================ -->
+<!-- SLIDE DECK                                                    -->
+<!-- ============================================================ -->
+<div class="deck" id="deck">
+
+<!-- ==================== SLIDE 1: TITLE ==================== -->
+<div class="slide active" data-slide="0">
+  <div class="slide-inner title-hero" style="text-align:center;">
+    <div style="display:flex;justify-content:center;">
+      <div class="title-logo glow-pulse">N</div>
+    </div>
+    <div class="spacer-sm"></div>
+    <div class="slide-label">Engine Evaluation</div>
+    <h1>Nemotron Speech<br><span style="font-weight:400;font-size:38px;color:var(--text-secondary)">vs</span> <span class="highlight-blue">faster-whisper</span></h1>
+    <div class="spacer-sm"></div>
+    <p class="subtitle" style="margin:0 auto;">A deep-dive comparison for <strong style="color:var(--text-primary)">Murmur</strong>'s next-generation transcription engine</p>
+    <div class="spacer-lg"></div>
+    <div style="display:flex;justify-content:center;gap:12px;">
+      <span class="badge badge-green">NVIDIA NeMo</span>
+      <span class="badge badge-blue">OpenAI Whisper</span>
+      <span class="badge badge-yellow">Desktop Voice App</span>
+    </div>
+    <div class="spacer-lg"></div>
+    <div class="waveform" style="justify-content:center;">
+      <div class="waveform-bar" style="animation-delay:0s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.15s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.3s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.45s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.6s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.75s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.9s;"></div>
+      <div class="waveform-bar" style="animation-delay:1.05s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.2s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.5s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.7s;"></div>
+      <div class="waveform-bar" style="animation-delay:0.85s;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 2: THE PROBLEM ==================== -->
+<div class="slide" data-slide="1">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Context</div>
+    <h2>Why explore a new engine?</h2>
+    <p class="subtitle" style="margin-bottom:32px;">Murmur's current architecture works, but faster-whisper has inherent limitations for real-time desktop transcription.</p>
+
+    <div class="grid-3">
+      <div class="card">
+        <div class="icon-circle red">&#9201;</div>
+        <h3>Latency Gap</h3>
+        <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">
+          Whisper processes audio in ~1 second chunks. Users experience a noticeable delay between speaking and seeing text appear.
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon-circle yellow">&#9889;</div>
+        <h3>Simulated Streaming</h3>
+        <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">
+          faster-whisper uses buffered pseudo-streaming&mdash;batch inference on accumulated audio, not true token-by-token output.
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon-circle blue">&#128300;</div>
+        <h3>VRAM Overhead</h3>
+        <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">
+          large-v3-turbo needs 4&ndash;6 GB VRAM. On consumer GPUs shared with other apps, this creates memory pressure.
+        </p>
+      </div>
+    </div>
+
+    <div class="spacer-lg"></div>
+
+    <div style="background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-sm);padding:20px 24px;display:flex;align-items:center;gap:16px;">
+      <span style="font-size:24px;">&#128161;</span>
+      <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin:0;">
+        <strong style="color:var(--text-primary)">The goal:</strong> evaluate NVIDIA Nemotron Speech as a drop-in upgrade&mdash;faster latency, native streaming, lower resource usage, while preserving Murmur's user experience.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 3: MEET THE CONTENDERS ==================== -->
+<div class="slide" data-slide="2">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Overview</div>
+    <h2>Meet the contenders</h2>
+    <div class="spacer-md"></div>
+
+    <div class="grid-2">
+      <!-- Nemotron -->
+      <div class="card card-green">
+        <div class="contender-header">
+          <div class="contender-icon green-bg">N</div>
+          <div>
+            <h3 style="margin-bottom:2px;">Nemotron Speech</h3>
+            <span class="tag tag-green">NVIDIA NeMo</span>
+          </div>
+        </div>
+        <ul class="feature-list">
+          <li><span class="bullet"></span>Cache-aware streaming with FastConformer + TDT decoder</li>
+          <li><span class="bullet"></span>Optimized for real-time with chunk sizes as small as 80ms</li>
+          <li><span class="bullet"></span>Built-in punctuation and capitalization&mdash;no post-processing</li>
+          <li><span class="bullet"></span>2.47 GB model, ~2 GB VRAM at runtime</li>
+          <li><span class="bullet"></span>English-only (trained on 11M+ hours)</li>
+          <li><span class="bullet"></span>License: CC-BY-4.0</li>
+        </ul>
+        <div class="glow-bar" style="width:90%;"></div>
+      </div>
+
+      <!-- Whisper -->
+      <div class="card card-blue">
+        <div class="contender-header">
+          <div class="contender-icon blue-bg">W</div>
+          <div>
+            <h3 style="margin-bottom:2px;">faster-whisper</h3>
+            <span class="tag tag-blue">CTranslate2</span>
+          </div>
+        </div>
+        <ul class="feature-list">
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Encoder-decoder (Transformer) architecture</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Batch-mode transcription with VAD-based chunking</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Supports 100+ languages with auto-detection</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>~3.1 GB model, 4&ndash;6 GB VRAM (large-v3-turbo)</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Mature ecosystem with broad community support</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>License: MIT</li>
+        </ul>
+        <div class="glow-bar" style="width:75%;background:linear-gradient(90deg, var(--whisper-blue), transparent);"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 4: LATENCY BENCHMARK ==================== -->
+<div class="slide" data-slide="3">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Performance</div>
+    <h2>Latency: <span class="highlight">21x faster</span></h2>
+    <p class="subtitle" style="margin-bottom:36px;">First-token latency is the most critical metric for a real-time transcription overlay. Users need to see words <em>as they speak</em>.</p>
+
+    <div class="grid-2" style="margin-bottom:36px;">
+      <div class="card card-green" style="text-align:center;">
+        <div class="metric-big highlight">43<span class="metric-unit"> ms</span></div>
+        <div class="metric-label">Nemotron first-token latency</div>
+        <div class="spacer-sm"></div>
+        <span class="badge badge-green">Near-instant</span>
+      </div>
+      <div class="card card-blue" style="text-align:center;">
+        <div class="metric-big highlight-blue">916<span class="metric-unit"> ms</span></div>
+        <div class="metric-label">faster-whisper chunk latency</div>
+        <div class="spacer-sm"></div>
+        <span class="badge badge-blue">Noticeable delay</span>
+      </div>
+    </div>
+
+    <div class="bar-chart">
+      <div class="bar-row">
+        <div class="bar-label"><span class="highlight">Nemotron</span></div>
+        <div class="bar-track">
+          <div class="bar-fill green" style="--bar-w: 4.7%;">43ms</div>
+        </div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label"><span class="highlight-blue">faster-whisper</span></div>
+        <div class="bar-track">
+          <div class="bar-fill blue" style="--bar-w: 100%;">916ms</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spacer-md"></div>
+    <p style="font-size:13px;color:var(--text-dim);text-align:center;">
+      Human perception threshold for "instant" feedback: &lt;100ms. Nemotron comfortably meets this.
+    </p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 5: RESOURCE EFFICIENCY ==================== -->
+<div class="slide" data-slide="4">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Resources</div>
+    <h2>GPU memory &amp; model footprint</h2>
+    <p class="subtitle" style="margin-bottom:36px;">Lower VRAM means Murmur coexists better with games, creative tools, and other GPU-hungry apps.</p>
+
+    <div style="margin-bottom:32px;">
+      <h3 style="font-size:15px;color:var(--text-secondary);margin-bottom:16px;">VRAM Usage (runtime)</h3>
+      <div class="bar-chart">
+        <div class="bar-row">
+          <div class="bar-label"><span class="highlight">Nemotron</span></div>
+          <div class="bar-track">
+            <div class="bar-fill green" style="--bar-w: 33%;">~2 GB</div>
+          </div>
+          <div class="bar-value green-text">~2 GB</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label"><span class="highlight-blue">faster-whisper</span></div>
+          <div class="bar-track">
+            <div class="bar-fill blue" style="--bar-w: 83%;">4&ndash;6 GB</div>
+          </div>
+          <div class="bar-value blue-text">4&ndash;6 GB</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:24px;">
+      <h3 style="font-size:15px;color:var(--text-secondary);margin-bottom:16px;">Model Size (on disk)</h3>
+      <div class="bar-chart">
+        <div class="bar-row">
+          <div class="bar-label"><span class="highlight">Nemotron</span></div>
+          <div class="bar-track">
+            <div class="bar-fill green" style="--bar-w: 60%;">2.47 GB</div>
+          </div>
+          <div class="bar-value green-text">2.47 GB</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label"><span class="highlight-blue">faster-whisper</span></div>
+          <div class="bar-track">
+            <div class="bar-fill blue" style="--bar-w: 75%;">~3.1 GB</div>
+          </div>
+          <div class="bar-value blue-text">~3.1 GB</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card" style="text-align:center;">
+        <div class="metric-big highlight">50<span class="metric-unit">%</span></div>
+        <div class="metric-label">Less VRAM usage</div>
+      </div>
+      <div class="card" style="text-align:center;">
+        <div class="metric-big highlight">20<span class="metric-unit">%</span></div>
+        <div class="metric-label">Smaller model file</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 6: STREAMING ==================== -->
+<div class="slide" data-slide="5">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Architecture</div>
+    <h2>Streaming: native vs. simulated</h2>
+    <p class="subtitle" style="margin-bottom:32px;">The fundamental architectural difference that drives every other metric.</p>
+
+    <div class="grid-2" style="gap:32px;">
+      <!-- Nemotron streaming -->
+      <div class="card card-green">
+        <div class="contender-header">
+          <div class="contender-icon green-bg">N</div>
+          <div>
+            <h3 style="margin-bottom:2px;">Cache-Aware Streaming</h3>
+            <span class="badge badge-green">Native</span>
+          </div>
+        </div>
+        <div class="spacer-sm"></div>
+        <div class="diagram-flow-vertical" style="gap:10px;align-items:stretch;">
+          <div class="diagram-box green-border">Audio chunk (80&ndash;1120ms)</div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box green-border">FastConformer encoder<br><span style="font-size:11px;color:var(--text-dim)">processes chunk with cached context</span></div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box green-border">TDT decoder<br><span style="font-size:11px;color:var(--text-dim)">emits tokens immediately</span></div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box green-border" style="border-color:var(--nv-green);background:rgba(118,185,0,0.12);">
+            <strong>Streaming text output</strong><br>
+            <span style="font-size:11px;color:var(--nv-green);">43ms latency per chunk</span>
+          </div>
+        </div>
+        <div class="spacer-md"></div>
+        <ul class="feature-list" style="font-size:13px;">
+          <li><span class="bullet"></span>Chunk sizes: 80ms, 160ms, 560ms, 1120ms</li>
+          <li><span class="bullet"></span>Context cached between chunks for continuity</li>
+          <li><span class="bullet"></span>No re-processing of previous audio</li>
+        </ul>
+      </div>
+
+      <!-- Whisper streaming -->
+      <div class="card card-blue">
+        <div class="contender-header">
+          <div class="contender-icon blue-bg">W</div>
+          <div>
+            <h3 style="margin-bottom:2px;">Buffered Pseudo-Streaming</h3>
+            <span class="badge badge-blue">Simulated</span>
+          </div>
+        </div>
+        <div class="spacer-sm"></div>
+        <div class="diagram-flow-vertical" style="gap:10px;align-items:stretch;">
+          <div class="diagram-box blue-border">Audio accumulates in buffer</div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box blue-border">VAD detects speech segment<br><span style="font-size:11px;color:var(--text-dim)">waits for silence or timeout</span></div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box blue-border">Full encoder-decoder pass<br><span style="font-size:11px;color:var(--text-dim)">processes entire segment at once</span></div>
+          <div class="diagram-arrow-down">&#8595;</div>
+          <div class="diagram-box blue-border" style="border-color:var(--whisper-blue);background:rgba(59,130,246,0.12);">
+            <strong>Batch text output</strong><br>
+            <span style="font-size:11px;color:var(--whisper-blue);">~916ms latency per segment</span>
+          </div>
+        </div>
+        <div class="spacer-md"></div>
+        <ul class="feature-list" style="font-size:13px;">
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Must accumulate enough audio before processing</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Each segment processed independently</li>
+          <li><span class="bullet" style="background:var(--whisper-blue);"></span>Text appears in bursts, not continuously</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 7: ACCURACY ==================== -->
+<div class="slide" data-slide="6">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Accuracy</div>
+    <h2>Word Error Rate (WER)</h2>
+    <p class="subtitle" style="margin-bottom:32px;">Parakeet-TDT-0.6B-v3 (Nemotron's backbone) achieves state-of-the-art accuracy on English benchmarks despite being a streaming model.</p>
+
+    <div class="grid-2" style="gap:32px;">
+      <div class="card">
+        <h3 style="margin-bottom:20px;">Benchmark scores <span class="tag tag-green" style="margin-left:8px;">Parakeet-TDT-0.6B-v3</span></h3>
+        <div class="wer-grid">
+          <div class="wer-dataset">LibriSpeech (clean)</div>
+          <div class="wer-score wer-excellent">1.93%</div>
+          <div class="wer-dataset">LibriSpeech (other)</div>
+          <div class="wer-score wer-excellent">3.59%</div>
+          <div class="wer-dataset">MCV-18 English</div>
+          <div class="wer-score wer-good">7.49%</div>
+          <div class="wer-dataset">VoxPopuli English</div>
+          <div class="wer-score wer-good">5.12%</div>
+          <div class="wer-dataset">TEDLIUM-v3</div>
+          <div class="wer-score wer-good">3.68%</div>
+          <div class="wer-dataset" style="font-weight:600;color:var(--text-primary);">Average WER</div>
+          <div class="wer-score wer-good" style="font-size:16px;">6.34%</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:20px;">
+          <h3 style="margin-bottom:16px;">Key Advantages</h3>
+          <ul class="feature-list">
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Built-in punctuation &amp; capitalization</strong><br>No need for a separate post-processing model&mdash;reduces pipeline complexity</li>
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Streaming without accuracy loss</strong><br>Cache-aware design preserves context across chunks</li>
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">RTFx: 3386 (batch)</strong><br>Parakeet processes audio 3386x faster than real-time in batch mode</li>
+          </ul>
+        </div>
+
+        <div class="card" style="background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.2);">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <span class="icon-warn" style="font-size:18px;">&#9888;</span>
+            <strong style="font-size:14px;">Trade-off: English Only</strong>
+          </div>
+          <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;">
+            Nemotron currently supports English only. Whisper supports 100+ languages. For Murmur's initial desktop audience this is acceptable, but multi-language support requires keeping Whisper available.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 8: FEATURE COMPARISON ==================== -->
+<div class="slide" data-slide="7">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Comparison</div>
+    <h2>Head-to-head feature matrix</h2>
+    <div class="spacer-md"></div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th class="col-feature">Feature</th>
+            <th><span class="highlight">Nemotron Speech</span></th>
+            <th><span class="highlight-blue">faster-whisper</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="col-feature">First-token latency</td>
+            <td><strong class="highlight">43 ms</strong></td>
+            <td>~916 ms</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Streaming</td>
+            <td><span class="icon-check">&#10003;</span> Native cache-aware</td>
+            <td><span class="icon-warn">&#9888;</span> Simulated (buffered)</td>
+          </tr>
+          <tr>
+            <td class="col-feature">VRAM usage</td>
+            <td><strong class="highlight">~2 GB</strong></td>
+            <td>4&ndash;6 GB</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Model size</td>
+            <td>2.47 GB</td>
+            <td>~3.1 GB</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Punctuation</td>
+            <td><span class="icon-check">&#10003;</span> Built-in</td>
+            <td><span class="icon-cross">&#10007;</span> Needs post-processing</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Capitalization</td>
+            <td><span class="icon-check">&#10003;</span> Built-in</td>
+            <td><span class="icon-cross">&#10007;</span> Needs post-processing</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Languages</td>
+            <td><span class="icon-warn">&#9888;</span> English only</td>
+            <td><span class="icon-check">&#10003;</span> 100+ languages</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Avg WER (English)</td>
+            <td>6.34%</td>
+            <td>~5&ndash;8% (varies by model)</td>
+          </tr>
+          <tr>
+            <td class="col-feature">License</td>
+            <td>CC-BY-4.0</td>
+            <td>MIT</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Chunk sizes</td>
+            <td>80ms, 160ms, 560ms, 1120ms</td>
+            <td>N/A (batch segments)</td>
+          </tr>
+          <tr>
+            <td class="col-feature">Framework</td>
+            <td>NVIDIA NeMo / ONNX</td>
+            <td>CTranslate2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 9: CURRENT ARCHITECTURE ==================== -->
+<div class="slide" data-slide="8">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Current State</div>
+    <h2>Murmur today</h2>
+    <p class="subtitle" style="margin-bottom:32px;">Electron frontend + Python backend, communicating over WebSocket on port 51717.</p>
+
+    <div class="arch-container">
+      <!-- Layer 1: Electron -->
+      <div style="text-align:center;margin-bottom:6px;">
+        <span class="badge badge-yellow" style="font-size:11px;">Electron App</span>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-node">Microphone</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node">AudioWorklet<br><span style="font-size:10px;color:var(--text-dim);">16-bit PCM, 16kHz</span></div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node">IPC</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node" style="border-color:rgba(245,158,11,0.4);">TranscriptionService<br><span style="font-size:10px;color:var(--warning);">WebSocket Client</span></div>
+      </div>
+
+      <div class="arch-connector">&#8595; &ensp;<span style="font-size:11px;font-family:var(--font-mono);color:var(--text-dim);">ws://localhost:51717</span>&ensp; &#8595;</div>
+
+      <!-- Layer 2: Server -->
+      <div style="text-align:center;margin-bottom:6px;">
+        <span class="badge badge-blue" style="font-size:11px;">Python Server</span>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-node">FastAPI</div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node secondary">faster-whisper<br><span style="font-size:10px;color:var(--whisper-blue);">large-v3-turbo</span></div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node">JSON response</div>
+      </div>
+
+      <div class="arch-connector">&#8595;</div>
+
+      <!-- Layer 3: Output -->
+      <div class="arch-layer">
+        <div class="arch-node">Overlay Window<br><span style="font-size:10px;color:var(--text-dim);">Svelte 5 + Tailwind</span></div>
+        <div class="diagram-arrow">&#8594;</div>
+        <div class="arch-node">Clipboard</div>
+      </div>
+    </div>
+
+    <div class="spacer-md"></div>
+    <div style="display:flex;gap:16px;justify-content:center;">
+      <div class="badge badge-yellow" style="font-size:11px;">&#128293; Tightly coupled to faster-whisper</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 10: PROPOSED ARCHITECTURE ==================== -->
+<div class="slide" data-slide="9">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Proposal</div>
+    <h2>Backend Abstraction Layer</h2>
+    <p class="subtitle" style="margin-bottom:28px;">A pluggable engine interface that lets Murmur switch between transcription backends without changing the frontend.</p>
+
+    <div class="grid-2" style="gap:32px;">
+      <div>
+        <div class="arch-container" style="margin-bottom:20px;">
+          <div style="text-align:center;margin-bottom:12px;">
+            <span class="badge badge-green">Proposed Server Architecture</span>
+          </div>
+
+          <div class="arch-layer">
+            <div class="arch-node" style="width:100%;">Electron Frontend<br><span style="font-size:10px;color:var(--text-dim);">Unchanged &mdash; same WebSocket protocol</span></div>
+          </div>
+          <div class="arch-connector">&#8595;</div>
+          <div class="arch-layer">
+            <div class="arch-node primary" style="width:100%;">
+              <span style="font-size:16px;">Engine Interface</span><br>
+              <span style="font-size:10px;font-weight:400;">TranscriptionEngine ABC &mdash; start(), transcribe_chunk(), stop()</span>
+            </div>
+          </div>
+          <div class="arch-connector" style="display:flex;gap:60px;">
+            <span>&#8601;</span>
+            <span>&#8600;</span>
+          </div>
+          <div class="arch-layer" style="gap:16px;">
+            <div class="arch-node primary" style="flex:1;">
+              Nemotron Engine<br>
+              <span style="font-size:10px;font-weight:400;">NeMo / ONNX Runtime</span>
+            </div>
+            <div class="arch-node secondary" style="flex:1;">
+              Whisper Engine<br>
+              <span style="font-size:10px;font-weight:400;">faster-whisper / CTranslate2</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="badge badge-green">&#10003; Recommended approach</div>
+      </div>
+
+      <div>
+        <div class="code-block" style="margin-bottom:20px;">
+<span class="code-comment"># engine interface (simplified)</span>
+<span class="code-keyword">class</span> <span class="code-type">TranscriptionEngine</span>(<span class="code-type">ABC</span>):
+
+    <span class="code-keyword">async def</span> <span class="code-func">start</span>(self, config):
+        <span class="code-string">"""Initialize the engine"""</span>
+        ...
+
+    <span class="code-keyword">async def</span> <span class="code-func">transcribe_chunk</span>(self, audio):
+        <span class="code-string">"""Process an audio chunk"""</span>
+        ...
+
+    <span class="code-keyword">async def</span> <span class="code-func">stop</span>(self):
+        <span class="code-string">"""Clean up resources"""</span>
+        ...
+
+<span class="code-comment"># Usage in server</span>
+engine = <span class="code-func">get_engine</span>(<span class="code-string">"nemotron"</span>)  <span class="code-comment"># or "whisper"</span>
+<span class="code-keyword">await</span> engine.<span class="code-func">start</span>(config)
+        </div>
+
+        <div class="card" style="font-size:13px;">
+          <h3 style="margin-bottom:12px;">Why this approach?</h3>
+          <ul class="feature-list" style="font-size:13px;">
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Single server binary</strong> &mdash; no additional install complexity</li>
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Hot-swappable</strong> &mdash; switch engines via settings, no restart needed</li>
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Frontend unchanged</strong> &mdash; same WebSocket protocol, same IPC</li>
+            <li><span class="bullet"></span><strong style="color:var(--text-primary);">Testable</strong> &mdash; each engine is independently unit-testable</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 11: MIGRATION PATH ==================== -->
+<div class="slide" data-slide="10">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Roadmap</div>
+    <h2>Migration path</h2>
+    <p class="subtitle" style="margin-bottom:36px;">A phased approach that keeps Murmur stable while we integrate Nemotron.</p>
+
+    <div class="grid-2" style="gap:48px;">
+      <div class="timeline">
+        <div class="timeline-item done">
+          <div class="timeline-phase">Phase 1 &mdash; Research <span class="badge badge-green" style="margin-left:8px;font-size:10px;">Now</span></div>
+          <div class="timeline-desc">Benchmark Nemotron models, validate accuracy on English transcription use cases, document integration requirements.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 2 &mdash; Engine Interface</div>
+          <div class="timeline-desc">Define <code style="color:var(--nv-green);font-family:var(--font-mono);">TranscriptionEngine</code> ABC. Refactor current Whisper code to implement it. Add engine selection to settings.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 3 &mdash; Nemotron Integration</div>
+          <div class="timeline-desc">Implement <code style="color:var(--nv-green);font-family:var(--font-mono);">NemotronEngine</code> class. Set up NeMo/ONNX pipeline. Wire up native streaming to WebSocket protocol.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 4 &mdash; UI &amp; Polish</div>
+          <div class="timeline-desc">Add engine selector to main window settings. Show engine badge on overlay. Streaming text animation for Nemotron's real-time output.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-phase">Phase 5 &mdash; Ship</div>
+          <div class="timeline-desc">Default to Nemotron for English users. Keep Whisper as fallback for multi-language and as a legacy option. Auto-detect GPU capabilities.</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:20px;">
+          <h3 style="margin-bottom:16px;">Risk mitigation</h3>
+          <ul class="feature-list">
+            <li>
+              <span class="bullet"></span>
+              <div>
+                <strong style="color:var(--text-primary);">No breaking changes</strong><br>
+                <span style="font-size:13px;">WebSocket protocol stays identical. Frontend doesn't know which engine is running.</span>
+              </div>
+            </li>
+            <li>
+              <span class="bullet"></span>
+              <div>
+                <strong style="color:var(--text-primary);">Whisper always available</strong><br>
+                <span style="font-size:13px;">Whisper remains as fallback. Users can switch back at any time.</span>
+              </div>
+            </li>
+            <li>
+              <span class="bullet"></span>
+              <div>
+                <strong style="color:var(--text-primary);">GPU auto-detection</strong><br>
+                <span style="font-size:13px;">If no NVIDIA GPU or insufficient VRAM, default to Whisper CPU mode.</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-bottom:16px;">Effort estimate</h3>
+          <div class="grid-2" style="gap:12px;">
+            <div style="text-align:center;">
+              <div class="metric-big highlight" style="font-size:32px;">~3</div>
+              <div class="metric-label">Server-side changes</div>
+              <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">New files to add</p>
+            </div>
+            <div style="text-align:center;">
+              <div class="metric-big" style="font-size:32px;color:var(--success);">0</div>
+              <div class="metric-label">Frontend changes</div>
+              <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Protocol unchanged</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 12: RECOMMENDATION ==================== -->
+<div class="slide" data-slide="11">
+  <div class="slide-inner stagger">
+    <div class="slide-label">Conclusion</div>
+    <h2>Recommendation</h2>
+    <div class="spacer-md"></div>
+
+    <div class="rec-box" style="margin-bottom:32px;">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
+        <div class="title-logo glow-pulse" style="width:52px;height:52px;border-radius:14px;font-size:24px;margin:0;box-shadow:0 4px 20px var(--nv-green-glow);">N</div>
+        <div>
+          <h3 style="margin-bottom:2px;font-size:20px;">Adopt Nemotron Speech as the primary English engine</h3>
+          <p style="font-size:14px;color:var(--text-secondary);margin:0;">Keep faster-whisper as fallback for multi-language support and legacy users</p>
+        </div>
+      </div>
+
+      <div class="grid-4" style="gap:16px;">
+        <div style="text-align:center;">
+          <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:var(--nv-green);">21x</div>
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Faster latency</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:var(--nv-green);">50%</div>
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Less VRAM</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:var(--nv-green);">Native</div>
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Streaming</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-family:var(--font-mono);font-size:28px;font-weight:800;color:var(--success);">Zero</div>
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Frontend changes</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom:32px;">
+      <div class="card" style="text-align:center;">
+        <span style="font-size:28px;">&#127937;</span>
+        <div class="spacer-sm"></div>
+        <h3 style="font-size:15px;">Immediate Win</h3>
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;">Nemotron delivers a dramatically better real-time experience for English-speaking desktop users.</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span style="font-size:28px;">&#128736;</span>
+        <div class="spacer-sm"></div>
+        <h3 style="font-size:15px;">Low Risk</h3>
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;">Backend abstraction layer means no frontend changes, easy rollback, and both engines coexist.</p>
+      </div>
+      <div class="card" style="text-align:center;">
+        <span style="font-size:28px;">&#128640;</span>
+        <div class="spacer-sm"></div>
+        <h3 style="font-size:15px;">Future-Proof</h3>
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;">Engine interface opens the door for additional backends (Canary, Conformer, cloud APIs) down the road.</p>
+      </div>
+    </div>
+
+    <div style="text-align:center;">
+      <p style="font-size:16px;color:var(--text-secondary);font-style:italic;">
+        "Nemotron brings <span class="highlight" style="font-style:normal;font-weight:700;">the instant feel</span> that desktop voice transcription needs."
+      </p>
+      <div class="spacer-lg"></div>
+      <div class="waveform" style="justify-content:center;">
+        <div class="waveform-bar" style="animation-delay:0s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.1s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.2s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.3s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.4s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.5s;"></div>
+        <div class="waveform-bar" style="animation-delay:0.6s;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<!-- ============================================================ -->
+<!-- JAVASCRIPT ENGINE                                             -->
+<!-- ============================================================ -->
+<script>
+(function() {
+  'use strict';
+
+  const deck = document.getElementById('deck');
+  const slides = deck.querySelectorAll('.slide');
+  const totalSlides = slides.length;
+  let currentIndex = 0;
+
+  // Elements
+  const progressBar = document.getElementById('progressBar');
+  const counterCurrent = document.getElementById('counterCurrent');
+  const counterTotal = document.getElementById('counterTotal');
+  const navDots = document.getElementById('navDots');
+  const btnPrev = document.getElementById('btnPrev');
+  const btnNext = document.getElementById('btnNext');
+
+  // Init counter total
+  counterTotal.textContent = String(totalSlides).padStart(2, '0');
+
+  // Create nav dots
+  for (let i = 0; i < totalSlides; i++) {
+    const dot = document.createElement('button');
+    dot.classList.add('nav-dot');
+    dot.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+    dot.addEventListener('click', () => goToSlide(i));
+    navDots.appendChild(dot);
+  }
+
+  function updateUI() {
+    // Progress
+    progressBar.style.width = ((currentIndex + 1) / totalSlides * 100) + '%';
+
+    // Counter
+    counterCurrent.textContent = String(currentIndex + 1).padStart(2, '0');
+
+    // Dots
+    const dots = navDots.querySelectorAll('.nav-dot');
+    dots.forEach((d, i) => d.classList.toggle('active', i === currentIndex));
+
+    // Arrows
+    btnPrev.classList.toggle('disabled', currentIndex === 0);
+    btnNext.classList.toggle('disabled', currentIndex === totalSlides - 1);
+  }
+
+  function goToSlide(index) {
+    if (index < 0 || index >= totalSlides || index === currentIndex) return;
+    const direction = index > currentIndex ? 1 : -1;
+
+    // Remove active from current
+    slides[currentIndex].classList.remove('active');
+    slides[currentIndex].classList.toggle('exit-left', direction === 1);
+    slides[currentIndex].classList.toggle('exit-right', direction === -1);
+
+    // Reset bar fills on the departing slide (so they animate again later)
+    slides[currentIndex].querySelectorAll('.bar-fill').forEach(bar => {
+      bar.style.width = '0';
+      // Force a reflow so the transition re-fires next time
+      void bar.offsetWidth;
+      bar.style.width = '';
+    });
+
+    currentIndex = index;
+
+    // Prepare incoming slide
+    slides[currentIndex].classList.remove('exit-left', 'exit-right');
+
+    // Reset bar fills for animation
+    slides[currentIndex].querySelectorAll('.bar-fill').forEach(bar => {
+      bar.style.width = '0';
+    });
+
+    // Small delay to trigger CSS transition
+    requestAnimationFrame(() => {
+      slides[currentIndex].classList.add('active');
+      // Animate bars
+      requestAnimationFrame(() => {
+        slides[currentIndex].querySelectorAll('.bar-fill').forEach(bar => {
+          bar.style.width = '';
+        });
+      });
+    });
+
+    updateUI();
+  }
+
+  function next() { goToSlide(currentIndex + 1); }
+  function prev() { goToSlide(currentIndex - 1); }
+
+  // Keyboard
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+    if (e.key === 'Home') { e.preventDefault(); goToSlide(0); }
+    if (e.key === 'End') { e.preventDefault(); goToSlide(totalSlides - 1); }
+  });
+
+  // Buttons
+  btnPrev.addEventListener('click', prev);
+  btnNext.addEventListener('click', next);
+
+  // Touch swipe support
+  let touchStartX = 0;
+  let touchEndX = 0;
+
+  document.addEventListener('touchstart', function(e) {
+    touchStartX = e.changedTouches[0].screenX;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    touchEndX = e.changedTouches[0].screenX;
+    const diff = touchStartX - touchEndX;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0) next();
+      else prev();
+    }
+  }, { passive: true });
+
+  // Initialize
+  updateUI();
+})();
+</script>
+
+</body>
+</html>

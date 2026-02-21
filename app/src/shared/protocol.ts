@@ -26,6 +26,13 @@ export interface ControlFrameError {
   message: string;
 }
 
+export interface ControlFrameWarning {
+  frame: 'control';
+  type: 'warning';
+  code: string;
+  message: string;
+}
+
 export interface ControlFrameClosing {
   frame: 'control';
   type: 'closing';
@@ -37,6 +44,7 @@ export type ControlFrame =
   | ControlFrameStop
   | ControlFrameReady
   | ControlFrameError
+  | ControlFrameWarning
   | ControlFrameClosing;
 
 // Text frames
@@ -60,7 +68,12 @@ export interface TextFrameFinal {
 
 export type TextFrame = TextFramePartial | TextFrameFinal;
 
-export type ServerFrame = ControlFrameReady | ControlFrameError | ControlFrameClosing | TextFrame;
+export type ServerFrame =
+  | ControlFrameReady
+  | ControlFrameError
+  | ControlFrameWarning
+  | ControlFrameClosing
+  | TextFrame;
 
 // Audio frame header constants
 export const AUDIO_HEADER_SIZE = 5; // 2 (seq) + 2 (sample count) + 1 (flags)

@@ -7,6 +7,12 @@ import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
 import { getSetting, getSettings, updateSetting } from '../services/settings.js';
+import {
+  getServerSettings,
+  updateServerSettings,
+  getEngineStatus,
+  getAvailableEngines,
+} from '../services/server-settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
 
@@ -179,5 +185,25 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       return [];
     }
     return serverManagerRef.getLogs();
+  });
+
+  // Server settings (REST API proxy)
+  ipcMain.handle(IPC_CHANNELS.GET_SERVER_SETTINGS, async () => {
+    return getServerSettings();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATE_SERVER_SETTINGS,
+    async (_event, patch: Record<string, unknown>) => {
+      return updateServerSettings(patch);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.GET_ENGINE_STATUS, async () => {
+    return getEngineStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_AVAILABLE_ENGINES, async () => {
+    return getAvailableEngines();
   });
 }

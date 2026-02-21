@@ -4,6 +4,7 @@ import type {
   RecordingStatePayload,
   TranscriptionPayload,
   ConnectionStatePayload,
+  RecordingWarningPayload,
 } from '../../shared/types.js';
 
 // Define the API exposed to the renderer
@@ -31,6 +32,14 @@ const murmurAPI = {
     };
     ipcRenderer.on(IPC_CHANNELS.STATE_TRANSCRIPTION, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_TRANSCRIPTION, handler);
+  },
+
+  onWarning: (callback: (warning: RecordingWarningPayload) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: RecordingWarningPayload) => {
+      callback(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.STATE_WARNING, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_WARNING, handler);
   },
 
   // Recording commands (Main → Renderer, tells overlay to start/stop audio capture)
@@ -61,6 +70,7 @@ const murmurAPI = {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_RECORDING);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_CONNECTION);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_TRANSCRIPTION);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_WARNING);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.COMMAND_START_RECORDING);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.COMMAND_STOP_RECORDING);
   },

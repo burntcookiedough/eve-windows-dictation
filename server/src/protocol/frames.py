@@ -1,7 +1,7 @@
 """Pydantic models for all protocol frame types."""
 
 from enum import StrEnum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,7 @@ class ReadyFrame(ControlFrameBase):
     """Server -> Client: Confirms session started, server is accepting audio."""
 
     type: Literal["ready"] = "ready"
+    engine: dict[str, Any] | None = None
 
 
 class ErrorFrame(ControlFrameBase):
@@ -58,6 +59,21 @@ class ErrorFrame(ControlFrameBase):
 
     type: Literal["error"] = "error"
     code: ErrorCode
+    message: str
+
+
+class WarningCode(StrEnum):
+    """Machine-readable warning codes sent in non-fatal warning frames."""
+
+    VRAM_EXHAUSTED = "vram_exhausted"
+    """GPU VRAM was exhausted during transcription."""
+
+
+class WarningFrame(ControlFrameBase):
+    """Server -> Client: Non-fatal warning; session continues."""
+
+    type: Literal["warning"] = "warning"
+    code: WarningCode
     message: str
 
 
@@ -79,7 +95,14 @@ class ClosingFrame(ControlFrameBase):
 
 
 # Union type for all control frames
-ControlFrame = Union[StartFrame, StopFrame, ReadyFrame, ErrorFrame, ClosingFrame]
+ControlFrame = Union[
+    StartFrame,
+    StopFrame,
+    ReadyFrame,
+    ErrorFrame,
+    WarningFrame,
+    ClosingFrame,
+]
 
 
 # --- Text Frames ---
@@ -105,7 +128,9 @@ class FinalTextFrame(TextFrameBase):
     """Server -> Client: Committed transcription result (will not change)."""
 
     type: Literal["final"] = "final"
-    text: Annotated[str, Field(min_length=1)]  # Never empty
+    # Can be empty when no speech was recognized; final frame is still emitted
+    # so clients can reliably treat it as the session's terminal text payload.
+    text: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
     transcription_time: Annotated[float, Field(ge=0.0)]
     audio_duration: Annotated[float, Field(ge=0.0)]

@@ -13,6 +13,8 @@ from protocol.frames import (
     ReadyFrame,
     StartFrame,
     StopFrame,
+    WarningCode,
+    WarningFrame,
 )
 
 
@@ -152,6 +154,37 @@ class TestClosingFrame:
         }
 
 
+class TestWarningFrame:
+    """Tests for WarningFrame."""
+
+    def test_valid_warning_frame(self) -> None:
+        """Create a valid warning frame."""
+        frame = WarningFrame(
+            code=WarningCode.VRAM_EXHAUSTED,
+            message="GPU VRAM exhausted",
+        )
+
+        assert frame.frame == "control"
+        assert frame.type == "warning"
+        assert frame.code == WarningCode.VRAM_EXHAUSTED
+        assert frame.message == "GPU VRAM exhausted"
+
+    def test_warning_frame_serialization(self) -> None:
+        """Warning frame serializes correctly."""
+        frame = WarningFrame(
+            code=WarningCode.VRAM_EXHAUSTED,
+            message="GPU VRAM exhausted",
+        )
+        data = frame.model_dump()
+
+        assert data == {
+            "frame": "control",
+            "type": "warning",
+            "code": "vram_exhausted",
+            "message": "GPU VRAM exhausted",
+        }
+
+
 class TestPartialTextFrame:
     """Tests for PartialTextFrame."""
 
@@ -223,12 +256,16 @@ class TestFinalTextFrame:
         assert frame.text == "hello world"
         assert frame.confidence == 0.95
 
-    def test_final_frame_requires_non_empty_text(self) -> None:
-        """Final frame cannot have empty text."""
-        with pytest.raises(ValidationError):
-            FinalTextFrame(
-                text="", confidence=0.9, transcription_time=0.1, audio_duration=1.0
-            )
+    def test_final_frame_can_have_empty_text(self) -> None:
+        """Final frame allows empty text when no speech was recognized."""
+        frame = FinalTextFrame(
+            text="",
+            confidence=0.0,
+            transcription_time=0.1,
+            audio_duration=1.0,
+        )
+
+        assert frame.text == ""
 
     def test_final_frame_confidence_bounds(self) -> None:
         """Final frame confidence must be 0-1."""

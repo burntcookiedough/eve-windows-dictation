@@ -40,6 +40,11 @@ export interface ConnectionStatePayload {
   error?: string;
 }
 
+export interface RecordingWarningPayload {
+  code: string;
+  message: string;
+}
+
 export interface AudioLevelPayload {
   levels: number[]; // RMS values for waveform bars
 }
@@ -121,6 +126,65 @@ export interface Settings {
   // Recognition vocabulary hints
   hotwordsEnabled: boolean;
   hotwordsCsl: string;
+}
+
+// Server settings types (fetched from server REST API)
+export interface ServerSetting<T> {
+  value: T;
+  label: string;
+  description: string;
+  type: 'select' | 'number' | 'bool' | 'text';
+  options?: Array<{ value: T; label: string; description?: string }>;
+  range?: [number, number];
+  requires_reload: boolean;
+  category: string;
+  visible_when?: Record<string, unknown>;
+  readonly?: boolean;
+}
+
+export interface EngineInfo {
+  id: string;
+  name: string;
+  model: string;
+  supports_hotwords: boolean;
+  languages: string[];
+  model_size_gb: number;
+  gpu_name?: string | null;
+  gpu_vram_gb?: number | null;
+  estimated_max_duration_s?: number | null;
+}
+
+export interface EngineStatus {
+  current: string;
+  status: 'loading' | 'ready' | 'error';
+  info?: EngineInfo;
+  message?: string;
+  pending?: {
+    engine: string;
+    status: 'loading' | 'ready' | 'error';
+    message?: string;
+  };
+}
+
+export interface ServerSettingsResponse {
+  settings: Record<string, ServerSetting<unknown>>;
+  engine_status: EngineStatus;
+  available_engines?: string[];
+  reload_required?: boolean;
+  reload_started?: boolean;
+  active_sessions?: number;
+  note?: string;
+}
+
+export interface AvailableEngine {
+  id: string;
+  name: string;
+  available: boolean;
+  description: string;
+  model_size_gb: number;
+  languages: string[];
+  features: string[];
+  install_hint?: string;
 }
 
 // Window bounds for position/size persistence

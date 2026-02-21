@@ -119,7 +119,7 @@ Explicitly ends the session.
 
 **Server behavior:**
 1. Finalize any pending transcription
-2. Send `final` text frame if there is pending text
+2. Send exactly one `final` text frame (may be empty when no speech was recognized)
 3. Send `closing` control frame with reason `"stop_received"`
 4. Close WebSocket connection
 
@@ -175,9 +175,37 @@ Fatal error. Connection will close immediately after.
 
 **Client behavior:** Log the error. Connection will close.
 
+### warning (Server → Client)
+
+Non-fatal warning. Session continues and connection remains open.
+
+```json
+{
+  "frame": "control",
+  "type": "warning",
+  "code": "vram_exhausted",
+  "message": "GPU VRAM exhausted during transcription; using last successful result."
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `frame` | string | `"control"` |
+| `type` | string | `"warning"` |
+| `code` | string | Machine-readable warning code |
+| `message` | string | Human-readable warning message |
+
+#### Warning Codes
+
+| Code | Meaning |
+|------|---------|
+| `vram_exhausted` | GPU VRAM exhausted during transcription; server falls back to last successful text |
+
+**Client behavior:** Surface warning to user and continue sending audio normally.
+
 ### closing (Server → Client)
 
-Server is about to close the connection. Sent after final text frame (if any).
+Server is about to close the connection. Sent after the terminal `final` text frame.
 
 ```json
 {
@@ -267,22 +295,22 @@ Committed transcription result. Will not change.
 |-------|------|-------------|
 | `frame` | string | `"text"` |
 | `type` | string | `"final"` |
-| `text` | string | Finalized transcription (always non-empty) |
+| `text` | string | Finalized transcription (may be empty when no speech was recognized) |
 | `confidence` | number | Confidence score, 0.0 to 1.0 |
 | `transcription_time` | number | Time in seconds for transcription processing (see below) |
 | `audio_duration` | number | Duration in seconds of the audio transcribed |
 
 **`transcription_time` includes:** reading audio from buffer, converting to float32, and model inference. **Does not include:** network latency, audio capture, or any post-processing.
 
-**Client behavior:** Append text to transcript. Clear partial buffer.
+**Client behavior:** Treat this as terminal session text. Clear partial buffer.
 
-**Note:** Empty `final` frames are never sent. If silence is detected with no speech, no `final` is emitted.
+**Note:** Empty `final` frames can be sent when silence/no-speech is detected.
 
 ### Emission Rules
 
-1. A `final` frame is only emitted when a stop signal occurs (client `stop`, silence timeout). It is never emitted on errors.
+1. A `final` frame is emitted on normal session termination (client `stop`, silence timeout).
 2. Once a `final` is sent, no further `partial` frames are sent for that session.
-3. The sequence is always: zero or more `partial` → one `final` (if there was speech) → `closing` → connection close.
+3. The sequence is always: zero or more `partial` → one terminal `final` → `closing` → connection close.
 
 ---
 
@@ -316,10 +344,12 @@ Client                                   Server
 
 A session ends when any of the following occur:
 
-1. **Client sends `stop`** — Server finalizes, sends `final` (if pending text), sends `closing` with reason `stop_received`, closes connection.
+1. **Client sends `stop`** — Server finalizes, sends terminal `final` (possibly empty), sends `closing` with reason `stop_received`, closes connection.
 
-2. **Silence timeout** — No speech detected for `silence_timeout` seconds. Server sends `final` (if pending text), sends `closing` with reason `silence_timeout`, closes connection.
+2. **Silence timeout** — No speech detected for `silence_timeout` seconds. Server sends terminal `final` (possibly empty), sends `closing` with reason `silence_timeout`, closes connection.
 
 3. **Client closes connection** — Server treats as implicit stop, cleans up resources.
 
 4. **Fatal error** — Server sends `error`, closes connection immediately. No `final` or `closing` frame is sent.
+
+5. **Non-fatal warning** — Server may send `warning` at any time during an active session. Session continues.

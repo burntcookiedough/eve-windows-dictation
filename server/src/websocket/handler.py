@@ -5,16 +5,20 @@ import json
 import logging
 import time
 
+from dataclasses import asdict
+
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
 from protocol.errors import ErrorCode
-from protocol.frames import ClosingReason, StartFrame
+from protocol.frames import ClosingReason, StartFrame, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
+from transcription.errors import VramExhaustedError
+from transcription.factory import get_engine_manager
 from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
 
@@ -54,12 +58,11 @@ async def websocket_handler(websocket: WebSocket) -> None:
         # Create transcription processor
         processor = TranscriptionProcessor(context)
 
-        # Determine partial emission interval (client override or server default)
-        partial_interval = (
-            context.partial_emission_interval
-            if context.partial_emission_interval is not None
-            else settings.partial_emission_interval
-        )
+        # Determine partial emission interval
+        if context.partial_emission_interval is not None:
+            partial_interval = context.partial_emission_interval
+        else:
+            partial_interval = settings.partial_emission_interval
 
         # Start background tasks
         partial_task = asyncio.create_task(
@@ -84,6 +87,8 @@ async def websocket_handler(websocket: WebSocket) -> None:
                 await silence_task
             except asyncio.CancelledError:
                 pass
+            # Release per-session engine resources
+            processor.close()
 
     except WebSocketDisconnect:
         logger.info("[%s] Client disconnected", context.session_id)
@@ -167,8 +172,13 @@ async def _wait_for_start(
     context.mark_started()
     context.state_machine.transition_to(SessionState.STARTED)
 
-    # Send ready
-    await sender.send_ready()
+    # Send ready with engine info
+    try:
+        engine_mgr = get_engine_manager()
+        engine_info_dict = asdict(engine_mgr.engine_info)
+    except Exception:
+        engine_info_dict = None
+    await sender.send_ready(engine_info=engine_info_dict)
     logger.info(
         "[%s] Session started (silence_timeout=%.1fs, partial_interval=%s, hotwords=%s)",
         context.session_id,
@@ -302,6 +312,8 @@ async def _partial_emission_loop(
     Uses adaptive timing: sleeps only for the remaining time after transcription
     completes, ensuring cycle time = max(min_interval, transcription_time).
     """
+    warning_sent = False
+
     while context.state_machine.is_active():
         cycle_start = time.monotonic()
 
@@ -340,6 +352,15 @@ async def _partial_emission_loop(
                     cycle_time * 1000,
                     result.audio_duration,
                 )
+        except VramExhaustedError as e:
+            logger.warning(
+                "[%s] VRAM exhausted during partial transcription: %s",
+                context.session_id,
+                e.message,
+            )
+            if not warning_sent:
+                warning_sent = True
+                await sender.send_warning(WarningCode.VRAM_EXHAUSTED, e.message)
         except Exception as e:
             logger.exception(
                 "[%s] Error in partial emission: %s", context.session_id, e
@@ -424,7 +445,7 @@ async def _finalize_session(
     processor: TranscriptionProcessor,
     reason: ClosingReason,
 ) -> None:
-    """Finalize session: send final text (if any) and closing frame."""
+    """Finalize session: always send final text frame, then closing frame."""
     if context.state_machine.state == SessionState.CLOSED:
         return
 
@@ -434,26 +455,52 @@ async def _finalize_session(
     if context.state_machine.state != SessionState.FINALIZING:
         context.state_machine.transition_to(SessionState.FINALIZING)
 
-    # Get final transcription
+    # Get final transcription. If final transcription fails, fall back to the
+    # last emitted partial so the client still receives a terminal text frame.
+    final_text = ""
+    final_confidence = 0.0
+    final_transcription_time = 0.0
+    final_audio_duration = context.audio_buffer.duration_seconds
+
     try:
         result = await processor.transcribe_final()
-        if not result.is_empty:
+        final_text = result.text
+        final_confidence = result.confidence
+        final_transcription_time = result.transcription_time
+        final_audio_duration = result.audio_duration
+
+        if result.is_empty and context.last_partial_text:
+            logger.warning(
+                "[%s] Final transcription empty, using last partial as terminal text",
+                context.session_id,
+            )
+            final_text = context.last_partial_text
+            final_confidence = 0.0
+
+        if final_text:
             logger.info(
                 "[%s] Final transcription: %r (%.1fs audio)",
                 context.session_id,
-                result.text[:100] if len(result.text) > 100 else result.text,
-                result.audio_duration,
-            )
-            await sender.send_final(
-                result.text,
-                result.confidence,
-                result.transcription_time,
-                result.audio_duration,
+                final_text[:100] if len(final_text) > 100 else final_text,
+                final_audio_duration,
             )
         else:
-            logger.info("[%s] No speech detected in session", context.session_id)
+            logger.info("[%s] Final transcription is empty (no speech detected)", context.session_id)
     except Exception as e:
         logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
+        if context.last_partial_text:
+            final_text = context.last_partial_text
+            logger.warning(
+                "[%s] Falling back to last partial as terminal text after finalization error",
+                context.session_id,
+            )
+
+    await sender.send_final(
+        final_text,
+        final_confidence,
+        final_transcription_time,
+        final_audio_duration,
+    )
 
     # Send closing frame
     logger.info("[%s] Sending closing frame", context.session_id)
