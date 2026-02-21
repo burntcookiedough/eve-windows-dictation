@@ -1,184 +1,128 @@
 <p align="center">
-  <img src="app/resources/icon.png" alt="Murmur" width="128" height="128">
+  <img src="app/resources/icon.png" alt="Murmur" width="100" height="100">
 </p>
 
 <h1 align="center">Murmur</h1>
 
 <p align="center">
-  <strong>Local voice transcription for Windows</strong><br>
-  Press a key, speak, release - your text appears where you are typing.
+  Local voice-to-text for Windows. Hold a key, talk, let go — your words land wherever you're typing.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-orange?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/v0.2.0-alpha-orange?style=flat-square" alt="v0.2.0 alpha">
 </p>
+
+<!-- TODO: add a demo gif here once one exists -->
 
 ---
 
-> [!CAUTION]
-> Murmur is alpha software. Core workflows are usable, but expect rough edges and rapid iteration.
+Everything runs on your machine. No cloud, no account, no sending audio anywhere. Murmur sits in your system tray and gives you a global hotkey that turns speech into text in any app — your editor, your browser, a chat window, whatever has focus.
 
-## What Murmur Is
+## How It Works
 
-Murmur is a desktop dictation app that runs entirely on your machine:
-
-- `app/`: Electron desktop app (overlay, settings, history, server controls)
-- `server/`: FastAPI WebSocket transcription server (Nemotron + Whisper engines)
-
-No cloud API is required for local usage.
-
-## Current Feature Set
-
-- Global hotkey recording (`hold-to-talk` and `toggle` modes)
-- Pre-warmed transparent overlay with live partial text and waveform
-- Local post-processing (`append period`, `append space`)
-- Clipboard + auto-paste output pipeline
-- Local searchable history (SQLite)
-- Two engine options with hot-swap:
-  - `nemotron` (default, English-focused, low-latency)
-  - `whisper` (multilingual, hotwords supported)
-- Runtime server controls in-app (status, start/stop/restart, log streaming)
-- External server mode (custom host/port in Settings)
-
-## Repository Layout
-
-```text
-app/      Electron app (Svelte 5 + TypeScript + Tailwind)
-server/   FastAPI transcription backend (Python 3.11+)
-docs/     Protocol and technical notes
-.dev/     Active internal scratch notes
+```mermaid
+graph LR
+    A["🎤 Hold hotkey"] --> B["🎙️ Mic capture"]
+    B --> C["📡 WebSocket"]
+    C --> D["🧠 Transcription engine"]
+    D --> E["💬 Partials stream to overlay"]
+    E --> F["📋 Release → clipboard + paste"]
 ```
 
-## Development Setup
+Audio flows from your mic through an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), gets sent as 16-bit PCM over a local WebSocket, and hits the transcription engine running on your GPU (or CPU). Partials stream back in real-time so you see words forming as you speak. When you release the key, the final transcription lands in your clipboard and gets pasted automatically.
 
-### 1) Prerequisites
+The overlay is a transparent, always-on-top, click-through window — it shows up when you're recording and gets out of the way when you're not.
 
-- Windows 10/11
-- Bun
-- Python 3.11+
-- uv
-- just
-- CUDA-capable GPU recommended (CPU is supported, but slower)
+## Features
 
-### 2) Important WSL Safety Note
+- **Hold-to-talk or toggle mode** — bind any key as your global hotkey
+- **Transparent overlay** — live waveform and partial transcription while you speak
+- **Two engines, hot-swappable** — switch between them without restarting
+- **Auto-paste** — transcribed text goes straight to your clipboard and into the active field
+- **Post-processing** — auto-append periods, spaces, or both
+- **Searchable history** — every transcription saved locally in SQLite
+- **In-app server controls** — start, stop, restart, stream logs, all from the settings panel
+- **External server mode** — point Murmur at a remote server if you want
 
-If you work from WSL, run dependency/runtime commands through Windows PowerShell.
-Do **not** run `uv sync`, `uv run`, `bun install`, or `bun run` directly in Linux mode against this repo.
+## Engines
 
-### 3) Install server dependencies
+Murmur ships with two transcription engines. Both run locally and can be swapped at runtime from the settings panel.
 
-From `server/` (PowerShell on Windows):
+| | Nemotron | Whisper |
+|---|---|---|
+| **Model** | `nvidia/nemotron-speech-streaming-en-0.6b` | `large-v3-turbo` (via faster-whisper) |
+| **Best for** | English dictation, low latency | Multilingual, accuracy |
+| **Streaming** | Native streaming architecture | Chunked re-transcription |
+| **Extras** | — | Hotword boosting |
+| **VRAM** | ~1.5 GB | ~3 GB |
+
+Nemotron is the default. It's a 0.6B parameter model built for streaming — partials come back fast and the final result is usually identical to the last partial. Whisper is the fallback for non-English languages or when you need hotword support to nail domain-specific terms.
+
+## Quick Start
+
+You need Windows 10/11 with [Bun](https://bun.sh), [Python 3.11+](https://python.org), [uv](https://docs.astral.sh/uv/), and [just](https://github.com/casey/just). A CUDA GPU is recommended but not required.
 
 ```powershell
-# Install both engines (recommended)
-uv sync --extra all
-```
-
-Engine-specific installs:
-
-```powershell
-uv sync --extra nemotron
-uv sync --extra whisper
-```
-
-### 4) Start server (dev)
-
-From `server/`:
-
-```bash
+# Server
+cd server
+uv sync --extra all    # or: --extra nemotron / --extra whisper
 just start
-```
 
-Other useful commands:
-
-```bash
-just start-bg
-just status
-just stop
-just test
-```
-
-### 5) Start app (dev)
-
-From `app/` (PowerShell on Windows):
-
-```powershell
+# App (separate terminal)
+cd app
 bun install
 bun run dev
 ```
 
-In development, Murmur **detects** an already-running server; it does not auto-spawn one.
+The app auto-detects a running server in dev mode. In production, it manages the server lifecycle itself.
 
-## Build / Package
+> [!NOTE]
+> If you develop from WSL, run all `uv`/`bun`/`just` commands through PowerShell — not Linux. Running them from WSL replaces Windows binaries with Linux ones and breaks everything. See [BUILDING.md](BUILDING.md).
 
-Build Windows installer:
+## Build
 
 ```powershell
-# ensure server .venv is current first
-cd server
-uv sync --extra all
-
-cd ../app
-bun run package:win
+cd server && uv sync --extra all
+cd ../app && bun run package:win
 ```
 
-Root-level helper:
-
-```bash
-just build
-```
-
-See `BUILDING.md` for full release and troubleshooting details.
+Produces a Windows NSIS installer under `app/release/`. Full build guide: **[BUILDING.md](BUILDING.md)**
 
 ## Configuration
 
-### App settings (UI)
+App settings (hotkey, audio device, engine, post-processing, auto-paste) are configured through the UI.
 
-Configured in `Settings` view:
+Server settings use `MURMUR_`-prefixed environment variables and can also be changed at runtime from the app, which persists them to `server/settings.json`.
 
-- Hotkey / activation mode
-- Audio input device
-- Post-processing options
-- Auto-copy / auto-paste
-- Startup behavior
-- Engine settings (fetched from server REST API)
-- External server toggle and endpoint
-
-### Server environment variables
-
-All settings use `MURMUR_` prefix.
+<details>
+<summary><strong>Server environment variables</strong></summary>
 
 | Variable | Default | Description |
 |---|---|---|
 | `MURMUR_HOST` | `0.0.0.0` | Bind host |
-| `MURMUR_PORT` | `51717` | Bind port (`0` allows random OS-assigned port) |
-| `MURMUR_MAX_SESSIONS` | `10` | Concurrent session cap |
-| `MURMUR_START_TIMEOUT` | `10.0` | Seconds to wait for `start` frame |
-| `MURMUR_ENGINE` | `nemotron` | Default engine (`nemotron` or `whisper`) |
+| `MURMUR_PORT` | `51717` | Bind port |
+| `MURMUR_ENGINE` | `nemotron` | Default engine (`nemotron` / `whisper`) |
 | `MURMUR_NEMOTRON_MODEL` | `nvidia/nemotron-speech-streaming-en-0.6b` | Nemotron model |
-| `MURMUR_NEMOTRON_DEVICE` | `auto` | Nemotron device (`auto`/`cuda`/`cpu`) |
+| `MURMUR_NEMOTRON_DEVICE` | `auto` | Device (`auto`/`cuda`/`cpu`) |
 | `MURMUR_WHISPER_MODEL` | `large-v3-turbo` | Whisper model |
-| `MURMUR_WHISPER_DEVICE` | `auto` | Whisper device (`auto`/`cuda`/`cpu`) |
+| `MURMUR_WHISPER_DEVICE` | `auto` | Device (`auto`/`cuda`/`cpu`) |
 | `MURMUR_WHISPER_COMPUTE_TYPE` | `auto` | Whisper precision mode |
-| `MURMUR_PARTIAL_EMISSION_INTERVAL` | `0.25` | Minimum partial emission interval (seconds) |
-| `MURMUR_MIN_AUDIO_FOR_TRANSCRIPTION` | `0.15` | Minimum audio duration for partial processing |
-| `MURMUR_UNLOAD_BEFORE_SWAP` | `false` | Free VRAM before engine swap |
-| `MURMUR_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `MURMUR_LOG_BINARY` | `false` | Verbose protocol logging |
+| `MURMUR_MAX_SESSIONS` | `10` | Concurrent session cap |
+| `MURMUR_LOG_LEVEL` | `INFO` | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 
-Runtime server settings are also persisted to `server/settings.json` when changed from the app UI.
+</details>
+
+## Project Structure
+
+```
+app/      Electron desktop app (Svelte 5, TypeScript, Tailwind v4)
+server/   Transcription server (FastAPI, faster-whisper, NeMo)
+docs/     Protocol spec and technical docs
+```
 
 ## Protocol
 
-Murmur uses a custom WebSocket protocol (`/transcribe`) for binary audio + JSON control/text frames.
-
-- Full spec: `docs/protocol.md`
-
-## Docs
-
-- `BUILDING.md`
-- `docs/README.md`
-- `docs/protocol.md`
+The app and server communicate over a custom WebSocket protocol on port 51717 — binary frames for audio, JSON frames for control and text. Full spec: **[docs/protocol.md](docs/protocol.md)**
 
 ## License
 
