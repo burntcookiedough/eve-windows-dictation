@@ -9,6 +9,10 @@
   Press a key, speak, release - your text appears where you are typing.
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.2.0-orange?style=flat-square" alt="Version">
+</p>
+
 ---
 
 > [!CAUTION]
