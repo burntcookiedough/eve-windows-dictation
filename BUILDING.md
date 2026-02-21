@@ -14,7 +14,7 @@ Complete guide for setting up, developing, and packaging Murmur.
 | **uv** | 0.4+ | Python package manager |
 | **just** | | Server task runner |
 | **PowerShell 7** | | Running Windows commands from WSL |
-| **CUDA toolkit** | 11.8+ | GPU acceleration (optional, CPU works too) |
+| **NVIDIA driver** | 525+ | GPU acceleration (optional, CPU works too) |
 
 Install prerequisites (WSL):
 
@@ -105,7 +105,7 @@ git push origin v1.0.0
 ### What happens after tag push
 
 1. GitHub Actions validates that tag version matches repository version.
-2. Workflow builds the Windows installer.
+2. Workflow builds the Windows nsis-web installer (stub + payloads).
 3. Workflow creates/publishes a GitHub Release and uploads release assets.
 
 ### If a release run fails
@@ -124,8 +124,8 @@ The server runs on Windows (via PowerShell from WSL). All `just` commands handle
 ```bash
 cd server
 
-# Install Python dependencies
-uv sync
+# Install Python dependencies (all engines, required for packaging)
+uv sync --extra all
 
 # Start the server (foreground)
 just start
@@ -139,6 +139,15 @@ just status
 # Stop
 just stop
 ```
+
+Optional smaller installs for development:
+
+```bash
+uv sync --extra whisper
+uv sync --extra nemotron
+```
+
+Whisper-only installs do not include PyTorch's CUDA DLLs; GPU mode may be unavailable unless the system has CUDA runtime libraries.
 
 On first run, the server downloads the Whisper model (~1.5 GB for `large-v3-turbo`). This only happens once.
 
@@ -219,10 +228,10 @@ The packaged app bundles the Python server with its virtual environment. Make su
 
 ```bash
 cd server
-uv sync
+uv sync --extra all
 ```
 
-This creates/updates `server/.venv/` with all Python dependencies including faster-whisper.
+This creates/updates `server/.venv/` with all Python dependencies, including Whisper and Nemotron.
 
 ### 2. Build and package the app
 
@@ -232,14 +241,16 @@ cd app
 # Build renderer (Vite) + main process (esbuild)
 bun run build
 
-# Package for Windows (creates installer in app/release/)
+# Package for Windows (creates nsis-web installer + payloads in app/release/)
 bun run package:win
 ```
 
 This runs electron-builder which:
 1. Compiles the renderer and main process into `app/dist/`
 2. Copies `server/` (source + `.venv`) into the app's `resources/server/` via `extraResources`
-3. Produces an NSIS installer in `app/release/`
+3. Produces an nsis-web installer stub plus payload archives in `app/release/`
+
+The nsis-web installer downloads payloads during install, so an internet connection is required for end users.
 
 ### 3. What gets bundled
 
@@ -287,7 +298,7 @@ The server writes a PID file to `%APPDATA%/murmur/server.pid` (JSON with `pid`, 
 | `bun run build` | Production build (renderer + main process) |
 | `bun run build:main` | Build main process only (esbuild) |
 | `bun run build:renderer` | Build renderer only (Vite) |
-| `bun run package:win` | Build + package Windows installer |
+| `bun run package:win` | Build + package Windows nsis-web installer + payloads |
 | `bun run clear-data` | Clear local app data (settings, history) |
 
 ### Server (`server/`)
@@ -336,6 +347,8 @@ bun run postinstall   # runs electron-rebuild
 ```
 
 ### GPU not detected
+
+Check the Server view warnings for CUDA DLL, driver, or VC++ Redistributable diagnostics.
 
 ```bash
 # Check CUDA availability

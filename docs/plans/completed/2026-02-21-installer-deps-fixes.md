@@ -81,9 +81,9 @@ Switch the Windows installer to nsis-web to bypass the NSIS 2GB limit, ensure re
 - Modify: `BUILDING.md`
 - Modify: `README.md`
 
-- [ ] Update installer-dependencies doc to reflect nsis-web, resolved blockers, and updated dependency guidance
-- [ ] Update BUILDING and README to match the new packaging flow and system requirements
-- [ ] Add/update doc consistency checks (for example a pytest that validates required sections or references)
-- [ ] Run test suite and ensure it passes
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update installer-dependencies doc to reflect nsis-web, resolved blockers, and updated dependency guidance
+- [x] Update BUILDING and README to match the new packaging flow and system requirements
+- [x] Add/update doc consistency checks (for example a pytest that validates required sections or references)
+- [x] Run test suite and ensure it passes
+- [x] Move this plan to `docs/plans/completed/`
 ---

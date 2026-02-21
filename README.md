@@ -33,7 +33,12 @@ Audio flows from your mic through an [AudioWorklet](https://developer.mozilla.or
 
 The overlay is a transparent, always-on-top, click-through window — it shows up when you're recording and gets out of the way when you're not.
 
-## Features
+- Windows 10/11
+- Bun
+- Python 3.11+
+- uv
+- just
+- CUDA-capable GPU recommended (driver 525+; CPU is supported but slower)
 
 - **Hold-to-talk or toggle mode** — bind any key as your global hotkey
 - **Transparent overlay** — live waveform and partial transcription while you speak
@@ -86,7 +91,15 @@ cd server && uv sync --extra all
 cd ../app && bun run package:win
 ```
 
-Produces a Windows NSIS installer under `app/release/`. Full build guide: **[BUILDING.md](BUILDING.md)**
+`bun run package:win` produces a small nsis-web installer stub plus payloads (for example `.7z`, `.yml`, `.blockmap`) in `app/release/`. End users need internet to install (payload download) and to fetch models on first run.
+
+Root-level helper:
+
+```bash
+just build
+```
+
+See `BUILDING.md` for full release and troubleshooting details.
 
 ## Configuration
 
