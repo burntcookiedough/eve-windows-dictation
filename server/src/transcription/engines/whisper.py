@@ -18,9 +18,28 @@ _CUDA_DLL_ERROR_MARKERS = ("cublas", "cudart", "cufft", "cudnn", "cuda")
 _MODEL_REPO_PREFIX = "Systran/faster-whisper-"
 
 
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    """Walk exception causes/contexts without raising on None."""
+    seen: set[int] = set()
+    stack = [exc]
+    chain: list[BaseException] = []
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        chain.append(current)
+        stack.append(current.__context__)
+        stack.append(current.__cause__)
+    return chain
+
+
 def _is_network_error(exc: BaseException) -> bool:
     """Detect TLS/network errors that local-only loading can recover from."""
-    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+    for e in _iter_exception_chain(exc):
         msg = str(e)
         if any(marker.lower() in msg.lower() for marker in _NETWORK_ERROR_MARKERS):
             return True
@@ -29,7 +48,7 @@ def _is_network_error(exc: BaseException) -> bool:
 
 def _is_cuda_dll_error(exc: BaseException) -> bool:
     """Detect missing CUDA DLL errors for clearer startup diagnostics."""
-    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+    for e in _iter_exception_chain(exc):
         msg = str(e).lower()
         if any(marker in msg for marker in _CUDA_DLL_ERROR_MARKERS):
             return True
@@ -138,12 +157,18 @@ class WhisperEngine:
                     )
                 raise
         self._model_name = model
+        if preflight_cached is False:
+            detail = "downloaded"
+        elif preflight_cached is True:
+            detail = "cached"
+        else:
+            detail = "local model"
         update_model_download_state(
             model=model,
             size_gb=model_size_gb,
             status="ready",
             cached=True,
-            detail="downloaded" if preflight_cached is False else "cached",
+            detail=detail,
         )
         if preflight_cached is False:
             logger.info("Whisper model download complete.")

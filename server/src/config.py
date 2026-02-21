@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Literal
 
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     )
 
     # Server settings
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 51717
     max_sessions: int = 10
     start_timeout: float = 10.0
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
     nemotron_device: Literal["auto", "cpu", "cuda"] = "auto"
 
     # Transcription settings
-    partial_emission_interval: float = 0.25
+    partial_emission_interval: float = Field(default=0.25, gt=0.0)
     min_audio_for_transcription: float = 0.15
 
     # Hot-swap
@@ -187,7 +188,11 @@ def get_settings() -> Settings:
         return _settings
     # Load from settings.json first, env vars override
     persisted = _load_settings_json()
-    _settings = Settings(**persisted) if persisted else Settings()
+    try:
+        _settings = Settings(**persisted) if persisted else Settings()
+    except ValidationError as e:
+        logger.warning("Invalid settings.json values; falling back to defaults: %s", e)
+        _settings = Settings()
     return _settings
 
 
@@ -196,7 +201,12 @@ def update_settings(patch: dict[str, Any]) -> Settings:
     current = get_settings()
     current_dict = current.model_dump()
     current_dict.update(patch)
-    _settings = Settings(**current_dict)
+    try:
+        updated = Settings(**current_dict)
+    except ValidationError as e:
+        logger.warning("Rejected invalid settings update: %s", e)
+        raise
+    _settings = updated
     # Persist non-default values
     _persist_settings(_settings)
     return _settings

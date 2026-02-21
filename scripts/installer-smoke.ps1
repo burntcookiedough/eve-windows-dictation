@@ -137,6 +137,8 @@ if ($Model) {
     $env:MURMUR_WHISPER_MODEL = $Model
     Write-Step "Setting MURMUR_WHISPER_MODEL=$Model"
 }
+$env:MURMUR_ENGINE = "whisper"
+Write-Step "Setting MURMUR_ENGINE=whisper"
 
 Write-Step "Installing Murmur"
 $installProc = Start-Process -Wait -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru

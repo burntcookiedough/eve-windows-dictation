@@ -49,6 +49,22 @@ async def websocket_handler(websocket: WebSocket) -> None:
         await websocket.accept()
         logger.info("[%s] WebSocket connected", context.session_id)
 
+        try:
+            engine_status = get_engine_manager().get_status()
+        except Exception as e:
+            logger.exception("[%s] Engine manager unavailable: %s", context.session_id, e)
+            await sender.send_error(ErrorCode.INTERNAL, "Engine manager unavailable")
+            await websocket.close()
+            return
+
+        if engine_status.status != "ready":
+            await sender.send_error(
+                ErrorCode.INTERNAL,
+                "Transcription engine is still loading. Try again shortly.",
+            )
+            await websocket.close()
+            return
+
         # Wait for start frame with timeout
         if not await _wait_for_start(
             websocket, sender, context, settings.start_timeout

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from audio.parser import AudioFrame, ParseError, parse_audio_frame
-from protocol.constants import HEADER_SIZE
+from protocol.constants import HEADER_SIZE, MAX_FRAME_SAMPLES
 
 
 def make_audio_frame(sequence: int, samples: np.ndarray, flags: int = 0) -> bytes:
@@ -65,6 +65,15 @@ class TestParseAudioFrame:
         data = make_audio_frame(sequence=0, samples=samples, flags=0x01)
 
         with pytest.raises(ParseError, match="Invalid flags"):
+            parse_audio_frame(data)
+
+    def test_frame_too_large(self) -> None:
+        """Reject frame with excessive sample count."""
+        header = struct.pack(">HHB", 0, MAX_FRAME_SAMPLES + 1, 0)
+        pcm_data = np.zeros(MAX_FRAME_SAMPLES + 1, dtype=np.int16).tobytes()
+        data = header + pcm_data
+
+        with pytest.raises(ParseError, match="Frame too large"):
             parse_audio_frame(data)
 
     def test_pcm_size_mismatch_too_short(self) -> None:

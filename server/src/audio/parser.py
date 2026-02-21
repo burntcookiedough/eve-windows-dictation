@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from protocol.constants import BYTES_PER_SAMPLE, HEADER_SIZE
+from protocol.constants import BYTES_PER_SAMPLE, HEADER_SIZE, MAX_FRAME_SAMPLES
 
 
 class ParseError(Exception):
@@ -46,6 +46,11 @@ def parse_audio_frame(data: bytes) -> AudioFrame:
     # Validate flags (must be 0x00)
     if flags != 0x00:
         raise ParseError(f"Invalid flags: 0x{flags:02x}, expected 0x00")
+
+    if sample_count > MAX_FRAME_SAMPLES:
+        raise ParseError(
+            f"Frame too large: {sample_count} samples exceeds max {MAX_FRAME_SAMPLES}"
+        )
 
     # Validate PCM data size
     expected_pcm_size = sample_count * BYTES_PER_SAMPLE

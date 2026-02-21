@@ -14,16 +14,45 @@ from numpy.typing import NDArray
 
 from transcription.base import EngineInfo
 from transcription.errors import VramExhaustedError
+from transcription.model_download import is_repo_cached, update_model_download_state
 from transcription.types import TranscribeResult
 
 logger = logging.getLogger(__name__)
 
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
+_MODEL_SIZE_GB = 2.3
+
+
+def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
+    """Walk exception causes/contexts without raising on None."""
+    seen: set[int] = set()
+    stack = [exc]
+    chain: list[BaseException] = []
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        chain.append(current)
+        stack.append(current.__context__)
+        stack.append(current.__cause__)
+    return chain
+
+
+def _resolve_repo_id(model: str) -> str | None:
+    if os.path.exists(model):
+        return None
+    if "/" in model:
+        return model
+    return None
 
 
 def _is_network_error(exc: BaseException) -> bool:
     """Detect TLS/network errors that offline loading can recover from."""
-    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+    for e in _iter_exception_chain(exc):
         msg = str(e)
         if any(marker.lower() in msg.lower() for marker in _NETWORK_ERROR_MARKERS):
             return True
@@ -83,6 +112,39 @@ class NemotronEngine:
     def __init__(self, model_name: str, device: str = "auto") -> None:
         import torch
 
+        repo_id = _resolve_repo_id(model_name)
+        preflight_cached: bool | None = None
+        if repo_id:
+            preflight_cached = is_repo_cached(repo_id)
+            if preflight_cached:
+                update_model_download_state(
+                    model=model_name,
+                    size_gb=_MODEL_SIZE_GB,
+                    status="ready",
+                    cached=True,
+                    detail="cached",
+                )
+            else:
+                update_model_download_state(
+                    model=model_name,
+                    size_gb=_MODEL_SIZE_GB,
+                    status="downloading",
+                    cached=False,
+                    detail="download started",
+                )
+                logger.info(
+                    "Nemotron model not found in cache; downloading (~%.1f GB).",
+                    _MODEL_SIZE_GB,
+                )
+        else:
+            update_model_download_state(
+                model=model_name,
+                size_gb=_MODEL_SIZE_GB,
+                status="ready",
+                cached=True,
+                detail="local model",
+            )
+
         # Suppress Python warnings from NeMo/Lhotse before import triggers them.
         warnings.filterwarnings("ignore", message=".*Lhotse.*")
         warnings.filterwarnings("ignore", message=".*non-tarred.*")
@@ -115,12 +177,30 @@ class NemotronEngine:
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 try:
                     self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+                except Exception as offline_exc:
+                    if preflight_cached is False:
+                        update_model_download_state(
+                            model=model_name,
+                            size_gb=_MODEL_SIZE_GB,
+                            status="error",
+                            cached=False,
+                            detail="download failed: network error",
+                        )
+                    raise offline_exc from exc
                 finally:
                     if old_val is None:
                         os.environ.pop("HF_HUB_OFFLINE", None)
                     else:
                         os.environ["HF_HUB_OFFLINE"] = old_val
             else:
+                if preflight_cached is False:
+                    update_model_download_state(
+                        model=model_name,
+                        size_gb=_MODEL_SIZE_GB,
+                        status="error",
+                        cached=False,
+                        detail="download failed",
+                    )
                 raise
         self._model.eval()
         self._model = self._model.to(resolved_device)
@@ -140,6 +220,21 @@ class NemotronEngine:
         # state corrupts when two calls overlap on the same model.
         self._model_lock = threading.Lock()
 
+        if preflight_cached is False:
+            detail = "downloaded"
+        elif preflight_cached is True:
+            detail = "cached"
+        else:
+            detail = "local model"
+        update_model_download_state(
+            model=model_name,
+            size_gb=_MODEL_SIZE_GB,
+            status="ready",
+            cached=True,
+            detail=detail,
+        )
+        if preflight_cached is False:
+            logger.info("Nemotron model download complete.")
         logger.info("Nemotron model loaded successfully")
 
     @property

@@ -337,15 +337,22 @@ class EngineManager:
             unload_first = getattr(new_settings, "unload_before_swap", False)
             loop = asyncio.get_running_loop()
 
+            old_engine: TranscriptionEngine | None = None
+            should_unload_old = False
             if unload_first and self._engine is not None:
-                old_engine = self._engine
                 with self._lock:
                     if not self._active_sessions:
+                        old_engine = self._engine
                         self._engine = None
-                        await loop.run_in_executor(None, old_engine.shutdown)
-                        _force_free_vram()
+                        should_unload_old = True
                     else:
-                        logger.warning("Cannot unload engine while sessions are active, loading new engine alongside")
+                        logger.warning(
+                            "Cannot unload engine while sessions are active, loading new engine alongside"
+                        )
+
+            if should_unload_old and old_engine is not None:
+                await loop.run_in_executor(None, old_engine.shutdown)
+                _force_free_vram()
 
             new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
 
@@ -395,13 +402,14 @@ def get_engine_manager() -> EngineManager:
     return _manager
 
 
-def init_engine_manager(settings: Settings) -> EngineManager:
+def init_engine_manager(settings: Settings, *, load_engine: bool = True) -> EngineManager:
     global _manager
     with _manager_lock:
         if _manager is not None:
             return _manager
         _manager = EngineManager(settings)
-        _manager.load_initial_engine()
+        if load_engine:
+            _manager.load_initial_engine()
         return _manager
 
 

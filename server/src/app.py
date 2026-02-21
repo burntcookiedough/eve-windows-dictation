@@ -8,6 +8,7 @@ from dataclasses import asdict
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, WebSocket
+from pydantic import ValidationError
 
 from config import (
     API_KEYS,
@@ -53,9 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
     logger.info("Starting murmur...")
-    logger.info("Loading transcription engine (this may take a moment)...")
+    logger.info("Initializing engine manager (engine loads in background)...")
 
-    init_engine_manager(settings)
+    engine_mgr = init_engine_manager(settings, load_engine=False)
+    asyncio.create_task(_swap_engine_background(engine_mgr, settings))
 
     logger.info("Murmur ready")
 
@@ -146,7 +148,10 @@ def create_app() -> FastAPI:
         # Check if reload is needed
         needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)
 
-        new_settings = update_settings(patch)
+        try:
+            new_settings = update_settings(patch)
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         engine_mgr = get_engine_manager()
 
         reload_started = False

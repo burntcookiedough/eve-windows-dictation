@@ -12,6 +12,7 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     contents = script_path.read_text(encoding="utf-8")
     assert "http://127.0.0.1:51717/health" in contents
     assert "model_download" in contents
+    assert "MURMUR_ENGINE" in contents
     assert "RequireCuda" in contents
     assert "RequireVcRedist" in contents
     assert "RequireDriverMinimum" in contents
