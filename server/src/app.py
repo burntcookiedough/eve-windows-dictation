@@ -17,6 +17,7 @@ from config import (
     get_settings_with_metadata,
     update_settings,
 )
+from diagnostics import collect_diagnostics
 from session.manager import get_session_manager
 from transcription.factory import (
     discover_engines,
@@ -90,13 +91,20 @@ def create_app() -> FastAPI:
         manager = get_session_manager()
         engine_mgr = get_engine_manager()
         status = engine_mgr.get_status()
+        settings = get_settings()
         return {
             "status": "healthy",
             "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
             "engine": serialize_engine_status(status),
+            "diagnostics": collect_diagnostics(settings),
         }
+
+    @app.get("/diagnostics")
+    async def diagnostics() -> dict:
+        settings = get_settings()
+        return collect_diagnostics(settings)
 
     @app.get("/settings")
     async def get_server_settings() -> dict:

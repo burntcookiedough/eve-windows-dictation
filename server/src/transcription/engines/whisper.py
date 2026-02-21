@@ -12,6 +12,7 @@ from transcription.types import TranscribeResult
 logger = logging.getLogger(__name__)
 
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
+_CUDA_DLL_ERROR_MARKERS = ("cublas", "cudart", "cufft", "cudnn", "cuda")
 
 
 def _is_network_error(exc: BaseException) -> bool:
@@ -19,6 +20,15 @@ def _is_network_error(exc: BaseException) -> bool:
     for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
         msg = str(e)
         if any(marker.lower() in msg.lower() for marker in _NETWORK_ERROR_MARKERS):
+            return True
+    return False
+
+
+def _is_cuda_dll_error(exc: BaseException) -> bool:
+    """Detect missing CUDA DLL errors for clearer startup diagnostics."""
+    for e in (exc, *getattr(exc, "__context__", ()), *getattr(exc, "__cause__", ())):
+        msg = str(e).lower()
+        if any(marker in msg for marker in _CUDA_DLL_ERROR_MARKERS):
             return True
     return False
 
@@ -51,6 +61,15 @@ class WhisperEngine:
                     model, device=device, compute_type=compute_type,
                     local_files_only=True,
                 )
+            elif _is_cuda_dll_error(exc):
+                logger.error(
+                    "CUDA runtime DLLs missing while loading Whisper. "
+                    "Install/update the NVIDIA driver or switch to CPU mode.",
+                    exc_info=exc,
+                )
+                raise RuntimeError(
+                    "CUDA runtime DLLs are missing. Install/update the NVIDIA driver or switch to CPU mode."
+                ) from exc
             else:
                 raise
         self._model_name = model

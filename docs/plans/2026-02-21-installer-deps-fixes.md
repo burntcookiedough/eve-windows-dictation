@@ -42,12 +42,12 @@ Switch the Windows installer to nsis-web to bypass the NSIS 2GB limit, ensure re
 - Modify: `app/src/main/services/server-manager.ts`
 - Modify: `app/src/renderer/app/views/ServerView.svelte`
 
-- [ ] Implement a diagnostics module that checks CUDA DLL availability (CTranslate2), CUDA capability, and optionally driver version via `nvidia-smi`
-- [ ] Add a lightweight VC++ redist check on Windows and surface the result as a warning with an install link
-- [ ] Expose diagnostics data via `/health` or a new `/diagnostics` endpoint and wire it into app state
-- [ ] Surface warnings in the Server view with actionable guidance (driver too old, missing redist, CUDA DLLs missing)
-- [ ] Add/update tests for diagnostics helpers and API payloads
-- [ ] Run test suite and ensure it passes before Task 3
+- [x] Implement a diagnostics module that checks CUDA DLL availability (CTranslate2), CUDA capability, and optionally driver version via `nvidia-smi`
+- [x] Add a lightweight VC++ redist check on Windows and surface the result as a warning with an install link
+- [x] Expose diagnostics data via `/health` or a new `/diagnostics` endpoint and wire it into app state
+- [x] Surface warnings in the Server view with actionable guidance (driver too old, missing redist, CUDA DLLs missing)
+- [x] Add/update tests for diagnostics helpers and API payloads
+- [x] Run test suite and ensure it passes before Task 3
 
 ### Task 3: Improve First-Run Model Download UX
 

@@ -21,12 +21,57 @@ export interface ServerStatePayload {
   error?: string;
   wsUrl?: string;
   managed: boolean; // false in dev mode (externally running server)
+  diagnostics?: ServerDiagnostics;
 }
 
 export interface ServerLogEntry {
   timestamp: number;
   level: 'stdout' | 'stderr';
   message: string;
+}
+
+export interface DiagnosticWarning {
+  code: string;
+  message: string;
+  action?: string;
+  url?: string;
+  severity: 'warning' | 'error';
+}
+
+export interface CudaDiagnostics {
+  available: boolean;
+  device: string;
+  reason?: string | null;
+  name?: string | null;
+  compute_capability?: string | null;
+}
+
+export interface CudaDllDiagnostics {
+  available: boolean;
+  detail?: string | null;
+}
+
+export interface NvidiaDriverDiagnostics {
+  available: boolean;
+  version?: string | null;
+  minimum_version?: string | null;
+  meets_minimum?: boolean | null;
+}
+
+export interface VcRedistDiagnostics {
+  required: boolean;
+  installed?: boolean | null;
+  missing?: string[] | null;
+  url?: string | null;
+}
+
+export interface ServerDiagnostics {
+  generated_at: string;
+  cuda: CudaDiagnostics;
+  cuda_dlls: CudaDllDiagnostics;
+  nvidia_driver: NvidiaDriverDiagnostics;
+  vc_redist: VcRedistDiagnostics;
+  warnings: DiagnosticWarning[];
 }
 
 // IPC State payloads

@@ -3,7 +3,13 @@ import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { ServerStatus, ServerPidFile, ServerStatePayload, ServerLogEntry } from '../../shared/types.js';
+import type {
+  ServerStatus,
+  ServerPidFile,
+  ServerStatePayload,
+  ServerLogEntry,
+  ServerDiagnostics,
+} from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ServerManager');
@@ -16,6 +22,7 @@ const STOP_TIMEOUT_MS = 10000;
 interface HealthState {
   healthy: boolean;
   version?: string;
+  diagnostics?: ServerDiagnostics;
 }
 
 export class ServerManager {
@@ -28,6 +35,7 @@ export class ServerManager {
   private managed = false; // Whether we spawned the server (production) vs detected it (dev)
   private startedAt: number | null = null;
   private serverVersion: string | null = null;
+  private diagnostics: ServerDiagnostics | null = null;
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -95,10 +103,15 @@ export class ServerManager {
         return { healthy: false };
       }
 
-      const data = (await response.json()) as { version?: unknown };
+      const data = (await response.json()) as Record<string, unknown>;
+      const diagnostics =
+        data.diagnostics && typeof data.diagnostics === 'object'
+          ? (data.diagnostics as ServerDiagnostics)
+          : undefined;
       return {
         healthy: true,
         version: typeof data.version === 'string' ? data.version : undefined,
+        diagnostics,
       };
     } catch {
       return { healthy: false };
@@ -114,15 +127,34 @@ export class ServerManager {
       const health = await this.getHealthState(port);
       if (!health.healthy && this.status === 'running') {
         log.warn('Server health check failed');
+        this.setDiagnostics(undefined);
         this.updateStatus('error', 'Health check failed');
         return;
       }
 
+      const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
+      let shouldBroadcast = diagnosticsChanged;
+
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
+        shouldBroadcast = true;
+      }
+
+      if (shouldBroadcast) {
         this.broadcastState();
       }
     }, HEALTH_POLL_INTERVAL_MS);
+  }
+
+  private setDiagnostics(next?: ServerDiagnostics): boolean {
+    const nextValue = next ?? null;
+    const currentSerialized = JSON.stringify(this.diagnostics);
+    const nextSerialized = JSON.stringify(nextValue);
+    if (currentSerialized === nextSerialized) {
+      return false;
+    }
+    this.diagnostics = nextValue;
+    return true;
   }
 
   /**
@@ -197,6 +229,7 @@ export class ServerManager {
         ? `ws://localhost:${this.pidFile.port}/transcribe`
         : undefined,
       managed: this.managed,
+      diagnostics: this.diagnostics ?? undefined,
     };
   }
 
@@ -218,6 +251,7 @@ export class ServerManager {
     if (!pidData) {
       log.info('No PID file found');
       this.serverVersion = null;
+      this.setDiagnostics(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -227,6 +261,7 @@ export class ServerManager {
       log.info('PID file exists but process is dead, cleaning up');
       this.cleanupStalePidFile();
       this.serverVersion = null;
+      this.setDiagnostics(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -236,6 +271,7 @@ export class ServerManager {
     if (!health.healthy) {
       log.warn('Server process alive but not responding to health checks');
       this.serverVersion = null;
+      this.setDiagnostics(undefined);
       this.updateStatus('error', 'Server not responding');
       return false;
     }
@@ -244,6 +280,7 @@ export class ServerManager {
     this.pidFile = pidData;
     this.startedAt = pidData.startedAt;
     this.serverVersion = health.version ?? null;
+    this.setDiagnostics(health.diagnostics);
     this.managed = false; // External server
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
@@ -321,6 +358,7 @@ export class ServerManager {
         this.pidFile = existingPid;
         this.startedAt = existingPid.startedAt;
         this.serverVersion = health.version ?? null;
+        this.setDiagnostics(health.diagnostics);
         this.managed = false;
         this.updateStatus('running');
         this.startHealthPolling(existingPid.port);
@@ -347,6 +385,7 @@ export class ServerManager {
     this.updateStatus('starting');
     this.managed = true;
     this.serverVersion = null;
+    this.setDiagnostics(undefined);
     this.logs = []; // Clear logs for new session
 
     try {
@@ -388,6 +427,7 @@ export class ServerManager {
         this.pidFile = null;
         this.startedAt = null;
         this.serverVersion = null;
+        this.setDiagnostics(undefined);
 
         if (this.status !== 'stopping') {
           // Preserve explicit startup/runtime errors already set by start()/stop() logic.
@@ -423,6 +463,7 @@ export class ServerManager {
       this.pidFile = pidData;
       this.startedAt = pidData.startedAt;
       this.serverVersion = health.version ?? null;
+      this.setDiagnostics(health.diagnostics);
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
@@ -528,6 +569,7 @@ export class ServerManager {
               this.pidFile = null;
               this.startedAt = null;
               this.serverVersion = null;
+              this.setDiagnostics(undefined);
               this.updateStatus('stopped');
               return;
             }
@@ -562,6 +604,7 @@ export class ServerManager {
       this.pidFile = null;
       this.startedAt = null;
       this.serverVersion = null;
+      this.setDiagnostics(undefined);
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });

@@ -32,6 +32,7 @@
   };
 
   let statusDisplay = $derived(statusConfig[serverState.status]);
+  let diagnosticWarnings = $derived(serverState.diagnostics?.warnings ?? []);
 
   // Format uptime as human-readable string
   function formatUptime(ms: number): string {
@@ -264,6 +265,33 @@
         {#if serverState.error}
           <div class="mb-4 p-3 bg-red-950/50 border border-red-900/50 rounded-lg">
             <p class="text-sm text-red-300">{serverState.error}</p>
+          </div>
+        {/if}
+
+        {#if diagnosticWarnings.length > 0}
+          <div class="mb-4 space-y-2">
+            {#each diagnosticWarnings as warning}
+              <div class="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+                <p class="text-sm text-amber-200">{warning.message}</p>
+                {#if warning.action || warning.url}
+                  <div class="mt-2 text-xs text-amber-300/80 flex flex-wrap items-center gap-2">
+                    {#if warning.action}
+                      <span>{warning.action}</span>
+                    {/if}
+                    {#if warning.url}
+                      <a
+                        href={warning.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="underline underline-offset-2 hover:text-amber-200 cursor-pointer"
+                      >
+                        Open link
+                      </a>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
           </div>
         {/if}
 
