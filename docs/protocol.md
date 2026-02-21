@@ -130,7 +130,15 @@ Confirms session started. Server is now accepting audio.
 ```json
 {
   "frame": "control",
-  "type": "ready"
+  "type": "ready",
+  "engine": {
+    "id": "nemotron",
+    "name": "Nemotron Speech",
+    "model": "nvidia/nemotron-speech-streaming-en-0.6b",
+    "supports_hotwords": false,
+    "languages": ["en"],
+    "model_size_gb": 2.3
+  }
 }
 ```
 
@@ -138,6 +146,7 @@ Confirms session started. Server is now accepting audio.
 |-------|------|-------------|
 | `frame` | string | `"control"` |
 | `type` | string | `"ready"` |
+| `engine` | object | Optional engine metadata for this session (may be omitted) |
 
 **Client behavior:** Begin sending audio frames.
 
@@ -328,9 +337,6 @@ Client                                   Server
    │──── [audio frame seq=1] ──────────────►│
    │◄────────────────────── text:partial ───│
    │──── [audio frame seq=2] ──────────────►│
-   │◄────────────────────── text:partial ───│
-   │◄──────────────────────── text:final ───│
-   │──── [audio frame seq=3] ──────────────►│
    │◄────────────────────── text:partial ───│
    │                                        │
    │──── control:stop ─────────────────────►│
