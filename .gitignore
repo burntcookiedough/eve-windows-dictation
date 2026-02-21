@@ -107,3 +107,6 @@ server_err.log
 .dev/transcription-decision.md
 .dev/transcription-research.md
 .pyre/
+
+# ralphex progress logs
+.ralphex/progress/
