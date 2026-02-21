@@ -71,6 +71,14 @@ class TranscriptionProcessor:
         transcription_time = time.perf_counter() - start_time
 
         if result.text == self._context.last_partial_text:
+            # Still update speech timing so silence monitor doesn't use stale data
+            if (
+                result.last_speech_end is not None
+                and self._context.audio_start_time is not None
+            ):
+                self._context.last_speech_time = (
+                    self._context.audio_start_time + result.last_speech_end
+                )
             return None
 
         self._context.last_partial_text = result.text

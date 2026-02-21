@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
         # Filter to only API-managed keys
         patch = {k: v for k, v in body.items() if k in API_KEYS}
         if not patch:
-            return {"error": "No valid settings provided"}
+            raise HTTPException(status_code=400, detail="No valid settings provided")
 
         discovered_engines = discover_engines()
         available_engines = [e["id"] for e in discovered_engines if e["available"]]
@@ -143,7 +143,8 @@ def create_app() -> FastAPI:
                 if install_hint:
                     detail = f"{detail} Install with: {install_hint}"
                 raise HTTPException(status_code=400, detail=detail)
-            patch["engine_preference_mode"] = "manual"
+            if "engine_preference_mode" not in patch:
+                patch["engine_preference_mode"] = "manual"
 
         # Check if reload is needed
         needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)

@@ -136,6 +136,7 @@ class EngineManager:
         self._settings = settings
         self._engine: TranscriptionEngine | None = None
         self._lock = threading.Lock()
+        self._swap_lock: asyncio.Lock | None = None
         self._active_sessions: dict[str, TranscriptionEngine] = {}
         self._pending_status: str | None = None
         self._pending_engine_id: str | None = None
@@ -325,6 +326,14 @@ class EngineManager:
             return len(self._active_sessions)
 
     async def swap_engine(self, new_settings: Settings) -> None:
+        # Lazily create the asyncio lock (must be created in an event loop context)
+        if self._swap_lock is None:
+            self._swap_lock = asyncio.Lock()
+
+        async with self._swap_lock:
+            await self._swap_engine_inner(new_settings)
+
+    async def _swap_engine_inner(self, new_settings: Settings) -> None:
         try:
             self._swap_error = None
             available = _get_available_engine_ids()
@@ -354,7 +363,26 @@ class EngineManager:
                 await loop.run_in_executor(None, old_engine.shutdown)
                 _force_free_vram()
 
-            new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
+            try:
+                new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
+            except Exception as create_error:
+                if should_unload_old:
+                    # Old engine was unloaded; attempt to restore it
+                    logger.warning(
+                        "New engine creation failed; attempting to restore previous engine"
+                    )
+                    try:
+                        restored = await loop.run_in_executor(
+                            None, lambda: _create_engine(self._settings)
+                        )
+                        with self._lock:
+                            self._engine = restored
+                        logger.info("Previous engine restored successfully")
+                    except Exception as restore_error:
+                        logger.error(
+                            "Failed to restore previous engine: %s", restore_error
+                        )
+                raise create_error
 
             with self._lock:
                 old_engine = self._engine

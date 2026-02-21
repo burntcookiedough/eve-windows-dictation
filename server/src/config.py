@@ -158,6 +158,17 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "requires_reload": False,
         "category": "engine",
     },
+    "engine_preference_mode": {
+        "label": "Engine Selection Mode",
+        "description": "Whether the engine was chosen automatically or manually overridden",
+        "type": "select",
+        "options": [
+            {"value": "auto", "label": "Auto"},
+            {"value": "manual", "label": "Manual"},
+        ],
+        "requires_reload": True,
+        "category": "engine",
+    },
 }
 
 # Keys that trigger engine reload when changed
@@ -165,7 +176,7 @@ RELOAD_KEYS = {k for k, v in SETTINGS_METADATA.items() if v.get("requires_reload
 
 # Keys exposed via REST API (excludes server-internal settings)
 API_KEYS = set(SETTINGS_METADATA.keys())
-PERSISTED_INTERNAL_KEYS = {"engine_preference_mode"}
+PERSISTED_INTERNAL_KEYS: set[str] = set()
 
 
 def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
