@@ -9,6 +9,7 @@
   type View = 'history' | 'settings' | 'test' | 'server';
 
   let activeView = $state<View>('history');
+  let settingsVisited = $state(false);
 
   const tabs: { id: View; label: string }[] = [
     { id: 'history', label: 'History' },
@@ -71,7 +72,10 @@
       {#each tabs as tab}
         <button
           bind:this={tabRefs[tab.id]}
-          onclick={() => (activeView = tab.id)}
+          onclick={() => {
+            if (tab.id === 'settings') settingsVisited = true;
+            activeView = tab.id;
+          }}
           class="relative z-10 px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer text-zinc-400 hover:text-zinc-300"
         >
           {tab.label}
@@ -96,9 +100,15 @@
   <main class="flex-1 overflow-hidden">
     {#if activeView === 'history'}
       <HistoryView />
-    {:else if activeView === 'settings'}
-      <SettingsView />
-    {:else if activeView === 'test'}
+    {/if}
+
+    {#if settingsVisited || activeView === 'settings'}
+      <div class="h-full" class:hidden={activeView !== 'settings'}>
+        <SettingsView />
+      </div>
+    {/if}
+
+    {#if activeView === 'test'}
       <TestView />
     {:else if activeView === 'server'}
       <ServerView />

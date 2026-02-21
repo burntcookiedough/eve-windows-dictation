@@ -4,6 +4,7 @@
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
+  import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import { toast } from '$lib/toast.svelte';
   import type { Settings, Hotkey, EngineStatus, ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -954,6 +955,8 @@
     </SettingsSection>
 
     </div>
+    {:else}
+      <SettingsSkeleton />
     {/if}
   </div>
 </div>
