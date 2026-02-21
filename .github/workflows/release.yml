@@ -40,6 +40,8 @@ jobs:
 
       - name: Build Windows installer
         working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run package:win
 
       - name: Publish GitHub release

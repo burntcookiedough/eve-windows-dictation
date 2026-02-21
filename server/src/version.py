@@ -1,3 +1,3 @@
 """Version constants for the Murmur server."""
 
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.5.0"
