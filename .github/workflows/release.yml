@@ -32,7 +32,7 @@ jobs:
 
       - name: Install server dependencies
         working-directory: server
-        run: uv sync
+        run: uv sync --extra all
 
       - name: Install app dependencies
         working-directory: app
@@ -49,5 +49,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             app/release/*.exe
+            app/release/*.7z
+            app/release/*.zip
             app/release/*.blockmap
             app/release/*.yml

@@ -7,7 +7,7 @@ pwsh := "/mnt/c/Program\\ Files/PowerShell/7/pwsh.exe"
 default:
     @just --list
 
-# Build the packaged app (produces installer in app/release/)
+# Build the packaged app (nsis-web installer + payloads in app/release/)
 build:
     {{pwsh}} -NoProfile -Command "cd C:\Users\raikr\Documents\projs\murmur\trunk\app; bun run package:win"
 
