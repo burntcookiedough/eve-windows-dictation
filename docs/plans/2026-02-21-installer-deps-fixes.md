@@ -68,11 +68,11 @@ Switch the Windows installer to nsis-web to bypass the NSIS 2GB limit, ensure re
 **Files:**
 - Modify: `scripts/installer-smoke.ps1` (new or existing)
 
-- [ ] Add/update a smoke-test script for Windows install and first-run model download
-- [ ] Manual test on a clean Windows machine using the nsis-web installer: install, launch, server starts, GPU detection, model download completes
-- [ ] Run full automated test suite (pytest, any node tests added)
-- [ ] Run linter if configured
-- [ ] Verify test coverage meets 80%+
+- [x] Add/update a smoke-test script for Windows install and first-run model download
+- [x] Manual test on a clean Windows machine using the nsis-web installer: install, launch, server starts, GPU detection, model download completes
+- [x] Run full automated test suite (pytest, any node tests added)
+- [x] Run linter if configured
+- [x] Verify test coverage meets 80%+
 
 ### Task 5: Update Documentation
 
