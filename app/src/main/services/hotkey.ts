@@ -12,22 +12,59 @@ let keyUpCallback: (() => void) | null = null;
 let isKeyDown = false;
 let isStarted = false;
 let activeKeycode: number | null = null; // Track which keycode triggered the keydown
+let heldCtrl = false;
+let heldAlt = false;
+let heldShift = false;
+let heldMeta = false;
 
 // Current hotkey configuration (read from settings on each key event)
 function getCurrentHotkey(): Hotkey {
   return getSetting('hotkey');
 }
 
+function isMetaKeycode(keycode: number): boolean {
+  return keycode === 3675 || keycode === 3676;
+}
+
+function isCtrlKeycode(keycode: number): boolean {
+  return keycode === 29 || keycode === 3613;
+}
+
+function isAltKeycode(keycode: number): boolean {
+  return keycode === 56 || keycode === 3640;
+}
+
+function isShiftKeycode(keycode: number): boolean {
+  return keycode === 42 || keycode === 54;
+}
+
+function updateHeldModifiers(e: UiohookKeyboardEvent, isDown: boolean): void {
+  if (isCtrlKeycode(e.keycode)) heldCtrl = isDown;
+  if (isAltKeycode(e.keycode)) heldAlt = isDown;
+  if (isShiftKeycode(e.keycode)) heldShift = isDown;
+  if (isMetaKeycode(e.keycode)) heldMeta = isDown;
+}
+
 /**
  * Check if a keyboard event matches the configured hotkey (full match including modifiers)
  */
 function matchesHotkeyDown(e: UiohookKeyboardEvent, hotkey: Hotkey): boolean {
+  const metaTrigger = isMetaKeycode(hotkey.keycode);
+  const ctrlTrigger = isCtrlKeycode(hotkey.keycode);
+  const keyMatches = metaTrigger ? isMetaKeycode(e.keycode) : e.keycode === hotkey.keycode;
+  const effectiveCtrl = e.ctrlKey || heldCtrl || ctrlTrigger;
+  const effectiveAlt = e.altKey || heldAlt || isAltKeycode(e.keycode);
+  const effectiveShift = e.shiftKey || heldShift || isShiftKeycode(e.keycode);
+  const effectiveMeta = e.metaKey || heldMeta || metaTrigger;
+  const ctrlMatches = ctrlTrigger ? true : effectiveCtrl === hotkey.ctrlKey;
+  const metaMatches = metaTrigger ? true : effectiveMeta === hotkey.metaKey;
+
   return (
-    e.keycode === hotkey.keycode &&
-    e.ctrlKey === hotkey.ctrlKey &&
-    e.altKey === hotkey.altKey &&
-    e.shiftKey === hotkey.shiftKey &&
-    e.metaKey === hotkey.metaKey
+    keyMatches &&
+    ctrlMatches &&
+    effectiveAlt === hotkey.altKey &&
+    effectiveShift === hotkey.shiftKey &&
+    metaMatches
   );
 }
 
@@ -36,7 +73,11 @@ function matchesHotkeyDown(e: UiohookKeyboardEvent, hotkey: Hotkey): boolean {
  * Only checks keycode, not modifiers, since user may release modifiers before main key.
  */
 function matchesHotkeyUp(e: UiohookKeyboardEvent): boolean {
-  return activeKeycode !== null && e.keycode === activeKeycode;
+  return (
+    activeKeycode !== null &&
+    (e.keycode === activeKeycode ||
+      (isMetaKeycode(activeKeycode) && isMetaKeycode(e.keycode)))
+  );
 }
 
 export function setupHotkeyService(
@@ -47,6 +88,7 @@ export function setupHotkeyService(
   keyUpCallback = onKeyUp;
 
   uIOhook.on('keydown', (e) => {
+    updateHeldModifiers(e, true);
     const hotkey = getCurrentHotkey();
     if (matchesHotkeyDown(e, hotkey)) {
       if (!isKeyDown) {
@@ -67,6 +109,7 @@ export function setupHotkeyService(
         keyUpCallback?.();
       }
     }
+    updateHeldModifiers(e, false);
   });
 
   // Start the hook
@@ -95,6 +138,10 @@ export function unregisterHotkey(): void {
 export function resetKeyState(): void {
   isKeyDown = false;
   activeKeycode = null;
+  heldCtrl = false;
+  heldAlt = false;
+  heldShift = false;
+  heldMeta = false;
 }
 
 // --- Hotkey Capture ---
