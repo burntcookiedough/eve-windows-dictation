@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { TranscriptionEntry, Settings, HistoryEntryWithGroup } from '../../shared/types.js';
 import type { TextFrameFinal } from '../../shared/protocol.js';
-import { copyToClipboard, simulatePaste } from './clipboard.js';
+import { copyToClipboard, pasteText } from './clipboard.js';
 import type { HistoryService } from './history.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -18,6 +18,43 @@ function computeDateGroup(timestamp: number): string {
   if (date >= yesterday) return 'Yesterday';
   if (date >= weekAgo) return 'This Week';
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function sentenceCase(text: string): string {
+  return text.replace(/(^|[.!?]\s+)([a-z])/g, (_, prefix: string, letter: string) => {
+    return `${prefix}${letter.toUpperCase()}`;
+  });
+}
+
+function ensureTerminalPunctuation(text: string): string {
+  if (!text) return text;
+  return /[.!?;:]$/.test(text) ? text : `${text}.`;
+}
+
+function applyDictationMode(text: string, mode: Settings['dictationMode']): string {
+  const cleaned = normalizeWhitespace(text);
+  switch (mode) {
+    case 'raw':
+      return text;
+    case 'clean_prompt':
+      return ensureTerminalPunctuation(sentenceCase(cleaned));
+    case 'codex_prompt':
+      return ensureTerminalPunctuation(sentenceCase(cleaned));
+    case 'message_rewrite':
+      return ensureTerminalPunctuation(sentenceCase(cleaned));
+    case 'command':
+      return cleaned
+        .replace(/\bnew line\b/gi, '\n')
+        .replace(/\bnew paragraph\b/gi, '\n\n')
+        .replace(/\btab key\b/gi, '\t')
+        .trim();
+    default:
+      return cleaned;
+  }
 }
 
 /**
@@ -42,7 +79,14 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   const rawText = entry.text;
   let text = rawText;
 
-  log.debug('Post-processing', { appendPeriod: settings.appendPeriod, appendSpace: settings.appendSpace, input: rawText });
+  log.debug('Post-processing', {
+    appendPeriod: settings.appendPeriod,
+    appendSpace: settings.appendSpace,
+    dictationMode: settings.dictationMode,
+    input: rawText,
+  });
+
+  text = applyDictationMode(text, settings.dictationMode);
 
   // Append period if enabled and text doesn't already end with punctuation
   if (settings.appendPeriod && text.length > 0) {
@@ -79,18 +123,19 @@ export async function dispatchToOutputs(
   settings: Settings,
   historyService: HistoryService | null
 ): Promise<DispatchResult> {
-  // Copy to clipboard if enabled
-  if (settings.autoCopy && entry.text) {
-    copyToClipboard(entry.text);
-  }
-
-  // Simulate paste if enabled
+  // Auto-paste temporarily uses the clipboard and can restore the previous value.
   if (settings.autoPaste && entry.text) {
     try {
-      await simulatePaste();
+      await pasteText(entry.text, {
+        restoreClipboard: settings.restoreClipboardAfterPaste,
+        restoreDelayMs: settings.clipboardRestoreDelayMs,
+        method: settings.pasteMethod,
+      });
     } catch (err) {
       log.error('Auto-paste failed', { error: err as Error });
     }
+  } else if (settings.autoCopy && entry.text) {
+    copyToClipboard(entry.text);
   }
 
   // Save to history

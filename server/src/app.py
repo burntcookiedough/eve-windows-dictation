@@ -108,7 +108,12 @@ def create_app() -> FastAPI:
     @app.get("/diagnostics")
     async def diagnostics() -> dict:
         settings = get_settings()
-        return collect_diagnostics(settings)
+        engine_mgr = get_engine_manager()
+        return {
+            **collect_diagnostics(settings),
+            "engine": serialize_engine_status(engine_mgr.get_status()),
+            "model_download": get_model_download_state(),
+        }
 
     @app.get("/settings")
     async def get_server_settings() -> dict:

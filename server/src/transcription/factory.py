@@ -103,9 +103,7 @@ def _create_engine(settings: Settings) -> TranscriptionEngine:
                 "Whisper engine requires faster-whisper. Install with: uv sync --extra whisper"
             )
         return WhisperEngine(
-            model=settings.whisper_model,
-            device=settings.whisper_device,
-            compute_type=settings.whisper_compute_type,
+            settings=settings,
         )
 
     raise ValueError(f"Unknown engine: {engine_id!r}")

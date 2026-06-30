@@ -7,7 +7,7 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "dist/main",
-    "rootDir": "src/main",
+    "rootDir": "src",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,

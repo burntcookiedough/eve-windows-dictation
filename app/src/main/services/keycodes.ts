@@ -9,7 +9,7 @@ const keycodeToName = new Map<number, string>(
 );
 
 // Modifier keycodes to filter out during recording
-const MODIFIER_KEYCODES = new Set([
+const MODIFIER_KEYCODES = new Set<number>([
   UiohookKey.Ctrl,
   UiohookKey.CtrlRight,
   UiohookKey.Alt,

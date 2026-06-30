@@ -34,10 +34,10 @@ Use this path if Murmur is removed from the laptop and needs to be restored.
 5. Download and verify `mobiuslabsgmbh/faster-whisper-large-v3-turbo`.
 6. Apply the server and app settings in this document.
 7. Start Murmur and query `%APPDATA%\murmur\server.pid` to find the active server port.
-8. Verify `/health` reports `engine.current=whisper`, `model=large-v3-turbo`, CUDA GPU name, and `status=ready`.
+8. Verify `/health` reports `engine.current=whisper`, `model=large-v3-turbo`, `device=cuda`, `compute_type=float16`, `cuda_active=true`, CUDA GPU name, and `status=ready`.
 9. Hold left `Ctrl + Windows`, speak, release, and confirm the transcript is inserted into the focused field.
 
-If running an installed release that does not include this hotkey fix yet, either install a build from the fixed source or patch/repack `app.asar` from the fixed `app/src/main/services/hotkey.ts` build output.
+If running an installed release that does not include these changes yet, install a build from the fork source or patch/repack `app.asar` from the fixed app build output.
 
 ## Recommended model and backend
 
@@ -72,6 +72,17 @@ Set `resources/server/settings.json` to:
   "whisper_model": "large-v3-turbo",
   "whisper_device": "cuda",
   "whisper_compute_type": "float16",
+  "whisper_language": "en",
+  "whisper_beam_size": 1,
+  "whisper_temperature": 0.0,
+  "whisper_condition_on_previous_text": false,
+  "whisper_without_timestamps": true,
+  "whisper_vad_filter": true,
+  "whisper_vad_min_silence_duration_ms": 500,
+  "whisper_vad_speech_pad_ms": 200,
+  "whisper_vad_threshold": 0.5,
+  "transcription_max_workers": 1,
+  "allow_overlapping_inference": false,
   "partial_emission_interval": 0.1,
   "unload_before_swap": true
 }
@@ -88,6 +99,17 @@ $serverSettings = "$env:LOCALAPPDATA\Programs\murmur\resources\server\settings.j
   "whisper_model": "large-v3-turbo",
   "whisper_device": "cuda",
   "whisper_compute_type": "float16",
+  "whisper_language": "en",
+  "whisper_beam_size": 1,
+  "whisper_temperature": 0.0,
+  "whisper_condition_on_previous_text": false,
+  "whisper_without_timestamps": true,
+  "whisper_vad_filter": true,
+  "whisper_vad_min_silence_duration_ms": 500,
+  "whisper_vad_speech_pad_ms": 200,
+  "whisper_vad_threshold": 0.5,
+  "transcription_max_workers": 1,
+  "allow_overlapping_inference": false,
   "partial_emission_interval": 0.1,
   "unload_before_swap": true
 }
@@ -110,9 +132,13 @@ Set `%APPDATA%\murmur\settings.json` to:
   "holdToTalk": true,
   "autoCopy": true,
   "autoPaste": true,
+  "restoreClipboardAfterPaste": true,
+  "clipboardRestoreDelayMs": 250,
+  "pasteMethod": "sendinput",
   "silenceTimeout": 15,
   "appendPeriod": false,
   "appendSpace": true,
+  "dictationMode": "clean_prompt",
   "selectedDeviceId": "default",
   "launchOnBoot": true,
   "startMinimized": true,
@@ -141,10 +167,14 @@ $appSettings = "$env:APPDATA\murmur\settings.json"
   "holdToTalk": true,
   "autoCopy": true,
   "autoPaste": true,
+  "restoreClipboardAfterPaste": true,
+  "clipboardRestoreDelayMs": 250,
+  "pasteMethod": "sendinput",
   "silenceTimeout": 15,
   "serverUrl": "ws://localhost:51717/transcribe",
   "appendPeriod": false,
   "appendSpace": true,
+  "dictationMode": "clean_prompt",
   "selectedDeviceId": "default",
   "launchOnBoot": true,
   "startMinimized": true,
@@ -291,7 +321,12 @@ Expected engine section:
   "status": "ready",
   "info": {
     "model": "large-v3-turbo",
-    "gpu_name": "NVIDIA GeForce RTX 3060 Laptop GPU"
+    "repo_id": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "device": "cuda",
+    "compute_type": "float16",
+    "cuda_active": true,
+    "gpu_name": "NVIDIA GeForce RTX 3060 Laptop GPU",
+    "load_time_s": 4.591
   }
 }
 ```
@@ -314,12 +349,43 @@ nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,nohead
 
 The verified behavior on RTX 3060 Laptop 6 GB was:
 
-- model load time: about 3.5 seconds when loaded directly
-- 47 second sample transcription: about 4.1 seconds server inference time
-- VRAM after model load: about 3.2 GB
-- VRAM during transcription: about 3.3 to 3.4 GB
+- model load time through Murmur: about 4.6 seconds
+- 47.3 second sample transcription: about 1.7 to 3.1 seconds server inference time after warm load
+- end-to-end WebSocket test elapsed time for that sample: about 5.7 seconds
+- VRAM during/after transcription: about 4.95 GB used by the CUDA workload and desktop GPU context
+- RAM usage depends on the Electron app, Python server, and Windows cache state; the model weights primarily live in VRAM during CUDA inference
 
 Murmur returns the final transcript after recording stops; partial messages can be emitted, but this setup behaves as push-to-talk dictation rather than true streaming insertion.
+
+## Local validation before publishing fork changes
+
+Run these checks from a clean checkout before pushing the fork branch:
+
+```powershell
+cd app
+bun install
+bunx svelte-check --tsconfig ./tsconfig.json
+bunx tsc --noEmit -p tsconfig.json
+bunx tsc --noEmit -p tsconfig.main.json
+bun run build
+
+cd ..\server
+$env:PYTHONPATH = "src;tests/ui/src"
+python -m compileall -q src tests
+python -m pytest tests -q
+
+cd ..
+git diff --check
+```
+
+Expected current result:
+
+- `svelte-check found 0 errors and 0 warnings`
+- renderer TypeScript check passes
+- main-process TypeScript check passes
+- app production build passes
+- `94 passed` for the server test suite
+- `git diff --check` exits successfully; Windows line-ending warnings are acceptable in this repository
 
 ## Rebuild from source
 
@@ -333,7 +399,7 @@ bun run build
 bun run package:win
 ```
 
-Until the upstream PR is merged, use the fork branch containing this fix:
+Use the fork branch containing this setup:
 
 ```powershell
 git clone https://github.com/burntcookiedough/murmur.git
@@ -344,7 +410,14 @@ bun install
 bun run build
 ```
 
-The fixed source is in `app/src/main/services/hotkey.ts`.
+The fixed source is in:
+
+- `app/src/main/services/hotkey.ts`
+- `app/src/main/services/clipboard.ts`
+- `app/src/main/services/pipeline.ts`
+- `server/src/transcription/engines/whisper.py`
+- `server/src/transcription/model_download.py`
+- `server/src/transcription/processor.py`
 
 ## Verified results
 
@@ -352,9 +425,9 @@ The setup was verified on the target laptop with:
 
 - Model fully downloaded from `mobiuslabsgmbh/faster-whisper-large-v3-turbo`
 - `WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")` loading successfully
-- Runtime `/health` reporting Faster-Whisper, `large-v3-turbo`, and `NVIDIA GeForce RTX 3060 Laptop GPU`
+- Runtime `/health` reporting Faster-Whisper, `large-v3-turbo`, `device=cuda`, `compute_type=float16`, `cuda_active=true`, and `NVIDIA GeForce RTX 3060 Laptop GPU`
 - Push-to-talk using left `Ctrl + Windows`
 - Transcription and auto-paste into Notepad
 - Manual paste mechanism verified in browser and VS Code
 
-The direct upstream push was not permitted by GitHub for the authenticated account used during setup, so the reproducible code path was pushed to `https://github.com/burntcookiedough/murmur` and opened as an upstream pull request.
+The maintained reproducible code path for this laptop is the fork at `https://github.com/burntcookiedough/murmur` on branch `trunk`. There should be no active upstream pull request for this private/local setup unless one is intentionally opened later.

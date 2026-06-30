@@ -25,10 +25,14 @@
     holdToTalk: true,
     autoCopy: true,
     autoPaste: true,
+    restoreClipboardAfterPaste: true,
+    clipboardRestoreDelayMs: 250,
+    pasteMethod: 'sendinput',
     silenceTimeout: 15,
     serverUrl: 'ws://localhost:51717/transcribe',
     appendPeriod: false,
     appendSpace: false,
+    dictationMode: 'clean_prompt',
     selectedDeviceId: 'default',
     launchOnBoot: false,
     startMinimized: false,
@@ -519,11 +523,20 @@
         />
       </SettingsRow>
 
-      <div class="p-4 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-700">
-        <p class="text-xs text-zinc-500 text-center">
-          More post-processing options coming soon
-        </p>
-      </div>
+      <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
+        <select
+          value={settings.dictationMode}
+          onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
+          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200
+            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+        >
+          <option value="raw">Raw Dictation</option>
+          <option value="clean_prompt">Clean Prompt</option>
+          <option value="codex_prompt">Codex Prompt</option>
+          <option value="message_rewrite">Message Rewrite</option>
+          <option value="command">Command Mode</option>
+        </select>
+      </SettingsRow>
     </SettingsSection>
 
     <!-- Recognition -->
@@ -620,6 +633,26 @@
           onchange={(v) => updateSetting('autoPaste', v)}
           label="Auto-paste"
         />
+      </SettingsRow>
+
+      <SettingsRow label="Restore clipboard" description="Put your previous clipboard text back after auto-paste">
+        <Toggle
+          enabled={settings.restoreClipboardAfterPaste}
+          onchange={(v) => updateSetting('restoreClipboardAfterPaste', v)}
+          label="Restore clipboard"
+        />
+      </SettingsRow>
+
+      <SettingsRow label="Paste method" description="Use native SendInput first, or force VBScript fallback">
+        <select
+          value={settings.pasteMethod}
+          onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
+          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200
+            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+        >
+          <option value="sendinput">SendInput</option>
+          <option value="vbscript">VBScript</option>
+        </select>
       </SettingsRow>
 
       <SettingsRow label="Launch on boot" description="Start application when system starts">

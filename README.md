@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/v0.2.0-alpha-orange?style=flat-square" alt="v0.2.0 alpha">
+  <img src="https://img.shields.io/badge/v0.5.0-orange?style=flat-square" alt="v0.5.0">
 </p>
 
 <!-- TODO: add a demo gif here once one exists -->
@@ -100,6 +100,8 @@ just build
 ```
 
 See `BUILDING.md` for full release and troubleshooting details.
+
+For the exact Windows 11 + RTX 3060 local CUDA dictation setup, including model cache paths, settings JSON, verification commands, and expected latency/VRAM numbers, see **[docs/windows-local-cuda-dictation.md](docs/windows-local-cuda-dictation.md)**.
 
 ## Configuration
 

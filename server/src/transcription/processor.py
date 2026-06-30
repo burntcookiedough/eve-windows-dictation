@@ -19,13 +19,28 @@ logger = logging.getLogger(__name__)
 
 # Shared thread pool for transcription
 _executor: ThreadPoolExecutor | None = None
+_executor_workers: int | None = None
+_inference_lock: asyncio.Lock | None = None
 
 
-def get_executor() -> ThreadPoolExecutor:
-    global _executor
-    if _executor is None:
-        _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="transcribe")
+def get_executor(max_workers: int) -> ThreadPoolExecutor:
+    global _executor, _executor_workers
+    if _executor is None or _executor_workers != max_workers:
+        if _executor is not None:
+            _executor.shutdown(wait=True)
+        _executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="transcribe",
+        )
+        _executor_workers = max_workers
     return _executor
+
+
+def get_inference_lock() -> asyncio.Lock:
+    global _inference_lock
+    if _inference_lock is None:
+        _inference_lock = asyncio.Lock()
+    return _inference_lock
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +62,14 @@ class TranscriptionProcessor:
         self._session: EngineSession = manager.create_session(context.session_id)
         self._session_id = context.session_id
 
+    @property
+    def _allow_overlapping_inference(self) -> bool:
+        return bool(getattr(self._settings, "allow_overlapping_inference", False))
+
+    @property
+    def _transcription_max_workers(self) -> int:
+        return int(getattr(self._settings, "transcription_max_workers", 1))
+
     async def transcribe_partial(self) -> TranscriptionResult | None:
         if (
             self._context.audio_buffer.duration_seconds
@@ -63,10 +86,17 @@ class TranscriptionProcessor:
             return None
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            get_executor(),
-            lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-        )
+        if self._allow_overlapping_inference:
+            result = await loop.run_in_executor(
+                get_executor(self._transcription_max_workers),
+                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+            )
+        else:
+            async with get_inference_lock():
+                result = await loop.run_in_executor(
+                    get_executor(1),
+                    lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+                )
 
         transcription_time = time.perf_counter() - start_time
 
@@ -109,10 +139,17 @@ class TranscriptionProcessor:
 
         loop = asyncio.get_running_loop()
         try:
-            result = await loop.run_in_executor(
-                get_executor(),
-                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-            )
+            if self._allow_overlapping_inference:
+                result = await loop.run_in_executor(
+                    get_executor(self._transcription_max_workers),
+                    lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+                )
+            else:
+                async with get_inference_lock():
+                    result = await loop.run_in_executor(
+                        get_executor(1),
+                        lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
+                    )
         except VramExhaustedError as error:
             logger.warning(
                 "[%s] VRAM exhausted during final transcription; "
@@ -138,7 +175,9 @@ class TranscriptionProcessor:
 
 
 def shutdown_executor() -> None:
-    global _executor
+    global _executor, _executor_workers, _inference_lock
     if _executor is not None:
         _executor.shutdown(wait=True)
         _executor = None
+        _executor_workers = None
+    _inference_lock = None

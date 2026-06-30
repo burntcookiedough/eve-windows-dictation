@@ -16,10 +16,9 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "paths": {
-      "$lib/*": ["src/renderer/lib/*"],
-      "$shared/*": ["src/shared/*"]
+      "$lib/*": ["./src/renderer/lib/*"],
+      "$shared/*": ["./src/shared/*"]
     }
   },
   "include": [

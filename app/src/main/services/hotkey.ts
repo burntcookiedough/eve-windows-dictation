@@ -1,4 +1,5 @@
-import { uIOhook, UiohookKeyboardEvent } from 'uiohook-napi';
+import { uIOhook } from 'uiohook-napi';
+import type { UiohookKeyboardEvent } from 'uiohook-napi';
 import { app } from 'electron';
 import type { Hotkey } from '../../shared/types.js';
 import { getSetting } from './settings.js';

@@ -179,8 +179,8 @@ export class TranscriptionService {
             code: frame.code,
             message: frame.message,
           };
-          log.warn('Server warning', payload);
-          this.broadcastToOverlay(IPC_CHANNELS.STATE_WARNING, payload);
+          log.warn('Server warning', { ...payload });
+          this.broadcastToOverlay(IPC_CHANNELS.STATE_WARNING, { ...payload });
           this.onWarningCallback?.(payload);
           break;
         }

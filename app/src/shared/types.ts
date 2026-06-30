@@ -78,9 +78,13 @@ export interface ServerDiagnostics {
 export interface ModelDownloadState {
   model: string;
   size_gb: number;
-  status: 'ready' | 'downloading' | 'error';
+  status: 'missing' | 'partial' | 'downloading' | 'ready' | 'error';
   cached?: boolean;
   detail?: string;
+  repo_id?: string;
+  path?: string;
+  missing_files?: string[];
+  partial_files?: string[];
   updated_at?: string;
 }
 
@@ -165,11 +169,15 @@ export interface Settings {
   holdToTalk: boolean;
   autoCopy: boolean;
   autoPaste: boolean;
+  restoreClipboardAfterPaste: boolean;
+  clipboardRestoreDelayMs: number;
+  pasteMethod: 'sendinput' | 'vbscript';
   silenceTimeout: number;
   serverUrl: string;
   // Post-processing
   appendPeriod: boolean;
   appendSpace: boolean;
+  dictationMode: 'raw' | 'clean_prompt' | 'codex_prompt' | 'message_rewrite' | 'command';
   // Audio
   selectedDeviceId: string; // 'default' uses system default
   // Startup behavior
@@ -207,6 +215,14 @@ export interface EngineInfo {
   gpu_name?: string | null;
   gpu_vram_gb?: number | null;
   estimated_max_duration_s?: number | null;
+  repo_id?: string | null;
+  model_path?: string | null;
+  device?: string | null;
+  compute_type?: string | null;
+  cuda_active?: boolean | null;
+  load_time_s?: number | null;
+  last_transcription_latency_s?: number | null;
+  vram_used_gb?: number | null;
 }
 
 export interface EngineStatus {
@@ -263,11 +279,15 @@ export const DEFAULT_SETTINGS: Settings = {
   holdToTalk: true,
   autoCopy: true,
   autoPaste: true,
+  restoreClipboardAfterPaste: true,
+  clipboardRestoreDelayMs: 250,
+  pasteMethod: 'sendinput',
   silenceTimeout: 15,
   serverUrl: 'ws://localhost:51717/transcribe',
   // Post-processing
   appendPeriod: false,
   appendSpace: false,
+  dictationMode: 'clean_prompt',
   // Audio
   selectedDeviceId: 'default',
   // Startup behavior

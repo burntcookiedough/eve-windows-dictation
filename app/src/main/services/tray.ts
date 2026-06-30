@@ -72,11 +72,11 @@ function createPlaceholderIcon(): Electron.NativeImage {
 export function updateTrayState(state: 'idle' | 'recording' | 'error'): void {
   if (!tray) return;
 
-  const tooltips: Record<string, string> = {
+  const tooltips: Record<typeof state, string> = {
     idle: 'Murmur - Press Ctrl+Shift+Space to start',
     recording: 'Murmur - Recording...',
     error: 'Murmur - Error occurred',
   };
 
-  tray.setToolTip(tooltips[state] || tooltips.idle);
+  tray.setToolTip(tooltips[state]);
 }

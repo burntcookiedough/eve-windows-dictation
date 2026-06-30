@@ -35,7 +35,19 @@ def _get_route_endpoint(app: FastAPI, path: str, method: str):
     raise AssertionError(f"Route {method} {path} not found")
 
 
-def test_is_repo_cached_detects_snapshot(tmp_path, monkeypatch) -> None:
+def _write_required_snapshot(snapshot_dir) -> None:
+    snapshot_dir.mkdir(parents=True)
+    for name in [
+        "config.json",
+        "model.bin",
+        "preprocessor_config.json",
+        "tokenizer.json",
+        "vocabulary.json",
+    ]:
+        (snapshot_dir / name).write_text("x", encoding="utf-8")
+
+
+def test_is_repo_cached_rejects_empty_snapshot(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "hub"
     monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
 
@@ -47,13 +59,59 @@ def test_is_repo_cached_detects_snapshot(tmp_path, monkeypatch) -> None:
     )
     snapshot_dir.mkdir(parents=True)
 
-    assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is True
+    status = model_download.get_repo_cache_status("Systran/faster-whisper-large-v3-turbo")
+    assert status.status == "partial"
+    assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is False
+
+
+def test_is_repo_cached_detects_complete_snapshot(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "hub"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
+
+    snapshot_dir = (
+        cache_dir
+        / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+        / "snapshots"
+        / "abc123"
+    )
+    _write_required_snapshot(snapshot_dir)
+
+    status = model_download.get_repo_cache_status(
+        "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+    )
+    assert status.status == "ready"
+    assert status.cached is True
+    assert model_download.is_repo_cached(
+        "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+    ) is True
+
+
+def test_is_repo_cached_rejects_incomplete_files(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "hub"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
+
+    repo_dir = cache_dir / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+    snapshot_dir = repo_dir / "snapshots" / "abc123"
+    _write_required_snapshot(snapshot_dir)
+    (repo_dir / "blobs").mkdir()
+    (repo_dir / "blobs" / "abc.incomplete").write_text("partial", encoding="utf-8")
+
+    status = model_download.get_repo_cache_status(
+        "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+    )
+    assert status.status == "downloading"
+    assert status.partial_files
+    assert model_download.is_repo_cached(
+        "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+    ) is False
 
 
 def test_is_repo_cached_returns_false_without_snapshot(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "hub"
     monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
 
+    status = model_download.get_repo_cache_status("Systran/faster-whisper-large-v3-turbo")
+    assert status.status == "missing"
     assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is False
 
 

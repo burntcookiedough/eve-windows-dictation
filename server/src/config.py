@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     whisper_compute_type: Literal[
         "auto", "int8", "int8_float16", "int16", "float16", "float32"
     ] = "auto"
+    whisper_language: str | None = "en"
+    whisper_beam_size: int = Field(default=1, ge=1, le=10)
+    whisper_temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    whisper_condition_on_previous_text: bool = False
+    whisper_without_timestamps: bool = True
+    whisper_vad_filter: bool = True
+    whisper_vad_min_silence_duration_ms: int = Field(default=500, ge=100, le=5000)
+    whisper_vad_speech_pad_ms: int = Field(default=200, ge=0, le=2000)
+    whisper_vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
     # Nemotron settings
     nemotron_model: str = "nvidia/nemotron-speech-streaming-en-0.6b"
@@ -57,6 +66,8 @@ class Settings(BaseSettings):
     # Transcription settings
     partial_emission_interval: float = Field(default=0.25, gt=0.0)
     min_audio_for_transcription: float = 0.15
+    transcription_max_workers: int = Field(default=1, ge=1, le=4)
+    allow_overlapping_inference: bool = False
 
     # Hot-swap
     unload_before_swap: bool = False
@@ -143,11 +154,103 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "category": "engine",
         "visible_when": {"engine": "whisper"},
     },
+    "whisper_language": {
+        "label": "Language",
+        "description": "Language code for Whisper. Use en for fastest English dictation.",
+        "type": "text",
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_beam_size": {
+        "label": "Beam Size",
+        "description": "1 is fastest and best for low-latency dictation.",
+        "type": "number",
+        "range": [1, 10],
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_temperature": {
+        "label": "Temperature",
+        "description": "0 is deterministic and recommended for prompts and commands.",
+        "type": "number",
+        "range": [0, 1],
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_condition_on_previous_text": {
+        "label": "Condition On Previous Text",
+        "description": "Disable for independent push-to-talk dictation snippets.",
+        "type": "bool",
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_without_timestamps": {
+        "label": "Without Timestamps",
+        "description": "Skip timestamp generation for lower latency.",
+        "type": "bool",
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_vad_filter": {
+        "label": "Voice Activity Detection",
+        "description": "Filter non-speech audio before decoding.",
+        "type": "bool",
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_vad_min_silence_duration_ms": {
+        "label": "VAD Min Silence",
+        "description": "Minimum silence in milliseconds before speech is split.",
+        "type": "number",
+        "range": [100, 5000],
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_vad_speech_pad_ms": {
+        "label": "VAD Speech Pad",
+        "description": "Milliseconds of padding around detected speech.",
+        "type": "number",
+        "range": [0, 2000],
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
+    "whisper_vad_threshold": {
+        "label": "VAD Threshold",
+        "description": "Speech probability threshold for VAD.",
+        "type": "number",
+        "range": [0, 1],
+        "requires_reload": True,
+        "category": "engine",
+        "visible_when": {"engine": "whisper"},
+    },
     "partial_emission_interval": {
         "label": "Update Interval",
         "description": "How often partial transcription results are sent (seconds)",
         "type": "number",
         "range": [0.1, 2.0],
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "transcription_max_workers": {
+        "label": "Transcription Workers",
+        "description": "Maximum local inference workers. 1 avoids overlapping GPU inference.",
+        "type": "number",
+        "range": [1, 4],
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "allow_overlapping_inference": {
+        "label": "Allow Overlapping Inference",
+        "description": "Permit concurrent inference calls on the same GPU.",
+        "type": "bool",
         "requires_reload": False,
         "category": "transcription",
     },
