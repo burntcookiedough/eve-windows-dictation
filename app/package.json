@@ -61,6 +61,7 @@
         "from": "../server",
         "to": "server",
         "filter": [
+          "settings.json",
           "src/**/*",
           ".venv/**/*",
           "!.venv/**/pip*",
