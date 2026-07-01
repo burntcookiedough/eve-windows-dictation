@@ -8,6 +8,7 @@ import type {
   Hotkey,
   RecordingDebugState,
   RecordingStatePayload,
+  RecordingStatusPayload,
   RecordingWarningPayload,
   ServerLogEntry,
   ServerSettingsResponse,
@@ -62,6 +63,7 @@ declare global {
       onConnectionState: (callback: (state: ConnectionStatePayload) => void) => () => void;
       onTranscription: (callback: (data: TranscriptionPayload) => void) => () => void;
       onWarning: (callback: (warning: RecordingWarningPayload) => void) => () => void;
+      onStatus: (callback: (status: RecordingStatusPayload) => void) => () => void;
       onStartRecording: (callback: (deviceId?: string) => void) => () => void;
       onStopRecording: (callback: () => void) => () => void;
       sendAudioData: (buffer: ArrayBuffer) => void;

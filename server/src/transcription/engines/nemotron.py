@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from transcription.base import EngineInfo
 from transcription.errors import VramExhaustedError
 from transcription.model_download import is_repo_cached, update_model_download_state
-from transcription.types import TranscribeResult
+from transcription.types import TranscribeOptions, TranscribeResult
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +283,7 @@ class NemotronSession:
         audio: NDArray[np.float32],
         *,
         hotwords: str | None = None,
+        options: TranscribeOptions | None = None,
     ) -> TranscribeResult:
         import torch
 

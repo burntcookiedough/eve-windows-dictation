@@ -42,6 +42,9 @@ class SessionContext:
     # Flag to track if we've sent any speech
     has_speech: bool = False
 
+    # Flag to avoid repeating the long-dictation mode transition notice.
+    long_dictation_announced: bool = False
+
     def mark_started(self) -> None:
         """Mark the session as started."""
         self.started_at = time.monotonic()

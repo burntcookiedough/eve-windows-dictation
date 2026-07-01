@@ -16,10 +16,17 @@
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
     hotkey: {
-      keycode: 100,
-      ctrlKey: false,
+      keycode: 3675,
+      ctrlKey: true,
       altKey: false,
       shiftKey: false,
+      metaKey: false,
+    },
+    longHotkey: {
+      keycode: 3675,
+      ctrlKey: true,
+      altKey: false,
+      shiftKey: true,
       metaKey: false,
     },
     holdToTalk: true,
@@ -42,18 +49,29 @@
     hotwordsCsl: '',
   });
 
-  // Default hotkey (F17)
+  // Default hotkey (Ctrl+Meta)
   const DEFAULT_HOTKEY: Hotkey = {
-    keycode: 100,
-    ctrlKey: false,
+    keycode: 3675,
+    ctrlKey: true,
     altKey: false,
     shiftKey: false,
     metaKey: false,
   };
 
+  // Default long dictation hotkey (Ctrl+Shift+Meta)
+  const DEFAULT_LONG_HOTKEY: Hotkey = {
+    keycode: 3675,
+    ctrlKey: true,
+    altKey: false,
+    shiftKey: true,
+    metaKey: false,
+  };
+
   // Hotkey display name (human-readable)
-  let hotkeyDisplayName = $state('F17');
+  let hotkeyDisplayName = $state('Ctrl+Meta');
+  let longHotkeyDisplayName = $state('Ctrl+Shift+Meta');
   let isHotkeyModalOpen = $state(false);
+  let hotkeyCaptureTarget = $state<'quick' | 'long'>('quick');
 
   // Check if hotkey differs from default
   let isHotkeyChanged = $derived(
@@ -62,6 +80,13 @@
     settings.hotkey.altKey !== DEFAULT_HOTKEY.altKey ||
     settings.hotkey.shiftKey !== DEFAULT_HOTKEY.shiftKey ||
     settings.hotkey.metaKey !== DEFAULT_HOTKEY.metaKey
+  );
+  let isLongHotkeyChanged = $derived(
+    settings.longHotkey.keycode !== DEFAULT_LONG_HOTKEY.keycode ||
+    settings.longHotkey.ctrlKey !== DEFAULT_LONG_HOTKEY.ctrlKey ||
+    settings.longHotkey.altKey !== DEFAULT_LONG_HOTKEY.altKey ||
+    settings.longHotkey.shiftKey !== DEFAULT_LONG_HOTKEY.shiftKey ||
+    settings.longHotkey.metaKey !== DEFAULT_LONG_HOTKEY.metaKey
   );
 
   // Input devices from system enumeration
@@ -239,6 +264,7 @@
 
     // Get display name for current hotkey (use loadedSettings directly, not the $state)
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
+    longHotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.longHotkey);
 
     // Fetch server settings (engine, model, etc.)
     try {
@@ -321,15 +347,22 @@
     }
   }
 
-  function openHotkeyCapture() {
+  function openHotkeyCapture(target: 'quick' | 'long') {
+    hotkeyCaptureTarget = target;
     isHotkeyModalOpen = true;
   }
 
   function handleHotkeyCapture(hotkey: Hotkey, displayName: string) {
     isHotkeyModalOpen = false;
-    settings.hotkey = hotkey;
-    hotkeyDisplayName = displayName;
-    window.murmurMain.updateSetting('hotkey', hotkey);
+    if (hotkeyCaptureTarget === 'long') {
+      settings.longHotkey = hotkey;
+      longHotkeyDisplayName = displayName;
+      window.murmurMain.updateSetting('longHotkey', hotkey);
+    } else {
+      settings.hotkey = hotkey;
+      hotkeyDisplayName = displayName;
+      window.murmurMain.updateSetting('hotkey', hotkey);
+    }
   }
 
   function handleHotkeyCancel() {
@@ -340,6 +373,12 @@
     settings.hotkey = { ...DEFAULT_HOTKEY };
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_HOTKEY);
     window.murmurMain.updateSetting('hotkey', DEFAULT_HOTKEY);
+  }
+
+  async function resetLongHotkey() {
+    settings.longHotkey = { ...DEFAULT_LONG_HOTKEY };
+    longHotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_LONG_HOTKEY);
+    window.murmurMain.updateSetting('longHotkey', DEFAULT_LONG_HOTKEY);
   }
 
   async function importHotwords() {
@@ -441,7 +480,7 @@
       <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording">
         <div class="flex items-center gap-2">
           <button
-            onclick={openHotkeyCapture}
+            onclick={() => openHotkeyCapture('quick')}
             class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
           >
             {hotkeyDisplayName}
@@ -450,7 +489,30 @@
             <button
               onclick={resetHotkey}
               class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to F17"
+              title="Reset to Ctrl+Meta"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      </SettingsRow>
+
+      <SettingsRow label="Long Hotkey" description="Toggle hands-free long dictation">
+        <div class="flex items-center gap-2">
+          <button
+            onclick={() => openHotkeyCapture('long')}
+            class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
+          >
+            {longHotkeyDisplayName}
+          </button>
+          {#if isLongHotkeyChanged}
+            <button
+              onclick={resetLongHotkey}
+              class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+              title="Reset to Ctrl+Shift+Meta"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>

@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
   STATE_CONNECTION: 'state:connection',
   STATE_TRANSCRIPTION: 'state:transcription',
   STATE_WARNING: 'state:warning',
+  STATE_STATUS: 'state:status',
 
   // Main → Renderer (commands to start/stop audio capture)
   COMMAND_START_RECORDING: 'command:start-recording',
@@ -64,7 +65,8 @@ export const IPC_CHANNELS = {
 
 // Overlay window constants
 export const OVERLAY_CONFIG = {
-  WIDTH: 700,
+  QUICK_WIDTH: 700,
+  LONG_WIDTH: 900,
   HEIGHT: 320,
   BOTTOM_MARGIN: 80,
 } as const;

@@ -27,6 +27,22 @@ export function isModifierKey(keycode: number): boolean {
   return MODIFIER_KEYCODES.has(keycode);
 }
 
+export function isMetaKeycode(keycode: number): boolean {
+  return keycode === UiohookKey.Meta || keycode === UiohookKey.MetaRight;
+}
+
+export function isCtrlKeycode(keycode: number): boolean {
+  return keycode === UiohookKey.Ctrl || keycode === UiohookKey.CtrlRight;
+}
+
+export function isAltKeycode(keycode: number): boolean {
+  return keycode === UiohookKey.Alt || keycode === UiohookKey.AltRight;
+}
+
+export function isShiftKeycode(keycode: number): boolean {
+  return keycode === UiohookKey.Shift || keycode === UiohookKey.ShiftRight;
+}
+
 /**
  * Get human-readable name for a keycode
  */

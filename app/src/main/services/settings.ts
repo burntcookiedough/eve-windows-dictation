@@ -36,14 +36,19 @@ function isValidHotkey(hotkey: unknown): hotkey is Hotkey {
   );
 }
 
+function getStoredHotkey(key: 'hotkey' | 'longHotkey'): Hotkey {
+  const storedHotkey = store.get(key);
+  return isValidHotkey(storedHotkey) ? storedHotkey : DEFAULT_SETTINGS[key];
+}
+
 export function getSettings(): Settings {
-  // Get hotkey with validation (handles migration from old string format)
-  const storedHotkey = store.get('hotkey');
-  const hotkey = isValidHotkey(storedHotkey) ? storedHotkey : DEFAULT_SETTINGS.hotkey;
+  const hotkey = getStoredHotkey('hotkey');
+  const longHotkey = getStoredHotkey('longHotkey');
 
   // Return all settings, falling back to defaults for any missing keys
   return {
     hotkey,
+    longHotkey,
     holdToTalk: store.get('holdToTalk'),
     autoCopy: store.get('autoCopy'),
     autoPaste: store.get('autoPaste'),
@@ -66,9 +71,8 @@ export function getSettings(): Settings {
 }
 
 export function getSetting<K extends keyof Settings>(key: K): Settings[K] {
-  if (key === 'hotkey') {
-    const storedHotkey = store.get('hotkey');
-    return (isValidHotkey(storedHotkey) ? storedHotkey : DEFAULT_SETTINGS.hotkey) as Settings[K];
+  if (key === 'hotkey' || key === 'longHotkey') {
+    return getStoredHotkey(key) as Settings[K];
   }
   return store.get(key);
 }

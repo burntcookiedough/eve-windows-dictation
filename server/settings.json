@@ -1,3 +1,8 @@
 {
-  "engine_preference_mode": "manual"
+  "engine": "whisper",
+  "engine_preference_mode": "manual",
+  "whisper_model": "large-v3-turbo",
+  "whisper_device": "cuda",
+  "whisper_compute_type": "float16",
+  "whisper_language": "en"
 }

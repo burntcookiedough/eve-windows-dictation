@@ -77,6 +77,24 @@ class WarningFrame(ControlFrameBase):
     message: str
 
 
+class StatusKind(StrEnum):
+    """Machine-readable session status updates."""
+
+    LONG_DICTATION_STARTED = "long_dictation_started"
+    LONG_DICTATION_PROCESSING = "long_dictation_processing"
+
+
+class StatusFrame(ControlFrameBase):
+    """Server -> Client: Non-terminal session status/progress update."""
+
+    type: Literal["status"] = "status"
+    status: StatusKind
+    message: str | None = None
+    chunk_index: Annotated[int | None, Field(default=None, ge=1)] = None
+    chunk_total: Annotated[int | None, Field(default=None, ge=1)] = None
+    audio_duration: Annotated[float | None, Field(default=None, ge=0.0)] = None
+
+
 class ClosingReason(StrEnum):
     """Reasons for closing a session."""
 
@@ -101,6 +119,7 @@ ControlFrame = Union[
     ReadyFrame,
     ErrorFrame,
     WarningFrame,
+    StatusFrame,
     ClosingFrame,
 ]
 

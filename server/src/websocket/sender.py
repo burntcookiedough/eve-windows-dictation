@@ -13,6 +13,8 @@ from protocol.frames import (
     FinalTextFrame,
     PartialTextFrame,
     ReadyFrame,
+    StatusFrame,
+    StatusKind,
     WarningCode,
     WarningFrame,
 )
@@ -60,6 +62,26 @@ class FrameSender:
         logger.warning(
             "[%s] Sent warning frame: %s - %s", self._session_id, code, message
         )
+
+    async def send_status(
+        self,
+        status: StatusKind,
+        *,
+        message: str | None = None,
+        chunk_index: int | None = None,
+        chunk_total: int | None = None,
+        audio_duration: float | None = None,
+    ) -> None:
+        """Send a non-terminal status/progress control frame."""
+        frame = StatusFrame(
+            status=status,
+            message=message,
+            chunk_index=chunk_index,
+            chunk_total=chunk_total,
+            audio_duration=audio_duration,
+        )
+        await self._ws.send_json(frame.model_dump(exclude_none=True))
+        logger.debug("[%s] Sent status frame: %s", self._session_id, status.value)
 
     async def send_closing(self, reason: ClosingReason) -> None:
         """Send a closing control frame.

@@ -17,6 +17,8 @@ import type {
   ConnectionStatePayload,
   TranscriptionPayload,
   RecordingDebugState,
+  RecordingStatusPayload,
+  DictationSessionMode,
 } from '../shared/types.js';
 import { createLogger } from './lib/logger.js';
 
@@ -29,10 +31,13 @@ let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
 let isRecording = false;
 let recordingSource: 'lab' | 'normal' | null = null;
+let recordingSessionMode: DictationSessionMode = 'quick';
 let isStopping = false;
-let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false };
+let startLongAfterStop = false;
+let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false, mode: 'quick' };
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
+let latestStatus: RecordingStatusPayload | null = null;
 
 function broadcastLabState<T>(channel: string, payload: T): void {
   if (recordingSource === 'lab' && mainWindow && !mainWindow.isDestroyed()) {
@@ -41,8 +46,9 @@ function broadcastLabState<T>(channel: string, payload: T): void {
 }
 
 function updateRecordingState(payload: RecordingStatePayload): void {
-  currentRecordingState = payload;
-  broadcastLabState(IPC_CHANNELS.STATE_RECORDING, payload);
+  const nextPayload = { ...payload, mode: payload.mode ?? recordingSessionMode };
+  currentRecordingState = nextPayload;
+  broadcastLabState(IPC_CHANNELS.STATE_RECORDING, nextPayload);
 }
 
 function updateConnectionState(payload: ConnectionStatePayload): void {
@@ -55,10 +61,15 @@ function updateTranscription(payload: TranscriptionPayload): void {
   broadcastLabState(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
 }
 
+function updateStatus(payload: RecordingStatusPayload): void {
+  latestStatus = payload;
+  broadcastLabState(IPC_CHANNELS.STATE_STATUS, payload);
+}
+
 function getRecordingDebugState(): RecordingDebugState {
   if (recordingSource !== 'lab') {
     return {
-      recording: { state: 'idle', isRecording: false },
+      recording: { state: 'idle', isRecording: false, mode: 'quick' },
       connection: { status: 'disconnected' },
       transcription: null,
     };
@@ -71,7 +82,7 @@ function getRecordingDebugState(): RecordingDebugState {
   };
 }
 
-async function startRecording(source: 'lab' | 'normal') {
+async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick') {
   if (isRecording || isStopping || !overlayWindow) return;
 
   const useExternalServer = getSetting('useExternalServer');
@@ -89,18 +100,22 @@ async function startRecording(source: 'lab' | 'normal') {
 
   isRecording = true;
   recordingSource = source;
+  recordingSessionMode = sessionMode;
   latestTranscription = null;
+  latestStatus = null;
   updateConnectionState({ status: 'connecting' });
-  updateRecordingState({ state: 'processing', isRecording: true });
+  updateRecordingState({ state: 'processing', isRecording: true, mode: sessionMode });
 
   // Position and show overlay
-  positionOverlayOnActiveDisplay(overlayWindow);
+  positionOverlayOnActiveDisplay(overlayWindow, sessionMode);
   showOverlay(overlayWindow);
 
   // Initialize transcription service
   // Only use silence timeout in toggle mode; in hold mode use a very long timeout (user releases key to stop)
   const isHoldMode = getSetting('holdToTalk');
-  const silenceTimeout = isHoldMode ? 300 : getSetting('silenceTimeout'); // 5 min fallback for hold mode
+  const silenceTimeout = sessionMode === 'quick' && isHoldMode
+    ? 300
+    : getSetting('silenceTimeout');
   const settings = getSettings();
   const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
 
@@ -112,7 +127,8 @@ async function startRecording(source: 'lab' | 'normal') {
     serverUrl,
     silenceTimeout,
     overlayWindow,
-    hotwords
+    hotwords,
+    sessionMode
   );
   transcriptionService = service;
 
@@ -129,6 +145,11 @@ async function startRecording(source: 'lab' | 'normal') {
   service.onTranscription((payload) => {
     if (transcriptionService !== service) return;
     updateTranscription(payload);
+  });
+
+  service.onStatus((payload) => {
+    if (transcriptionService !== service) return;
+    updateStatus(payload);
   });
 
   // Set up transcription callbacks
@@ -150,25 +171,39 @@ async function startRecording(source: 'lab' | 'normal') {
 
   service.onClose(() => {
     if (transcriptionService !== service) return;
+    const shouldStartLongAfterStop = startLongAfterStop;
 
     isRecording = false;
     isStopping = false;
     transcriptionService = null;
     latestTranscription = null;
+    latestStatus = null;
     recordingSource = null;
+    recordingSessionMode = 'quick';
 
     if (overlayWindow) {
       hideOverlay(overlayWindow);
+    }
+
+    if (shouldStartLongAfterStop) {
+      startLongAfterStop = false;
+      void startRecording('normal', 'long');
     }
   });
 
   // Connect to server
   try {
     await service.connect();
+    if (transcriptionService !== service || !isRecording) {
+      return;
+    }
     // Tell overlay to start audio capture with selected device
     const deviceId = getSetting('selectedDeviceId');
     overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
   } catch (error) {
+    if (transcriptionService !== service) {
+      return;
+    }
     log.error('Failed to connect to transcription server', { error: error as Error });
     stopRecording();
   }
@@ -184,15 +219,32 @@ async function stopRecording() {
 
   // Send stop to server
   transcriptionService?.stop();
-  updateRecordingState({ state: 'idle', isRecording: false });
-  updateConnectionState({ status: 'disconnected' });
+  updateRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
+}
 
-  // Hide overlay after brief delay to show final state
-  setTimeout(() => {
-    if (overlayWindow) {
-      hideOverlay(overlayWindow);
+function queueLongRecordingAfterStop(): void {
+  startLongAfterStop = true;
+  if (!isRecording && !isStopping) {
+    startLongAfterStop = false;
+    void startRecording('normal', 'long');
+  }
+}
+
+function toggleLongRecording(): void {
+  if (isRecording && recordingSessionMode === 'long') {
+    log.info('Long dictation stopped');
+    startLongAfterStop = false;
+    stopRecording();
+  } else if (isRecording || isStopping) {
+    log.info('Long dictation queued after quick dictation stop');
+    queueLongRecordingAfterStop();
+    if (isRecording) {
+      stopRecording();
     }
-  }, 500);
+  } else {
+    log.info('Long dictation started');
+    startRecording('normal', 'long');
+  }
 }
 
 // Handle audio data from overlay renderer
@@ -261,7 +313,7 @@ function setupDisplayChangeHandlers() {
     log.info('Display removed', { displayId: oldDisplay.id, bounds: oldDisplay.bounds });
     if (isRecording && overlayWindow) {
       // Reposition overlay to ensure it's on a valid display
-      positionOverlayOnActiveDisplay(overlayWindow);
+      positionOverlayOnActiveDisplay(overlayWindow, recordingSessionMode);
       log.debug('Repositioned overlay after display removal');
     }
   });
@@ -275,7 +327,7 @@ function setupDisplayChangeHandlers() {
     log.info('Display metrics changed', { displayId: display.id, changedMetrics });
     if (isRecording && overlayWindow) {
       // Reposition overlay in case work area changed
-      positionOverlayOnActiveDisplay(overlayWindow);
+      positionOverlayOnActiveDisplay(overlayWindow, recordingSessionMode);
       log.debug('Repositioned overlay after display metrics change');
     }
   });
@@ -317,34 +369,34 @@ app.whenReady().then(async () => {
   setupDisplayChangeHandlers();
 
   // Set up global hotkey (supports hold-to-talk and toggle modes)
-  setupHotkeyService(
-    () => {
-      // Key down handler
+  setupHotkeyService({
+    onHoldStart: () => {
       if (getSetting('holdToTalk')) {
-        // Hold mode: start recording on key down
-        log.info('Recording started (hold mode)');
-        startRecording('normal');
+        log.info('Quick dictation started (hold mode)');
+        startRecording('normal', 'quick');
+      } else if (isRecording) {
+        log.info('Quick dictation stopped (toggle mode)');
+        stopRecording();
       } else {
-        // Toggle mode: toggle recording on key down
-        if (isRecording) {
-          log.info('Recording stopped (toggle mode)');
-          stopRecording();
-        } else {
-          log.info('Recording started (toggle mode)');
-          startRecording('normal');
-        }
+        log.info('Quick dictation started (toggle mode)');
+        startRecording('normal', 'quick');
       }
     },
-    () => {
-      // Key up handler
-      if (getSetting('holdToTalk')) {
-        // Hold mode: stop recording on key up
-        log.info('Recording stopped (hold mode)');
+    onHoldEnd: () => {
+      if (getSetting('holdToTalk') && recordingSessionMode === 'quick') {
+        log.info('Quick dictation stopped (hold mode)');
         stopRecording();
       }
-      // Toggle mode: do nothing on key up
-    }
-  );
+    },
+    onDoubleTap: () => {
+      log.info('Long dictation toggled (double-tap)');
+      toggleLongRecording();
+    },
+    onLongShortcut: () => {
+      log.info('Long dictation toggled (long hotkey)');
+      toggleLongRecording();
+    },
+  });
 
   // Set up system tray with main window reference for show/focus
   setupTray(() => {

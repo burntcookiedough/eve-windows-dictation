@@ -6,16 +6,20 @@
   import { AUDIO_CONFIG } from '../../shared/constants';
   import type {
     RecordingState,
+    RecordingStatusPayload,
     RecordingWarningPayload,
     TranscriptionPayload,
+    DictationSessionMode,
   } from '../../shared/types';
 
   let recordingState = $state<RecordingState>('idle');
   let transcriptionText = $state('');
   let transcriptionType = $state<'partial' | 'final'>('partial');
+  let sessionMode = $state<DictationSessionMode>('quick');
   let audioLevels = $state<number[]>(new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0));
   let isVisible = $state(false);
   let warningMessage = $state('');
+  let statusMessage = $state('');
   let warningTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let cleanupFns: Array<() => void> = [];
@@ -49,12 +53,17 @@
     cleanupFns.push(
       window.murmur.onRecordingState((payload) => {
         recordingState = payload.state;
+        sessionMode = payload.mode ?? sessionMode;
         isVisible = payload.isRecording || recordingState === 'success' || recordingState === 'error';
 
         // Reset text when starting new session
         if (recordingState === 'listening') {
           transcriptionText = '';
           transcriptionType = 'partial';
+          statusMessage = sessionMode === 'long' ? 'Long dictation' : 'Fast dictation';
+        }
+        if (recordingState === 'idle') {
+          statusMessage = '';
         }
       })
     );
@@ -64,6 +73,9 @@
       window.murmur.onTranscription((payload: TranscriptionPayload) => {
         transcriptionText = payload.text;
         transcriptionType = payload.type;
+        if (payload.type === 'final') {
+          statusMessage = '';
+        }
       })
     );
 
@@ -78,6 +90,20 @@
           warningMessage = '';
           warningTimeout = null;
         }, 5000);
+      })
+    );
+
+    cleanupFns.push(
+      window.murmur.onStatus((payload: RecordingStatusPayload) => {
+        if (payload.status === 'long_dictation_started') {
+          transcriptionText = '';
+          transcriptionType = 'partial';
+          statusMessage = 'Long dictation';
+        } else if (payload.status === 'long_dictation_processing') {
+          statusMessage = payload.chunkIndex && payload.chunkTotal
+            ? `Processing ${payload.chunkIndex}/${payload.chunkTotal}`
+            : 'Processing long dictation';
+        }
       })
     );
 
@@ -106,7 +132,7 @@
 </script>
 
 <div
-  class="flex flex-col items-center gap-8 pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+  class="flex h-screen w-screen flex-col items-center justify-end gap-8 pb-6 pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
 >
   {#if warningMessage}
     <div class="max-w-xl rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
@@ -117,7 +143,15 @@
   {/if}
 
   {#if transcriptionText}
-    <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} />
+    <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
+  {/if}
+
+  {#if statusMessage && isVisible}
+    <div class="rounded-full border border-zinc-500/25 bg-black px-3 py-1">
+      <p class="text-center text-xs font-medium text-zinc-300">
+        {statusMessage}
+      </p>
+    </div>
   {/if}
 
   <Pill state={recordingState} levels={audioLevels} />

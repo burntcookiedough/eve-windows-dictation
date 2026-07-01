@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OVERLAY_CONFIG } from '../../shared/constants.js';
+import type { DictationSessionMode } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Overlay');
@@ -15,7 +16,7 @@ export async function createOverlayWindow(): Promise<BrowserWindow> {
   log.debug('Creating overlay window', { preloadPath });
 
   const overlay = new BrowserWindow({
-    width: OVERLAY_CONFIG.WIDTH,
+    width: OVERLAY_CONFIG.QUICK_WIDTH,
     height: OVERLAY_CONFIG.HEIGHT,
     frame: false,
     transparent: true,
@@ -47,21 +48,33 @@ export async function createOverlayWindow(): Promise<BrowserWindow> {
   return overlay;
 }
 
-export function positionOverlayOnActiveDisplay(overlay: BrowserWindow): void {
+function getOverlayWidth(mode: DictationSessionMode): number {
+  return mode === 'long' ? OVERLAY_CONFIG.LONG_WIDTH : OVERLAY_CONFIG.QUICK_WIDTH;
+}
+
+export function positionOverlayOnActiveDisplay(
+  overlay: BrowserWindow,
+  mode: DictationSessionMode = 'quick'
+): void {
   // Get the display where the cursor is (proxy for active window)
   const cursorPoint = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursorPoint);
   const { workArea } = display;
 
+  const width = getOverlayWidth(mode);
+  overlay.setSize(width, OVERLAY_CONFIG.HEIGHT);
+
   // Position at bottom-center of the work area
-  const x = workArea.x + Math.round((workArea.width - OVERLAY_CONFIG.WIDTH) / 2);
+  const x = workArea.x + Math.round((workArea.width - width) / 2);
   const y = workArea.y + workArea.height - OVERLAY_CONFIG.HEIGHT - OVERLAY_CONFIG.BOTTOM_MARGIN;
 
   log.debug('Positioning overlay', {
     cursor: cursorPoint,
     displayId: display.id,
     workArea,
-    position: { x, y }
+    mode,
+    position: { x, y },
+    size: { width, height: OVERLAY_CONFIG.HEIGHT },
   });
 
   overlay.setPosition(x, y);

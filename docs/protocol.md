@@ -212,6 +212,41 @@ Non-fatal warning. Session continues and connection remains open.
 
 **Client behavior:** Surface warning to user and continue sending audio normally.
 
+### status (Server → Client)
+
+Non-terminal progress/status update. Clients that do not understand a status value may ignore it.
+
+```json
+{
+  "frame": "control",
+  "type": "status",
+  "status": "long_dictation_processing",
+  "message": "Processing chunk 2/3",
+  "chunk_index": 2,
+  "chunk_total": 3,
+  "audio_duration": 62.8
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `frame` | string | `"control"` |
+| `type` | string | `"status"` |
+| `status` | string | Machine-readable status |
+| `message` | string | Optional human-readable status |
+| `chunk_index` | number | Optional 1-based chunk number |
+| `chunk_total` | number | Optional total chunk count |
+| `audio_duration` | number | Optional current/full audio duration in seconds |
+
+#### Status Values
+
+| Status | Meaning |
+|--------|---------|
+| `long_dictation_started` | Buffered audio crossed the server's long-dictation threshold and final transcription will use long mode |
+| `long_dictation_processing` | Final long-dictation transcription is processing a specific chunk |
+
+**Client behavior:** Surface mode/progress without treating it as terminal text.
+
 ### closing (Server → Client)
 
 Server is about to close the connection. Sent after the terminal `final` text frame.

@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     min_audio_for_transcription: float = 0.15
     transcription_max_workers: int = Field(default=1, ge=1, le=4)
     allow_overlapping_inference: bool = False
+    long_dictation_threshold_s: float = Field(default=30.0, gt=0.0)
+    long_dictation_chunk_s: float = Field(default=25.0, gt=1.0)
+    long_dictation_overlap_s: float = Field(default=0.75, ge=0.0, le=5.0)
 
     # Hot-swap
     unload_before_swap: bool = False
@@ -251,6 +254,30 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "label": "Allow Overlapping Inference",
         "description": "Permit concurrent inference calls on the same GPU.",
         "type": "bool",
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "long_dictation_threshold_s": {
+        "label": "Long Dictation Threshold",
+        "description": "Seconds before final transcription switches to chunked long dictation mode.",
+        "type": "number",
+        "range": [5, 120],
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "long_dictation_chunk_s": {
+        "label": "Long Dictation Chunk",
+        "description": "Target seconds per local batch chunk for long dictation.",
+        "type": "number",
+        "range": [5, 60],
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "long_dictation_overlap_s": {
+        "label": "Long Dictation Overlap",
+        "description": "Seconds of overlap between long dictation chunks for safer stitching.",
+        "type": "number",
+        "range": [0, 5],
         "requires_reload": False,
         "category": "transcription",
     },

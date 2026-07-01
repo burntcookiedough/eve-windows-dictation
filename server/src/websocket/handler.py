@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
 from protocol.errors import ErrorCode
-from protocol.frames import ClosingReason, StartFrame, WarningCode
+from protocol.frames import ClosingReason, StartFrame, StatusKind, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
@@ -265,6 +265,18 @@ async def _handle_audio_frame(
 
     # Add to buffer
     context.audio_buffer.append(frame.sequence, frame.samples)
+    audio_duration = context.audio_buffer.duration_seconds
+
+    if (
+        not context.long_dictation_announced
+        and audio_duration >= get_settings().long_dictation_threshold_s
+    ):
+        context.long_dictation_announced = True
+        await sender.send_status(
+            StatusKind.LONG_DICTATION_STARTED,
+            message="Long dictation mode",
+            audio_duration=audio_duration,
+        )
 
     # Transition to streaming if first audio and record audio start time
     if context.state_machine.state == SessionState.STARTED:
@@ -479,7 +491,15 @@ async def _finalize_session(
     final_audio_duration = context.audio_buffer.duration_seconds
 
     try:
-        result = await processor.transcribe_final()
+        result = await processor.transcribe_final(
+            progress_callback=lambda chunk_index, chunk_total: sender.send_status(
+                StatusKind.LONG_DICTATION_PROCESSING,
+                message=f"Processing chunk {chunk_index}/{chunk_total}",
+                chunk_index=chunk_index,
+                chunk_total=chunk_total,
+                audio_duration=final_audio_duration,
+            )
+        )
         final_text = result.text
         final_confidence = result.confidence
         final_transcription_time = result.transcription_time

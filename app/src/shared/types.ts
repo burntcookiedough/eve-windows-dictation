@@ -1,5 +1,6 @@
 // Recording/Session states
 export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'error';
+export type DictationSessionMode = 'quick' | 'long';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -92,6 +93,7 @@ export interface ModelDownloadState {
 export interface RecordingStatePayload {
   state: RecordingState;
   isRecording: boolean;
+  mode?: DictationSessionMode;
 }
 
 export interface ConnectionStatePayload {
@@ -102,6 +104,14 @@ export interface ConnectionStatePayload {
 export interface RecordingWarningPayload {
   code: string;
   message: string;
+}
+
+export interface RecordingStatusPayload {
+  status: 'long_dictation_started' | 'long_dictation_processing';
+  message?: string;
+  chunkIndex?: number;
+  chunkTotal?: number;
+  audioDuration?: number;
 }
 
 export interface AudioLevelPayload {
@@ -166,6 +176,7 @@ export interface Hotkey {
 // Settings (v0 uses hardcoded values, but define the shape)
 export interface Settings {
   hotkey: Hotkey;
+  longHotkey: Hotkey;
   holdToTalk: boolean;
   autoCopy: boolean;
   autoPaste: boolean;
@@ -267,13 +278,19 @@ export interface WindowBounds {
 }
 
 // Default settings for v0
-// F17 keycode: 0x0064 (100) in libuiohook, 128 on Windows
 export const DEFAULT_SETTINGS: Settings = {
   hotkey: {
-    keycode: 100, // F17 in libuiohook (0x0064)
-    ctrlKey: false,
+    keycode: 3675, // Meta/Windows in libuiohook
+    ctrlKey: true,
     altKey: false,
     shiftKey: false,
+    metaKey: false,
+  },
+  longHotkey: {
+    keycode: 3675, // Ctrl+Shift+Meta toggles long dictation
+    ctrlKey: true,
+    altKey: false,
+    shiftKey: true,
     metaKey: false,
   },
   holdToTalk: true,
