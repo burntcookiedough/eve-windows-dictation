@@ -24,7 +24,8 @@ const log = createLogger('ServerManager');
 
 const MAX_LOG_ENTRIES = 500;
 const HEALTH_POLL_INTERVAL_MS = 3000;
-const START_TIMEOUT_MS = 30000;
+const START_PID_TIMEOUT_MS = 30000;
+const START_HEALTH_TIMEOUT_MS = 180000;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
@@ -551,13 +552,13 @@ export class ServerManager {
       });
 
       // Wait for PID file to appear (indicates server is ready)
-      const pidData = await this.waitForPidFile(START_TIMEOUT_MS, spawnStartedAt);
+      const pidData = await this.waitForPidFile(START_PID_TIMEOUT_MS, spawnStartedAt);
       if (!pidData) {
         throw new Error('Server did not write PID file within timeout');
       }
 
       // Wait for health check to pass
-      const health = await this.waitForHealth(pidData.port, START_TIMEOUT_MS);
+      const health = await this.waitForHealth(pidData.port, START_HEALTH_TIMEOUT_MS);
       if (!health) {
         throw new Error('Server health check did not pass within timeout');
       }

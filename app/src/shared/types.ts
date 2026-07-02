@@ -1,6 +1,7 @@
 // Recording/Session states
 export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'error';
 export type DictationSessionMode = 'quick' | 'long';
+export type InsightsRange = 'today' | '7d' | '30d' | 'all';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -145,6 +146,13 @@ export interface TranscriptionEntry {
   audioDuration: number;
   confidence: number;
   transcriptionTime: number;
+  wordCount?: number;
+  sessionMode?: DictationSessionMode;
+  engine?: string;
+  model?: string;
+  device?: string;
+  computeType?: string;
+  cudaActive?: boolean;
   editedAt?: number;
   originalText?: string;
 }
@@ -169,6 +177,73 @@ export interface HistoryFilters {
 export interface HistoryResponse {
   entries: HistoryEntryWithGroup[];
   hasMore: boolean;
+}
+
+export interface InsightSourceEntry {
+  id: string;
+  timestamp: number;
+  text: string;
+  audioDuration: number;
+  transcriptionTime: number;
+  confidence: number;
+  wordCount?: number;
+}
+
+export interface InsightsSummary {
+  totalDictations: number;
+  totalWords: number;
+  totalAudioSeconds: number;
+  totalProcessingMs: number;
+  avgConfidence: number;
+  avgWpm: number;
+  avgProcessingRatio: number;
+  avgWordsPerDictation: number;
+  longestStreakDays: number;
+  busiestDay?: {
+    date: string;
+    label: string;
+    words: number;
+    dictations: number;
+  };
+}
+
+export interface InsightsTrendPoint {
+  date: string;
+  label: string;
+  dictations: number;
+  words: number;
+  audioSeconds: number;
+  processingMs: number;
+  avgWpm: number;
+  avgConfidence: number;
+  avgProcessingRatio: number;
+}
+
+export interface InsightsWordStat {
+  text: string;
+  count: number;
+}
+
+export interface InsightsEntryStat {
+  id: string;
+  timestamp: number;
+  text: string;
+  wordCount: number;
+  audioDuration: number;
+  transcriptionTime: number;
+  processingRatio: number;
+}
+
+export interface InsightsResponse {
+  range: InsightsRange;
+  generatedAt: number;
+  hasData: boolean;
+  summary: InsightsSummary;
+  trends: InsightsTrendPoint[];
+  commonWords: InsightsWordStat[];
+  commonPhrases: InsightsWordStat[];
+  longestEntries: InsightsEntryStat[];
+  slowestEntries: InsightsEntryStat[];
 }
 
 // Hotkey configuration

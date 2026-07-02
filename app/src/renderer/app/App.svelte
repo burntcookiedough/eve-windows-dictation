@@ -2,17 +2,19 @@
   import TitleBar from './components/TitleBar.svelte';
   import Toasts from './components/Toasts.svelte';
   import HistoryView from './views/HistoryView.svelte';
+  import InsightsView from './views/InsightsView.svelte';
   import SettingsView from './views/SettingsView.svelte';
   import TestView from './views/TestView.svelte';
   import ServerView from './views/ServerView.svelte';
 
-  type View = 'history' | 'settings' | 'test' | 'server';
+  type View = 'history' | 'insights' | 'settings' | 'test' | 'server';
 
   let activeView = $state<View>('history');
   let settingsVisited = $state(false);
 
   const tabs: { id: View; label: string }[] = [
     { id: 'history', label: 'History' },
+    { id: 'insights', label: 'Insights' },
     { id: 'settings', label: 'Settings' },
     { id: 'test', label: 'Lab' },
     { id: 'server', label: 'Server' },
@@ -49,6 +51,10 @@
   <main class="flex-1 overflow-hidden">
     {#if activeView === 'history'}
       <HistoryView />
+    {/if}
+
+    {#if activeView === 'insights'}
+      <InsightsView />
     {/if}
 
     {#if settingsVisited || activeView === 'settings'}

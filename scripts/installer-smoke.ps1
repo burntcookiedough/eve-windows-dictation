@@ -2,9 +2,10 @@
 param(
     [string]$InstallerPath,
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Murmur",
-    [string]$Model = "tiny",
+    [string]$Model = "",
     [int]$HealthTimeoutSec = 180,
     [int]$DownloadTimeoutSec = 1200,
+    [string]$PidFilePath = "$env:APPDATA\murmur\server.pid",
     [switch]$SkipUninstall,
     [switch]$SkipLaunch,
     [switch]$RequireCuda,
@@ -71,27 +72,27 @@ function Wait-For-Health {
     throw "Server did not become healthy within ${TimeoutSec}s."
 }
 
-function Wait-For-ServerPidFile {
-    param([int]$TimeoutSec, [datetime]$StartedAfterUtc)
+function Wait-For-PidFile {
+    param([string]$Path, [int]$TimeoutSec, [long]$StartedAfter)
 
-    $pidPath = Join-Path $env:APPDATA "murmur\server.pid"
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        if (
-            (Test-Path -LiteralPath $pidPath) -and
-            (Get-Item -LiteralPath $pidPath).LastWriteTimeUtc -ge $StartedAfterUtc
-        ) {
+        if (Test-Path $Path) {
             try {
-                $data = Get-Content -LiteralPath $pidPath -Raw | ConvertFrom-Json
-                if ($data.port -and $data.pid) { return $data }
+                $pidData = Get-Content -Path $Path -Raw | ConvertFrom-Json
+                if ($pidData.pid -and $pidData.port -and $pidData.startedAt -ge $StartedAfter) {
+                    return $pidData
+                }
             } catch {
-                # The server may still be writing the file; retry.
+                Start-Sleep -Milliseconds 500
+                continue
             }
         }
-        Start-Sleep -Milliseconds 500
+
+        Start-Sleep -Seconds 1
     }
 
-    throw "Server PID file did not appear within ${TimeoutSec}s: $pidPath"
+    throw "PID file was not written within ${TimeoutSec}s at $Path."
 }
 
 function Wait-For-Model {
@@ -163,6 +164,11 @@ if ($Model) {
 $env:MURMUR_ENGINE = "whisper"
 Write-Step "Setting MURMUR_ENGINE=whisper"
 
+if (Test-Path $PidFilePath) {
+    Write-Step "Removing stale PID file at $PidFilePath"
+    Remove-Item -Path $PidFilePath -Force
+}
+
 Write-Step "Installing Murmur"
 $installProc = Start-Process -Wait -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru
 Assert-ExitCode -Process $installProc -Step "Install"
@@ -177,12 +183,14 @@ if (-not (Test-Path $exePath)) {
     throw "Installed app not found at $exePath"
 }
 
+$launchStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 Write-Step "Launching Murmur"
 $launchTimeUtc = (Get-Date).ToUniversalTime()
 $process = Start-Process -FilePath $exePath -WorkingDirectory $InstallDir -PassThru
 
 try {
-    $pidData = Wait-For-ServerPidFile -TimeoutSec $HealthTimeoutSec -StartedAfterUtc $launchTimeUtc
+    Write-Step "Waiting for server PID file at $PidFilePath"
+    $pidData = Wait-For-PidFile -Path $PidFilePath -TimeoutSec $HealthTimeoutSec -StartedAfter $launchStartedAt
     $healthUrl = "http://127.0.0.1:$($pidData.port)/health"
     Write-Step "Waiting for server health at $healthUrl"
     $health = Wait-For-Health -Url $healthUrl -TimeoutSec $HealthTimeoutSec

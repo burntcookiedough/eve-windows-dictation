@@ -69,6 +69,10 @@ export class HotkeyGestureRecognizer {
     }
 
     const activePress = this.activePress;
+    if (activePress.modifierOnly && requiredModifierStillHeld(event.modifiers, activePress.requiredModifiers)) {
+      return null;
+    }
+
     this.activePress = null;
 
     if (activePress.kind === 'double-tap') {
@@ -160,4 +164,13 @@ function matchesActiveRelease(keycode: number, activePress: ActivePress): boolea
   }
 
   return isRequiredModifierEvent(keycode, activePress.requiredModifiers);
+}
+
+function requiredModifierStillHeld(actual: ModifierState, required: ModifierState): boolean {
+  return (
+    (required.ctrl && actual.ctrl) ||
+    (required.alt && actual.alt) ||
+    (required.shift && actual.shift) ||
+    (required.meta && actual.meta)
+  );
 }

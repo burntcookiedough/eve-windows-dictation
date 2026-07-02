@@ -8,6 +8,7 @@ import { TranscriptionService } from './services/transcription.js';
 import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
+import { getForegroundWindowHandle } from './services/clipboard.js';
 import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
@@ -24,6 +25,10 @@ import type {
 import { createLogger } from './lib/logger.js';
 
 const log = createLogger('App');
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.murmur.app');
+}
 
 let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -112,6 +117,7 @@ function showTransientOverlayError(message: string, mode: DictationSessionMode):
   sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
   scheduleOverlayDismiss(generation, mode, 'error');
 }
+let currentPasteTargetWindowHandlePromise: Promise<number | null> | null = null;
 
 function broadcastLabState<T>(channel: string, payload: T): void {
   if (recordingSource === 'lab' && mainWindow && !mainWindow.isDestroyed()) {
@@ -196,6 +202,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   recordingTerminalOverride = null;
   recordingSource = source;
   recordingSessionMode = sessionMode;
+  currentPasteTargetWindowHandlePromise = source === 'normal'
+    ? getForegroundWindowHandle()
+    : null;
   latestTranscription = null;
   latestStatus = null;
   updateConnectionState({ status: 'connecting' });
@@ -226,6 +235,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     sessionMode
   );
   transcriptionService = service;
+  const serviceSessionMode = sessionMode;
+  const servicePasteTargetWindowHandlePromise = currentPasteTargetWindowHandlePromise;
 
   service.onRecordingState((payload) => {
     if (transcriptionService !== service) return;
@@ -250,13 +261,26 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
   // Set up transcription callbacks
   service.onFinal(async (frame: TextFrameFinal) => {
+    if (transcriptionService !== service) {
+      return;
+    }
+
     if (source !== 'normal') {
       return;
     }
 
     if (frame.text) {
+      const pasteTargetWindowHandle = await servicePasteTargetWindowHandlePromise
+        ?.catch(() => null) ?? null;
+
       // Process through pipeline (post-processing, clipboard, paste, history)
-      const result = await processFinalTranscription(frame, getSettings(), historyService);
+      const result = await processFinalTranscription(
+        frame,
+        getSettings(),
+        historyService,
+        serviceSessionMode,
+        pasteTargetWindowHandle
+      );
 
       // Push new entry to main window if visible
       if (mainWindow && mainWindow.isVisible()) {
@@ -286,6 +310,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     recordingSource = null;
     recordingSessionMode = 'quick';
     recordingTerminalOverride = null;
+    currentPasteTargetWindowHandlePromise = null;
 
     scheduleOverlayDismiss(sessionGeneration, closedSessionMode, terminalState);
 

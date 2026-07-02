@@ -40,6 +40,10 @@ export const IPC_CHANNELS = {
   HISTORY_DELETE: 'history:delete',
   HISTORY_NEW_ENTRY: 'history:new-entry',
 
+  // Insights
+  INSIGHTS_GET: 'insights:get',
+  INSIGHTS_REBUILD: 'insights:rebuild',
+
   // Recording test controls
   RECORDING_GET_STATE: 'recording:get-state',
   RECORDING_START: 'recording:start',

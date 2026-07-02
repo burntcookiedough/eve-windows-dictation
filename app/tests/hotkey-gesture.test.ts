@@ -69,13 +69,22 @@ describe('HotkeyGestureRecognizer', () => {
     expect(winThenCtrl.keyDown(event(KEY.Ctrl, { ctrl: true, meta: true }, 10), CTRL_WIN)).toBe('hold-start');
   });
 
-  test('stops Ctrl+Win hold when either required modifier is released', () => {
+  test('stops Ctrl+Win hold only after all required modifiers are released', () => {
     const recognizer = new HotkeyGestureRecognizer();
 
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 10), CTRL_WIN)).toBe('hold-start');
-    expect(recognizer.keyUp(event(KEY.Ctrl, { ctrl: true, meta: true }, 100))).toBe('hold-end');
-    expect(recognizer.keyUp(event(KEY.Meta, { meta: true }, 110))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, { meta: true }, 100))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Meta, {}, 110))).toBe('hold-end');
+  });
+
+  test('stops Ctrl+Win hold only after all required modifiers are released in reverse order', () => {
+    const recognizer = new HotkeyGestureRecognizer();
+
+    expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_WIN)).toBeNull();
+    expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 10), CTRL_WIN)).toBe('hold-start');
+    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true }, 100))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, {}, 110))).toBe('hold-end');
   });
 
   test('does not fire modifier-only hotkey when an extra modifier is down', () => {
@@ -91,12 +100,13 @@ describe('HotkeyGestureRecognizer', () => {
 
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 20), CTRL_WIN)).toBe('hold-start');
-    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true, meta: true }, 80))).toBe('hold-end');
-    expect(recognizer.keyUp(event(KEY.Ctrl, { ctrl: true }, 90))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true }, 80))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, {}, 90))).toBe('hold-end');
 
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 200), CTRL_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 220), CTRL_WIN)).toBe('double-tap');
-    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true, meta: true }, 260))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true }, 260))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, {}, 270))).toBeNull();
   });
 
   test('long hold is not treated as a double tap', () => {
@@ -104,7 +114,8 @@ describe('HotkeyGestureRecognizer', () => {
 
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 20), CTRL_WIN)).toBe('hold-start');
-    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true, meta: true }, 400))).toBe('hold-end');
+    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true }, 400))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, {}, 410))).toBe('hold-end');
 
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 500), CTRL_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, meta: true }, 520), CTRL_WIN)).toBe('hold-start');
@@ -123,6 +134,17 @@ describe('HotkeyGestureRecognizer', () => {
     expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_SHIFT_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Shift, { ctrl: true, shift: true }, 10), CTRL_SHIFT_WIN)).toBeNull();
     expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, shift: true, meta: true }, 20), CTRL_SHIFT_WIN)).toBe('hold-start');
+  });
+
+  test('Ctrl+Shift+Win long chord ends only after all required modifiers are released', () => {
+    const recognizer = new HotkeyGestureRecognizer();
+
+    expect(recognizer.keyDown(event(KEY.Ctrl, { ctrl: true }, 0), CTRL_SHIFT_WIN)).toBeNull();
+    expect(recognizer.keyDown(event(KEY.Shift, { ctrl: true, shift: true }, 10), CTRL_SHIFT_WIN)).toBeNull();
+    expect(recognizer.keyDown(event(KEY.Meta, { ctrl: true, shift: true, meta: true }, 20), CTRL_SHIFT_WIN)).toBe('hold-start');
+    expect(recognizer.keyUp(event(KEY.Meta, { ctrl: true, shift: true }, 100))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Shift, { ctrl: true }, 110))).toBeNull();
+    expect(recognizer.keyUp(event(KEY.Ctrl, {}, 120))).toBe('hold-end');
   });
 
   test('captures Windows-key modifier chords only when Meta is the final modifier', () => {
