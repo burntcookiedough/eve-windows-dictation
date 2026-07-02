@@ -15,6 +15,9 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     assert "Removing stale PID file" in contents
     assert "StartedAfter" in contents
     assert "http://127.0.0.1:$($pidData.port)/health" in contents
+    assert "ExpectedVersion" in contents
+    assert "Version mismatch" in contents
+    assert '"/D=$InstallDir"' in contents
     assert "model_download" in contents
     assert "MURMUR_ENGINE" in contents
     assert "RequireCuda" in contents

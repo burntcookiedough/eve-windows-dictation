@@ -231,6 +231,11 @@ export interface InsightsResponse {
   range: InsightsRange;
   generatedAt: number;
   hasData: boolean;
+  indexing: {
+    isIndexing: boolean;
+    processedEntries: number;
+    totalEntries: number;
+  };
   summary: InsightsSummary;
   trends: InsightsTrendPoint[];
   commonWords: InsightsWordStat[];

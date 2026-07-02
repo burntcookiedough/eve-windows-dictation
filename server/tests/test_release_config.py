@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -66,3 +67,25 @@ def test_release_workflow_installs_extras_and_uploads_payloads() -> None:
     assert "app/release/*.yml" in contents
     assert "app/release/*.blockmap" in contents
     assert "app/release/*.7z" in contents or "app/release/*.zip" in contents
+
+
+def test_release_version_surfaces_are_0_6_0_and_not_0_5_0() -> None:
+    package_json = _load_package_json()
+    server_pyproject = ROOT / "server" / "pyproject.toml"
+    server_version = ROOT / "server" / "src" / "version.py"
+    readme = ROOT / "README.md"
+
+    assert package_json["version"] == "0.6.0"
+    assert 'version = "0.6.0"' in server_pyproject.read_text(encoding="utf-8")
+    assert 'SERVER_VERSION = "0.6.0"' in server_version.read_text(encoding="utf-8")
+    assert "v0.6.0-orange" in readme.read_text(encoding="utf-8")
+
+    managed_text = "\n".join(
+        [
+          json.dumps(package_json),
+          server_pyproject.read_text(encoding="utf-8"),
+          server_version.read_text(encoding="utf-8"),
+          readme.read_text(encoding="utf-8"),
+        ]
+    )
+    assert not re.search(r"\b0\.5\.0\b", managed_text)

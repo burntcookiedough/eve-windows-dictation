@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/v0.5.0-orange?style=flat-square" alt="v0.5.0">
+  <img src="https://img.shields.io/badge/v0.6.0-orange?style=flat-square" alt="v0.6.0">
 </p>
 
 <!-- TODO: add a demo gif here once one exists -->

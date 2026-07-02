@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Desktop voice transcription app",
   "repository": {
     "type": "git",
@@ -32,7 +32,7 @@
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
     "electron": "^40.1.0",
-    "electron-builder": "^26.4.0",
+    "electron-builder": "26.15.3",
     "esbuild": "^0.27.2",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
