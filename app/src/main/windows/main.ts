@@ -10,9 +10,19 @@ const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase(
 const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
 
 function getAppIcon(): Electron.NativeImage | undefined {
-  const iconPath = join(app.getAppPath(), 'resources', 'icon.ico');
-  const icon = nativeImage.createFromPath(iconPath);
-  return icon.isEmpty() ? undefined : icon;
+  const candidates = [
+    join(app.getAppPath(), 'resources', 'icon.ico'),
+    join(process.resourcesPath, 'icon.ico'),
+  ];
+
+  for (const iconPath of candidates) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      return icon;
+    }
+  }
+
+  return undefined;
 }
 
 let isQuitting = false;

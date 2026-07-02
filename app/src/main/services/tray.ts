@@ -3,23 +3,25 @@ import { join } from 'path';
 
 let tray: Tray | null = null;
 
-export function setupTray(onShowMainWindow?: () => void): void {
-  // Use app.getAppPath() for consistent path resolution in dev and production
-  const iconPath = join(app.getAppPath(), 'resources', 'icon.png');
+function getTrayIcon(): Electron.NativeImage {
+  const candidates = [
+    join(app.getAppPath(), 'resources', 'icon.png'),
+    join(process.resourcesPath, 'icon.png'),
+  ];
 
-  // Create a simple 16x16 icon if the file doesn't exist
-  let icon: Electron.NativeImage;
-  try {
-    icon = nativeImage.createFromPath(iconPath);
-    if (icon.isEmpty()) {
-      icon = createPlaceholderIcon();
+  for (const iconPath of candidates) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      return icon.resize({ width: 16, height: 16 });
     }
-  } catch {
-    icon = createPlaceholderIcon();
   }
 
-  tray = new Tray(icon);
-  tray.setToolTip('Murmur - Press Ctrl+Shift+Space to start');
+  return createPlaceholderIcon();
+}
+
+export function setupTray(onShowMainWindow?: () => void): void {
+  tray = new Tray(getTrayIcon());
+  tray.setToolTip('Murmur - Press Ctrl+Win to dictate');
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -73,7 +75,7 @@ export function updateTrayState(state: 'idle' | 'recording' | 'error'): void {
   if (!tray) return;
 
   const tooltips: Record<typeof state, string> = {
-    idle: 'Murmur - Press Ctrl+Shift+Space to start',
+    idle: 'Murmur - Press Ctrl+Win to dictate',
     recording: 'Murmur - Recording...',
     error: 'Murmur - Error occurred',
   };

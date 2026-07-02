@@ -4,6 +4,8 @@ import type {
   HistoryFilters,
   HistoryResponse,
   HistoryEntryWithGroup,
+  InsightsRange,
+  InsightsResponse,
   Settings,
   Hotkey,
   ServerStatePayload,
@@ -73,6 +75,14 @@ const murmurMainAPI = {
 
   deleteHistoryEntry: (id: string): Promise<void> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id);
+  },
+
+  getInsights: (range: InsightsRange): Promise<InsightsResponse | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_GET, range);
+  },
+
+  rebuildInsights: (): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_REBUILD);
   },
 
   onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): void => {

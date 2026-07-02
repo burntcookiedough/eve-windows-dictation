@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { OVERLAY_CONFIG } from '../../shared/constants.js';
 import type { DictationSessionMode } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
+import { calculateOverlayBounds } from './overlay-bounds.js';
 
 const log = createLogger('Overlay');
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -59,25 +60,27 @@ export function positionOverlayOnActiveDisplay(
   // Get the display where the cursor is (proxy for active window)
   const cursorPoint = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursorPoint);
-  const { workArea } = display;
+  const { bounds: displayBounds, workArea } = display;
 
-  const width = getOverlayWidth(mode);
-  overlay.setSize(width, OVERLAY_CONFIG.HEIGHT);
-
-  // Position at bottom-center of the work area
-  const x = workArea.x + Math.round((workArea.width - width) / 2);
-  const y = workArea.y + workArea.height - OVERLAY_CONFIG.HEIGHT - OVERLAY_CONFIG.BOTTOM_MARGIN;
+  const preferredWidth = getOverlayWidth(mode);
+  const bounds = calculateOverlayBounds(
+    displayBounds,
+    workArea,
+    preferredWidth,
+    OVERLAY_CONFIG.HEIGHT,
+    OVERLAY_CONFIG.BOTTOM_MARGIN
+  );
+  overlay.setBounds(bounds);
 
   log.debug('Positioning overlay', {
     cursor: cursorPoint,
     displayId: display.id,
+    displayBounds,
     workArea,
     mode,
-    position: { x, y },
-    size: { width, height: OVERLAY_CONFIG.HEIGHT },
+    position: { x: bounds.x, y: bounds.y },
+    size: { width: bounds.width, height: bounds.height },
   });
-
-  overlay.setPosition(x, y);
 }
 
 export function showOverlay(overlay: BrowserWindow): void {

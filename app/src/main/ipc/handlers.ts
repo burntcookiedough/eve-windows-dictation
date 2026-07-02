@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
+import type { HistoryFilters, InsightsRange, Settings, Hotkey } from '../../shared/types.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
@@ -126,6 +126,20 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       return;
     }
     historyServiceRef.delete(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSIGHTS_GET, (_event, range: InsightsRange) => {
+    if (!historyServiceRef) {
+      return null;
+    }
+    return historyServiceRef.getInsights(range);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSIGHTS_REBUILD, () => {
+    if (!historyServiceRef) {
+      return;
+    }
+    historyServiceRef.rebuildInsights();
   });
 
   // Handle hotkey capture

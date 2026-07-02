@@ -59,10 +59,27 @@ function currentModifiers(e: UiohookKeyboardEvent): ModifierState {
   };
 }
 
+function heldModifiers(): ModifierState {
+  return {
+    ctrl: heldCtrl,
+    alt: heldAlt,
+    shift: heldShift,
+    meta: heldMeta,
+  };
+}
+
 function eventSnapshot(e: UiohookKeyboardEvent): KeyEventSnapshot {
   return {
     keycode: e.keycode,
     modifiers: currentModifiers(e),
+    nowMs: Date.now(),
+  };
+}
+
+function keyUpSnapshot(e: UiohookKeyboardEvent): KeyEventSnapshot {
+  return {
+    keycode: e.keycode,
+    modifiers: heldModifiers(),
     nowMs: Date.now(),
   };
 }
@@ -92,14 +109,14 @@ export function setupHotkeyService(hotkeyCallbacks: HotkeyCallbacks): void {
   });
 
   uIOhook.on('keyup', (e) => {
-    const snapshot = eventSnapshot(e);
+    updateHeldModifiers(e, false);
+    const snapshot = keyUpSnapshot(e);
     longRecognizer.keyUp(snapshot);
     const action = quickRecognizer.keyUp(snapshot);
     if (action === 'hold-end') {
       log.debug('Hotkey hold end', { keycode: e.keycode });
       callbacks?.onHoldEnd();
     }
-    updateHeldModifiers(e, false);
   });
 
   // Start the hook

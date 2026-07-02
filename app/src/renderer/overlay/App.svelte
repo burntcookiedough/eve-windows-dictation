@@ -132,27 +132,33 @@
 </script>
 
 <div
-  class="flex h-screen w-screen flex-col items-center justify-end gap-8 pb-6 pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+  class="relative h-screen w-screen pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
 >
-  {#if warningMessage}
-    <div class="max-w-xl rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-      <p class="text-center text-xs font-medium text-amber-200">
-        {warningMessage}
-      </p>
+  <div class="absolute inset-x-0 bottom-[88px] flex flex-col items-center gap-5 px-4">
+    {#if warningMessage}
+      <div class="max-w-xl rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+        <p class="text-center text-xs font-medium text-amber-200">
+          {warningMessage}
+        </p>
+      </div>
+    {/if}
+
+    {#if transcriptionText}
+      <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
+    {/if}
+
+    {#if statusMessage && isVisible}
+      <div class="rounded-full border border-zinc-500/25 bg-black px-3 py-1">
+        <p class="text-center text-xs font-medium text-zinc-300">
+          {statusMessage}
+        </p>
+      </div>
+    {/if}
+  </div>
+
+  <div class="absolute inset-x-0 bottom-6 flex justify-center">
+    <div class="h-[50px] w-[150px]">
+      <Pill state={recordingState} levels={audioLevels} />
     </div>
-  {/if}
-
-  {#if transcriptionText}
-    <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
-  {/if}
-
-  {#if statusMessage && isVisible}
-    <div class="rounded-full border border-zinc-500/25 bg-black px-3 py-1">
-      <p class="text-center text-xs font-medium text-zinc-300">
-        {statusMessage}
-      </p>
-    </div>
-  {/if}
-
-  <Pill state={recordingState} levels={audioLevels} />
+  </div>
 </div>
