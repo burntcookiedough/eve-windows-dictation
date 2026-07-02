@@ -162,19 +162,19 @@
   });
 </script>
 
-<div class="h-full flex flex-col p-6 pr-2">
-  <div class="flex-1 overflow-y-auto pr-4">
-    <div class="mb-5 flex items-center justify-between gap-3">
-      <div>
+<div class="h-full flex flex-col p-4 pr-2 sm:p-6 sm:pr-2">
+  <div class="flex-1 overflow-y-auto pr-2 sm:pr-4">
+    <div class="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+      <div class="min-w-0">
         <h1 class="text-xl font-semibold text-zinc-100">Insights</h1>
         <p class="mt-1 text-xs text-zinc-500">Local aggregate profile from your transcription history</p>
       </div>
 
-      <div class="flex shrink-0 rounded-full border border-zinc-800 bg-zinc-900/70 p-1">
+      <div class="flex w-full shrink-0 rounded-full border border-zinc-800 bg-zinc-900/70 p-1 sm:w-auto">
         {#each ranges as option}
           <button
             onclick={() => selectRange(option.id)}
-            class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors cursor-pointer
+            class="min-w-0 flex-1 px-3 py-1.5 text-xs font-medium rounded-full transition-colors cursor-pointer sm:flex-none
               {range === option.id
                 ? 'bg-zinc-100 text-zinc-950'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}"
@@ -186,49 +186,55 @@
     </div>
 
     {#if error}
-      <div class="rounded-xl border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+      <div class="rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-300">
         {error}
       </div>
     {:else if loading && !insights}
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {#each Array(4) as _}
-          <div class="h-24 rounded-xl border border-zinc-800 bg-zinc-900/40 skeleton-bone"></div>
+          <div class="h-24 rounded-lg border border-zinc-800 bg-zinc-900/40 skeleton-bone"></div>
         {/each}
       </div>
     {:else if !insights || !insights.hasData}
-      <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-12 text-center">
+      <div class="rounded-lg border border-zinc-800 bg-zinc-900/40 px-5 py-12 text-center">
         <p class="text-sm font-medium text-zinc-300">No dictations in this range</p>
         <p class="mt-1 text-xs text-zinc-500">Insights appear after history entries are saved locally.</p>
       </div>
     {:else}
-      <div class="grid grid-cols-2 gap-3">
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      {#if insights.indexing.isIndexing}
+        <div class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+          Indexing older history: {formatInteger(insights.indexing.processedEntries)} of {formatInteger(insights.indexing.totalEntries)} entries included.
+        </div>
+      {/if}
+
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <p class="text-xs text-zinc-500">Words spoken</p>
           <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalWords)}</p>
           <p class="mt-1 text-xs text-emerald-400">{formatInteger(insights.summary.avgWordsPerDictation)} avg / dictation</p>
         </div>
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <p class="text-xs text-zinc-500">Dictations</p>
           <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalDictations)}</p>
           <p class="mt-1 text-xs text-zinc-500">
             {insights.summary.busiestDay ? `${insights.summary.busiestDay.label} busiest` : 'No active day'}
           </p>
         </div>
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <p class="text-xs text-zinc-500">Dictation time</p>
           <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
           <p class="mt-1 text-xs text-amber-400">{formatInteger(insights.summary.avgWpm)} WPM</p>
         </div>
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <p class="text-xs text-zinc-500">Processing</p>
           <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatProcessing(insights.summary.totalProcessingMs)}</p>
           <p class="mt-1 text-xs text-emerald-400">{formatRatio(insights.summary.avgProcessingRatio)} realtime</p>
         </div>
       </div>
 
-      <div class="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <div>
+      <div class="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+        <div class="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+          <div class="min-w-0">
             <h2 class="text-sm font-medium text-zinc-200">Trends</h2>
             <p class="mt-1 text-xs text-zinc-500">
               Confidence {formatPercent(insights.summary.avgConfidence)}
@@ -236,7 +242,7 @@
               {insights.summary.longestStreakDays} day streak
             </p>
           </div>
-          <div class="flex rounded-lg bg-zinc-950/60 p-1">
+          <div class="grid w-full grid-cols-2 rounded-lg bg-zinc-950/60 p-1 sm:flex sm:w-auto">
             {#each trendMetrics as metric}
               <button
                 onclick={() => (trendMetric = metric.id)}
@@ -283,7 +289,7 @@
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-4">
-        <section class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <section class="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
           <h2 class="text-sm font-medium text-zinc-200">Speaking Profile</h2>
           <div class="mt-4 space-y-4">
             {@render WordCloud('Common words', insights.commonWords)}
@@ -291,9 +297,9 @@
           </div>
         </section>
 
-        <section class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+        <section class="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
           <h2 class="text-sm font-medium text-zinc-200">Quality & Performance</h2>
-          <div class="mt-4 grid grid-cols-3 gap-3">
+          <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div class="rounded-lg bg-zinc-950/50 px-3 py-3">
               <p class="text-xs text-zinc-500">Confidence</p>
               <p class="mt-1 text-lg font-medium text-zinc-100">{formatPercent(insights.summary.avgConfidence)}</p>
@@ -359,14 +365,14 @@
   formatEntryTime: (timestamp: number) => string,
   truncateText: (text: string) => string
 )}
-  <section class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+  <section class="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
     <h2 class="text-sm font-medium text-zinc-200">{title}</h2>
     {#if entries.length === 0}
       <p class="mt-3 text-xs text-zinc-600">No entries in this range</p>
     {:else}
       <div class="mt-3 divide-y divide-zinc-800/80">
         {#each entries as entry}
-          <div class="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+          <div class="flex min-w-0 items-start gap-3 py-3 first:pt-0 last:pb-0">
             <div class="min-w-0 flex-1">
               <p class="line-clamp-2 text-sm text-zinc-300">{truncateText(entry.text)}</p>
               <p class="mt-1 text-xs text-zinc-600">

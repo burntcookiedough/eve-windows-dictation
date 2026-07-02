@@ -6,6 +6,7 @@ param(
     [int]$HealthTimeoutSec = 180,
     [int]$DownloadTimeoutSec = 1200,
     [string]$PidFilePath = "$env:APPDATA\murmur\server.pid",
+    [string]$ExpectedVersion = "",
     [switch]$SkipUninstall,
     [switch]$SkipLaunch,
     [switch]$RequireCuda,
@@ -44,7 +45,7 @@ function Resolve-InstallerPath {
     foreach ($root in $roots) {
         $resolved = Resolve-Path $root -ErrorAction SilentlyContinue
         if (-not $resolved) { continue }
-        $candidate = Get-ChildItem -Path $resolved -Filter "Murmur Setup*.exe" -File |
+        $candidate = Get-ChildItem -Path $resolved -Filter "Murmur*Setup*.exe" -File |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
         if ($candidate) { return $candidate.FullName }
@@ -170,7 +171,7 @@ if (Test-Path $PidFilePath) {
 }
 
 Write-Step "Installing Murmur"
-$installProc = Start-Process -Wait -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru
+$installProc = Start-Process -Wait -FilePath $resolvedInstaller -ArgumentList @("/S", "/D=$InstallDir") -PassThru
 Assert-ExitCode -Process $installProc -Step "Install"
 
 if ($SkipLaunch) {
@@ -194,6 +195,10 @@ try {
     $healthUrl = "http://127.0.0.1:$($pidData.port)/health"
     Write-Step "Waiting for server health at $healthUrl"
     $health = Wait-For-Health -Url $healthUrl -TimeoutSec $HealthTimeoutSec
+
+    if ($ExpectedVersion -and $health.version -ne $ExpectedVersion) {
+        throw "Version mismatch: expected $ExpectedVersion, got $($health.version)"
+    }
 
     $diagnostics = $health.diagnostics
     if (-not $diagnostics) {

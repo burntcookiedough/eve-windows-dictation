@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import Database from 'better-sqlite3';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const workDir = mkdtempSync(join(testDir, '.history-check-'));
@@ -84,6 +85,73 @@ try {
   ]);
 
   service.close();
+
+  const migrationDbPath = join(workDir, 'migration-history.db');
+  const migrationService = new HistoryService(migrationDbPath);
+  migrationService.initialize();
+  migrationService.save(transcription('m-a', now, 'Migration project notes', 30, 15000));
+  migrationService.save(transcription('m-b', now, 'Migration review notes', 30, 15000));
+  migrationService.close();
+
+  const migrationDb = new Database(migrationDbPath);
+  migrationDb.prepare('DELETE FROM insights_processed_entries').run();
+  migrationDb.close();
+
+  const migratedService = new HistoryService(migrationDbPath);
+  migratedService.initialize();
+  const migrated = migratedService.getInsights('all');
+  assert.equal(migrated.summary.totalDictations, 2);
+  assert.equal(migrated.summary.totalWords, 6);
+  migratedService.close();
+
+  const largeDbPath = join(workDir, 'large-history.db');
+  const largeSetup = new HistoryService(largeDbPath);
+  largeSetup.initialize();
+  largeSetup.close();
+
+  const largeDb = new Database(largeDbPath);
+  const insert = largeDb.prepare(`
+    INSERT INTO transcriptions (
+      id,
+      timestamp,
+      text,
+      confidence,
+      audioDuration,
+      transcriptionTime,
+      wordCount,
+      sessionMode
+    )
+    VALUES (@id, @timestamp, @text, 0.9, 12, 6000, @wordCount, 'quick')
+  `);
+  const insertMany = largeDb.transaction((count) => {
+    for (let index = 0; index < count; index += 1) {
+      insert.run({
+        id: `large-${index}`,
+        timestamp: now - index * 60000,
+        text: `large history entry ${index} project notes`,
+        wordCount: 6,
+      });
+    }
+  });
+  insertMany(5000);
+  largeDb.close();
+
+  const largeService = new HistoryService(largeDbPath);
+  const initStarted = Date.now();
+  largeService.initialize();
+  const initMs = Date.now() - initStarted;
+  assert.ok(initMs < 1500, `large initialize took ${initMs}ms`);
+
+  const insightsStarted = Date.now();
+  const largeInsights = largeService.getInsights('all');
+  const insightsMs = Date.now() - insightsStarted;
+  assert.ok(insightsMs < 1500, `large getInsights(all) took ${insightsMs}ms`);
+  assert.ok(largeInsights.summary.totalDictations <= 1250);
+  assert.equal(largeInsights.indexing.isIndexing, true);
+  assert.equal(largeInsights.indexing.totalEntries, 5000);
+  assert.equal(largeInsights.indexing.processedEntries, 1250);
+  largeService.close();
+
   console.log('history insights aggregate check passed');
   rmSync(workDir, { recursive: true, force: true });
   process.exit(0);

@@ -1,29 +1,14 @@
-import { app, BrowserWindow, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { MAIN_WINDOW_CONFIG } from '../../shared/constants.js';
 import { getMainWindowBounds, setMainWindowBounds } from '../services/settings.js';
 import type { WindowBounds } from '../../shared/types.js';
+import { getMurmurIcon } from '../services/app-icon.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
 const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
-
-function getAppIcon(): Electron.NativeImage | undefined {
-  const candidates = [
-    join(app.getAppPath(), 'resources', 'icon.ico'),
-    join(process.resourcesPath, 'icon.ico'),
-  ];
-
-  for (const iconPath of candidates) {
-    const icon = nativeImage.createFromPath(iconPath);
-    if (!icon.isEmpty()) {
-      return icon;
-    }
-  }
-
-  return undefined;
-}
 
 let isQuitting = false;
 
@@ -112,7 +97,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
     frame: false,
     transparent: false,
     backgroundColor: '#0a0a0a',
-    icon: getAppIcon(),
+    icon: getMurmurIcon('icon.ico'),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

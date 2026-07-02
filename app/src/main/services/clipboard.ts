@@ -243,9 +243,10 @@ export async function simulatePaste(
     } catch (error) {
       if (hasTargetWindow) {
         log.error('Targeted SendInput paste failed', { error: error as Error });
-        throw error;
+      } else {
+        log.error('SendInput paste failed', { error: error as Error });
       }
-      log.error('SendInput paste failed; falling back to VBScript', { error: error as Error });
+      throw error;
     }
   }
 

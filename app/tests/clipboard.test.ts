@@ -59,6 +59,35 @@ describe('pasteText', () => {
     await expect(simulatePaste('sendinput', 12345)).rejects.toThrow('target activation failed');
     expect(execFile).toHaveBeenCalledTimes(1);
   });
+
+  test('does not fall back to VBScript when untargeted SendInput fails', async () => {
+    execFile.mockImplementationOnce((_command: string, _args: string[], callback: (error?: Error | null) => void) => {
+      callback(new Error('sendinput failed'));
+      return { kill: mock(() => {}) };
+    });
+
+    await expect(simulatePaste('sendinput')).rejects.toThrow('sendinput failed');
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
+  test('runs VBScript only when explicitly selected', async () => {
+    await simulatePaste('vbscript');
+
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile.mock.calls[0]?.[0]).toBe('cscript');
+  });
+
+  test('keeps transcript on clipboard when restoreClipboard is disabled', async () => {
+    await pasteText('final transcript', {
+      restoreClipboard: false,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardText).toBe('final transcript');
+  });
 });
 
 describe('buildSendInputScriptContent', () => {
@@ -76,5 +105,6 @@ describe('buildSendInputScriptContent', () => {
     expect(script).toContain('Marshal.SizeOf(typeof(INPUT))');
     expect(script).toContain('Target window is not foreground before paste.');
     expect(script).toContain('if (IsIconic(target))');
+    expect(script).toContain('ShowWindow(target, SW_RESTORE);');
   });
 });
