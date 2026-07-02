@@ -85,6 +85,9 @@ export function positionOverlayOnActiveDisplay(
 
 export function showOverlay(overlay: BrowserWindow): void {
   overlay.showInactive();
+  overlay.setAlwaysOnTop(false);
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.moveTop();
 }
 
 export function hideOverlay(overlay: BrowserWindow): void {

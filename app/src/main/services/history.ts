@@ -730,7 +730,7 @@ export class HistoryService {
         WHERE timestamp >= @rangeStart
         ORDER BY timestamp DESC
         LIMIT @limit
-      `).all({ rangeStart }).map(mapInsightSourceEntry);
+      `).all({ rangeStart, limit }).map(mapInsightSourceEntry);
   }
 
   private getLongestEntries(rangeStart: number | null, limit: number): InsightsEntryStat[] {

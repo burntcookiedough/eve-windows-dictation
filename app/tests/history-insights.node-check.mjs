@@ -54,6 +54,11 @@ try {
   service.initialize();
 
   const now = new Date(2026, 6, 1, 10).getTime();
+  const empty = service.getInsights('7d');
+  assert.equal(empty.hasData, false);
+  assert.equal(empty.summary.totalDictations, 0);
+  assert.equal(empty.indexing.isIndexing, false);
+  assert.equal(empty.indexing.totalEntries, 0);
 
   service.save(transcription('a', now, 'Project planning project notes', 30, 15000));
   service.save(transcription('b', now, 'Project review notes', 30, 30000));
