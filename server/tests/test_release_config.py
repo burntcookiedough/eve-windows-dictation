@@ -105,6 +105,8 @@ def test_packaging_includes_relocatable_runtime() -> None:
     assert "!.venv/Lib/site-packages/pip/**" in filters
     assert "!.venv/Lib/site-packages/wheel/**" in filters
     assert "!.venv/Lib/site-packages/setuptools/**" in filters
+    assert "!.venv/Lib/site-packages/**/test/**" in filters
+    assert "!.venv/Lib/site-packages/**/tests/**" in filters
     assert "!.venv/Lib/site-packages/**/*.lib" in filters
     assert "!.venv/Lib/site-packages/torch/include/**" in filters
     assert "!.runtime/Lib/test/**" in filters

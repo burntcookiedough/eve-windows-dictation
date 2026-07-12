@@ -76,6 +76,8 @@
           "!.venv/Lib/site-packages/wheel-*.dist-info/**",
           "!.venv/Lib/site-packages/setuptools/**",
           "!.venv/Lib/site-packages/setuptools-*.dist-info/**",
+          "!.venv/Lib/site-packages/**/test/**",
+          "!.venv/Lib/site-packages/**/tests/**",
           "!.venv/Lib/site-packages/**/*.lib",
           "!.venv/Lib/site-packages/torch/include/**",
           "!.runtime/include/**",
