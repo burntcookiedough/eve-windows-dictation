@@ -7,7 +7,7 @@ Complete guide for setting up, developing, and packaging Murmur.
 | Tool | Version | Purpose |
 |------|---------|---------|
 | **Windows 10/11** | | Target platform |
-| **WSL 2** | | Development environment (recommended) |
+| **WSL 2** | | Optional development environment |
 | **Bun** | 1.0+ | App package manager and runtime |
 | **Node.js** | 18+ | Electron tooling |
 | **Python** | 3.11+ | Transcription server |
@@ -119,7 +119,7 @@ git push origin v1.0.0
 
 ### 1. Server
 
-The server runs on Windows (via PowerShell from WSL). All `just` commands handle this automatically.
+The server runs on Windows. Run the Windows build of `just`; recipes resolve the current clone directory and do not depend on a username or fixed checkout path.
 
 ```bash
 cd server
@@ -229,9 +229,10 @@ The packaged app bundles the Python server with its virtual environment. Make su
 ```bash
 cd server
 uv sync --extra all
+..\scripts\prepare-python-runtime.ps1 -ServerDir .
 ```
 
-This creates/updates `server/.venv/` with all Python dependencies, including Whisper and Nemotron.
+This creates/updates `server/.venv/` with all Python dependencies and copies uv's managed, python-build-standalone runtime to `server/.runtime/`. The packaged app launches `.runtime/python.exe` with `.venv/Lib/site-packages` on `PYTHONPATH`; it therefore does not depend on Python being installed on the destination laptop.
 
 ### 2. Build and package the app
 
@@ -265,14 +266,16 @@ Excluded from the bundle:
 - `__pycache__/` directories
 - `.pyc` files
 - pip/wheel/setuptools packages (not needed at runtime)
+- Python/package test suites and interpreter UI/development files
+- Static linker archives and PyTorch C++ headers (runtime DLLs remain bundled)
 
 ### 4. How the packaged app starts the server
 
 In production (`app.isPackaged === true`), the Electron app:
 
-1. Looks for `{resources}/server/.venv/Scripts/python.exe`
+1. Prefers `{resources}/server/.runtime/python.exe` and uses the bundled `.venv/Lib/site-packages` (with a logged legacy `.venv/Scripts/python.exe` fallback)
 2. Spawns it with `{resources}/server/src/main.py`
-3. Waits for the server to write a PID file and respond to health checks
+3. Stores mutable server settings under Electron's per-user data directory, then waits for the server to write a PID file and respond to health checks
 4. Begins health polling every 3 seconds
 
 The server writes a PID file to `%APPDATA%/murmur/server.pid` (JSON with `pid`, `port`, `startedAt`) so the app can track it.

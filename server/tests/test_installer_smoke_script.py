@@ -10,7 +10,8 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     assert script_path.is_file()
 
     contents = script_path.read_text(encoding="utf-8")
-    assert "http://127.0.0.1:51717/health" in contents
+    assert "Wait-For-ServerPidFile" in contents
+    assert 'http://127.0.0.1:$($pidData.port)/health' in contents
     assert "model_download" in contents
     assert "MURMUR_ENGINE" in contents
     assert "RequireCuda" in contents

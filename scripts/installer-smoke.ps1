@@ -71,6 +71,29 @@ function Wait-For-Health {
     throw "Server did not become healthy within ${TimeoutSec}s."
 }
 
+function Wait-For-ServerPidFile {
+    param([int]$TimeoutSec, [datetime]$StartedAfterUtc)
+
+    $pidPath = Join-Path $env:APPDATA "murmur\server.pid"
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (
+            (Test-Path -LiteralPath $pidPath) -and
+            (Get-Item -LiteralPath $pidPath).LastWriteTimeUtc -ge $StartedAfterUtc
+        ) {
+            try {
+                $data = Get-Content -LiteralPath $pidPath -Raw | ConvertFrom-Json
+                if ($data.port -and $data.pid) { return $data }
+            } catch {
+                # The server may still be writing the file; retry.
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    throw "Server PID file did not appear within ${TimeoutSec}s: $pidPath"
+}
+
 function Wait-For-Model {
     param([string]$Url, [int]$TimeoutSec)
 
@@ -155,10 +178,12 @@ if (-not (Test-Path $exePath)) {
 }
 
 Write-Step "Launching Murmur"
+$launchTimeUtc = (Get-Date).ToUniversalTime()
 $process = Start-Process -FilePath $exePath -WorkingDirectory $InstallDir -PassThru
 
 try {
-    $healthUrl = "http://127.0.0.1:51717/health"
+    $pidData = Wait-For-ServerPidFile -TimeoutSec $HealthTimeoutSec -StartedAfterUtc $launchTimeUtc
+    $healthUrl = "http://127.0.0.1:$($pidData.port)/health"
     Write-Step "Waiting for server health at $healthUrl"
     $health = Wait-For-Health -Url $healthUrl -TimeoutSec $HealthTimeoutSec
 

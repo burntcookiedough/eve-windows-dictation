@@ -1,20 +1,21 @@
 # Murmur root justfile
-# Build, install, and uninstall the packaged app
+# Run these recipes with the Windows build of `just` from any clone location.
 
-pwsh := "/mnt/c/Program\\ Files/PowerShell/7/pwsh.exe"
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 
-# List available commands
+root := justfile_directory()
+
 default:
     @just --list
 
 # Build the packaged app (nsis-web installer + payloads in app/release/)
 build:
-    {{pwsh}} -NoProfile -Command "cd C:\Users\raikr\Documents\projs\murmur\trunk\app; bun run package:win"
+    Set-Location (Join-Path '{{root}}' 'app'); bun run package:win
 
-# Silently install the app
+# Silently install the newest generated installer
 install:
-    {{pwsh}} -NoProfile -Command "Get-Item 'C:\Users\raikr\Documents\projs\murmur\trunk\app\release\Murmur Setup*.exe' | ForEach-Object { Start-Process -Wait -FilePath \$_.FullName -ArgumentList '/S' }"
+    $release = Join-Path '{{root}}' 'app\release'; $installer = Get-ChildItem -LiteralPath $release -Filter '*.exe' -File | Where-Object Name -NotLike '*Uninstall*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if (-not $installer) { throw "No installer found in $release" }; Start-Process -Wait -FilePath $installer.FullName -ArgumentList '/S'
 
-# Silently uninstall the app
+# Silently uninstall the per-user installation
 uninstall:
-    {{pwsh}} -NoProfile -Command "Start-Process -Wait -FilePath \"\$env:LOCALAPPDATA\\Programs\\Murmur\\Uninstall Murmur.exe\" -ArgumentList '/S'"
+    $uninstaller = Join-Path $env:LOCALAPPDATA 'Programs\Murmur\Uninstall Murmur.exe'; if (-not (Test-Path -LiteralPath $uninstaller)) { throw "Uninstaller not found: $uninstaller" }; Start-Process -Wait -FilePath $uninstaller -ArgumentList '/S'

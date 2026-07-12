@@ -1,31 +1,25 @@
 # Murmur server justfile
-# Runs uv via PowerShell on Windows from WSL
+# Run these recipes with the Windows build of `just` from any clone location.
 
-set windows-shell := ["/mnt/c/Program Files/PowerShell/7/pwsh.exe", "-NoProfile", "-Command"]
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 
-port := "51717"
-pwsh := "/mnt/c/Program\\ Files/PowerShell/7/pwsh.exe"
+server_dir := justfile_directory()
 
-# List available commands
 default:
     @just --list
 
-# Run tests
 test:
-    {{pwsh}} -NoProfile -Command "uv run pytest"
+    Set-Location '{{server_dir}}'; uv run pytest
 
-# Start server in foreground
 start:
-    {{pwsh}} -NoProfile -Command "uv run python -m main"
+    Set-Location '{{server_dir}}'; uv run python -m main
 
-# Start server in background
 start-bg:
-    {{pwsh}} -NoProfile -Command "Start-Process -NoNewWindow -FilePath uv -ArgumentList 'run','python','-m','main'"
+    Start-Process -FilePath 'uv' -ArgumentList 'run','python','-m','main' -WorkingDirectory '{{server_dir}}' -WindowStyle Hidden
 
-# Stop server by killing process on port
+# Stop only the Python process identified by Murmur's PID file.
 stop:
-    {{pwsh}} -NoProfile -Command "Get-NetTCPConnection -LocalPort {{port}} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+    $candidates = @((Join-Path $env:APPDATA 'murmur\server.pid'), (Join-Path $env:LOCALAPPDATA 'murmur\server.pid')); $pidFile = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1; if (-not $pidFile) { Write-Host 'Murmur is not running (no PID file).'; exit 0 }; $data = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json; $owned = Get-CimInstance Win32_Process -Filter "ProcessId = $($data.pid)" -ErrorAction SilentlyContinue; if (-not $owned) { Remove-Item -LiteralPath $pidFile -Force; Write-Host 'Removed stale Murmur PID file.'; exit 0 }; if ($owned.Name -notmatch '^python(w)?\.exe$' -or $owned.CommandLine -notmatch '(?:-m\s+main|[\\/]src[\\/]main\.py)') { throw "PID $($data.pid) is not an identifiable Murmur server; refusing to stop it." }; Stop-Process -Id $data.pid; Write-Host "Stopped Murmur server PID $($data.pid)."
 
-# Show status - check if server is running
 status:
-    {{pwsh}} -NoProfile -Command "Get-NetTCPConnection -LocalPort {{port}} -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess"
+    $candidates = @((Join-Path $env:APPDATA 'murmur\server.pid'), (Join-Path $env:LOCALAPPDATA 'murmur\server.pid')); $pidFile = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1; if (-not $pidFile) { Write-Host 'Murmur is not running.'; exit 0 }; $data = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json; $process = Get-Process -Id $data.pid -ErrorAction SilentlyContinue; if (-not $process) { Write-Host 'Murmur PID file is stale.'; exit 1 }; [pscustomobject]@{ PID = $data.pid; Port = $data.port; StartedAt = $data.startedAt; Process = $process.ProcessName } | Format-List

@@ -26,7 +26,9 @@ def test_build_docs_match_packaging_flow() -> None:
     readme = _read("README.md")
 
     for content in (building, readme):
-        assert "uv sync --extra all" in content
+        assert "uv sync" in content
 
     assert "nsis-web" in building
     assert "nsis-web" in readme
+    assert "prepare-python-runtime.ps1" in building
+    assert ".runtime" in building

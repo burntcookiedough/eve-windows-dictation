@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_PACKAGE = ROOT / "app" / "package.json"
 SERVER_PYPROJECT = ROOT / "server" / "pyproject.toml"
 SERVER_VERSION_FILE = ROOT / "server" / "src" / "version.py"
+README_FILE = ROOT / "README.md"
 
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -23,6 +24,9 @@ SEMVER_RE = re.compile(
 
 SERVER_VERSION_RE = re.compile(r'^SERVER_VERSION\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
+README_BADGE_RE = re.compile(
+    r'(https://img\.shields\.io/badge/v)(.+?)(-orange\?style=flat-square)'
+)
 
 
 def validate_semver(version: str) -> bool:
@@ -58,11 +62,20 @@ def read_server_source_version() -> str:
     return match.group(1)
 
 
+def read_readme_version() -> str:
+    content = README_FILE.read_text(encoding="utf-8")
+    match = README_BADGE_RE.search(content)
+    if not match:
+        raise ValueError(f"Could not find version badge in {README_FILE}")
+    return match.group(2)
+
+
 def collect_versions() -> dict[str, str]:
     return {
         "app/package.json": read_app_version(),
         "server/pyproject.toml": read_server_pyproject_version(),
         "server/src/version.py": read_server_source_version(),
+        "README.md": read_readme_version(),
     }
 
 
@@ -97,6 +110,19 @@ def write_server_source_version(version: str) -> None:
     if count != 1:
         raise ValueError(f"Could not update SERVER_VERSION in {SERVER_VERSION_FILE}")
     SERVER_VERSION_FILE.write_text(updated, encoding="utf-8")
+
+
+def write_readme_version(version: str) -> None:
+    content = README_FILE.read_text(encoding="utf-8")
+    updated, badge_count = README_BADGE_RE.subn(
+        rf"\g<1>{version}\g<3>", content, count=1
+    )
+    updated, alt_count = re.subn(
+        r'alt="v[^"]+"', f'alt="v{version}"', updated, count=1
+    )
+    if badge_count != 1 or alt_count != 1:
+        raise ValueError(f"Could not update version badge in {README_FILE}")
+    README_FILE.write_text(updated, encoding="utf-8")
 
 
 def check_versions(expected_tag: str | None = None) -> int:
@@ -137,13 +163,14 @@ def bump_version(version: str, dry_run: bool = False) -> int:
 
     if dry_run:
         print(f"Would set version to {version} in:")
-        for path in [APP_PACKAGE, SERVER_PYPROJECT, SERVER_VERSION_FILE]:
+        for path in [APP_PACKAGE, SERVER_PYPROJECT, SERVER_VERSION_FILE, README_FILE]:
             print(f"  - {path.relative_to(ROOT)}")
         return 0
 
     write_app_version(version)
     write_server_pyproject_version(version)
     write_server_source_version(version)
+    write_readme_version(version)
 
     print(f"Updated version to {version}")
     return 0
