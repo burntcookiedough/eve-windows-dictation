@@ -17,6 +17,9 @@
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
+  let pendingLogs: ServerLogEntry[] = [];
+  let logFrame: number | null = null;
+  let scrollAfterLogBatch = false;
 
   // Status badge colors and labels
   const statusConfig: Record<
@@ -31,7 +34,14 @@
     error: { color: 'text-red-400', bgColor: 'bg-red-900/50', label: 'Error' },
   };
 
-  let statusDisplay = $derived(statusConfig[serverState.status]);
+  let statusDisplay = $derived(
+    serverState.status === 'running' && serverState.engineStatus?.status === 'loading'
+      ? { color: 'text-amber-400', bgColor: 'bg-amber-400', label: 'Loading engine' }
+      : serverState.status === 'running' && serverState.engineStatus?.status === 'error'
+        ? { color: 'text-red-400', bgColor: 'bg-red-400', label: 'Engine error' }
+        : statusConfig[serverState.status]
+  );
+  let engineReady = $derived(serverState.engineStatus?.status === 'ready');
   let diagnosticWarnings = $derived(serverState.diagnostics?.warnings ?? []);
   let modelDownload = $derived(serverState.modelDownload);
   let isDownloadingModel = $derived(modelDownload?.status === 'downloading');
@@ -142,6 +152,24 @@
     setTimeout(() => (logsCopied = false), 2000);
   }
 
+  function queueLog(entry: ServerLogEntry) {
+    scrollAfterLogBatch ||= showLogs && isScrolledToBottom();
+    pendingLogs.push(entry);
+    if (pendingLogs.length > 500) pendingLogs = pendingLogs.slice(-500);
+    if (logFrame !== null) return;
+
+    logFrame = requestAnimationFrame(() => {
+      logFrame = null;
+      const nextLogs = pendingLogs;
+      pendingLogs = [];
+      logs = [...logs, ...nextLogs].slice(-500);
+      if (scrollAfterLogBatch) {
+        scrollAfterLogBatch = false;
+        requestAnimationFrame(scrollLogsToBottom);
+      }
+    });
+  }
+
   onMount(async () => {
     // Load initial state
     serverState = await window.murmurMain.getServerStatus();
@@ -158,22 +186,12 @@
     });
 
     window.murmurMain.onServerLog((entry) => {
-      // Check scroll position before mutating logs (which triggers DOM update)
-      const shouldScroll = showLogs && isScrolledToBottom();
-
-      logs = [...logs, entry];
-      // Keep logs bounded
-      if (logs.length > 500) {
-        logs = logs.slice(-500);
-      }
-      // Only auto-scroll if user was already at the bottom
-      if (shouldScroll) {
-        setTimeout(scrollLogsToBottom, 0);
-      }
+      queueLog(entry);
     });
   });
 
   onDestroy(() => {
+    if (logFrame !== null) cancelAnimationFrame(logFrame);
     window.murmurMain.removeServerListeners();
   });
 </script>
@@ -216,11 +234,11 @@
           <!-- Status Badge -->
           <div class="flex items-center gap-3">
             <div class="relative flex items-center justify-center">
-              {#if serverState.status === 'running'}
+              {#if serverState.status === 'running' && engineReady}
                 <!-- Pulse animation for running state -->
                 <span class="absolute w-3 h-3 rounded-full bg-emerald-400 animate-ping opacity-75"></span>
               {/if}
-              <span class="relative w-3 h-3 rounded-full {statusDisplay.bgColor} {serverState.status === 'running' ? 'bg-emerald-400' : ''}"></span>
+              <span class="relative w-3 h-3 rounded-full {statusDisplay.bgColor}"></span>
             </div>
             <span class="text-lg font-medium {statusDisplay.color}">
               {statusDisplay.label}
@@ -274,6 +292,15 @@
         {#if serverState.error}
           <div class="mb-4 p-3 bg-red-950/50 border border-red-900/50 rounded-lg">
             <p class="text-sm text-red-300">{serverState.error}</p>
+          </div>
+        {/if}
+
+        {#if serverState.engineStatus?.status === 'error'}
+          <div class="mb-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
+            <p class="text-sm text-red-300">Transcription engine failed to load</p>
+            <p class="mt-1 text-xs text-red-300/80">
+              {serverState.engineStatus.message ?? 'Restart the server or select a CPU-compatible engine configuration.'}
+            </p>
           </div>
         {/if}
 

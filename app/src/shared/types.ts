@@ -22,6 +22,7 @@ export interface ServerStatePayload {
   error?: string;
   wsUrl?: string;
   managed: boolean; // false in dev mode (externally running server)
+  engineStatus?: EngineStatus;
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
 }
@@ -104,6 +105,12 @@ export interface ConnectionStatePayload {
 export interface RecordingWarningPayload {
   code: string;
   message: string;
+}
+
+export interface AudioCaptureErrorPayload {
+  code: string;
+  message: string;
+  deviceId?: string;
 }
 
 export interface RecordingStatusPayload {

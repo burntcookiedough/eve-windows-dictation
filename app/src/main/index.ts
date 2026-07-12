@@ -19,6 +19,7 @@ import type {
   RecordingDebugState,
   RecordingStatusPayload,
   DictationSessionMode,
+  AudioCaptureErrorPayload,
 } from '../shared/types.js';
 import { createLogger } from './lib/logger.js';
 
@@ -38,6 +39,79 @@ let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording:
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
 let latestStatus: RecordingStatusPayload | null = null;
+let recordingTerminalOverride: 'error' | null = null;
+let overlaySessionGeneration = 0;
+let overlayExitTimer: ReturnType<typeof setTimeout> | null = null;
+let overlayHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+const OVERLAY_SUCCESS_DWELL_MS = 900;
+const OVERLAY_ERROR_DWELL_MS = 2200;
+const OVERLAY_EXIT_ANIMATION_MS = 200;
+
+function clearOverlayDismissTimers(): void {
+  if (overlayExitTimer) {
+    clearTimeout(overlayExitTimer);
+    overlayExitTimer = null;
+  }
+  if (overlayHideTimer) {
+    clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+  }
+}
+
+function beginOverlaySession(): number {
+  overlaySessionGeneration += 1;
+  clearOverlayDismissTimers();
+  return overlaySessionGeneration;
+}
+
+function sendOverlayRecordingState(payload: RecordingStatePayload): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send(IPC_CHANNELS.STATE_RECORDING, payload);
+  }
+  updateRecordingState(payload);
+}
+
+function scheduleOverlayDismiss(
+  generation: number,
+  mode: DictationSessionMode,
+  terminalState: RecordingStatePayload['state']
+): void {
+  clearOverlayDismissTimers();
+  const dwellMs = terminalState === 'error'
+    ? OVERLAY_ERROR_DWELL_MS
+    : terminalState === 'success'
+      ? OVERLAY_SUCCESS_DWELL_MS
+      : 0;
+
+  overlayExitTimer = setTimeout(() => {
+    overlayExitTimer = null;
+    if (generation !== overlaySessionGeneration || isRecording) return;
+
+    sendOverlayRecordingState({ state: 'idle', isRecording: false, mode });
+    overlayHideTimer = setTimeout(() => {
+      overlayHideTimer = null;
+      if (generation !== overlaySessionGeneration || isRecording) return;
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        hideOverlay(overlayWindow);
+      }
+    }, OVERLAY_EXIT_ANIMATION_MS);
+  }, dwellMs);
+}
+
+function showTransientOverlayError(message: string, mode: DictationSessionMode): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+
+  const generation = beginOverlaySession();
+  positionOverlayOnActiveDisplay(overlayWindow, mode);
+  showOverlay(overlayWindow);
+  overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, {
+    code: 'engine_not_ready',
+    message,
+  });
+  sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
+  scheduleOverlayDismiss(generation, mode, 'error');
+}
 
 function broadcastLabState<T>(channel: string, payload: T): void {
   if (recordingSource === 'lab' && mainWindow && !mainWindow.isDestroyed()) {
@@ -98,7 +172,28 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     return;
   }
 
+  if (
+    app.isPackaged &&
+    !useExternalServer &&
+    serverState?.engineStatus &&
+    serverState.engineStatus.status !== 'ready'
+  ) {
+    const message = serverState.engineStatus.status === 'error'
+      ? (serverState.engineStatus.message ?? 'The transcription engine failed to load. Open Server settings for details.')
+      : 'The speech model is still loading. Keep Murmur open and try again when the Server status is ready.';
+    log.warn('Cannot start recording: transcription engine is not ready', {
+      engine: serverState.engineStatus.current,
+      engineStatus: serverState.engineStatus.status,
+      message: serverState.engineStatus.message,
+    });
+    showTransientOverlayError(message, sessionMode);
+    return;
+  }
+
+  const sessionGeneration = beginOverlaySession();
+
   isRecording = true;
+  recordingTerminalOverride = null;
   recordingSource = source;
   recordingSessionMode = sessionMode;
   latestTranscription = null;
@@ -134,6 +229,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
   service.onRecordingState((payload) => {
     if (transcriptionService !== service) return;
+    if (recordingTerminalOverride) return;
     updateRecordingState(payload);
   });
 
@@ -172,6 +268,15 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   service.onClose(() => {
     if (transcriptionService !== service) return;
     const shouldStartLongAfterStop = startLongAfterStop;
+    const closedSessionMode = recordingSessionMode;
+    const terminalState = recordingTerminalOverride ?? currentRecordingState.state;
+
+    // A server-initiated close must stop the renderer's microphone capture too.
+    overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING);
+
+    // End Lab state immediately while allowing the overlay to dwell on its
+    // success/error state before its renderer exit transition and native hide.
+    updateRecordingState({ state: 'idle', isRecording: false, mode: closedSessionMode });
 
     isRecording = false;
     isStopping = false;
@@ -180,10 +285,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     latestStatus = null;
     recordingSource = null;
     recordingSessionMode = 'quick';
+    recordingTerminalOverride = null;
 
-    if (overlayWindow) {
-      hideOverlay(overlayWindow);
-    }
+    scheduleOverlayDismiss(sessionGeneration, closedSessionMode, terminalState);
 
     if (shouldStartLongAfterStop) {
       startLongAfterStop = false;
@@ -205,7 +309,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
       return;
     }
     log.error('Failed to connect to transcription server', { error: error as Error });
-    stopRecording();
+    recordingTerminalOverride = 'error';
+    await stopRecording();
+    sendOverlayRecordingState({ state: 'error', isRecording: false, mode: sessionMode });
   }
 }
 
@@ -254,6 +360,36 @@ function setupAudioHandler() {
       transcriptionService.sendAudioBuffer(audioData);
     }
   });
+
+  ipcMain.on(
+    IPC_CHANNELS.AUDIO_CAPTURE_ERROR,
+    (event, payload: AudioCaptureErrorPayload) => {
+      if (
+        !isRecording ||
+        !overlayWindow ||
+        overlayWindow.isDestroyed() ||
+        event.sender.id !== overlayWindow.webContents.id
+      ) {
+        return;
+      }
+
+      log.error('Audio capture failed', {
+        code: payload.code,
+        message: payload.message,
+        deviceId: payload.deviceId,
+      });
+
+      const mode = recordingSessionMode;
+      recordingTerminalOverride = 'error';
+      overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, {
+        code: `audio_capture_${payload.code}`,
+        message: payload.message,
+      });
+      void stopRecording().then(() => {
+        sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
+      });
+    }
+  );
 }
 
 // Handle main window controls

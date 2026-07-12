@@ -40,6 +40,17 @@
       );
     } catch (error) {
       console.error('Failed to start audio capture:', error);
+      const code = error instanceof DOMException ? error.name : 'AudioCaptureError';
+      const message =
+        code === 'NotAllowedError'
+          ? 'Microphone access was denied. Allow microphone access in Windows settings and try again.'
+          : code === 'NotFoundError' || code === 'OverconstrainedError'
+            ? 'The selected microphone is unavailable. Reconnect it or choose another input device.'
+            : error instanceof Error
+              ? `Could not start the microphone: ${error.message}`
+              : 'Could not start the microphone. Check the selected input device and try again.';
+
+      window.murmur.reportAudioCaptureError({ code, message, deviceId });
     }
   }
 
@@ -58,6 +69,11 @@
 
         // Reset text when starting new session
         if (recordingState === 'listening') {
+          if (warningTimeout) {
+            clearTimeout(warningTimeout);
+            warningTimeout = null;
+          }
+          warningMessage = '';
           transcriptionText = '';
           transcriptionType = 'partial';
           statusMessage = sessionMode === 'long' ? 'Long dictation' : 'Fast dictation';

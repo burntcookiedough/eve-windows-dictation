@@ -61,12 +61,27 @@ export function positionOverlayOnActiveDisplay(
   const display = screen.getDisplayNearestPoint(cursorPoint);
   const { workArea } = display;
 
-  const width = getOverlayWidth(mode);
-  overlay.setSize(width, OVERLAY_CONFIG.HEIGHT);
+  const horizontalMargin = Math.min(16, Math.floor(workArea.width / 2));
+  const bottomMargin = Math.min(
+    OVERLAY_CONFIG.BOTTOM_MARGIN,
+    Math.max(0, workArea.height - 1)
+  );
+  const width = Math.max(
+    1,
+    Math.min(getOverlayWidth(mode), workArea.width - horizontalMargin * 2)
+  );
+  const height = Math.max(
+    1,
+    Math.min(OVERLAY_CONFIG.HEIGHT, workArea.height - bottomMargin)
+  );
+  overlay.setSize(width, height);
 
   // Position at bottom-center of the work area
   const x = workArea.x + Math.round((workArea.width - width) / 2);
-  const y = workArea.y + workArea.height - OVERLAY_CONFIG.HEIGHT - OVERLAY_CONFIG.BOTTOM_MARGIN;
+  const y = Math.max(
+    workArea.y,
+    workArea.y + workArea.height - height - bottomMargin
+  );
 
   log.debug('Positioning overlay', {
     cursor: cursorPoint,
@@ -74,7 +89,7 @@ export function positionOverlayOnActiveDisplay(
     workArea,
     mode,
     position: { x, y },
-    size: { width, height: OVERLAY_CONFIG.HEIGHT },
+    size: { width, height },
   });
 
   overlay.setPosition(x, y);

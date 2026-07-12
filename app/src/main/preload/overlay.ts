@@ -6,6 +6,7 @@ import type {
   ConnectionStatePayload,
   RecordingWarningPayload,
   RecordingStatusPayload,
+  AudioCaptureErrorPayload,
 } from '../../shared/types.js';
 
 // Define the API exposed to the renderer
@@ -67,6 +68,10 @@ const murmurAPI = {
   // Audio data (Renderer → Main)
   sendAudioData: (buffer: ArrayBuffer) => {
     ipcRenderer.send(IPC_CHANNELS.AUDIO_DATA, buffer);
+  },
+
+  reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => {
+    ipcRenderer.send(IPC_CHANNELS.AUDIO_CAPTURE_ERROR, payload);
   },
 
   // Commands (Renderer → Main)

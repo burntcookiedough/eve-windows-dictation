@@ -94,6 +94,7 @@
     { id: 'default', label: 'Default' },
   ]);
   let isLoadingDevices = $state(true);
+  let audioDeviceError = $state('');
   let settingsLoaded = $state(false);
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
@@ -254,19 +255,31 @@
     updateSetting('serverUrl', buildExternalServerUrl(host, port));
   }
 
-  onMount(async () => {
-    appVersion = await window.murmurMain.getAppVersion();
+  async function loadCoreSettings() {
+    try {
+      const loadedSettings = await window.murmurMain.getSettings();
+      settings = loadedSettings;
+      syncExternalServerFields(loadedSettings.serverUrl);
+      settingsLoaded = true;
 
-    // Load settings from main process
-    const loadedSettings = await window.murmurMain.getSettings();
-    settings = loadedSettings;
-    syncExternalServerFields(loadedSettings.serverUrl);
+      const displayNames = await Promise.allSettled([
+        window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey),
+        window.murmurMain.getHotkeyDisplayName(loadedSettings.longHotkey),
+      ]);
+      if (displayNames[0].status === 'fulfilled') {
+        hotkeyDisplayName = displayNames[0].value;
+      }
+      if (displayNames[1].status === 'fulfilled') {
+        longHotkeyDisplayName = displayNames[1].value;
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+      settingsLoaded = true;
+      toast('Failed to load saved settings', 'error');
+    }
+  }
 
-    // Get display name for current hotkey (use loadedSettings directly, not the $state)
-    hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
-    longHotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.longHotkey);
-
-    // Fetch server settings (engine, model, etc.)
+  async function loadServerSettings() {
     try {
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
@@ -276,14 +289,12 @@
     } catch {
       serverConnected = false;
     }
+  }
 
-    // Enumerate audio input devices
+  async function loadAudioDevices() {
     try {
-      // Request permission first (required to get device labels)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Release the microphone immediately after getting permission
       stream.getTracks().forEach(track => track.stop());
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(d => d.kind === 'audioinput');
 
@@ -296,12 +307,25 @@
             label: d.label || `Microphone ${d.deviceId.slice(0, 8)}`,
           })),
       ];
+      audioDeviceError = '';
     } catch (err) {
       console.error('Failed to enumerate audio devices:', err);
+      const code = err instanceof DOMException ? err.name : '';
+      audioDeviceError = code === 'NotAllowedError'
+        ? 'Microphone permission is blocked; using the system default input.'
+        : 'Microphones could not be listed; using the system default input.';
     } finally {
       isLoadingDevices = false;
-      settingsLoaded = true;
     }
+  }
+
+  onMount(() => {
+    void loadCoreSettings();
+    void loadServerSettings();
+    void loadAudioDevices();
+    void window.murmurMain.getAppVersion()
+      .then((version) => (appVersion = version))
+      .catch((error) => console.error('Failed to load app version:', error));
   });
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -551,7 +575,10 @@
 
     <!-- Audio -->
     <SettingsSection title="Audio">
-      <SettingsRow label="Input Device" description="Select microphone for recording">
+      <SettingsRow
+        label="Input Device"
+        description={audioDeviceError || 'Select microphone for recording'}
+      >
         <select
           value={settings.selectedDeviceId}
           onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}

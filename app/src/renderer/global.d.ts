@@ -1,5 +1,6 @@
 import type {
   AvailableEngine,
+  AudioCaptureErrorPayload,
   ConnectionStatePayload,
   EngineStatus,
   HistoryEntryWithGroup,
@@ -67,6 +68,7 @@ declare global {
       onStartRecording: (callback: (deviceId?: string) => void) => () => void;
       onStopRecording: (callback: () => void) => () => void;
       sendAudioData: (buffer: ArrayBuffer) => void;
+      reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => void;
       copyToClipboard: (text: string) => void;
       removeAllListeners: () => void;
     };
