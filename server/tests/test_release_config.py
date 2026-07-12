@@ -73,6 +73,8 @@ def test_release_workflow_installs_extras_and_uploads_payloads() -> None:
     assert "--extra all" in contents
     assert "prepare-python-runtime.ps1" in contents
     assert "portable Python imports" in contents
+    assert "Verify packaged Python imports" in contents
+    assert "release\\win-unpacked\\resources\\server" in contents
     assert "torch, nemo.collections.asr" in contents
     assert '$health.engine.status -eq "ready"' in contents
     assert '$health.model_download.status -eq "ready"' in contents
@@ -97,6 +99,14 @@ def test_packaging_includes_relocatable_runtime() -> None:
         if isinstance(entry, str)
     ]
     assert ".runtime/**/*" in filters
+    assert "!.venv/**/pip*" not in filters
+    assert "!.venv/**/wheel*" not in filters
+    assert "!.venv/**/setuptools*" not in filters
+    assert "!.venv/Lib/site-packages/pip/**" in filters
+    assert "!.venv/Lib/site-packages/wheel/**" in filters
+    assert "!.venv/Lib/site-packages/setuptools/**" in filters
+    assert "!.venv/Lib/site-packages/**/test/**" in filters
+    assert "!.venv/Lib/site-packages/**/tests/**" in filters
     assert "!.venv/Lib/site-packages/**/*.lib" in filters
     assert "!.venv/Lib/site-packages/torch/include/**" in filters
     assert "!.runtime/Lib/test/**" in filters
