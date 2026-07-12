@@ -286,7 +286,7 @@
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Listen for new entries
-    window.murmurMain.onNewHistoryEntry((entry) => {
+    const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry((entry) => {
       // Prepend new entry if it passes current filters
       const filters = buildFilters();
       let shouldAdd = true;
@@ -345,7 +345,7 @@
     return () => {
       observer?.disconnect();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.murmurMain.removeNewHistoryEntryListener();
+      unsubscribeNewHistoryEntry();
       if (searchTimeout) clearTimeout(searchTimeout);
     };
   });

@@ -85,14 +85,12 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_REBUILD);
   },
 
-  onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): void => {
-    ipcRenderer.on(IPC_CHANNELS.HISTORY_NEW_ENTRY, (_event, entry) => {
+  onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, entry: HistoryEntryWithGroup) => {
       callback(entry);
-    });
-  },
-
-  removeNewHistoryEntryListener: (): void => {
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
+    };
+    ipcRenderer.on(IPC_CHANNELS.HISTORY_NEW_ENTRY, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.HISTORY_NEW_ENTRY, handler);
   },
 
   // Clipboard

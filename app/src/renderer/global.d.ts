@@ -38,8 +38,7 @@ declare global {
       deleteHistoryEntry: (id: string) => Promise<void>;
       getInsights: (range: InsightsRange) => Promise<InsightsResponse | null>;
       rebuildInsights: () => Promise<void>;
-      onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => void;
-      removeNewHistoryEntryListener: () => void;
+      onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => () => void;
       copyToClipboard: (text: string) => void;
       getRecordingDebugState: () => Promise<RecordingDebugState>;
       startRecording: () => Promise<RecordingDebugState>;

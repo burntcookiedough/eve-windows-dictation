@@ -12,6 +12,10 @@ export const INSIGHTS_RANGE_LABELS: Record<InsightsRange, string> = {
   all: 'All time',
 };
 
+export function isInsightsRange(value: unknown): value is InsightsRange {
+  return value === 'today' || value === '7d' || value === '30d' || value === 'all';
+}
+
 const STOP_WORDS = new Set([
   'a',
   'about',
@@ -199,15 +203,21 @@ export function getLocalDayStart(timestamp: number): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
+export function addLocalDays(timestamp: number, days: number): number {
+  const date = new Date(timestamp);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
 export function getRangeStart(range: InsightsRange, now = Date.now()): number | null {
   const today = getLocalDayStart(now);
   switch (range) {
     case 'today':
       return today;
     case '7d':
-      return today - 6 * 86400000;
+      return addLocalDays(today, -6);
     case '30d':
-      return today - 29 * 86400000;
+      return addLocalDays(today, -29);
     case 'all':
       return null;
     default:
@@ -244,7 +254,7 @@ export function buildTrendPoints(
     const start = getRangeStart(range, now) ?? getLocalDayStart(now);
     const days = range === 'today' ? 1 : range === '7d' ? 7 : 30;
     for (let i = 0; i < days; i += 1) {
-      const key = getLocalDayKey(start + i * 86400000);
+      const key = getLocalDayKey(addLocalDays(start, i));
       if (!buckets.has(key)) buckets.set(key, []);
     }
   }

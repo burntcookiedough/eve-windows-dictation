@@ -9,6 +9,7 @@ const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
 const MIN_RESTORE_DELAY_MS = 750;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
+const FOREGROUND_WINDOW_TIMEOUT_MS = 2000;
 
 // VBScript for keyboard simulation — much faster startup than PowerShell (~50ms vs ~300ms).
 // Written to userData once and reused via cscript.
@@ -187,6 +188,10 @@ public class NativeWindow {
 [NativeWindow]::GetForegroundWindow().ToInt64()
 `.trim(),
       ],
+      {
+        windowsHide: true,
+        timeout: FOREGROUND_WINDOW_TIMEOUT_MS,
+      },
       (error, stdout) => {
         if (error) {
           log.error('Failed to capture foreground window', { error });
@@ -211,8 +216,7 @@ export async function simulatePaste(
     const script = ensureSendInputScript();
     try {
       await new Promise<void>((resolve, reject) => {
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        const child = execFile(
+        execFile(
           'powershell',
           [
             '-NoProfile',
@@ -223,10 +227,11 @@ export async function simulatePaste(
             '-TargetWindowHandle',
             String(targetWindowHandle ?? 0),
           ],
+          {
+            windowsHide: true,
+            timeout: PASTE_PROCESS_TIMEOUT_MS,
+          },
           (error) => {
-            if (timeout) {
-              clearTimeout(timeout);
-            }
             if (error) {
               reject(error);
             } else {
@@ -234,10 +239,6 @@ export async function simulatePaste(
             }
           }
         );
-        timeout = setTimeout(() => {
-          child.kill();
-          reject(new Error(`SendInput paste timed out after ${PASTE_PROCESS_TIMEOUT_MS}ms`));
-        }, PASTE_PROCESS_TIMEOUT_MS);
       });
       return;
     } catch (error) {

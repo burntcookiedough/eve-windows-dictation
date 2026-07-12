@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'path';
 import {
+  addLocalDays,
   buildPhraseStats,
   calcProcessingRatio,
   calcWordsPerMinute,
@@ -286,7 +287,7 @@ export class HistoryService {
     const summary = this.buildSummary(rows);
     const indexing = this.getIndexingStatus();
     const commonWords = this.getCommonWords(dayStart, 18);
-    const sourceEntries = this.getSourceEntries(rangeStart, 500);
+    const sourceEntries = this.getSourceEntries(rangeStart);
     const commonPhrases = buildPhraseStats(sourceEntries, 12);
     const longestEntries = this.getLongestEntries(rangeStart, 5);
     const slowestEntries = this.getSlowestEntries(rangeStart, 5);
@@ -713,15 +714,14 @@ export class HistoryService {
     return sortWordStats(new Map(rows.map((row) => [row.word, row.count])), limit);
   }
 
-  private getSourceEntries(rangeStart: number | null, limit: number): InsightSourceEntry[] {
+  private getSourceEntries(rangeStart: number | null): InsightSourceEntry[] {
     if (!this.db) throw new Error('Database not initialized');
     if (rangeStart === null) {
       return this.db.prepare(`
         SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
         FROM transcriptions
         ORDER BY timestamp DESC
-        LIMIT @limit
-      `).all({ limit }).map(mapInsightSourceEntry);
+      `).all().map(mapInsightSourceEntry);
     }
 
     return this.db.prepare(`
@@ -729,8 +729,7 @@ export class HistoryService {
         FROM transcriptions
         WHERE timestamp >= @rangeStart
         ORDER BY timestamp DESC
-        LIMIT @limit
-      `).all({ rangeStart, limit }).map(mapInsightSourceEntry);
+      `).all({ rangeStart }).map(mapInsightSourceEntry);
   }
 
   private getLongestEntries(rangeStart: number | null, limit: number): InsightsEntryStat[] {
@@ -786,26 +785,32 @@ function emptyDailyRow(day: string): DailyRollupRow {
 function buildRangeDayKeys(range: Exclude<InsightsRange, 'all'>, now: number): string[] {
   const start = getRangeStart(range, now) ?? now;
   const days = range === 'today' ? 1 : range === '7d' ? 7 : 30;
-  return Array.from({ length: days }, (_, index) => getLocalDayKey(start + index * 86400000));
+  return Array.from({ length: days }, (_, index) => getLocalDayKey(addLocalDays(start, index)));
 }
 
 function computeLongestStreak(rows: DailyRollupRow[]): number {
   let longest = 0;
   let current = 0;
-  let previousTime: number | null = null;
+  let previousDay: string | null = null;
 
   for (const row of rows.filter((item) => item.dictations > 0)) {
-    const timestamp = new Date(`${row.day}T00:00:00`).getTime();
-    if (previousTime !== null && timestamp - previousTime === 86400000) {
+    const isConsecutive = previousDay !== null && getNextLocalDayKey(previousDay) === row.day;
+    if (isConsecutive) {
       current += 1;
     } else {
       current = 1;
     }
     longest = Math.max(longest, current);
-    previousTime = timestamp;
+    previousDay = row.day;
   }
 
   return longest;
+}
+
+function getNextLocalDayKey(dayKey: string): string {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  const localMidnight = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getTime();
+  return getLocalDayKey(addLocalDays(localMidnight, 1));
 }
 
 function toEntryStat(entry: InsightSourceEntry): InsightsEntryStat {

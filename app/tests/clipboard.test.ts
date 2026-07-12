@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 let clipboardText = '';
-const execFile = mock((command: string, args: string[], callback: (error?: Error | null) => void) => {
-  callback(null);
+const execFile = mock((
+  command: string,
+  args: string[],
+  options: { windowsHide?: boolean; timeout?: number } | ((error?: Error | null, stdout?: string) => void),
+  callback?: (error?: Error | null, stdout?: string) => void
+) => {
+  const done = typeof options === 'function' ? options : callback;
+  done?.(null, '12345');
   return { kill: mock(() => {}) };
 });
 
@@ -22,7 +28,7 @@ mock.module('child_process', () => ({
   execFile,
 }));
 
-const { buildSendInputScriptContent, pasteText, simulatePaste } = await import('../src/main/services/clipboard.js');
+const { buildSendInputScriptContent, getForegroundWindowHandle, pasteText, simulatePaste } = await import('../src/main/services/clipboard.js');
 
 describe('pasteText', () => {
   beforeEach(() => {
@@ -44,6 +50,7 @@ describe('pasteText', () => {
     expect(execFile).toHaveBeenCalledTimes(1);
     expect(execFile.mock.calls[0]?.[1]).toContain('-TargetWindowHandle');
     expect(execFile.mock.calls[0]?.[1]).toContain('12345');
+    expect(execFile.mock.calls[0]?.[2]).toEqual({ windowsHide: true, timeout: 5000 });
     expect(clipboardText).toBe('new text');
 
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -51,7 +58,7 @@ describe('pasteText', () => {
   });
 
   test('does not fall back to untargeted VBScript when targeted SendInput fails', async () => {
-    execFile.mockImplementationOnce((_command: string, _args: string[], callback: (error?: Error | null) => void) => {
+    execFile.mockImplementationOnce((_command: string, _args: string[], _options: unknown, callback: (error?: Error | null) => void) => {
       callback(new Error('target activation failed'));
       return { kill: mock(() => {}) };
     });
@@ -61,7 +68,7 @@ describe('pasteText', () => {
   });
 
   test('does not fall back to VBScript when untargeted SendInput fails', async () => {
-    execFile.mockImplementationOnce((_command: string, _args: string[], callback: (error?: Error | null) => void) => {
+    execFile.mockImplementationOnce((_command: string, _args: string[], _options: unknown, callback: (error?: Error | null) => void) => {
       callback(new Error('sendinput failed'));
       return { kill: mock(() => {}) };
     });
@@ -87,6 +94,26 @@ describe('pasteText', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(clipboardText).toBe('final transcript');
+  });
+});
+
+describe('getForegroundWindowHandle', () => {
+  beforeEach(() => {
+    execFile.mockClear();
+  });
+
+  test('hides PowerShell and applies a finite timeout', async () => {
+    expect(await getForegroundWindowHandle()).toBe(12345);
+    expect(execFile.mock.calls[0]?.[2]).toEqual({ windowsHide: true, timeout: 2000 });
+  });
+
+  test('resolves null when foreground-window capture times out', async () => {
+    execFile.mockImplementationOnce((_command: string, _args: string[], _options: unknown, callback: (error?: Error | null) => void) => {
+      callback(Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }));
+      return { kill: mock(() => {}) };
+    });
+
+    await expect(getForegroundWindowHandle()).resolves.toBeNull();
   });
 });
 

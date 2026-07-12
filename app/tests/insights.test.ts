@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  addLocalDays,
   buildPhraseStats,
   buildTrendPoints,
   calcProcessingRatio,
@@ -7,6 +8,7 @@ import {
   countWords,
   getLocalDayKey,
   getRangeStart,
+  isInsightsRange,
   tokenizeInsightWords,
 } from '../src/shared/insights.js';
 import type { InsightSourceEntry } from '../src/shared/types.js';
@@ -31,6 +33,16 @@ function entry(
 }
 
 describe('insights helpers', () => {
+  test('accepts only supported IPC range values', () => {
+    expect(isInsightsRange('today')).toBe(true);
+    expect(isInsightsRange('7d')).toBe(true);
+    expect(isInsightsRange('30d')).toBe(true);
+    expect(isInsightsRange('all')).toBe(true);
+    expect(isInsightsRange('week')).toBe(false);
+    expect(isInsightsRange(null)).toBe(false);
+    expect(isInsightsRange({ range: '7d' })).toBe(false);
+  });
+
   test('counts words from trimmed whitespace-separated text', () => {
     expect(countWords('')).toBe(0);
     expect(countWords('   one   two\nthree  ')).toBe(3);
@@ -87,4 +99,32 @@ describe('insights helpers', () => {
     expect(getRangeStart('7d', now)).toBe(new Date(2026, 5, 25).getTime());
     expect(getRangeStart('all', now)).toBeNull();
   });
+
+  test('uses calendar days across daylight-saving transitions', () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+
+    try {
+      const springForward = new Date(2026, 2, 8).getTime();
+      const nextDay = addLocalDays(springForward, 1);
+      expect(getLocalDayKey(nextDay)).toBe('2026-03-09');
+      expect(nextDay - springForward).toBe(23 * 60 * 60 * 1000);
+
+      const now = new Date(2026, 2, 10, 12).getTime();
+      expect(getLocalDayKey(getRangeStart('7d', now)!)).toBe('2026-03-04');
+      expect(buildTrendPoints([], '7d', now).map(({ date }) => date)).toEqual([
+        '2026-03-04',
+        '2026-03-05',
+        '2026-03-06',
+        '2026-03-07',
+        '2026-03-08',
+        '2026-03-09',
+        '2026-03-10',
+      ]);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
 });

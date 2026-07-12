@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import type {
     InsightsEntryStat,
     InsightsRange,
@@ -7,6 +7,7 @@
     InsightsTrendPoint,
     InsightsWordStat,
   } from '$shared/types';
+  import { createLatestRequestGuard } from '../latest-request';
 
   type TrendMetric = 'words' | 'audio' | 'processing' | 'wpm';
 
@@ -30,6 +31,7 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
+  const insightRequests = createLatestRequestGuard();
 
   let peakTrendValue = $derived.by(() => {
     if (!insights) return 0;
@@ -37,15 +39,22 @@
   });
 
   async function loadInsights() {
+    const requestId = insightRequests.begin();
     loading = true;
     error = null;
     try {
-      insights = await window.murmurMain.getInsights(range);
+      const response = await window.murmurMain.getInsights(range);
+      if (insightRequests.isCurrent(requestId)) {
+        insights = response;
+      }
     } catch (err) {
+      if (!insightRequests.isCurrent(requestId)) return;
       console.error('Failed to load insights:', err);
       error = 'Unable to load insights';
     } finally {
-      loading = false;
+      if (insightRequests.isCurrent(requestId)) {
+        loading = false;
+      }
     }
   }
 
@@ -149,18 +158,15 @@
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    window.murmurMain.onNewHistoryEntry(() => {
+    const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry(() => {
       loadInsights();
     });
 
     return () => {
+      insightRequests.invalidate();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.murmurMain.removeNewHistoryEntryListener();
+      unsubscribeNewHistoryEntry();
     };
-  });
-
-  onDestroy(() => {
-    window.murmurMain.removeNewHistoryEntryListener();
   });
 </script>
 

@@ -92,22 +92,125 @@ try {
   service.close();
 
   const migrationDbPath = join(workDir, 'migration-history.db');
-  const migrationService = new HistoryService(migrationDbPath);
-  migrationService.initialize();
-  migrationService.save(transcription('m-a', now, 'Migration project notes', 30, 15000));
-  migrationService.save(transcription('m-b', now, 'Migration review notes', 30, 15000));
-  migrationService.close();
-
   const migrationDb = new Database(migrationDbPath);
-  migrationDb.prepare('DELETE FROM insights_processed_entries').run();
+  migrationDb.exec(`
+    CREATE TABLE transcriptions (
+      id TEXT PRIMARY KEY,
+      timestamp INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      confidence REAL,
+      audioDuration REAL,
+      transcriptionTime INTEGER,
+      editedAt INTEGER,
+      originalText TEXT
+    );
+
+    CREATE INDEX idx_timestamp ON transcriptions(timestamp DESC);
+  `);
+  migrationDb.prepare(`
+    INSERT INTO transcriptions (
+      id, timestamp, text, confidence, audioDuration, transcriptionTime, editedAt, originalText
+    ) VALUES (
+      'm-legacy', @timestamp, 'Migration project notes', 0.85, 30, 15000, @editedAt, 'Migration notes'
+    )
+  `).run({ timestamp: now, editedAt: now + 1000 });
   migrationDb.close();
 
   const migratedService = new HistoryService(migrationDbPath);
   migratedService.initialize();
   const migrated = migratedService.getInsights('all');
-  assert.equal(migrated.summary.totalDictations, 2);
-  assert.equal(migrated.summary.totalWords, 6);
+  assert.equal(migrated.summary.totalDictations, 1);
+  assert.equal(migrated.summary.totalWords, 3);
+  const migratedLegacy = migratedService.getById('m-legacy');
+  assert.equal(migratedLegacy?.wordCount, 3);
+  assert.equal(migratedLegacy?.editedAt, now + 1000);
+  assert.equal(migratedLegacy?.originalText, 'Migration notes');
+  assert.equal(migratedLegacy?.sessionMode, undefined);
+  assert.equal(migratedLegacy?.engine, undefined);
+  assert.equal(migratedLegacy?.model, undefined);
+  assert.equal(migratedLegacy?.device, undefined);
+  assert.equal(migratedLegacy?.computeType, undefined);
+  assert.equal(migratedLegacy?.cudaActive, undefined);
+
+  migratedService.save({
+    ...transcription('m-current', now + 2000, 'Current metadata entry', 10, 5000),
+    sessionMode: 'long',
+    engine: 'whisper',
+    model: 'large-v3-turbo',
+    device: 'cuda',
+    computeType: 'float16',
+    cudaActive: true,
+  });
+  assert.deepEqual(
+    (({ sessionMode, engine, model, device, computeType, cudaActive }) => ({
+      sessionMode,
+      engine,
+      model,
+      device,
+      computeType,
+      cudaActive,
+    }))(migratedService.getById('m-current')),
+    {
+      sessionMode: 'long',
+      engine: 'whisper',
+      model: 'large-v3-turbo',
+      device: 'cuda',
+      computeType: 'float16',
+      cudaActive: true,
+    },
+  );
   migratedService.close();
+
+  const phrasesDbPath = join(workDir, 'full-range-phrases.db');
+  const phrasesSetup = new HistoryService(phrasesDbPath);
+  phrasesSetup.initialize();
+  phrasesSetup.close();
+
+  const phrasesDb = new Database(phrasesDbPath);
+  const insertPhraseEntry = phrasesDb.prepare(`
+    INSERT INTO transcriptions (id, timestamp, text, confidence, audioDuration, transcriptionTime)
+    VALUES (@id, @timestamp, @text, 0.9, 1, 100)
+  `);
+  const insertPhraseEntries = phrasesDb.transaction(() => {
+    insertPhraseEntry.run({
+      id: 'phrase-older-than-500',
+      timestamp: now - 502000,
+      text: 'complete selected range',
+    });
+    for (let index = 0; index < 501; index += 1) {
+      insertPhraseEntry.run({
+        id: `phrase-recent-${index}`,
+        timestamp: now - index * 1000,
+        text: `recent${index}`,
+      });
+    }
+  });
+  insertPhraseEntries();
+  phrasesDb.close();
+
+  const phrasesService = new HistoryService(phrasesDbPath);
+  phrasesService.initialize();
+  const fullRangePhrases = phrasesService.getInsights('all').commonPhrases;
+  assert.ok(
+    fullRangePhrases.some(({ text, count }) => text === 'complete selected' && count === 1),
+    'common phrases should include entries older than the newest 500',
+  );
+  phrasesService.close();
+
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    const streakService = new HistoryService(join(workDir, 'dst-streak.db'));
+    streakService.initialize();
+    streakService.save(transcription('dst-1', new Date(2026, 2, 7, 12).getTime(), 'first day', 1, 100));
+    streakService.save(transcription('dst-2', new Date(2026, 2, 8, 12).getTime(), 'second day', 1, 100));
+    streakService.save(transcription('dst-3', new Date(2026, 2, 9, 12).getTime(), 'third day', 1, 100));
+    assert.equal(streakService.getInsights('all').summary.longestStreakDays, 3);
+    streakService.close();
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
 
   const largeDbPath = join(workDir, 'large-history.db');
   const largeSetup = new HistoryService(largeDbPath);
