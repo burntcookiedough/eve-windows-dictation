@@ -722,7 +722,7 @@ export class HistoryService {
       return this.db.prepare(`
         SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
         FROM transcriptions
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, id DESC
         LIMIT @limit
       `).all({ limit }).map(mapInsightSourceEntry);
     }
@@ -731,7 +731,7 @@ export class HistoryService {
         SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
         FROM transcriptions
         WHERE timestamp >= @rangeStart
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, id DESC
         LIMIT @limit
       `).all({ rangeStart, limit }).map(mapInsightSourceEntry);
   }
