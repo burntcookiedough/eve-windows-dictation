@@ -29,6 +29,7 @@
   let insights: InsightsResponse | null = $state(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let scrollContainer: HTMLDivElement | undefined = $state(undefined);
 
   let peakTrendValue = $derived.by(() => {
     if (!insights) return 0;
@@ -138,6 +139,7 @@
   }
 
   onMount(() => {
+    queueMicrotask(() => scrollContainer?.scrollTo({ top: 0, behavior: 'auto' }));
     loadInsights();
 
     const handleVisibilityChange = () => {
@@ -163,7 +165,8 @@
 </script>
 
 <div class="h-full flex flex-col p-4 pr-2 sm:p-6 sm:pr-2">
-  <div class="flex-1 overflow-y-auto pr-2 sm:pr-4">
+  <div bind:this={scrollContainer} class="flex-1 overflow-y-auto pr-2 sm:pr-4">
+    <div class="mx-auto w-full max-w-5xl">
     <div class="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
       <div class="min-w-0">
         <h1 class="text-xl font-semibold text-zinc-100">Insights</h1>
@@ -190,7 +193,7 @@
         {error}
       </div>
     {:else if loading && !insights}
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div class="grid grid-cols-2 gap-3">
         {#each Array(4) as _}
           <div class="h-24 rounded-lg border border-zinc-800 bg-zinc-900/40 skeleton-bone"></div>
         {/each}
@@ -207,7 +210,7 @@
         </div>
       {/if}
 
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div class="grid grid-cols-2 gap-3">
         <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <p class="text-xs text-zinc-500">Words spoken</p>
           <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalWords)}</p>
@@ -242,7 +245,7 @@
               {insights.summary.longestStreakDays} day streak
             </p>
           </div>
-          <div class="grid w-full grid-cols-2 rounded-lg bg-zinc-950/60 p-1 sm:flex sm:w-auto">
+          <div class="grid w-full grid-cols-4 rounded-lg bg-zinc-950/60 p-1 sm:w-auto">
             {#each trendMetrics as metric}
               <button
                 onclick={() => (trendMetric = metric.id)}
@@ -257,7 +260,7 @@
           </div>
         </div>
 
-        <div class="h-44 w-full overflow-hidden">
+        <div class="mx-auto h-44 w-full max-w-3xl overflow-hidden">
           <svg viewBox="0 0 520 176" preserveAspectRatio="none" class="h-full w-full">
             <line x1="0" y1="137" x2="520" y2="137" stroke="rgb(63 63 70 / 0.6)" stroke-width="1" />
             {#each insights.trends as point, index}
@@ -332,6 +335,7 @@
         )}
       </div>
     {/if}
+    </div>
   </div>
 </div>
 

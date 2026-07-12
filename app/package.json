@@ -18,6 +18,7 @@
     "build": "bun run build:main && bun run build:renderer",
     "build:main": "node scripts/build-main.js",
     "build:renderer": "vite build",
+    "test:history": "node tests/run-history-insights-check.mjs",
     "preview": "vite preview",
     "package": "bun run build && electron-builder",
     "package:win": "bun run build && electron-builder --win --publish never",
