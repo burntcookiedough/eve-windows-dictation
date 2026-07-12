@@ -1,8 +1,33 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'path';
-import type { TranscriptionEntry } from '../../shared/types.js';
-import type { HistoryFilters, HistoryEntryWithGroup, HistoryResponse } from '../../shared/types.js';
+import {
+  addLocalDays,
+  buildPhraseStats,
+  calcProcessingRatio,
+  calcWordsPerMinute,
+  countWords,
+  formatTrendLabel,
+  getLocalDayKey,
+  getRangeStart,
+  sortWordStats,
+  tokenizeInsightWords,
+} from '../../shared/insights.js';
+import type {
+  HistoryFilters,
+  HistoryEntryWithGroup,
+  HistoryResponse,
+  InsightSourceEntry,
+  InsightsEntryStat,
+  InsightsRange,
+  InsightsResponse,
+  InsightsSummary,
+  InsightsTrendPoint,
+  InsightsWordStat,
+  TranscriptionEntry,
+} from '../../shared/types.js';
+
+const INSIGHTS_PHRASE_ENTRY_LIMIT = 5000;
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -20,10 +45,13 @@ function computeDateGroup(timestamp: number): string {
 export class HistoryService {
   private db: Database.Database | null = null;
   private dbPath: string;
+  private readonly startupCatchupLimit = 250;
+  private readonly queryCatchupLimit = 1000;
+  private readonly backgroundCatchupLimit = 500;
+  private catchupTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor() {
-    const userDataPath = app.getPath('userData');
-    this.dbPath = path.join(userDataPath, 'history.db');
+  constructor(dbPath?: string) {
+    this.dbPath = dbPath ?? path.join(app.getPath('userData'), 'history.db');
   }
 
   initialize(): void {
@@ -41,20 +69,67 @@ export class HistoryService {
         confidence REAL,
         audioDuration REAL,
         transcriptionTime INTEGER,
+        wordCount INTEGER,
+        sessionMode TEXT,
+        engine TEXT,
+        model TEXT,
+        device TEXT,
+        computeType TEXT,
+        cudaActive INTEGER,
         editedAt INTEGER,
         originalText TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_timestamp ON transcriptions(timestamp DESC);
     `);
+
+    this.migrateSchema();
+    this.createInsightsTables();
+    this.prepareInsightsLedgerMigration();
+    if (this.processPendingInsights(this.startupCatchupLimit) >= this.startupCatchupLimit) {
+      this.scheduleInsightsCatchup();
+    }
   }
 
   save(entry: TranscriptionEntry): void {
     if (!this.db) throw new Error('Database not initialized');
+    const wordCount = entry.wordCount ?? countWords(entry.text);
 
     const stmt = this.db.prepare(`
-      INSERT INTO transcriptions (id, timestamp, text, confidence, audioDuration, transcriptionTime, editedAt, originalText)
-      VALUES (@id, @timestamp, @text, @confidence, @audioDuration, @transcriptionTime, @editedAt, @originalText)
+      INSERT INTO transcriptions (
+        id,
+        timestamp,
+        text,
+        confidence,
+        audioDuration,
+        transcriptionTime,
+        wordCount,
+        sessionMode,
+        engine,
+        model,
+        device,
+        computeType,
+        cudaActive,
+        editedAt,
+        originalText
+      )
+      VALUES (
+        @id,
+        @timestamp,
+        @text,
+        @confidence,
+        @audioDuration,
+        @transcriptionTime,
+        @wordCount,
+        @sessionMode,
+        @engine,
+        @model,
+        @device,
+        @computeType,
+        @cudaActive,
+        @editedAt,
+        @originalText
+      )
     `);
 
     stmt.run({
@@ -64,9 +139,18 @@ export class HistoryService {
       confidence: entry.confidence,
       audioDuration: entry.audioDuration,
       transcriptionTime: entry.transcriptionTime,
+      wordCount,
+      sessionMode: entry.sessionMode ?? null,
+      engine: entry.engine ?? null,
+      model: entry.model ?? null,
+      device: entry.device ?? null,
+      computeType: entry.computeType ?? null,
+      cudaActive: entry.cudaActive === undefined ? null : Number(entry.cudaActive),
       editedAt: entry.editedAt ?? null,
       originalText: entry.originalText ?? null,
     });
+
+    this.addEntryToInsights({ ...entry, wordCount });
   }
 
   getEntries(offset: number, limit: number, filters?: HistoryFilters): HistoryResponse {
@@ -108,7 +192,22 @@ export class HistoryService {
 
     // Fetch one extra to determine if there are more entries
     const query = `
-      SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, editedAt, originalText
+      SELECT
+        id,
+        timestamp,
+        text,
+        confidence,
+        audioDuration,
+        transcriptionTime,
+        wordCount,
+        sessionMode,
+        engine,
+        model,
+        device,
+        computeType,
+        cudaActive,
+        editedAt,
+        originalText
       FROM transcriptions
       ${whereClause}
       ORDER BY timestamp DESC
@@ -120,7 +219,7 @@ export class HistoryService {
       ...params,
       limit: limit + 1,
       offset,
-    }) as TranscriptionEntry[];
+    }).map(mapTranscriptionEntry);
 
     const hasMore = rows.length > limit;
     const entries = hasMore ? rows.slice(0, limit) : rows;
@@ -140,26 +239,631 @@ export class HistoryService {
   delete(id: string): void {
     if (!this.db) throw new Error('Database not initialized');
 
+    const existing = this.getById(id);
     const stmt = this.db.prepare('DELETE FROM transcriptions WHERE id = @id');
-    stmt.run({ id });
+    const result = stmt.run({ id });
+    if (result.changes > 0 && existing) {
+      this.removeEntryFromInsights(existing);
+    }
   }
 
   getById(id: string): TranscriptionEntry | null {
     if (!this.db) throw new Error('Database not initialized');
 
     const stmt = this.db.prepare(`
-      SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, editedAt, originalText
+      SELECT
+        id,
+        timestamp,
+        text,
+        confidence,
+        audioDuration,
+        transcriptionTime,
+        wordCount,
+        sessionMode,
+        engine,
+        model,
+        device,
+        computeType,
+        cudaActive,
+        editedAt,
+        originalText
       FROM transcriptions
       WHERE id = @id
     `);
 
-    return (stmt.get({ id }) as TranscriptionEntry) ?? null;
+    const row = stmt.get({ id });
+    return row ? mapTranscriptionEntry(row) : null;
+  }
+
+  getInsights(range: InsightsRange): InsightsResponse {
+    if (!this.db) throw new Error('Database not initialized');
+    if (this.processPendingInsights(this.queryCatchupLimit) >= this.queryCatchupLimit) {
+      this.scheduleInsightsCatchup();
+    }
+
+    const now = Date.now();
+    const rangeStart = getRangeStart(range, now);
+    const dayStart = rangeStart === null ? null : getLocalDayKey(rangeStart);
+    const rows = this.getDailyRows(dayStart);
+    const trends = this.buildTrends(rows, range, now);
+    const summary = this.buildSummary(rows);
+    const indexing = this.getIndexingStatus();
+    const commonWords = this.getCommonWords(dayStart, 18);
+    const sourceEntries = this.getSourceEntries(rangeStart, INSIGHTS_PHRASE_ENTRY_LIMIT);
+    const commonPhrases = buildPhraseStats(sourceEntries, 12);
+    const longestEntries = this.getLongestEntries(rangeStart, 5);
+    const slowestEntries = this.getSlowestEntries(rangeStart, 5);
+
+    return {
+      range,
+      generatedAt: now,
+      hasData: summary.totalDictations > 0,
+      indexing,
+      summary,
+      trends,
+      commonWords,
+      commonPhrases,
+      longestEntries,
+      slowestEntries,
+    };
+  }
+
+  rebuildInsights(): void {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const rows = this.db.prepare(`
+      SELECT
+        id,
+        timestamp,
+        text,
+        confidence,
+        audioDuration,
+        transcriptionTime,
+        wordCount,
+        sessionMode,
+        engine,
+        model,
+        device,
+        computeType,
+        cudaActive,
+        editedAt,
+        originalText
+      FROM transcriptions
+    `).all().map(mapTranscriptionEntry);
+
+    const reset = this.db.transaction((entries: TranscriptionEntry[]) => {
+      this.db!.prepare('DELETE FROM insights_daily_rollups').run();
+      this.db!.prepare('DELETE FROM insights_word_counts').run();
+      this.db!.prepare('DELETE FROM insights_processed_entries').run();
+
+      const updateWords = this.db!.prepare(`
+        UPDATE transcriptions
+        SET wordCount = @wordCount
+        WHERE id = @id
+      `);
+
+      for (const entry of entries) {
+        const wordCount = entry.wordCount ?? countWords(entry.text);
+        if (entry.wordCount !== wordCount) {
+          updateWords.run({ id: entry.id, wordCount });
+        }
+        this.addEntryToInsights({ ...entry, wordCount });
+      }
+    });
+
+    reset(rows);
   }
 
   close(): void {
+    if (this.catchupTimer) {
+      clearTimeout(this.catchupTimer);
+      this.catchupTimer = null;
+    }
     if (this.db) {
       this.db.close();
       this.db = null;
     }
   }
+
+  private migrateSchema(): void {
+    if (!this.db) throw new Error('Database not initialized');
+    const columns = new Set(
+      (this.db.prepare('PRAGMA table_info(transcriptions)').all() as Array<{ name: string }>)
+        .map((column) => column.name)
+    );
+
+    const migrations: Array<[string, string]> = [
+      ['wordCount', 'ALTER TABLE transcriptions ADD COLUMN wordCount INTEGER'],
+      ['sessionMode', 'ALTER TABLE transcriptions ADD COLUMN sessionMode TEXT'],
+      ['engine', 'ALTER TABLE transcriptions ADD COLUMN engine TEXT'],
+      ['model', 'ALTER TABLE transcriptions ADD COLUMN model TEXT'],
+      ['device', 'ALTER TABLE transcriptions ADD COLUMN device TEXT'],
+      ['computeType', 'ALTER TABLE transcriptions ADD COLUMN computeType TEXT'],
+      ['cudaActive', 'ALTER TABLE transcriptions ADD COLUMN cudaActive INTEGER'],
+    ];
+
+    for (const [column, sql] of migrations) {
+      if (!columns.has(column)) {
+        this.db.exec(sql);
+      }
+    }
+  }
+
+  private createInsightsTables(): void {
+    if (!this.db) throw new Error('Database not initialized');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS insights_daily_rollups (
+        day TEXT PRIMARY KEY,
+        dictations INTEGER NOT NULL,
+        words INTEGER NOT NULL,
+        audioSeconds REAL NOT NULL,
+        processingMs INTEGER NOT NULL,
+        confidenceSum REAL NOT NULL,
+        confidenceCount INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS insights_word_counts (
+        day TEXT NOT NULL,
+        word TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (day, word)
+      );
+
+      CREATE TABLE IF NOT EXISTS insights_processed_entries (
+        id TEXT PRIMARY KEY,
+        processedAt INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_insights_word_counts_word ON insights_word_counts(word);
+    `);
+  }
+
+  private prepareInsightsLedgerMigration(): void {
+    if (!this.db) throw new Error('Database not initialized');
+    const processed = this.db.prepare('SELECT COUNT(*) as count FROM insights_processed_entries').get() as { count: number };
+    if (processed.count > 0) return;
+
+    const rollups = this.db.prepare('SELECT COUNT(*) as count FROM insights_daily_rollups').get() as { count: number };
+    const words = this.db.prepare('SELECT COUNT(*) as count FROM insights_word_counts').get() as { count: number };
+    if (rollups.count === 0 && words.count === 0) return;
+
+    this.db.prepare('DELETE FROM insights_daily_rollups').run();
+    this.db.prepare('DELETE FROM insights_word_counts').run();
+  }
+
+  private addEntryToInsights(entry: TranscriptionEntry): void {
+    if (!this.db) throw new Error('Database not initialized');
+    const wordCount = entry.wordCount ?? countWords(entry.text);
+    const day = getLocalDayKey(entry.timestamp);
+    const confidence = Number.isFinite(entry.confidence) ? entry.confidence : 0;
+    const confidenceCount = Number.isFinite(entry.confidence) ? 1 : 0;
+
+    this.db.prepare(`
+      INSERT INTO insights_daily_rollups (
+        day,
+        dictations,
+        words,
+        audioSeconds,
+        processingMs,
+        confidenceSum,
+        confidenceCount
+      )
+      VALUES (@day, 1, @words, @audioSeconds, @processingMs, @confidenceSum, @confidenceCount)
+      ON CONFLICT(day) DO UPDATE SET
+        dictations = dictations + excluded.dictations,
+        words = words + excluded.words,
+        audioSeconds = audioSeconds + excluded.audioSeconds,
+        processingMs = processingMs + excluded.processingMs,
+        confidenceSum = confidenceSum + excluded.confidenceSum,
+        confidenceCount = confidenceCount + excluded.confidenceCount
+    `).run({
+      day,
+      words: wordCount,
+      audioSeconds: entry.audioDuration || 0,
+      processingMs: entry.transcriptionTime || 0,
+      confidenceSum: confidence,
+      confidenceCount,
+    });
+
+    const counts = new Map<string, number>();
+    for (const word of tokenizeInsightWords(entry.text)) {
+      counts.set(word, (counts.get(word) ?? 0) + 1);
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT INTO insights_word_counts (day, word, count)
+      VALUES (@day, @word, @count)
+      ON CONFLICT(day, word) DO UPDATE SET
+        count = count + excluded.count
+    `);
+
+    for (const [word, count] of counts) {
+      stmt.run({ day, word, count });
+    }
+
+    this.db.prepare(`
+      INSERT INTO insights_processed_entries (id, processedAt)
+      VALUES (@id, @processedAt)
+      ON CONFLICT(id) DO UPDATE SET processedAt = excluded.processedAt
+    `).run({
+      id: entry.id,
+      processedAt: Date.now(),
+    });
+  }
+
+  private removeEntryFromInsights(entry: TranscriptionEntry): void {
+    if (!this.db) throw new Error('Database not initialized');
+    const wasProcessed = this.db.prepare(`
+      SELECT 1 FROM insights_processed_entries WHERE id = @id
+    `).get({ id: entry.id });
+    if (!wasProcessed) return;
+
+    const wordCount = entry.wordCount ?? countWords(entry.text);
+    const day = getLocalDayKey(entry.timestamp);
+    const confidence = Number.isFinite(entry.confidence) ? entry.confidence : 0;
+    const confidenceCount = Number.isFinite(entry.confidence) ? 1 : 0;
+
+    const remove = this.db.transaction(() => {
+      this.db!.prepare(`
+        UPDATE insights_daily_rollups
+        SET
+          dictations = MAX(dictations - 1, 0),
+          words = MAX(words - @words, 0),
+          audioSeconds = MAX(audioSeconds - @audioSeconds, 0),
+          processingMs = MAX(processingMs - @processingMs, 0),
+          confidenceSum = MAX(confidenceSum - @confidenceSum, 0),
+          confidenceCount = MAX(confidenceCount - @confidenceCount, 0)
+        WHERE day = @day
+      `).run({
+        day,
+        words: wordCount,
+        audioSeconds: entry.audioDuration || 0,
+        processingMs: entry.transcriptionTime || 0,
+        confidenceSum: confidence,
+        confidenceCount,
+      });
+
+      const counts = new Map<string, number>();
+      for (const word of tokenizeInsightWords(entry.text)) {
+        counts.set(word, (counts.get(word) ?? 0) + 1);
+      }
+
+      const decrementWord = this.db!.prepare(`
+        UPDATE insights_word_counts
+        SET count = MAX(count - @count, 0)
+        WHERE day = @day AND word = @word
+      `);
+
+      for (const [word, count] of counts) {
+        decrementWord.run({ day, word, count });
+      }
+
+      this.db!.prepare('DELETE FROM insights_word_counts WHERE count <= 0').run();
+      this.db!.prepare('DELETE FROM insights_daily_rollups WHERE day = @day AND dictations <= 0').run({ day });
+      this.db!.prepare('DELETE FROM insights_processed_entries WHERE id = @id').run({ id: entry.id });
+    });
+
+    remove();
+  }
+
+  private processPendingInsights(limit: number): number {
+    if (!this.db) throw new Error('Database not initialized');
+    if (limit <= 0) return 0;
+
+    const rows = this.db.prepare(`
+      SELECT
+        t.id,
+        t.timestamp,
+        t.text,
+        t.confidence,
+        t.audioDuration,
+        t.transcriptionTime,
+        t.wordCount,
+        t.sessionMode,
+        t.engine,
+        t.model,
+        t.device,
+        t.computeType,
+        t.cudaActive,
+        t.editedAt,
+        t.originalText
+      FROM transcriptions t
+      LEFT JOIN insights_processed_entries p ON p.id = t.id
+      WHERE p.id IS NULL
+      ORDER BY t.timestamp ASC
+      LIMIT @limit
+    `).all({ limit }).map(mapTranscriptionEntry);
+
+    if (rows.length === 0) return 0;
+
+    const catchup = this.db.transaction((entries: TranscriptionEntry[]) => {
+      const updateWords = this.db!.prepare(`
+        UPDATE transcriptions
+        SET wordCount = @wordCount
+        WHERE id = @id
+      `);
+
+      for (const entry of entries) {
+        const wordCount = entry.wordCount ?? countWords(entry.text);
+        if (entry.wordCount !== wordCount) {
+          updateWords.run({ id: entry.id, wordCount });
+        }
+        this.addEntryToInsights({ ...entry, wordCount });
+      }
+    });
+
+    catchup(rows);
+    return rows.length;
+  }
+
+  private getIndexingStatus(): InsightsResponse['indexing'] {
+    if (!this.db) throw new Error('Database not initialized');
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM transcriptions').get() as { count: number };
+    const processed = this.db.prepare('SELECT COUNT(*) as count FROM insights_processed_entries').get() as { count: number };
+
+    return {
+      isIndexing: processed.count < total.count,
+      processedEntries: Math.min(processed.count, total.count),
+      totalEntries: total.count,
+    };
+  }
+
+  private scheduleInsightsCatchup(): void {
+    if (this.catchupTimer || !this.db) return;
+
+    this.catchupTimer = setTimeout(() => {
+      this.catchupTimer = null;
+      if (!this.db) return;
+
+      try {
+        const processed = this.processPendingInsights(this.backgroundCatchupLimit);
+        if (processed >= this.backgroundCatchupLimit) {
+          this.scheduleInsightsCatchup();
+        }
+      } catch {
+        // A later explicit rebuild or insights query can retry catch-up.
+      }
+    }, 50);
+  }
+
+  private getDailyRows(dayStart: string | null): DailyRollupRow[] {
+    if (!this.db) throw new Error('Database not initialized');
+    if (dayStart === null) {
+      return this.db.prepare(`
+        SELECT day, dictations, words, audioSeconds, processingMs, confidenceSum, confidenceCount
+        FROM insights_daily_rollups
+        ORDER BY day ASC
+      `).all() as DailyRollupRow[];
+    }
+
+    return this.db.prepare(`
+      SELECT day, dictations, words, audioSeconds, processingMs, confidenceSum, confidenceCount
+      FROM insights_daily_rollups
+      WHERE day >= @dayStart
+      ORDER BY day ASC
+    `).all({ dayStart }) as DailyRollupRow[];
+  }
+
+  private buildTrends(rows: DailyRollupRow[], range: InsightsRange, now: number): InsightsTrendPoint[] {
+    const rowMap = new Map(rows.map((row) => [row.day, row]));
+    const activeRows = range === 'all'
+      ? rows
+      : buildRangeDayKeys(range, now).map((day) => rowMap.get(day) ?? emptyDailyRow(day));
+
+    return activeRows.map((row) => ({
+      date: row.day,
+      label: formatTrendLabel(row.day),
+      dictations: row.dictations,
+      words: row.words,
+      audioSeconds: row.audioSeconds,
+      processingMs: row.processingMs,
+      avgWpm: calcWordsPerMinute(row.words, row.audioSeconds),
+      avgConfidence: row.confidenceCount > 0 ? row.confidenceSum / row.confidenceCount : 0,
+      avgProcessingRatio: calcProcessingRatio(row.audioSeconds, row.processingMs),
+    }));
+  }
+
+  private buildSummary(rows: DailyRollupRow[]): InsightsSummary {
+    const totalDictations = rows.reduce((sum, row) => sum + row.dictations, 0);
+    const totalWords = rows.reduce((sum, row) => sum + row.words, 0);
+    const totalAudioSeconds = rows.reduce((sum, row) => sum + row.audioSeconds, 0);
+    const totalProcessingMs = rows.reduce((sum, row) => sum + row.processingMs, 0);
+    const confidenceSum = rows.reduce((sum, row) => sum + row.confidenceSum, 0);
+    const confidenceCount = rows.reduce((sum, row) => sum + row.confidenceCount, 0);
+    const busiest = [...rows].sort((a, b) => b.words - a.words || b.dictations - a.dictations)[0];
+
+    return {
+      totalDictations,
+      totalWords,
+      totalAudioSeconds,
+      totalProcessingMs,
+      avgConfidence: confidenceCount > 0 ? confidenceSum / confidenceCount : 0,
+      // Weighted by recorded audio duration so a one-word clip cannot skew the speaking pace.
+      avgWpm: calcWordsPerMinute(totalWords, totalAudioSeconds),
+      avgProcessingRatio: calcProcessingRatio(totalAudioSeconds, totalProcessingMs),
+      avgWordsPerDictation: totalDictations > 0 ? totalWords / totalDictations : 0,
+      longestStreakDays: computeLongestStreak(rows),
+      busiestDay: busiest && busiest.dictations > 0
+        ? {
+            date: busiest.day,
+            label: formatTrendLabel(busiest.day),
+            words: busiest.words,
+            dictations: busiest.dictations,
+          }
+        : undefined,
+    };
+  }
+
+  private getCommonWords(dayStart: string | null, limit: number): InsightsWordStat[] {
+    if (!this.db) throw new Error('Database not initialized');
+    const rows = dayStart === null
+      ? this.db.prepare(`
+          SELECT word, SUM(count) as count
+          FROM insights_word_counts
+          GROUP BY word
+          ORDER BY count DESC, word ASC
+          LIMIT @limit
+        `).all({ limit }) as Array<{ word: string; count: number }>
+      : this.db.prepare(`
+          SELECT word, SUM(count) as count
+          FROM insights_word_counts
+          WHERE day >= @dayStart
+          GROUP BY word
+          ORDER BY count DESC, word ASC
+          LIMIT @limit
+        `).all({ dayStart, limit }) as Array<{ word: string; count: number }>;
+
+    return sortWordStats(new Map(rows.map((row) => [row.word, row.count])), limit);
+  }
+
+  private getSourceEntries(rangeStart: number | null, limit: number): InsightSourceEntry[] {
+    if (!this.db) throw new Error('Database not initialized');
+    if (rangeStart === null) {
+      return this.db.prepare(`
+        SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
+        FROM transcriptions
+        ORDER BY timestamp DESC, id DESC
+        LIMIT @limit
+      `).all({ limit }).map(mapInsightSourceEntry);
+    }
+
+    return this.db.prepare(`
+        SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
+        FROM transcriptions
+        WHERE timestamp >= @rangeStart
+        ORDER BY timestamp DESC, id DESC
+        LIMIT @limit
+      `).all({ rangeStart, limit }).map(mapInsightSourceEntry);
+  }
+
+  private getLongestEntries(rangeStart: number | null, limit: number): InsightsEntryStat[] {
+    if (!this.db) throw new Error('Database not initialized');
+    const whereClause = rangeStart === null ? '' : 'WHERE timestamp >= @rangeStart';
+    return this.db.prepare(`
+      SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
+      FROM transcriptions
+      ${whereClause}
+      ORDER BY COALESCE(audioDuration, 0) DESC, COALESCE(wordCount, 0) DESC
+      LIMIT @limit
+    `).all({ rangeStart, limit }).map(mapInsightSourceEntry).map(toEntryStat);
+  }
+
+  private getSlowestEntries(rangeStart: number | null, limit: number): InsightsEntryStat[] {
+    if (!this.db) throw new Error('Database not initialized');
+    const whereClause = rangeStart === null ? '' : 'AND timestamp >= @rangeStart';
+    return this.db.prepare(`
+      SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
+      FROM transcriptions
+      WHERE COALESCE(audioDuration, 0) > 0
+        AND COALESCE(transcriptionTime, 0) > 0
+        ${whereClause}
+      ORDER BY (COALESCE(audioDuration, 0) / (COALESCE(transcriptionTime, 0) / 1000.0)) ASC,
+        transcriptionTime DESC
+      LIMIT @limit
+    `).all({ rangeStart, limit }).map(mapInsightSourceEntry).map(toEntryStat);
+  }
+}
+
+interface DailyRollupRow {
+  day: string;
+  dictations: number;
+  words: number;
+  audioSeconds: number;
+  processingMs: number;
+  confidenceSum: number;
+  confidenceCount: number;
+}
+
+function emptyDailyRow(day: string): DailyRollupRow {
+  return {
+    day,
+    dictations: 0,
+    words: 0,
+    audioSeconds: 0,
+    processingMs: 0,
+    confidenceSum: 0,
+    confidenceCount: 0,
+  };
+}
+
+function buildRangeDayKeys(range: Exclude<InsightsRange, 'all'>, now: number): string[] {
+  const start = getRangeStart(range, now) ?? now;
+  const days = range === 'today' ? 1 : range === '7d' ? 7 : 30;
+  return Array.from({ length: days }, (_, index) => getLocalDayKey(addLocalDays(start, index)));
+}
+
+function computeLongestStreak(rows: DailyRollupRow[]): number {
+  let longest = 0;
+  let current = 0;
+  let previousDay: string | null = null;
+
+  for (const row of rows.filter((item) => item.dictations > 0)) {
+    const isConsecutive = previousDay !== null && getNextLocalDayKey(previousDay) === row.day;
+    if (isConsecutive) {
+      current += 1;
+    } else {
+      current = 1;
+    }
+    longest = Math.max(longest, current);
+    previousDay = row.day;
+  }
+
+  return longest;
+}
+
+function getNextLocalDayKey(dayKey: string): string {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  const localMidnight = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1).getTime();
+  return getLocalDayKey(addLocalDays(localMidnight, 1));
+}
+
+function toEntryStat(entry: InsightSourceEntry): InsightsEntryStat {
+  const wordCount = entry.wordCount ?? countWords(entry.text);
+  return {
+    id: entry.id,
+    timestamp: entry.timestamp,
+    text: entry.text,
+    wordCount,
+    audioDuration: entry.audioDuration || 0,
+    transcriptionTime: entry.transcriptionTime || 0,
+    processingRatio: calcProcessingRatio(entry.audioDuration || 0, entry.transcriptionTime || 0),
+  };
+}
+
+function mapTranscriptionEntry(row: unknown): TranscriptionEntry {
+  const item = row as Record<string, unknown>;
+  return {
+    id: String(item.id),
+    timestamp: Number(item.timestamp),
+    text: String(item.text ?? ''),
+    confidence: Number(item.confidence ?? 0),
+    audioDuration: Number(item.audioDuration ?? 0),
+    transcriptionTime: Number(item.transcriptionTime ?? 0),
+    wordCount: item.wordCount === null || item.wordCount === undefined ? undefined : Number(item.wordCount),
+    sessionMode: item.sessionMode === 'quick' || item.sessionMode === 'long' ? item.sessionMode : undefined,
+    engine: optionalString(item.engine),
+    model: optionalString(item.model),
+    device: optionalString(item.device),
+    computeType: optionalString(item.computeType),
+    cudaActive: item.cudaActive === null || item.cudaActive === undefined ? undefined : Boolean(item.cudaActive),
+    editedAt: item.editedAt === null || item.editedAt === undefined ? undefined : Number(item.editedAt),
+    originalText: optionalString(item.originalText),
+  };
+}
+
+function mapInsightSourceEntry(row: unknown): InsightSourceEntry {
+  const item = row as Record<string, unknown>;
+  return {
+    id: String(item.id),
+    timestamp: Number(item.timestamp),
+    text: String(item.text ?? ''),
+    confidence: Number(item.confidence ?? 0),
+    audioDuration: Number(item.audioDuration ?? 0),
+    transcriptionTime: Number(item.transcriptionTime ?? 0),
+    wordCount: item.wordCount === null || item.wordCount === undefined ? undefined : Number(item.wordCount),
+  };
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }

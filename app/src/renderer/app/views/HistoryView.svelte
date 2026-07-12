@@ -12,6 +12,8 @@
   let hasMore = $state(true);
   let loading = $state(false);
   let offset = $state(0);
+  let requestGeneration = 0;
+  let resetQueued = false;
 
   // Search and filters
   let searchQuery = $state('');
@@ -25,6 +27,12 @@
 
   // Delete confirmation
   let deleteConfirmId: string | null = $state(null);
+  let deleteDialog: HTMLDivElement | undefined = $state(undefined);
+  let deleteTrigger: HTMLElement | null = null;
+
+  $effect(() => {
+    if (deleteConfirmId) queueMicrotask(() => deleteDialog?.focus());
+  });
 
   // Expanded item
   let expandedId: string | null = $state(null);
@@ -75,28 +83,46 @@
 
   // Load entries
   async function loadEntries(reset = false) {
-    if (loading) return;
-
     if (reset) {
+      requestGeneration += 1;
       offset = 0;
       hasMore = true;
       history = [];
     }
 
+    if (loading) {
+      resetQueued ||= reset;
+      return;
+    }
+
     if (!hasMore) return;
 
+    const generation = requestGeneration;
+    const requestOffset = offset;
+    const filters = buildFilters();
     loading = true;
     try {
-      const filters = buildFilters();
-      const response = await window.murmurMain.getHistoryEntries(offset, BATCH_SIZE, filters);
+      const response = await window.murmurMain.getHistoryEntries(
+        requestOffset,
+        BATCH_SIZE,
+        filters
+      );
+      if (generation !== requestGeneration) return;
+
       history = reset ? response.entries : [...history, ...response.entries];
       hasMore = response.hasMore;
-      offset += response.entries.length;
+      offset = requestOffset + response.entries.length;
       lastUpdated = Date.now();
     } catch (err) {
-      console.error('Failed to load history:', err);
+      if (generation === requestGeneration) {
+        console.error('Failed to load history:', err);
+      }
     } finally {
       loading = false;
+      if (resetQueued) {
+        resetQueued = false;
+        void loadEntries(true);
+      }
     }
   }
 
@@ -159,7 +185,17 @@
   }
 
   function handleDelete(id: string) {
+    deleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     deleteConfirmId = id;
+  }
+
+  function closeDeleteDialog() {
+    deleteConfirmId = null;
+    const trigger = deleteTrigger;
+    deleteTrigger = null;
+    queueMicrotask(() => {
+      if (trigger?.isConnected) trigger.focus();
+    });
   }
 
   async function confirmDelete() {
@@ -172,11 +208,41 @@
       console.error('Failed to delete:', err);
       toast('Failed to delete', 'error');
     }
-    deleteConfirmId = null;
+    closeDeleteDialog();
   }
 
   function cancelDelete() {
-    deleteConfirmId = null;
+    closeDeleteDialog();
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (!deleteConfirmId) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelDelete();
+      return;
+    }
+    if (event.key === 'Tab' && deleteDialog) {
+      const focusable = Array.from(
+        deleteDialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        deleteDialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
   }
 
   function toggleExpand(id: string) {
@@ -220,7 +286,7 @@
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Listen for new entries
-    window.murmurMain.onNewHistoryEntry((entry) => {
+    const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry((entry) => {
       // Prepend new entry if it passes current filters
       const filters = buildFilters();
       let shouldAdd = true;
@@ -231,7 +297,19 @@
       if (filters?.dateFrom && entry.timestamp < filters.dateFrom) {
         shouldAdd = false;
       }
-      if (filters?.minConfidence && entry.confidence < filters.minConfidence) {
+      if (filters?.dateTo && entry.timestamp > filters.dateTo) {
+        shouldAdd = false;
+      }
+      if (filters?.minDuration !== undefined && entry.audioDuration < filters.minDuration) {
+        shouldAdd = false;
+      }
+      if (filters?.maxDuration !== undefined && entry.audioDuration > filters.maxDuration) {
+        shouldAdd = false;
+      }
+      if (filters?.minConfidence !== undefined && entry.confidence < filters.minConfidence) {
+        shouldAdd = false;
+      }
+      if (filters?.editedOnly && entry.editedAt === undefined) {
         shouldAdd = false;
       }
 
@@ -267,7 +345,7 @@
     return () => {
       observer?.disconnect();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.murmurMain.removeNewHistoryEntryListener();
+      unsubscribeNewHistoryEntry();
       if (searchTimeout) clearTimeout(searchTimeout);
     };
   });
@@ -279,6 +357,8 @@
     }
   });
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <div class="h-full flex flex-col p-6 pr-2">
   <!-- Search Bar -->
@@ -450,7 +530,12 @@
             <div
               class="p-4 cursor-pointer"
               onclick={() => toggleExpand(item.id)}
-              onkeydown={(e) => e.key === 'Enter' && toggleExpand(item.id)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleExpand(item.id);
+                }
+              }}
               role="button"
               tabindex="0"
             >
@@ -469,9 +554,10 @@
 
                 <!-- Quick Action Buttons (stacked vertically) -->
                 <div class="flex flex-col gap-0.5 shrink-0 transition-opacity
-                  {isExpanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}">
+                  {isExpanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}">
                   <button
                     onclick={(e) => { e.stopPropagation(); handleCopy(item.text); }}
+                    aria-label="Copy transcription"
                     class="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
                     title="Copy"
                   >
@@ -481,6 +567,7 @@
                   </button>
                   <button
                     onclick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                    aria-label="Delete transcription"
                     class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
                     title="Delete"
                   >
@@ -574,9 +661,17 @@
 <!-- Delete Confirmation Dialog -->
 {#if deleteConfirmId}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl">
-      <h3 class="text-lg font-medium text-zinc-100 mb-2">Delete Transcription?</h3>
-      <p class="text-sm text-zinc-400 mb-6">
+    <div
+      bind:this={deleteDialog}
+      tabindex="-1"
+      class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-dialog-title"
+      aria-describedby="delete-dialog-description"
+    >
+      <h3 id="delete-dialog-title" class="text-lg font-medium text-zinc-100 mb-2">Delete Transcription?</h3>
+      <p id="delete-dialog-description" class="text-sm text-zinc-400 mb-6">
         This action cannot be undone. The transcription will be permanently removed from your history.
       </p>
       <div class="flex gap-3 justify-end">

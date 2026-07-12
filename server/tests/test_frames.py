@@ -12,6 +12,8 @@ from protocol.frames import (
     PartialTextFrame,
     ReadyFrame,
     StartFrame,
+    StatusFrame,
+    StatusKind,
     StopFrame,
     WarningCode,
     WarningFrame,
@@ -182,6 +184,41 @@ class TestWarningFrame:
             "type": "warning",
             "code": "vram_exhausted",
             "message": "GPU VRAM exhausted",
+        }
+
+
+class TestStatusFrame:
+    """Tests for StatusFrame."""
+
+    def test_valid_status_frame(self) -> None:
+        """Create a valid status frame."""
+        frame = StatusFrame(
+            status=StatusKind.LONG_DICTATION_PROCESSING,
+            message="Processing chunk 2/3",
+            chunk_index=2,
+            chunk_total=3,
+            audio_duration=62.8,
+        )
+
+        assert frame.frame == "control"
+        assert frame.type == "status"
+        assert frame.status == StatusKind.LONG_DICTATION_PROCESSING
+
+    def test_status_frame_serialization(self) -> None:
+        """Status frame serializes correctly."""
+        frame = StatusFrame(
+            status=StatusKind.LONG_DICTATION_STARTED,
+            message="Long dictation mode",
+            audio_duration=31.0,
+        )
+        data = frame.model_dump(exclude_none=True)
+
+        assert data == {
+            "frame": "control",
+            "type": "status",
+            "status": "long_dictation_started",
+            "message": "Long dictation mode",
+            "audio_duration": 31.0,
         }
 
 

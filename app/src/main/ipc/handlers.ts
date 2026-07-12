@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
+import { isInsightsRange } from '../../shared/insights.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
@@ -126,6 +127,23 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       return;
     }
     historyServiceRef.delete(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSIGHTS_GET, (_event, range: unknown) => {
+    if (!isInsightsRange(range)) {
+      throw new TypeError('Invalid insights range');
+    }
+    if (!historyServiceRef) {
+      return null;
+    }
+    return historyServiceRef.getInsights(range);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSIGHTS_REBUILD, () => {
+    if (!historyServiceRef) {
+      return;
+    }
+    historyServiceRef.rebuildInsights();
   });
 
   // Handle hotkey capture

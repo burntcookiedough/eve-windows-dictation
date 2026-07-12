@@ -3,7 +3,11 @@
   import { toastState } from '$lib/toast.svelte';
 </script>
 
-<div class="fixed inset-x-0 bottom-16 z-50 flex flex-col items-center gap-2 pointer-events-none">
+<div
+  class="fixed inset-x-0 bottom-16 z-50 flex flex-col items-center gap-2 pointer-events-none"
+  aria-live="polite"
+  aria-atomic="false"
+>
   {#each toastState.toasts as t (t.id)}
     <div
       in:fly={{ y: 12, duration: 200, opacity: 0 }}

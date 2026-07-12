@@ -6,7 +6,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
-from transcription.types import TranscribeResult
+from transcription.types import TranscribeOptions, TranscribeResult
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ class EngineSession(Protocol):
         audio: NDArray[np.float32],
         *,
         hotwords: str | None = None,
+        options: TranscribeOptions | None = None,
     ) -> TranscribeResult: ...
 
     def finalize(self) -> TranscribeResult: ...

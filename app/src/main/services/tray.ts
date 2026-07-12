@@ -1,25 +1,19 @@
-import { Tray, Menu, app, nativeImage } from 'electron';
-import { join } from 'path';
+import { Tray, Menu, app } from 'electron';
+import { getMurmurTrayIcon } from './app-icon.js';
 
 let tray: Tray | null = null;
 
-export function setupTray(onShowMainWindow?: () => void): void {
-  // Use app.getAppPath() for consistent path resolution in dev and production
-  const iconPath = join(app.getAppPath(), 'resources', 'icon.png');
-
-  // Create a simple 16x16 icon if the file doesn't exist
-  let icon: Electron.NativeImage;
-  try {
-    icon = nativeImage.createFromPath(iconPath);
-    if (icon.isEmpty()) {
-      icon = createPlaceholderIcon();
-    }
-  } catch {
-    icon = createPlaceholderIcon();
+function getTrayIcon(): Electron.NativeImage {
+  const icon = getMurmurTrayIcon();
+  if (!icon) {
+    throw new Error('Murmur tray icon resource is missing or invalid');
   }
+  return icon;
+}
 
-  tray = new Tray(icon);
-  tray.setToolTip('Murmur - Press Ctrl+Shift+Space to start');
+export function setupTray(onShowMainWindow?: () => void): void {
+  tray = new Tray(getTrayIcon());
+  tray.setToolTip('Murmur - Press Ctrl+Win to dictate');
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -50,30 +44,11 @@ export function setupTray(onShowMainWindow?: () => void): void {
   });
 }
 
-function createPlaceholderIcon(): Electron.NativeImage {
-  // Create a simple 16x16 gray icon
-  const size = 16;
-  const buffer = Buffer.alloc(size * size * 4);
-
-  for (let i = 0; i < size * size; i++) {
-    const offset = i * 4;
-    buffer[offset] = 100;     // R
-    buffer[offset + 1] = 100; // G
-    buffer[offset + 2] = 100; // B
-    buffer[offset + 3] = 255; // A
-  }
-
-  return nativeImage.createFromBuffer(buffer, {
-    width: size,
-    height: size,
-  });
-}
-
 export function updateTrayState(state: 'idle' | 'recording' | 'error'): void {
   if (!tray) return;
 
   const tooltips: Record<typeof state, string> = {
-    idle: 'Murmur - Press Ctrl+Shift+Space to start',
+    idle: 'Murmur - Press Ctrl+Win to dictate',
     recording: 'Murmur - Recording...',
     error: 'Murmur - Error occurred',
   };

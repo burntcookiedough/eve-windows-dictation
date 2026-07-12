@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
 from protocol.errors import ErrorCode
-from protocol.frames import ClosingReason, StartFrame, WarningCode
+from protocol.frames import ClosingReason, StartFrame, StatusKind, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
@@ -85,7 +85,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
             _partial_emission_loop(sender, context, processor, partial_interval)
         )
         silence_task = asyncio.create_task(
-            _silence_monitor_loop(sender, context, processor)
+            _silence_monitor_loop(websocket, sender, context, processor)
         )
 
         try:
@@ -265,6 +265,18 @@ async def _handle_audio_frame(
 
     # Add to buffer
     context.audio_buffer.append(frame.sequence, frame.samples)
+    audio_duration = context.audio_buffer.duration_seconds
+
+    if (
+        not context.long_dictation_announced
+        and audio_duration >= get_settings().long_dictation_threshold_s
+    ):
+        context.long_dictation_announced = True
+        await sender.send_status(
+            StatusKind.LONG_DICTATION_STARTED,
+            message="Long dictation mode",
+            audio_duration=audio_duration,
+        )
 
     # Transition to streaming if first audio and record audio start time
     if context.state_machine.state == SessionState.STARTED:
@@ -390,6 +402,7 @@ async def _partial_emission_loop(
 
 
 async def _silence_monitor_loop(
+    websocket: WebSocket,
     sender: FrameSender,
     context: SessionContext,
     processor: TranscriptionProcessor,
@@ -418,10 +431,18 @@ async def _silence_monitor_loop(
                     context.session_id,
                     audio_gap,
                 )
-                context.state_machine.transition_to(SessionState.FINALIZING)
-                await _finalize_session(
-                    sender, context, processor, ClosingReason.SILENCE_TIMEOUT
-                )
+                try:
+                    await _finalize_session(
+                        sender, context, processor, ClosingReason.SILENCE_TIMEOUT
+                    )
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        logger.debug(
+                            "[%s] WebSocket already closed after silence timeout",
+                            context.session_id,
+                        )
                 return
 
         # Check 2: Speech-based silence timeout
@@ -448,10 +469,18 @@ async def _silence_monitor_loop(
                 context.silence_timeout,
                 "last speech" if context.last_speech_time else "session start",
             )
-            context.state_machine.transition_to(SessionState.FINALIZING)
-            await _finalize_session(
-                sender, context, processor, ClosingReason.SILENCE_TIMEOUT
-            )
+            try:
+                await _finalize_session(
+                    sender, context, processor, ClosingReason.SILENCE_TIMEOUT
+                )
+            finally:
+                try:
+                    await websocket.close()
+                except Exception:
+                    logger.debug(
+                        "[%s] WebSocket already closed after silence timeout",
+                        context.session_id,
+                    )
             return
 
 
@@ -462,66 +491,82 @@ async def _finalize_session(
     reason: ClosingReason,
 ) -> None:
     """Finalize session: always send final text frame, then closing frame."""
-    if context.state_machine.state == SessionState.CLOSED:
-        return
+    async with context.finalization_lock:
+        if context.state_machine.state == SessionState.CLOSED:
+            return
 
-    logger.info("[%s] Finalizing session (reason=%s)", context.session_id, reason.value)
+        logger.info("[%s] Finalizing session (reason=%s)", context.session_id, reason.value)
 
-    # Transition to finalizing if not already
-    if context.state_machine.state != SessionState.FINALIZING:
-        context.state_machine.transition_to(SessionState.FINALIZING)
+        # Transition to finalizing if not already
+        if context.state_machine.state != SessionState.FINALIZING:
+            context.state_machine.transition_to(SessionState.FINALIZING)
 
-    # Get final transcription. If final transcription fails, fall back to the
-    # last emitted partial so the client still receives a terminal text frame.
-    final_text = ""
-    final_confidence = 0.0
-    final_transcription_time = 0.0
-    final_audio_duration = context.audio_buffer.duration_seconds
+        # Get final transcription. If it fails, fall back to the last partial.
+        final_text = ""
+        final_confidence = 0.0
+        final_transcription_time = 0.0
+        final_audio_duration = context.audio_buffer.duration_seconds
 
-    try:
-        result = await processor.transcribe_final()
-        final_text = result.text
-        final_confidence = result.confidence
-        final_transcription_time = result.transcription_time
-        final_audio_duration = result.audio_duration
-
-        if result.is_empty and context.last_partial_text:
-            logger.warning(
-                "[%s] Final transcription empty, using last partial as terminal text",
-                context.session_id,
+        try:
+            result = await processor.transcribe_final(
+                progress_callback=lambda chunk_index, chunk_total: sender.send_status(
+                    StatusKind.LONG_DICTATION_PROCESSING,
+                    message=f"Processing chunk {chunk_index}/{chunk_total}",
+                    chunk_index=chunk_index,
+                    chunk_total=chunk_total,
+                    audio_duration=final_audio_duration,
+                )
             )
-            final_text = context.last_partial_text
-            final_confidence = 0.0
+            final_text = result.text
+            final_confidence = result.confidence
+            final_transcription_time = result.transcription_time
+            final_audio_duration = result.audio_duration
 
-        if final_text:
-            logger.info(
-                "[%s] Final transcription: %r (%.1fs audio)",
-                context.session_id,
-                final_text[:100] if len(final_text) > 100 else final_text,
+            if result.is_empty and context.last_partial_text:
+                logger.warning(
+                    "[%s] Final transcription empty, using last partial as terminal text",
+                    context.session_id,
+                )
+                final_text = context.last_partial_text
+                final_confidence = 0.0
+
+            if final_text:
+                logger.info(
+                    "[%s] Final transcription: %r (%.1fs audio)",
+                    context.session_id,
+                    final_text[:100] if len(final_text) > 100 else final_text,
+                    final_audio_duration,
+                )
+            else:
+                logger.info(
+                    "[%s] Final transcription is empty (no speech detected)",
+                    context.session_id,
+                )
+        except Exception as e:
+            logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
+            if context.last_partial_text:
+                final_text = context.last_partial_text
+                logger.warning(
+                    "[%s] Falling back to last partial as terminal text after finalization error",
+                    context.session_id,
+                )
+
+        try:
+            await sender.send_final(
+                final_text,
+                final_confidence,
+                final_transcription_time,
                 final_audio_duration,
             )
-        else:
-            logger.info("[%s] Final transcription is empty (no speech detected)", context.session_id)
-    except Exception as e:
-        logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
-        if context.last_partial_text:
-            final_text = context.last_partial_text
-            logger.warning(
-                "[%s] Falling back to last partial as terminal text after finalization error",
-                context.session_id,
-            )
+        except Exception:
+            logger.debug("[%s] Failed to send final frame", context.session_id, exc_info=True)
 
-    await sender.send_final(
-        final_text,
-        final_confidence,
-        final_transcription_time,
-        final_audio_duration,
-    )
-
-    # Send closing frame
-    logger.info("[%s] Sending closing frame", context.session_id)
-    await sender.send_closing(reason)
-
-    # Mark closed
-    context.state_machine.transition_to(SessionState.CLOSED)
-    logger.info("[%s] Session closed", context.session_id)
+        try:
+            logger.info("[%s] Sending closing frame", context.session_id)
+            await sender.send_closing(reason)
+        except Exception:
+            logger.debug("[%s] Failed to send closing frame", context.session_id, exc_info=True)
+        finally:
+            if context.state_machine.state != SessionState.CLOSED:
+                context.state_machine.transition_to(SessionState.CLOSED)
+            logger.info("[%s] Session closed", context.session_id)

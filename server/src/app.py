@@ -32,6 +32,15 @@ from version import SERVER_VERSION
 from websocket.handler import websocket_handler
 
 logger = logging.getLogger(__name__)
+_engine_tasks: set[asyncio.Task[None]] = set()
+
+
+def _schedule_engine_swap(engine_mgr: Any, settings: Settings) -> asyncio.Task[None]:
+    """Keep background engine loads alive and observe their completion."""
+    task = asyncio.create_task(_swap_engine_background(engine_mgr, settings))
+    _engine_tasks.add(task)
+    task.add_done_callback(_engine_tasks.discard)
+    return task
 
 
 @asynccontextmanager
@@ -57,15 +66,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Initializing engine manager (engine loads in background)...")
 
     engine_mgr = init_engine_manager(settings, load_engine=False)
-    asyncio.create_task(_swap_engine_background(engine_mgr, settings))
+    _schedule_engine_swap(engine_mgr, settings)
 
     logger.info("Murmur ready")
 
     yield
 
     logger.info("Shutting down murmur...")
-    shutdown_executor()
     shutdown_engine_manager()
+    shutdown_executor()
+    if _engine_tasks:
+        _, pending = await asyncio.wait(tuple(_engine_tasks), timeout=1.0)
+        if pending:
+            logger.info(
+                "Waiting for %d background engine load(s) to leave native code",
+                len(pending),
+            )
     logger.info("Murmur stopped")
 
 
@@ -163,7 +179,7 @@ def create_app() -> FastAPI:
         reload_started = False
         if needs_reload:
             reload_started = True
-            asyncio.create_task(_swap_engine_background(engine_mgr, new_settings))
+            _schedule_engine_swap(engine_mgr, new_settings)
 
         status = engine_mgr.get_status()
         session_mgr = get_session_manager()

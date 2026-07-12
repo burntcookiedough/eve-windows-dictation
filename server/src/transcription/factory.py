@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import importlib.util
 import logging
 import threading
 from dataclasses import dataclass, replace
@@ -25,8 +26,7 @@ logger = logging.getLogger(__name__)
 def discover_engines() -> list[dict]:
     available = []
 
-    try:
-        import nemo.collections.asr  # noqa: F401
+    if _module_is_available("nemo"):
         available.append({
             "id": "nemotron",
             "name": "Nemotron Speech",
@@ -36,7 +36,7 @@ def discover_engines() -> list[dict]:
             "languages": ["en"],
             "features": ["fast_batch", "constant_latency"],
         })
-    except ImportError:
+    else:
         available.append({
             "id": "nemotron",
             "name": "Nemotron Speech",
@@ -45,8 +45,7 @@ def discover_engines() -> list[dict]:
             "install_hint": "uv sync --extra nemotron",
         })
 
-    try:
-        import faster_whisper  # noqa: F401
+    if _module_is_available("faster_whisper"):
         available.append({
             "id": "whisper",
             "name": "Faster-Whisper",
@@ -56,7 +55,7 @@ def discover_engines() -> list[dict]:
             "languages": ["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
             "features": ["multilingual", "hotwords"],
         })
-    except ImportError:
+    else:
         available.append({
             "id": "whisper",
             "name": "Faster-Whisper",
@@ -66,6 +65,14 @@ def discover_engines() -> list[dict]:
         })
 
     return available
+
+
+def _module_is_available(module_name: str) -> bool:
+    """Check for an optional engine without executing its import-time code."""
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
 
 
 def _get_available_engine_ids() -> list[str]:
@@ -143,6 +150,7 @@ class EngineManager:
         self._gpu_name: str | None = None
         self._gpu_vram_gb: float | None = None
         self._estimated_max_duration_s: int | None = None
+        self._shutting_down = False
 
     def _resolve_engine_availability(
         self,
@@ -277,10 +285,10 @@ class EngineManager:
         info = self.engine_info if self._engine else None
         if self._pending_status:
             status_value = "loading"
-        elif self._swap_error:
-            status_value = "error"
         elif self._engine:
             status_value = "ready"
+        elif self._swap_error:
+            status_value = "error"
         else:
             status_value = "loading"
 
@@ -333,6 +341,10 @@ class EngineManager:
 
     async def _swap_engine_inner(self, new_settings: Settings) -> None:
         try:
+            with self._lock:
+                if self._shutting_down:
+                    return
+
             self._swap_error = None
             available = _get_available_engine_ids()
             self._prepare_engine_selection(new_settings, available)
@@ -364,7 +376,7 @@ class EngineManager:
             try:
                 new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
             except Exception as create_error:
-                if should_unload_old:
+                if should_unload_old and not self._shutting_down:
                     # Old engine was unloaded; attempt to restore it
                     logger.warning(
                         "New engine creation failed; attempting to restore previous engine"
@@ -373,21 +385,44 @@ class EngineManager:
                         restored = await loop.run_in_executor(
                             None, lambda: _create_engine(self._settings)
                         )
+                        discard_restored = False
                         with self._lock:
-                            self._engine = restored
-                        logger.info("Previous engine restored successfully")
+                            if self._shutting_down:
+                                discard_restored = True
+                            else:
+                                self._engine = restored
+                        if discard_restored:
+                            await loop.run_in_executor(None, restored.shutdown)
+                        else:
+                            logger.info("Previous engine restored successfully")
                     except Exception as restore_error:
                         logger.error(
                             "Failed to restore previous engine: %s", restore_error
                         )
                 raise create_error
 
+            discard_new_engine = False
             with self._lock:
-                old_engine = self._engine
-                self._engine = new_engine
-                self._settings = new_settings
+                if self._shutting_down:
+                    discard_new_engine = True
+                    old_engine = None
+                    has_active = False
+                else:
+                    old_engine = self._engine
+                    self._engine = new_engine
+                    self._settings = new_settings
+                    has_active = (
+                        old_engine is not None
+                        and old_engine in self._active_sessions.values()
+                    )
 
-                has_active = old_engine is not None and old_engine in self._active_sessions.values()
+            if discard_new_engine:
+                logger.info("Discarding engine that finished loading during shutdown")
+                await loop.run_in_executor(None, new_engine.shutdown)
+                self._pending_status = None
+                self._pending_engine_id = None
+                self._pending_message = None
+                return
 
             self._update_runtime_metadata(new_settings)
 
@@ -410,11 +445,18 @@ class EngineManager:
             raise
 
     def shutdown(self) -> None:
+        engine: TranscriptionEngine | None
         with self._lock:
-            if self._engine is not None:
-                logger.info("Shutting down engine manager")
-                self._engine.shutdown()
-                self._engine = None
+            self._shutting_down = True
+            self._pending_status = None
+            self._pending_engine_id = None
+            self._pending_message = None
+            engine = self._engine
+            self._engine = None
+
+        if engine is not None:
+            logger.info("Shutting down engine manager")
+            engine.shutdown()
 
 
 # Global engine manager

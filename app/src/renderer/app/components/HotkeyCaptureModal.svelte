@@ -59,11 +59,17 @@
     onclick={handleBackdropClick}
   >
     <!-- Modal -->
-    <div class="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-[320px] shadow-2xl">
-      <h2 class="text-lg font-medium text-zinc-100 mb-2 text-center">
+    <div
+      class="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-[320px] shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hotkey-dialog-title"
+      aria-describedby="hotkey-dialog-description"
+    >
+      <h2 id="hotkey-dialog-title" class="text-lg font-medium text-zinc-100 mb-2 text-center">
         Recording Hotkey
       </h2>
-      <p class="text-sm text-zinc-400 mb-6 text-center">
+      <p id="hotkey-dialog-description" class="text-sm text-zinc-400 mb-6 text-center">
         Press any key combination...
       </p>
 

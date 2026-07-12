@@ -1,19 +1,14 @@
-import { app, BrowserWindow, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { MAIN_WINDOW_CONFIG } from '../../shared/constants.js';
 import { getMainWindowBounds, setMainWindowBounds } from '../services/settings.js';
 import type { WindowBounds } from '../../shared/types.js';
+import { getMurmurIcon } from '../services/app-icon.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
 const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
-
-function getAppIcon(): Electron.NativeImage | undefined {
-  const iconPath = join(app.getAppPath(), 'resources', 'icon.ico');
-  const icon = nativeImage.createFromPath(iconPath);
-  return icon.isEmpty() ? undefined : icon;
-}
 
 let isQuitting = false;
 
@@ -45,6 +40,28 @@ function areBoundsOnScreen(bounds: WindowBounds): boolean {
   return false;
 }
 
+function clampBoundsToDisplay(bounds: WindowBounds): WindowBounds {
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const width = Math.min(
+    Math.max(bounds.width, MAIN_WINDOW_CONFIG.MIN_WIDTH),
+    workArea.width
+  );
+  const height = Math.min(
+    Math.max(bounds.height, MAIN_WINDOW_CONFIG.MIN_HEIGHT),
+    workArea.height
+  );
+  const x = Math.min(
+    Math.max(bounds.x, workArea.x),
+    workArea.x + workArea.width - width
+  );
+  const y = Math.min(
+    Math.max(bounds.y, workArea.y),
+    workArea.y + workArea.height - height
+  );
+
+  return { x, y, width, height };
+}
+
 export interface CreateMainWindowOptions {
   startMinimized?: boolean;
 }
@@ -55,19 +72,32 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
   // Restore saved window bounds if valid, otherwise use defaults
   const savedBounds = getMainWindowBounds();
   const useSavedBounds = savedBounds && areBoundsOnScreen(savedBounds);
+  const restoredBounds = useSavedBounds ? clampBoundsToDisplay(savedBounds) : null;
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
+  const displayWorkAreas = screen.getAllDisplays().map((display) => display.workArea);
+  const defaultWidth = Math.min(MAIN_WINDOW_CONFIG.WIDTH, primaryWorkArea.width);
+  const defaultHeight = Math.min(MAIN_WINDOW_CONFIG.HEIGHT, primaryWorkArea.height);
+  const minWidth = Math.min(
+    MAIN_WINDOW_CONFIG.MIN_WIDTH,
+    ...displayWorkAreas.map((workArea) => workArea.width)
+  );
+  const minHeight = Math.min(
+    MAIN_WINDOW_CONFIG.MIN_HEIGHT,
+    ...displayWorkAreas.map((workArea) => workArea.height)
+  );
 
   const mainWindow = new BrowserWindow({
-    width: useSavedBounds ? savedBounds.width : MAIN_WINDOW_CONFIG.WIDTH,
-    height: useSavedBounds ? savedBounds.height : MAIN_WINDOW_CONFIG.HEIGHT,
-    x: useSavedBounds ? savedBounds.x : undefined,
-    y: useSavedBounds ? savedBounds.y : undefined,
-    minWidth: MAIN_WINDOW_CONFIG.MIN_WIDTH,
-    minHeight: MAIN_WINDOW_CONFIG.MIN_HEIGHT,
+    width: restoredBounds?.width ?? defaultWidth,
+    height: restoredBounds?.height ?? defaultHeight,
+    x: restoredBounds?.x,
+    y: restoredBounds?.y,
+    minWidth,
+    minHeight,
     show: false,
     frame: false,
     transparent: false,
     backgroundColor: '#0a0a0a',
-    icon: getAppIcon(),
+    icon: getMurmurIcon('icon.ico'),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

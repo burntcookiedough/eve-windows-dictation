@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron';
-import { spawn, ChildProcess } from 'child_process';
+import { execFile, spawn, ChildProcess } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants.js';
@@ -10,22 +11,23 @@ import type {
   ServerLogEntry,
   ServerDiagnostics,
   ModelDownloadState,
+  EngineStatus,
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
+import {
+  isMurmurServerCommandLine,
+  parseHealthyResponse,
+  type HealthState,
+} from './server-health.js';
 
 const log = createLogger('ServerManager');
 
 const MAX_LOG_ENTRIES = 500;
 const HEALTH_POLL_INTERVAL_MS = 3000;
-const START_TIMEOUT_MS = 30000;
+const START_PID_TIMEOUT_MS = 30000;
+const START_HEALTH_TIMEOUT_MS = 180000;
 const STOP_TIMEOUT_MS = 10000;
-
-interface HealthState {
-  healthy: boolean;
-  version?: string;
-  diagnostics?: ServerDiagnostics;
-  modelDownload?: ModelDownloadState;
-}
+const execFileAsync = promisify(execFile);
 
 export class ServerManager {
   private status: ServerStatus = 'idle';
@@ -39,6 +41,7 @@ export class ServerManager {
   private serverVersion: string | null = null;
   private diagnostics: ServerDiagnostics | null = null;
   private modelDownload: ModelDownloadState | null = null;
+  private engineStatus: EngineStatus | null = null;
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -106,21 +109,7 @@ export class ServerManager {
         return { healthy: false };
       }
 
-      const data = (await response.json()) as Record<string, unknown>;
-      const diagnostics =
-        data.diagnostics && typeof data.diagnostics === 'object'
-          ? (data.diagnostics as ServerDiagnostics)
-          : undefined;
-      const modelDownload =
-        data.model_download && typeof data.model_download === 'object'
-          ? (data.model_download as ModelDownloadState)
-          : undefined;
-      return {
-        healthy: true,
-        version: typeof data.version === 'string' ? data.version : undefined,
-        diagnostics,
-        modelDownload,
-      };
+      return parseHealthyResponse(await response.json());
     } catch {
       return { healthy: false };
     }
@@ -137,13 +126,15 @@ export class ServerManager {
         log.warn('Server health check failed');
         this.setDiagnostics(undefined);
         this.setModelDownload(undefined);
+        this.setEngineStatus(undefined);
         this.updateStatus('error', 'Health check failed');
         return;
       }
 
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
       const downloadChanged = this.setModelDownload(health.modelDownload);
-      let shouldBroadcast = diagnosticsChanged || downloadChanged;
+      const engineChanged = this.setEngineStatus(health.engineStatus);
+      let shouldBroadcast = diagnosticsChanged || downloadChanged || engineChanged;
 
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
@@ -175,6 +166,41 @@ export class ServerManager {
       return false;
     }
     this.modelDownload = nextValue;
+    return true;
+  }
+
+  private async isOwnedServerProcess(pid: number): Promise<boolean> {
+    if (this.childProcess?.pid === pid) return true;
+    if (process.platform !== 'win32') return false;
+
+    try {
+      const { stdout } = await execFileAsync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
+        ],
+        { encoding: 'utf8', timeout: 3000, windowsHide: true }
+      );
+      const commandLine = stdout.trim();
+      return isMurmurServerCommandLine(commandLine);
+    } catch (error) {
+      log.warn('Could not verify stale server process ownership', {
+        pid,
+        error: error as Error,
+      });
+      return false;
+    }
+  }
+
+  private setEngineStatus(next?: EngineStatus): boolean {
+    const nextValue = next ?? null;
+    if (JSON.stringify(this.engineStatus) === JSON.stringify(nextValue)) {
+      return false;
+    }
+    this.engineStatus = nextValue;
     return true;
   }
 
@@ -250,6 +276,7 @@ export class ServerManager {
         ? `ws://localhost:${this.pidFile.port}/transcribe`
         : undefined,
       managed: this.managed,
+      engineStatus: this.engineStatus ?? undefined,
       diagnostics: this.diagnostics ?? undefined,
       modelDownload: this.modelDownload ?? undefined,
     };
@@ -275,6 +302,7 @@ export class ServerManager {
       this.serverVersion = null;
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
+      this.setEngineStatus(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -286,6 +314,7 @@ export class ServerManager {
       this.serverVersion = null;
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
+      this.setEngineStatus(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -297,6 +326,7 @@ export class ServerManager {
       this.serverVersion = null;
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
+      this.setEngineStatus(undefined);
       this.updateStatus('error', 'Server not responding');
       return false;
     }
@@ -307,6 +337,7 @@ export class ServerManager {
     this.serverVersion = health.version ?? null;
     this.setDiagnostics(health.diagnostics);
     this.setModelDownload(health.modelDownload);
+    this.setEngineStatus(health.engineStatus);
     this.managed = false; // External server
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
@@ -334,7 +365,12 @@ export class ServerManager {
    * Get the command and arguments to spawn the server.
    * Returns null if server path cannot be determined.
    */
-  private getServerCommand(): { command: string; args: string[]; cwd: string } | null {
+  private getServerCommand(): {
+    command: string;
+    args: string[];
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+  } | null {
     // In production, the server is bundled with the app
     // The exact path depends on how the app is packaged
 
@@ -345,11 +381,26 @@ export class ServerManager {
       // Production: server is in resources
       const resourcesPath = process.resourcesPath;
       const serverDir = path.join(resourcesPath, 'server');
-      const pythonExe = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
+      const runtimePython = path.join(serverDir, '.runtime', 'python.exe');
+      const legacyPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
+      const sitePackages = path.join(serverDir, '.venv', 'Lib', 'site-packages');
       const mainPy = path.join(serverDir, 'src', 'main.py');
 
-      if (!fs.existsSync(pythonExe)) {
-        log.error('Server Python not found', { path: pythonExe });
+      let pythonExe = runtimePython;
+      if (!fs.existsSync(runtimePython)) {
+        if (!fs.existsSync(legacyPython)) {
+          log.error('Server Python runtime not found', {
+            runtimePath: runtimePython,
+            legacyPath: legacyPython,
+          });
+          return null;
+        }
+        pythonExe = legacyPython;
+        log.warn('Using legacy virtual-environment Python; packaged builds should include .runtime', {
+          path: legacyPython,
+        });
+      } else if (!fs.existsSync(sitePackages)) {
+        log.error('Bundled server site-packages not found', { path: sitePackages });
         return null;
       }
 
@@ -357,6 +408,13 @@ export class ServerManager {
         command: pythonExe,
         args: [mainPy],
         cwd: serverDir,
+        env: {
+          PYTHONNOUSERSITE: '1',
+          PYTHONUTF8: '1',
+          PYTHONPATH: fs.existsSync(sitePackages)
+            ? [sitePackages, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
+            : process.env.PYTHONPATH,
+        },
       };
     } else {
       // Development mode - this shouldn't be called, but provide fallback
@@ -386,18 +444,26 @@ export class ServerManager {
         this.serverVersion = health.version ?? null;
         this.setDiagnostics(health.diagnostics);
         this.setModelDownload(health.modelDownload);
+        this.setEngineStatus(health.engineStatus);
         this.managed = false;
         this.updateStatus('running');
         this.startHealthPolling(existingPid.port);
         return;
       }
-      // Process alive but not healthy - try to kill it
-      log.warn('Existing server not responding, will attempt to kill');
-      try {
-        process.kill(existingPid.pid, 'SIGTERM');
-        await this.waitForProcessExit(existingPid.pid, 5000);
-      } catch {
-        // Ignore errors, proceed with starting new server
+      // A stale PID can be reused by an unrelated process. Only terminate a
+      // command line that still identifies itself as Murmur's Python entry.
+      if (await this.isOwnedServerProcess(existingPid.pid)) {
+        log.warn('Existing Murmur server is not responding; terminating it');
+        try {
+          process.kill(existingPid.pid, 'SIGTERM');
+          await this.waitForProcessExit(existingPid.pid, 5000);
+        } catch {
+          // Ignore errors, proceed with starting a new server.
+        }
+      } else {
+        log.warn('Stale PID belongs to an unrelated process; refusing to terminate it', {
+          pid: existingPid.pid,
+        });
       }
       this.cleanupStalePidFile();
     }
@@ -414,21 +480,28 @@ export class ServerManager {
     this.serverVersion = null;
     this.setDiagnostics(undefined);
     this.setModelDownload(undefined);
+    this.setEngineStatus(undefined);
     this.logs = []; // Clear logs for new session
 
     try {
       const spawnStartedAt = Date.now();
+      const childEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        ...serverCmd.env,
+        MURMUR_PID_FILE: this.getPidFilePath(),
+        MURMUR_SETTINGS_FILE: path.join(app.getPath('userData'), 'server-settings.json'),
+        MURMUR_PORT: '0',
+      };
+      // Transformers v5 removes this deprecated variable. HF_HOME and the
+      // standard Hugging Face cache discovery continue to work normally.
+      delete childEnv.TRANSFORMERS_CACHE;
 
       this.childProcess = spawn(serverCmd.command, serverCmd.args, {
         cwd: serverCmd.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         windowsHide: true,
-        env: {
-          ...process.env,
-          MURMUR_PID_FILE: this.getPidFilePath(),
-          MURMUR_PORT: '0',
-        },
+        env: childEnv,
       });
 
       // Capture stdout
@@ -457,6 +530,7 @@ export class ServerManager {
         this.serverVersion = null;
         this.setDiagnostics(undefined);
         this.setModelDownload(undefined);
+        this.setEngineStatus(undefined);
 
         if (this.status !== 'stopping') {
           // Preserve explicit startup/runtime errors already set by start()/stop() logic.
@@ -478,13 +552,13 @@ export class ServerManager {
       });
 
       // Wait for PID file to appear (indicates server is ready)
-      const pidData = await this.waitForPidFile(START_TIMEOUT_MS, spawnStartedAt);
+      const pidData = await this.waitForPidFile(START_PID_TIMEOUT_MS, spawnStartedAt);
       if (!pidData) {
         throw new Error('Server did not write PID file within timeout');
       }
 
       // Wait for health check to pass
-      const health = await this.waitForHealth(pidData.port, START_TIMEOUT_MS);
+      const health = await this.waitForHealth(pidData.port, START_HEALTH_TIMEOUT_MS);
       if (!health) {
         throw new Error('Server health check did not pass within timeout');
       }
@@ -494,6 +568,7 @@ export class ServerManager {
       this.serverVersion = health.version ?? null;
       this.setDiagnostics(health.diagnostics);
       this.setModelDownload(health.modelDownload);
+      this.setEngineStatus(health.engineStatus);
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
@@ -601,6 +676,7 @@ export class ServerManager {
               this.serverVersion = null;
               this.setDiagnostics(undefined);
               this.setModelDownload(undefined);
+              this.setEngineStatus(undefined);
               this.updateStatus('stopped');
               return;
             }
@@ -624,10 +700,14 @@ export class ServerManager {
         }
       } else if (this.pidFile?.pid) {
         // No child process ref but have PID (shouldn't happen but handle it)
-        try {
-          process.kill(this.pidFile.pid, 'SIGTERM');
-        } catch {
-          // Process may already be gone
+        if (await this.isOwnedServerProcess(this.pidFile.pid)) {
+          try {
+            process.kill(this.pidFile.pid, 'SIGTERM');
+          } catch {
+            // Process may already be gone
+          }
+        } else {
+          log.warn('Refusing to stop unverified PID', { pid: this.pidFile.pid });
         }
       }
 
@@ -637,6 +717,7 @@ export class ServerManager {
       this.serverVersion = null;
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
+      this.setEngineStatus(undefined);
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });

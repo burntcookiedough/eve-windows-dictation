@@ -1,13 +1,17 @@
 import type {
   AvailableEngine,
+  AudioCaptureErrorPayload,
   ConnectionStatePayload,
   EngineStatus,
   HistoryEntryWithGroup,
   HistoryFilters,
   HistoryResponse,
   Hotkey,
+  InsightsRange,
+  InsightsResponse,
   RecordingDebugState,
   RecordingStatePayload,
+  RecordingStatusPayload,
   RecordingWarningPayload,
   ServerLogEntry,
   ServerSettingsResponse,
@@ -32,8 +36,9 @@ declare global {
       getHotkeyDisplayName: (hotkey: Hotkey) => Promise<string>;
       getHistoryEntries: (offset: number, limit: number, filters?: HistoryFilters) => Promise<HistoryResponse>;
       deleteHistoryEntry: (id: string) => Promise<void>;
-      onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => void;
-      removeNewHistoryEntryListener: () => void;
+      getInsights: (range: InsightsRange) => Promise<InsightsResponse | null>;
+      rebuildInsights: () => Promise<void>;
+      onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => () => void;
       copyToClipboard: (text: string) => void;
       getRecordingDebugState: () => Promise<RecordingDebugState>;
       startRecording: () => Promise<RecordingDebugState>;
@@ -62,9 +67,11 @@ declare global {
       onConnectionState: (callback: (state: ConnectionStatePayload) => void) => () => void;
       onTranscription: (callback: (data: TranscriptionPayload) => void) => () => void;
       onWarning: (callback: (warning: RecordingWarningPayload) => void) => () => void;
+      onStatus: (callback: (status: RecordingStatusPayload) => void) => () => void;
       onStartRecording: (callback: (deviceId?: string) => void) => () => void;
       onStopRecording: (callback: () => void) => () => void;
       sendAudioData: (buffer: ArrayBuffer) => void;
+      reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => void;
       copyToClipboard: (text: string) => void;
       removeAllListeners: () => void;
     };

@@ -33,6 +33,16 @@ export interface ControlFrameWarning {
   message: string;
 }
 
+export interface ControlFrameStatus {
+  frame: 'control';
+  type: 'status';
+  status: 'long_dictation_started' | 'long_dictation_processing';
+  message?: string;
+  chunk_index?: number;
+  chunk_total?: number;
+  audio_duration?: number;
+}
+
 export interface ControlFrameClosing {
   frame: 'control';
   type: 'closing';
@@ -45,6 +55,7 @@ export type ControlFrame =
   | ControlFrameReady
   | ControlFrameError
   | ControlFrameWarning
+  | ControlFrameStatus
   | ControlFrameClosing;
 
 // Text frames
@@ -72,6 +83,7 @@ export type ServerFrame =
   | ControlFrameReady
   | ControlFrameError
   | ControlFrameWarning
+  | ControlFrameStatus
   | ControlFrameClosing
   | TextFrame;
 

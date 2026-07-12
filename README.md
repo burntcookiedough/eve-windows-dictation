@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/v0.5.0-orange?style=flat-square" alt="v0.5.0">
+  <img src="https://img.shields.io/badge/v0.6.0-orange?style=flat-square" alt="v0.6.0">
 </p>
 
 <!-- TODO: add a demo gif here once one exists -->
@@ -88,6 +88,7 @@ The app auto-detects a running server in dev mode. In production, it manages the
 
 ```powershell
 cd server && uv sync --extra all
+..\scripts\prepare-python-runtime.ps1 -ServerDir .
 cd ../app && bun run package:win
 ```
 
@@ -107,7 +108,7 @@ For the exact Windows 11 + RTX 3060 local CUDA dictation setup, including model 
 
 App settings (hotkey, audio device, engine, post-processing, auto-paste) are configured through the UI.
 
-Server settings use `MURMUR_`-prefixed environment variables and can also be changed at runtime from the app, which persists them to `server/settings.json`.
+Server settings use `MURMUR_`-prefixed environment variables and can also be changed at runtime from the app. Packaged builds persist them under the Electron user-data directory so upgrades do not overwrite them.
 
 <details>
 <summary><strong>Server environment variables</strong></summary>

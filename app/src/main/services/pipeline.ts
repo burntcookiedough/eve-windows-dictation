@@ -1,6 +1,12 @@
 import { randomUUID } from 'crypto';
-import type { TranscriptionEntry, Settings, HistoryEntryWithGroup } from '../../shared/types.js';
+import type {
+  DictationSessionMode,
+  HistoryEntryWithGroup,
+  Settings,
+  TranscriptionEntry,
+} from '../../shared/types.js';
 import type { TextFrameFinal } from '../../shared/protocol.js';
+import { countWords } from '../../shared/insights.js';
 import { copyToClipboard, pasteText } from './clipboard.js';
 import type { HistoryService } from './history.js';
 import { createLogger } from '../lib/logger.js';
@@ -60,7 +66,7 @@ function applyDictationMode(text: string, mode: Settings['dictationMode']): stri
 /**
  * Build a TranscriptionEntry from a final text frame
  */
-export function buildEntry(frame: TextFrameFinal): TranscriptionEntry {
+export function buildEntry(frame: TextFrameFinal, sessionMode: DictationSessionMode = 'quick'): TranscriptionEntry {
   return {
     id: randomUUID(),
     timestamp: Date.now(),
@@ -68,6 +74,8 @@ export function buildEntry(frame: TextFrameFinal): TranscriptionEntry {
     confidence: frame.confidence,
     audioDuration: frame.audio_duration,
     transcriptionTime: frame.transcription_time * 1000, // Server sends seconds, we store ms
+    wordCount: countWords(frame.text),
+    sessionMode,
   };
 }
 
@@ -121,18 +129,23 @@ export interface DispatchResult {
 export async function dispatchToOutputs(
   entry: TranscriptionEntry,
   settings: Settings,
-  historyService: HistoryService | null
+  historyService: HistoryService | null,
+  pasteTargetWindowHandle?: number | null
 ): Promise<DispatchResult> {
   // Auto-paste temporarily uses the clipboard and can restore the previous value.
   if (settings.autoPaste && entry.text) {
     try {
       await pasteText(entry.text, {
-        restoreClipboard: settings.restoreClipboardAfterPaste,
+        restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
         restoreDelayMs: settings.clipboardRestoreDelayMs,
         method: settings.pasteMethod,
+        targetWindowHandle: pasteTargetWindowHandle,
       });
     } catch (err) {
       log.error('Auto-paste failed', { error: err as Error });
+      if (settings.autoCopy) {
+        copyToClipboard(entry.text);
+      }
     }
   } else if (settings.autoCopy && entry.text) {
     copyToClipboard(entry.text);
@@ -162,9 +175,19 @@ export async function dispatchToOutputs(
 export async function processFinalTranscription(
   frame: TextFrameFinal,
   settings: Settings,
-  historyService: HistoryService | null
+  historyService: HistoryService | null,
+  sessionMode: DictationSessionMode = 'quick',
+  pasteTargetWindowHandle?: number | null
 ): Promise<DispatchResult> {
-  const rawEntry = buildEntry(frame);
+  const rawEntry = buildEntry(frame, sessionMode);
   const processedEntry = applyPostProcessing(rawEntry, settings);
-  return dispatchToOutputs(processedEntry, settings, historyService);
+  return dispatchToOutputs(
+    {
+      ...processedEntry,
+      wordCount: countWords(processedEntry.text),
+    },
+    settings,
+    historyService,
+    pasteTargetWindowHandle
+  );
 }

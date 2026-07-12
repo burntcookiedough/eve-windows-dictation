@@ -3,40 +3,44 @@ import type { UiohookKeyboardEvent } from 'uiohook-napi';
 import { app } from 'electron';
 import type { Hotkey } from '../../shared/types.js';
 import { getSetting } from './settings.js';
-import { isModifierKey, formatHotkey } from './keycodes.js';
+import {
+  formatHotkey,
+  isAltKeycode,
+  isCtrlKeycode,
+  isMetaKeycode,
+  isModifierKey,
+  isShiftKeycode,
+} from './keycodes.js';
+import { HotkeyGestureRecognizer } from './hotkey-gesture.js';
+import { captureModifierChord } from './hotkey-gesture.js';
+import type { KeyEventSnapshot, ModifierState } from './hotkey-gesture.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Hotkey');
 
-let keyDownCallback: (() => void) | null = null;
-let keyUpCallback: (() => void) | null = null;
-let isKeyDown = false;
+interface HotkeyCallbacks {
+  onHoldStart: () => void;
+  onHoldEnd: () => void;
+  onDoubleTap: () => void;
+  onLongShortcut: () => void;
+}
+
+let callbacks: HotkeyCallbacks | null = null;
 let isStarted = false;
-let activeKeycode: number | null = null; // Track which keycode triggered the keydown
 let heldCtrl = false;
 let heldAlt = false;
 let heldShift = false;
 let heldMeta = false;
+const quickRecognizer = new HotkeyGestureRecognizer();
+const longRecognizer = new HotkeyGestureRecognizer();
 
 // Current hotkey configuration (read from settings on each key event)
 function getCurrentHotkey(): Hotkey {
   return getSetting('hotkey');
 }
 
-function isMetaKeycode(keycode: number): boolean {
-  return keycode === 3675 || keycode === 3676;
-}
-
-function isCtrlKeycode(keycode: number): boolean {
-  return keycode === 29 || keycode === 3613;
-}
-
-function isAltKeycode(keycode: number): boolean {
-  return keycode === 56 || keycode === 3640;
-}
-
-function isShiftKeycode(keycode: number): boolean {
-  return keycode === 42 || keycode === 54;
+function getCurrentLongHotkey(): Hotkey {
+  return getSetting('longHotkey');
 }
 
 function updateHeldModifiers(e: UiohookKeyboardEvent, isDown: boolean): void {
@@ -46,71 +50,73 @@ function updateHeldModifiers(e: UiohookKeyboardEvent, isDown: boolean): void {
   if (isMetaKeycode(e.keycode)) heldMeta = isDown;
 }
 
-/**
- * Check if a keyboard event matches the configured hotkey (full match including modifiers)
- */
-function matchesHotkeyDown(e: UiohookKeyboardEvent, hotkey: Hotkey): boolean {
-  const metaTrigger = isMetaKeycode(hotkey.keycode);
-  const ctrlTrigger = isCtrlKeycode(hotkey.keycode);
-  const keyMatches = metaTrigger ? isMetaKeycode(e.keycode) : e.keycode === hotkey.keycode;
-  const effectiveCtrl = e.ctrlKey || heldCtrl || ctrlTrigger;
-  const effectiveAlt = e.altKey || heldAlt || isAltKeycode(e.keycode);
-  const effectiveShift = e.shiftKey || heldShift || isShiftKeycode(e.keycode);
-  const effectiveMeta = e.metaKey || heldMeta || metaTrigger;
-  const ctrlMatches = ctrlTrigger ? true : effectiveCtrl === hotkey.ctrlKey;
-  const metaMatches = metaTrigger ? true : effectiveMeta === hotkey.metaKey;
-
-  return (
-    keyMatches &&
-    ctrlMatches &&
-    effectiveAlt === hotkey.altKey &&
-    effectiveShift === hotkey.shiftKey &&
-    metaMatches
-  );
+function currentModifiers(e: UiohookKeyboardEvent): ModifierState {
+  return {
+    ctrl: heldCtrl || e.ctrlKey,
+    alt: heldAlt || e.altKey,
+    shift: heldShift || e.shiftKey,
+    meta: heldMeta || e.metaKey,
+  };
 }
 
-/**
- * Check if a keyboard event matches the keyup for the active hotkey.
- * Only checks keycode, not modifiers, since user may release modifiers before main key.
- */
-function matchesHotkeyUp(e: UiohookKeyboardEvent): boolean {
-  return (
-    activeKeycode !== null &&
-    (e.keycode === activeKeycode ||
-      (isMetaKeycode(activeKeycode) && isMetaKeycode(e.keycode)))
-  );
+function heldModifiers(): ModifierState {
+  return {
+    ctrl: heldCtrl,
+    alt: heldAlt,
+    shift: heldShift,
+    meta: heldMeta,
+  };
 }
 
-export function setupHotkeyService(
-  onKeyDown: () => void,
-  onKeyUp: () => void
-): void {
-  keyDownCallback = onKeyDown;
-  keyUpCallback = onKeyUp;
+function eventSnapshot(e: UiohookKeyboardEvent): KeyEventSnapshot {
+  return {
+    keycode: e.keycode,
+    modifiers: currentModifiers(e),
+    nowMs: Date.now(),
+  };
+}
+
+function keyUpSnapshot(e: UiohookKeyboardEvent): KeyEventSnapshot {
+  return {
+    keycode: e.keycode,
+    modifiers: heldModifiers(),
+    nowMs: Date.now(),
+  };
+}
+
+export function setupHotkeyService(hotkeyCallbacks: HotkeyCallbacks): void {
+  callbacks = hotkeyCallbacks;
 
   uIOhook.on('keydown', (e) => {
     updateHeldModifiers(e, true);
-    const hotkey = getCurrentHotkey();
-    if (matchesHotkeyDown(e, hotkey)) {
-      if (!isKeyDown) {
-        isKeyDown = true;
-        activeKeycode = e.keycode;
-        log.debug('Keydown', { keycode: e.keycode });
-        keyDownCallback?.();
-      }
+    const snapshot = eventSnapshot(e);
+    const longAction = longRecognizer.keyDown(snapshot, getCurrentLongHotkey());
+    if (longAction === 'hold-start' || longAction === 'double-tap') {
+      quickRecognizer.reset();
+      log.debug('Long hotkey', { keycode: e.keycode });
+      callbacks?.onLongShortcut();
+      return;
+    }
+
+    const action = quickRecognizer.keyDown(snapshot, getCurrentHotkey());
+    if (action === 'hold-start') {
+      log.debug('Hotkey hold start', { keycode: e.keycode });
+      callbacks?.onHoldStart();
+    } else if (action === 'double-tap') {
+      log.debug('Hotkey double tap', { keycode: e.keycode });
+      callbacks?.onDoubleTap();
     }
   });
 
   uIOhook.on('keyup', (e) => {
-    if (matchesHotkeyUp(e)) {
-      if (isKeyDown) {
-        isKeyDown = false;
-        activeKeycode = null;
-        log.debug('Keyup', { keycode: e.keycode });
-        keyUpCallback?.();
-      }
-    }
     updateHeldModifiers(e, false);
+    const snapshot = keyUpSnapshot(e);
+    longRecognizer.keyUp(snapshot);
+    const action = quickRecognizer.keyUp(snapshot);
+    if (action === 'hold-end') {
+      log.debug('Hotkey hold end', { keycode: e.keycode });
+      callbacks?.onHoldEnd();
+    }
   });
 
   // Start the hook
@@ -137,8 +143,8 @@ export function unregisterHotkey(): void {
  * Reset the key state (useful when hotkey changes while key is held)
  */
 export function resetKeyState(): void {
-  isKeyDown = false;
-  activeKeycode = null;
+  quickRecognizer.reset();
+  longRecognizer.reset();
   heldCtrl = false;
   heldAlt = false;
   heldShift = false;
@@ -147,7 +153,6 @@ export function resetKeyState(): void {
 
 // --- Hotkey Capture ---
 
-let captureCallback: ((hotkey: Hotkey, displayName: string) => void) | null = null;
 let captureListener: ((e: UiohookKeyboardEvent) => void) | null = null;
 
 /**
@@ -162,12 +167,16 @@ export function startHotkeyCapture(): Promise<{ hotkey: Hotkey; displayName: str
     }
 
     captureListener = (e: UiohookKeyboardEvent) => {
-      // Ignore modifier-only key presses
       if (isModifierKey(e.keycode)) {
+        const modifierHotkey = captureModifierChord(eventSnapshot(e));
+        if (!modifierHotkey) {
+          return;
+        }
+
+        resolveCapturedHotkey(modifierHotkey, resolve);
         return;
       }
 
-      // Capture the hotkey
       const hotkey: Hotkey = {
         keycode: e.keycode,
         ctrlKey: e.ctrlKey,
@@ -176,22 +185,26 @@ export function startHotkeyCapture(): Promise<{ hotkey: Hotkey; displayName: str
         metaKey: e.metaKey,
       };
 
-      const displayName = formatHotkey(hotkey);
-
-      // Clean up listener
-      if (captureListener) {
-        uIOhook.off('keydown', captureListener);
-        captureListener = null;
-      }
-
-      // Reset key state in case the captured key is also the current hotkey
-      resetKeyState();
-
-      resolve({ hotkey, displayName });
+      resolveCapturedHotkey(hotkey, resolve);
     };
 
     uIOhook.on('keydown', captureListener);
   });
+}
+
+function resolveCapturedHotkey(
+  hotkey: Hotkey,
+  resolve: (value: { hotkey: Hotkey; displayName: string }) => void,
+): void {
+  const displayName = formatHotkey(hotkey);
+
+  if (captureListener) {
+    uIOhook.off('keydown', captureListener);
+    captureListener = null;
+  }
+
+  resetKeyState();
+  resolve({ hotkey, displayName });
 }
 
 /**

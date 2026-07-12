@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
   STATE_CONNECTION: 'state:connection',
   STATE_TRANSCRIPTION: 'state:transcription',
   STATE_WARNING: 'state:warning',
+  STATE_STATUS: 'state:status',
 
   // Main → Renderer (commands to start/stop audio capture)
   COMMAND_START_RECORDING: 'command:start-recording',
@@ -12,6 +13,7 @@ export const IPC_CHANNELS = {
 
   // Renderer → Main (audio data)
   AUDIO_DATA: 'audio:data',
+  AUDIO_CAPTURE_ERROR: 'audio:capture-error',
 
   // Renderer → Main (commands)
   COMMAND_COPY_TO_CLIPBOARD: 'command:copy-to-clipboard',
@@ -37,6 +39,10 @@ export const IPC_CHANNELS = {
   HISTORY_GET_ENTRIES: 'history:get-entries',
   HISTORY_DELETE: 'history:delete',
   HISTORY_NEW_ENTRY: 'history:new-entry',
+
+  // Insights
+  INSIGHTS_GET: 'insights:get',
+  INSIGHTS_REBUILD: 'insights:rebuild',
 
   // Recording test controls
   RECORDING_GET_STATE: 'recording:get-state',
@@ -64,7 +70,8 @@ export const IPC_CHANNELS = {
 
 // Overlay window constants
 export const OVERLAY_CONFIG = {
-  WIDTH: 700,
+  QUICK_WIDTH: 700,
+  LONG_WIDTH: 900,
   HEIGHT: 320,
   BOTTOM_MARGIN: 80,
 } as const;

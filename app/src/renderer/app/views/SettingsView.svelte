@@ -6,7 +6,7 @@
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import { toast } from '$lib/toast.svelte';
-  import type { Settings, Hotkey, EngineStatus, ServerSetting } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DEFAULT_SERVER_HOST = 'localhost';
@@ -15,45 +15,22 @@
 
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
-    hotkey: {
-      keycode: 100,
-      ctrlKey: false,
-      altKey: false,
-      shiftKey: false,
-      metaKey: false,
-    },
-    holdToTalk: true,
-    autoCopy: true,
-    autoPaste: true,
-    restoreClipboardAfterPaste: true,
-    clipboardRestoreDelayMs: 250,
-    pasteMethod: 'sendinput',
-    silenceTimeout: 15,
-    serverUrl: 'ws://localhost:51717/transcribe',
-    appendPeriod: false,
-    appendSpace: false,
-    dictationMode: 'clean_prompt',
-    selectedDeviceId: 'default',
-    launchOnBoot: false,
-    startMinimized: false,
-    serverAutoStart: true,
-    useExternalServer: false,
-    hotwordsEnabled: false,
-    hotwordsCsl: '',
+    ...DEFAULT_SETTINGS,
+    hotkey: { ...DEFAULT_SETTINGS.hotkey },
+    longHotkey: { ...DEFAULT_SETTINGS.longHotkey },
   });
 
-  // Default hotkey (F17)
-  const DEFAULT_HOTKEY: Hotkey = {
-    keycode: 100,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    metaKey: false,
-  };
+  // Default hotkey (Ctrl+Meta)
+  const DEFAULT_HOTKEY: Hotkey = DEFAULT_SETTINGS.hotkey;
+
+  // Default long dictation hotkey (Ctrl+Shift+Meta)
+  const DEFAULT_LONG_HOTKEY: Hotkey = DEFAULT_SETTINGS.longHotkey;
 
   // Hotkey display name (human-readable)
-  let hotkeyDisplayName = $state('F17');
+  let hotkeyDisplayName = $state('Ctrl+Meta');
+  let longHotkeyDisplayName = $state('Ctrl+Shift+Meta');
   let isHotkeyModalOpen = $state(false);
+  let hotkeyCaptureTarget = $state<'quick' | 'long'>('quick');
 
   // Check if hotkey differs from default
   let isHotkeyChanged = $derived(
@@ -63,12 +40,20 @@
     settings.hotkey.shiftKey !== DEFAULT_HOTKEY.shiftKey ||
     settings.hotkey.metaKey !== DEFAULT_HOTKEY.metaKey
   );
+  let isLongHotkeyChanged = $derived(
+    settings.longHotkey.keycode !== DEFAULT_LONG_HOTKEY.keycode ||
+    settings.longHotkey.ctrlKey !== DEFAULT_LONG_HOTKEY.ctrlKey ||
+    settings.longHotkey.altKey !== DEFAULT_LONG_HOTKEY.altKey ||
+    settings.longHotkey.shiftKey !== DEFAULT_LONG_HOTKEY.shiftKey ||
+    settings.longHotkey.metaKey !== DEFAULT_LONG_HOTKEY.metaKey
+  );
 
   // Input devices from system enumeration
   let inputDevices = $state<Array<{ id: string; label: string }>>([
     { id: 'default', label: 'Default' },
   ]);
   let isLoadingDevices = $state(true);
+  let audioDeviceError = $state('');
   let settingsLoaded = $state(false);
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
@@ -229,18 +214,31 @@
     updateSetting('serverUrl', buildExternalServerUrl(host, port));
   }
 
-  onMount(async () => {
-    appVersion = await window.murmurMain.getAppVersion();
+  async function loadCoreSettings() {
+    try {
+      const loadedSettings = await window.murmurMain.getSettings();
+      settings = loadedSettings;
+      syncExternalServerFields(loadedSettings.serverUrl);
+      settingsLoaded = true;
 
-    // Load settings from main process
-    const loadedSettings = await window.murmurMain.getSettings();
-    settings = loadedSettings;
-    syncExternalServerFields(loadedSettings.serverUrl);
+      const displayNames = await Promise.allSettled([
+        window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey),
+        window.murmurMain.getHotkeyDisplayName(loadedSettings.longHotkey),
+      ]);
+      if (displayNames[0].status === 'fulfilled') {
+        hotkeyDisplayName = displayNames[0].value;
+      }
+      if (displayNames[1].status === 'fulfilled') {
+        longHotkeyDisplayName = displayNames[1].value;
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+      settingsLoaded = true;
+      toast('Failed to load saved settings', 'error');
+    }
+  }
 
-    // Get display name for current hotkey (use loadedSettings directly, not the $state)
-    hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(loadedSettings.hotkey);
-
-    // Fetch server settings (engine, model, etc.)
+  async function loadServerSettings() {
     try {
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
@@ -250,14 +248,12 @@
     } catch {
       serverConnected = false;
     }
+  }
 
-    // Enumerate audio input devices
+  async function loadAudioDevices() {
     try {
-      // Request permission first (required to get device labels)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Release the microphone immediately after getting permission
       stream.getTracks().forEach(track => track.stop());
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(d => d.kind === 'audioinput');
 
@@ -270,12 +266,25 @@
             label: d.label || `Microphone ${d.deviceId.slice(0, 8)}`,
           })),
       ];
+      audioDeviceError = '';
     } catch (err) {
       console.error('Failed to enumerate audio devices:', err);
+      const code = err instanceof DOMException ? err.name : '';
+      audioDeviceError = code === 'NotAllowedError'
+        ? 'Microphone permission is blocked; using the system default input.'
+        : 'Microphones could not be listed; using the system default input.';
     } finally {
       isLoadingDevices = false;
-      settingsLoaded = true;
     }
+  }
+
+  onMount(() => {
+    void loadCoreSettings();
+    void loadServerSettings();
+    void loadAudioDevices();
+    void window.murmurMain.getAppVersion()
+      .then((version) => (appVersion = version))
+      .catch((error) => console.error('Failed to load app version:', error));
   });
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -316,20 +325,28 @@
     if (enabled) {
       updateExternalServerUrl();
       setTimeout(() => {
-        externalServerCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        externalServerCard?.scrollIntoView({ behavior, block: 'center' });
       }, 50);
     }
   }
 
-  function openHotkeyCapture() {
+  function openHotkeyCapture(target: 'quick' | 'long') {
+    hotkeyCaptureTarget = target;
     isHotkeyModalOpen = true;
   }
 
   function handleHotkeyCapture(hotkey: Hotkey, displayName: string) {
     isHotkeyModalOpen = false;
-    settings.hotkey = hotkey;
-    hotkeyDisplayName = displayName;
-    window.murmurMain.updateSetting('hotkey', hotkey);
+    if (hotkeyCaptureTarget === 'long') {
+      settings.longHotkey = hotkey;
+      longHotkeyDisplayName = displayName;
+      window.murmurMain.updateSetting('longHotkey', hotkey);
+    } else {
+      settings.hotkey = hotkey;
+      hotkeyDisplayName = displayName;
+      window.murmurMain.updateSetting('hotkey', hotkey);
+    }
   }
 
   function handleHotkeyCancel() {
@@ -340,6 +357,12 @@
     settings.hotkey = { ...DEFAULT_HOTKEY };
     hotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_HOTKEY);
     window.murmurMain.updateSetting('hotkey', DEFAULT_HOTKEY);
+  }
+
+  async function resetLongHotkey() {
+    settings.longHotkey = { ...DEFAULT_LONG_HOTKEY };
+    longHotkeyDisplayName = await window.murmurMain.getHotkeyDisplayName(DEFAULT_LONG_HOTKEY);
+    window.murmurMain.updateSetting('longHotkey', DEFAULT_LONG_HOTKEY);
   }
 
   async function importHotwords() {
@@ -441,7 +464,7 @@
       <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording">
         <div class="flex items-center gap-2">
           <button
-            onclick={openHotkeyCapture}
+            onclick={() => openHotkeyCapture('quick')}
             class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
           >
             {hotkeyDisplayName}
@@ -450,7 +473,30 @@
             <button
               onclick={resetHotkey}
               class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to F17"
+              title="Reset to Ctrl+Meta"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+            </button>
+          {/if}
+        </div>
+      </SettingsRow>
+
+      <SettingsRow label="Long Hotkey" description="Toggle hands-free long dictation">
+        <div class="flex items-center gap-2">
+          <button
+            onclick={() => openHotkeyCapture('long')}
+            class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
+          >
+            {longHotkeyDisplayName}
+          </button>
+          {#if isLongHotkeyChanged}
+            <button
+              onclick={resetLongHotkey}
+              class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+              title="Reset to Ctrl+Shift+Meta"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -489,7 +535,10 @@
 
     <!-- Audio -->
     <SettingsSection title="Audio">
-      <SettingsRow label="Input Device" description="Select microphone for recording">
+      <SettingsRow
+        label="Input Device"
+        description={audioDeviceError || 'Select microphone for recording'}
+      >
         <select
           value={settings.selectedDeviceId}
           onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}

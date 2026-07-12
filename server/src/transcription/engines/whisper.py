@@ -21,7 +21,7 @@ import numpy as np
 from config import Settings
 from transcription.base import EngineInfo
 from transcription.model_download import get_repo_cache_status, update_model_download_state
-from transcription.types import TranscribeResult
+from transcription.types import TranscribeOptions, TranscribeResult, resolve_option
 
 logger = logging.getLogger(__name__)
 
@@ -177,13 +177,12 @@ class WhisperEngine:
                     path=cache_status.snapshot_path,
                 )
             else:
-                status = "downloading" if cache_status.status == "downloading" else cache_status.status
                 update_model_download_state(
                     model=model,
                     size_gb=model_size_gb,
-                    status=status,
+                    status="downloading",
                     cached=False,
-                    detail=cache_status.detail,
+                    detail=f"download started ({cache_status.detail})",
                     repo_id=repo_id,
                     path=cache_status.snapshot_path or cache_status.repo_path,
                     missing_files=cache_status.missing_files,
@@ -339,17 +338,28 @@ class WhisperSession:
         audio: NDArray[np.float32],
         *,
         hotwords: str | None = None,
+        options: TranscribeOptions | None = None,
     ) -> TranscribeResult:
         start = time.perf_counter()
-        segments, info = self._model.transcribe(
+        options = options or TranscribeOptions()
+        condition_on_previous_text = resolve_option(
+            self._options.condition_on_previous_text, options.condition_on_previous_text
+        )
+        without_timestamps = resolve_option(
+            self._options.without_timestamps, options.without_timestamps
+        )
+        vad_filter = resolve_option(self._options.vad_filter, options.vad_filter)
+        temperature = resolve_option(self._options.temperature, options.temperature)
+        beam_size = resolve_option(self._options.beam_size, options.beam_size)
+        segments, _info = self._model.transcribe(
             audio,
             language=self._options.language,
             hotwords=hotwords,
-            beam_size=self._options.beam_size,
-            temperature=self._options.temperature,
-            condition_on_previous_text=self._options.condition_on_previous_text,
-            without_timestamps=self._options.without_timestamps,
-            vad_filter=self._options.vad_filter,
+            beam_size=beam_size,
+            temperature=temperature,
+            condition_on_previous_text=condition_on_previous_text,
+            without_timestamps=without_timestamps,
+            vad_filter=vad_filter,
             vad_parameters=self._options.vad_parameters,
         )
 

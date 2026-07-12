@@ -1,5 +1,7 @@
 // Recording/Session states
 export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'error';
+export type DictationSessionMode = 'quick' | 'long';
+export type InsightsRange = 'today' | '7d' | '30d' | 'all';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -21,6 +23,7 @@ export interface ServerStatePayload {
   error?: string;
   wsUrl?: string;
   managed: boolean; // false in dev mode (externally running server)
+  engineStatus?: EngineStatus;
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
 }
@@ -92,6 +95,7 @@ export interface ModelDownloadState {
 export interface RecordingStatePayload {
   state: RecordingState;
   isRecording: boolean;
+  mode?: DictationSessionMode;
 }
 
 export interface ConnectionStatePayload {
@@ -102,6 +106,20 @@ export interface ConnectionStatePayload {
 export interface RecordingWarningPayload {
   code: string;
   message: string;
+}
+
+export interface AudioCaptureErrorPayload {
+  code: string;
+  message: string;
+  deviceId?: string;
+}
+
+export interface RecordingStatusPayload {
+  status: 'long_dictation_started' | 'long_dictation_processing';
+  message?: string;
+  chunkIndex?: number;
+  chunkTotal?: number;
+  audioDuration?: number;
 }
 
 export interface AudioLevelPayload {
@@ -128,6 +146,13 @@ export interface TranscriptionEntry {
   audioDuration: number;
   confidence: number;
   transcriptionTime: number;
+  wordCount?: number;
+  sessionMode?: DictationSessionMode;
+  engine?: string;
+  model?: string;
+  device?: string;
+  computeType?: string;
+  cudaActive?: boolean;
   editedAt?: number;
   originalText?: string;
 }
@@ -154,6 +179,78 @@ export interface HistoryResponse {
   hasMore: boolean;
 }
 
+export interface InsightSourceEntry {
+  id: string;
+  timestamp: number;
+  text: string;
+  audioDuration: number;
+  transcriptionTime: number;
+  confidence: number;
+  wordCount?: number;
+}
+
+export interface InsightsSummary {
+  totalDictations: number;
+  totalWords: number;
+  totalAudioSeconds: number;
+  totalProcessingMs: number;
+  avgConfidence: number;
+  avgWpm: number;
+  avgProcessingRatio: number;
+  avgWordsPerDictation: number;
+  longestStreakDays: number;
+  busiestDay?: {
+    date: string;
+    label: string;
+    words: number;
+    dictations: number;
+  };
+}
+
+export interface InsightsTrendPoint {
+  date: string;
+  label: string;
+  dictations: number;
+  words: number;
+  audioSeconds: number;
+  processingMs: number;
+  avgWpm: number;
+  avgConfidence: number;
+  avgProcessingRatio: number;
+}
+
+export interface InsightsWordStat {
+  text: string;
+  count: number;
+}
+
+export interface InsightsEntryStat {
+  id: string;
+  timestamp: number;
+  text: string;
+  wordCount: number;
+  audioDuration: number;
+  transcriptionTime: number;
+  processingRatio: number;
+}
+
+export interface InsightsResponse {
+  range: InsightsRange;
+  generatedAt: number;
+  hasData: boolean;
+  indexing: {
+    isIndexing: boolean;
+    processedEntries: number;
+    totalEntries: number;
+  };
+  summary: InsightsSummary;
+  trends: InsightsTrendPoint[];
+  commonWords: InsightsWordStat[];
+  commonPhrases: InsightsWordStat[];
+  longestEntries: InsightsEntryStat[];
+  slowestEntries: InsightsEntryStat[];
+}
+
 // Hotkey configuration
 export interface Hotkey {
   keycode: number;
@@ -166,6 +263,7 @@ export interface Hotkey {
 // Settings (v0 uses hardcoded values, but define the shape)
 export interface Settings {
   hotkey: Hotkey;
+  longHotkey: Hotkey;
   holdToTalk: boolean;
   autoCopy: boolean;
   autoPaste: boolean;
@@ -267,13 +365,19 @@ export interface WindowBounds {
 }
 
 // Default settings for v0
-// F17 keycode: 0x0064 (100) in libuiohook, 128 on Windows
 export const DEFAULT_SETTINGS: Settings = {
   hotkey: {
-    keycode: 100, // F17 in libuiohook (0x0064)
-    ctrlKey: false,
+    keycode: 3675, // Meta/Windows in libuiohook
+    ctrlKey: true,
     altKey: false,
     shiftKey: false,
+    metaKey: false,
+  },
+  longHotkey: {
+    keycode: 3675, // Ctrl+Shift+Meta toggles long dictation
+    ctrlKey: true,
+    altKey: false,
+    shiftKey: true,
     metaKey: false,
   },
   holdToTalk: true,

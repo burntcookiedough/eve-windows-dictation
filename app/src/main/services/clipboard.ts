@@ -6,6 +6,10 @@ import { app } from 'electron';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Clipboard');
+const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
+const MIN_RESTORE_DELAY_MS = 750;
+const PASTE_PROCESS_TIMEOUT_MS = 5000;
+const FOREGROUND_WINDOW_TIMEOUT_MS = 2000;
 
 // VBScript for keyboard simulation — much faster startup than PowerShell (~50ms vs ~300ms).
 // Written to userData once and reused via cscript.
@@ -22,13 +26,10 @@ function ensurePasteScript(): string {
   return pasteScriptPath;
 }
 
-function ensureSendInputScript(): string {
-  if (sendInputScriptPath) return sendInputScriptPath;
-  sendInputScriptPath = join(app.getPath('userData'), 'paste-sendinput.ps1');
-  if (!existsSync(sendInputScriptPath)) {
-    writeFileSync(
-      sendInputScriptPath,
-      `
+export function buildSendInputScriptContent(): string {
+  return `
+param([long]$TargetWindowHandle = 0)
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -42,7 +43,19 @@ public class NativePaste {
 
   [StructLayout(LayoutKind.Explicit)]
   public struct InputUnion {
+    [FieldOffset(0)] public MOUSEINPUT mi;
     [FieldOffset(0)] public KEYBDINPUT ki;
+    [FieldOffset(0)] public HARDWAREINPUT hi;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct MOUSEINPUT {
+    public int dx;
+    public int dy;
+    public uint mouseData;
+    public uint dwFlags;
+    public uint time;
+    public IntPtr dwExtraInfo;
   }
 
   [StructLayout(LayoutKind.Sequential)]
@@ -54,15 +67,70 @@ public class NativePaste {
     public IntPtr dwExtraInfo;
   }
 
+  [StructLayout(LayoutKind.Sequential)]
+  public struct HARDWAREINPUT {
+    public uint uMsg;
+    public ushort wParamL;
+    public ushort wParamH;
+  }
+
   [DllImport("user32.dll", SetLastError=true)]
   public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern bool IsWindow(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")]
+  public static extern bool IsIconic(IntPtr hWnd);
 
   public const uint INPUT_KEYBOARD = 1;
   public const uint KEYEVENTF_KEYUP = 0x0002;
   public const ushort VK_CONTROL = 0x11;
+  public const ushort VK_MENU = 0x12;
   public const ushort VK_V = 0x56;
+  public const int SW_RESTORE = 9;
 
-  public static void Paste() {
+  private static void SendKey(ushort virtualKey, bool keyUp) {
+    INPUT[] inputs = new INPUT[1];
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].U.ki.wVk = virtualKey;
+    inputs[0].U.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
+    uint sent = SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
+    if (sent != 1) {
+      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    }
+  }
+
+  private static void AllowForegroundSwitch() {
+    SendKey(VK_MENU, false);
+    SendKey(VK_MENU, true);
+  }
+
+  public static void Paste(long targetWindowHandle) {
+    if (targetWindowHandle != 0) {
+      IntPtr target = new IntPtr(targetWindowHandle);
+      if (IsWindow(target)) {
+        AllowForegroundSwitch();
+        if (IsIconic(target)) {
+          ShowWindow(target, SW_RESTORE);
+          System.Threading.Thread.Sleep(80);
+        }
+        if (!SetForegroundWindow(target)) {
+          throw new InvalidOperationException("Could not focus target window before paste.");
+        }
+        System.Threading.Thread.Sleep(120);
+        if (GetForegroundWindow() != target) {
+          throw new InvalidOperationException("Target window is not foreground before paste.");
+        }
+      } else {
+        throw new InvalidOperationException("Target window no longer exists before paste.");
+      }
+    }
+
     INPUT[] inputs = new INPUT[4];
     inputs[0].type = INPUT_KEYBOARD; inputs[0].U.ki.wVk = VK_CONTROL;
     inputs[1].type = INPUT_KEYBOARD; inputs[1].U.ki.wVk = VK_V;
@@ -75,12 +143,19 @@ public class NativePaste {
   }
 }
 "@
-[NativePaste]::Paste()
-`.trimStart(),
-      'utf8'
-    );
-    log.debug('Created SendInput paste helper script', { path: sendInputScriptPath });
-  }
+[NativePaste]::Paste($TargetWindowHandle)
+`.trimStart();
+}
+
+function ensureSendInputScript(): string {
+  if (sendInputScriptPath) return sendInputScriptPath;
+  sendInputScriptPath = join(app.getPath('userData'), 'paste-sendinput.ps1');
+  writeFileSync(
+    sendInputScriptPath,
+    buildSendInputScriptContent(),
+    'utf8'
+  );
+  log.debug('Updated SendInput paste helper script', { path: sendInputScriptPath });
   return sendInputScriptPath;
 }
 
@@ -93,14 +168,69 @@ export function readFromClipboard(): string {
   return clipboard.readText();
 }
 
-export async function simulatePaste(method: 'sendinput' | 'vbscript' = 'sendinput'): Promise<void> {
+export function getForegroundWindowHandle(): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class NativeWindow {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+}
+"@
+[NativeWindow]::GetForegroundWindow().ToInt64()
+`.trim(),
+      ],
+      {
+        windowsHide: true,
+        timeout: FOREGROUND_WINDOW_TIMEOUT_MS,
+      },
+      (error, stdout) => {
+        if (error) {
+          log.error('Failed to capture foreground window', { error });
+          resolve(null);
+          return;
+        }
+
+        const handle = Number.parseInt(stdout.trim(), 10);
+        resolve(Number.isFinite(handle) && handle > 0 ? handle : null);
+      }
+    );
+  });
+}
+
+export async function simulatePaste(
+  method: 'sendinput' | 'vbscript' = 'sendinput',
+  targetWindowHandle?: number | null
+): Promise<void> {
+  const hasTargetWindow = Number.isFinite(targetWindowHandle) && Number(targetWindowHandle) > 0;
+
   if (method === 'sendinput') {
     const script = ensureSendInputScript();
     try {
       await new Promise<void>((resolve, reject) => {
         execFile(
           'powershell',
-          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script],
+          [
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            script,
+            '-TargetWindowHandle',
+            String(targetWindowHandle ?? 0),
+          ],
+          {
+            windowsHide: true,
+            timeout: PASTE_PROCESS_TIMEOUT_MS,
+          },
           (error) => {
             if (error) {
               reject(error);
@@ -112,7 +242,12 @@ export async function simulatePaste(method: 'sendinput' | 'vbscript' = 'sendinpu
       });
       return;
     } catch (error) {
-      log.error('SendInput paste failed; falling back to VBScript', { error: error as Error });
+      if (hasTargetWindow) {
+        log.error('Targeted SendInput paste failed', { error: error as Error });
+      } else {
+        log.error('SendInput paste failed', { error: error as Error });
+      }
+      throw error;
     }
   }
 
@@ -133,13 +268,19 @@ export interface PasteTextOptions {
   restoreClipboard: boolean;
   restoreDelayMs: number;
   method: 'sendinput' | 'vbscript';
+  targetWindowHandle?: number | null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function pasteText(text: string, options: PasteTextOptions): Promise<void> {
   const previous = clipboard.readText();
   clipboard.writeText(text);
   try {
-    await simulatePaste(options.method);
+    await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
+    await simulatePaste(options.method, options.targetWindowHandle);
   } finally {
     if (options.restoreClipboard) {
       setTimeout(() => {
@@ -148,7 +289,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         } catch (error) {
           log.error('Failed to restore clipboard', { error: error as Error });
         }
-      }, Math.max(0, options.restoreDelayMs));
+      }, Math.max(MIN_RESTORE_DELAY_MS, options.restoreDelayMs));
     }
   }
 }

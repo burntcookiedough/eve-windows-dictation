@@ -2,7 +2,9 @@ import { BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { OVERLAY_CONFIG } from '../../shared/constants.js';
+import type { DictationSessionMode } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
+import { calculateOverlayBounds } from './overlay-bounds.js';
 
 const log = createLogger('Overlay');
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +17,7 @@ export async function createOverlayWindow(): Promise<BrowserWindow> {
   log.debug('Creating overlay window', { preloadPath });
 
   const overlay = new BrowserWindow({
-    width: OVERLAY_CONFIG.WIDTH,
+    width: OVERLAY_CONFIG.QUICK_WIDTH,
     height: OVERLAY_CONFIG.HEIGHT,
     frame: false,
     transparent: true,
@@ -47,28 +49,45 @@ export async function createOverlayWindow(): Promise<BrowserWindow> {
   return overlay;
 }
 
-export function positionOverlayOnActiveDisplay(overlay: BrowserWindow): void {
+function getOverlayWidth(mode: DictationSessionMode): number {
+  return mode === 'long' ? OVERLAY_CONFIG.LONG_WIDTH : OVERLAY_CONFIG.QUICK_WIDTH;
+}
+
+export function positionOverlayOnActiveDisplay(
+  overlay: BrowserWindow,
+  mode: DictationSessionMode = 'quick'
+): void {
   // Get the display where the cursor is (proxy for active window)
   const cursorPoint = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursorPoint);
-  const { workArea } = display;
+  const { bounds: displayBounds, workArea } = display;
 
-  // Position at bottom-center of the work area
-  const x = workArea.x + Math.round((workArea.width - OVERLAY_CONFIG.WIDTH) / 2);
-  const y = workArea.y + workArea.height - OVERLAY_CONFIG.HEIGHT - OVERLAY_CONFIG.BOTTOM_MARGIN;
+  const preferredWidth = getOverlayWidth(mode);
+  const bounds = calculateOverlayBounds(
+    displayBounds,
+    workArea,
+    preferredWidth,
+    OVERLAY_CONFIG.HEIGHT,
+    OVERLAY_CONFIG.BOTTOM_MARGIN
+  );
+  overlay.setBounds(bounds);
 
   log.debug('Positioning overlay', {
     cursor: cursorPoint,
     displayId: display.id,
+    displayBounds,
     workArea,
-    position: { x, y }
+    mode,
+    position: { x: bounds.x, y: bounds.y },
+    size: { width: bounds.width, height: bounds.height },
   });
-
-  overlay.setPosition(x, y);
 }
 
 export function showOverlay(overlay: BrowserWindow): void {
   overlay.showInactive();
+  overlay.setAlwaysOnTop(false);
+  overlay.setAlwaysOnTop(true, 'screen-saver');
+  overlay.moveTop();
 }
 
 export function hideOverlay(overlay: BrowserWindow): void {

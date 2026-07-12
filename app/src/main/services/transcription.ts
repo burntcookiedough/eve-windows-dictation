@@ -13,6 +13,8 @@ import type {
   ConnectionStatePayload,
   RecordingStatePayload,
   RecordingWarningPayload,
+  RecordingStatusPayload,
+  DictationSessionMode,
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -23,16 +25,19 @@ export class TranscriptionService {
   private serverUrl: string;
   private silenceTimeout: number;
   private hotwords: string | undefined;
+  private sessionMode: DictationSessionMode;
   private overlayWindow: BrowserWindow;
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
+  private stopRequested = false;
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
   private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
   private onTranscriptionCallback: ((payload: TranscriptionPayload) => void) | null = null;
   private onWarningCallback: ((payload: RecordingWarningPayload) => void) | null = null;
+  private onStatusCallback: ((payload: RecordingStatusPayload) => void) | null = null;
   private lastTextFrame: TextFrame | null = null;
   private didReceiveFinal = false;
   private didReceiveReady = false;
@@ -41,29 +46,37 @@ export class TranscriptionService {
     serverUrl: string,
     silenceTimeout: number,
     overlayWindow: BrowserWindow,
-    hotwords?: string
+    hotwords?: string,
+    sessionMode: DictationSessionMode = 'quick'
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
     this.overlayWindow = overlayWindow;
     this.hotwords = hotwords;
+    this.sessionMode = sessionMode;
   }
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.isReady = false;
       this.serverClosing = false;
+      this.stopRequested = false;
       this.lastTextFrame = null;
       this.didReceiveFinal = false;
       this.didReceiveReady = false;
       this.sendConnectionState('connecting');
+      let connectSettled = false;
 
       this.ws = new WebSocket(this.serverUrl);
 
       this.ws.on('open', () => {
         this.sendStartFrame();
         this.sendConnectionState('connected');
+        connectSettled = true;
         resolve();
+        if (this.stopRequested) {
+          this.stop();
+        }
       });
 
       this.ws.on('message', (data) => {
@@ -73,12 +86,19 @@ export class TranscriptionService {
       this.ws.on('error', (error) => {
         log.error('WebSocket error', { error });
         this.sendConnectionState('error', error.message);
-        reject(error);
+        if (!connectSettled) {
+          connectSettled = true;
+          reject(error);
+        }
       });
 
       this.ws.on('close', () => {
         this.maybeEmitSyntheticFinal('socket_closed');
         this.sendConnectionState('disconnected');
+        if (!connectSettled) {
+          connectSettled = true;
+          reject(new Error('WebSocket closed before connection was ready'));
+        }
         this.onCloseCallback?.();
       });
     });
@@ -107,12 +127,23 @@ export class TranscriptionService {
   }
 
   stop(): void {
+    this.stopRequested = true;
+
     // Don't send stop if server already initiated close
     if (this.serverClosing) {
       return;
     }
 
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.ws) {
+      return;
+    }
+
+    if (this.ws.readyState === WebSocket.CONNECTING) {
+      this.ws.close();
+      return;
+    }
+
+    if (this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
 
@@ -145,6 +176,10 @@ export class TranscriptionService {
 
   onWarning(callback: (payload: RecordingWarningPayload) => void): void {
     this.onWarningCallback = callback;
+  }
+
+  onStatus(callback: (payload: RecordingStatusPayload) => void): void {
+    this.onStatusCallback = callback;
   }
 
   private broadcastToOverlay<T>(channel: string, payload: T): void {
@@ -182,6 +217,26 @@ export class TranscriptionService {
           log.warn('Server warning', { ...payload });
           this.broadcastToOverlay(IPC_CHANNELS.STATE_WARNING, { ...payload });
           this.onWarningCallback?.(payload);
+          break;
+        }
+
+        case 'status': {
+          if (frame.status !== 'long_dictation_started' && frame.status !== 'long_dictation_processing') {
+            log.warn('Ignoring unknown recording status', { status: frame.status });
+            break;
+          }
+          const payload: RecordingStatusPayload = {
+            status: frame.status,
+            message: frame.message,
+            chunkIndex: frame.chunk_index,
+            chunkTotal: frame.chunk_total,
+            audioDuration: frame.audio_duration,
+          };
+          this.broadcastToOverlay(IPC_CHANNELS.STATE_STATUS, payload);
+          this.onStatusCallback?.(payload);
+          if (frame.status === 'long_dictation_processing') {
+            this.sendRecordingState('processing');
+          }
           break;
         }
 
@@ -257,6 +312,7 @@ export class TranscriptionService {
     const payload: RecordingStatePayload = {
       state,
       isRecording: state !== 'idle',
+      mode: this.sessionMode,
     };
     this.broadcastToOverlay(IPC_CHANNELS.STATE_RECORDING, payload);
     this.onRecordingStateCallback?.(payload);

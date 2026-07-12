@@ -4,6 +4,8 @@ import type {
   HistoryFilters,
   HistoryResponse,
   HistoryEntryWithGroup,
+  InsightsRange,
+  InsightsResponse,
   Settings,
   Hotkey,
   ServerStatePayload,
@@ -75,14 +77,20 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id);
   },
 
-  onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): void => {
-    ipcRenderer.on(IPC_CHANNELS.HISTORY_NEW_ENTRY, (_event, entry) => {
-      callback(entry);
-    });
+  getInsights: (range: InsightsRange): Promise<InsightsResponse | null> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_GET, range);
   },
 
-  removeNewHistoryEntryListener: (): void => {
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
+  rebuildInsights: (): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_REBUILD);
+  },
+
+  onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, entry: HistoryEntryWithGroup) => {
+      callback(entry);
+    };
+    ipcRenderer.on(IPC_CHANNELS.HISTORY_NEW_ENTRY, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.HISTORY_NEW_ENTRY, handler);
   },
 
   // Clipboard

@@ -31,7 +31,7 @@ The nsis-web installer produced by `bun run package:win` includes a small web in
 | Electron runtime (Chromium + Node.js) | `app/dist/` | ~150-200 MB |
 | App resources (icons, etc.) | `app/resources/` | < 1 MB |
 | Native Node modules (better-sqlite3, uiohook-napi) | `app/node_modules/` (rebuilt for Electron) | ~10 MB |
-| Python interpreter | `server/.venv/Scripts/python.exe` (python-build-standalone) | ~100 MB |
+| Python interpreter | `server/.runtime/python.exe` (uv-managed python-build-standalone runtime) | ~100 MB |
 | Python packages | `server/.venv/Lib/site-packages/` | **Varies enormously by extras** |
 | Server source code | `server/src/` | ~100 KB |
 
@@ -41,6 +41,12 @@ Per the `extraResources` config in `app/package.json`:
 - `__pycache__/` directories
 - `.pyc` files
 - pip, wheel, setuptools packages
+- dependency test suites, static `.lib` linker archives, and PyTorch headers
+- standalone-Python development/UI assets (`include`, `libs`, `idlelib`, `tkinter`, Tcl)
+
+These exclusions remove build-time material only. Release validation imports both
+engines and runs a WebSocket transcription smoke against the packaged runtime
+layout before publication.
 
 ### What's NOT in the installer at all
 
@@ -81,14 +87,15 @@ Works without any GPU. Set device to `cpu` in Settings. Transcription will be si
 
 **Verdict: No system Python required.**
 
-The bundled `.venv` uses [python-build-standalone](https://github.com/astral-sh/python-build-standalone), which produces fully self-contained, relocatable Python distributions. The `python.exe` in the venv works independently of any system Python installation.
+The release copies uv's managed [python-build-standalone](https://github.com/astral-sh/python-build-standalone) distribution into `.runtime` and keeps third-party packages in `.venv/Lib/site-packages`. This avoids copying a virtual-environment launcher that still points to the build machine's base Python.
 
 The packaged app spawns the server via:
-```
-{resources}/server/.venv/Scripts/python.exe {resources}/server/src/main.py
+```text
+PYTHONPATH={resources}/server/.venv/Lib/site-packages
+{resources}/server/.runtime/python.exe {resources}/server/src/main.py
 ```
 
-This is confirmed working in the `server-manager.ts` production code path.
+The release workflow verifies imports and starts `/health` with this exact split-runtime layout before packaging.
 
 ---
 
