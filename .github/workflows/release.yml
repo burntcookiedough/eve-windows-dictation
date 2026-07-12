@@ -111,6 +111,16 @@ jobs:
         working-directory: app
         run: bun run package:win
 
+      - name: Verify packaged Python imports
+        working-directory: app
+        shell: pwsh
+        run: |
+          $server = (Resolve-Path "release\win-unpacked\resources\server").Path
+          $env:PYTHONNOUSERSITE = "1"
+          $env:PYTHONPATH = (Resolve-Path "$server\.venv\Lib\site-packages").Path
+          & "$server\.runtime\python.exe" -c "import fastapi, uvicorn, faster_whisper, torch, nemo.collections.asr; print('packaged runtime imports passed')"
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Python import smoke test failed." }
+
       - name: Verify release artifacts fit GitHub
         shell: pwsh
         run: |
