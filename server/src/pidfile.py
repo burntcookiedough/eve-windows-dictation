@@ -8,6 +8,7 @@ import atexit
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -44,7 +45,7 @@ def get_pid_file_path() -> Path:
         return Path.home() / "AppData" / "Local" / "murmur" / "server.pid"
     else:
         # Linux/macOS: ~/.local/share/murmur or ~/Library/Application Support/murmur
-        if os.name == "darwin":
+        if sys.platform == "darwin":
             return Path.home() / "Library" / "Application Support" / "murmur" / "server.pid"
         return Path.home() / ".local" / "share" / "murmur" / "server.pid"
 

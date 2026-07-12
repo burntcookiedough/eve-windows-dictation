@@ -1,5 +1,6 @@
 """Per-session data container bundling all session state."""
 
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ class SessionContext:
 
     # Flag to avoid repeating the long-dictation mode transition notice.
     long_dictation_announced: bool = False
+
+    # Only one stop/timeout path may produce terminal protocol frames.
+    finalization_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def mark_started(self) -> None:
         """Mark the session as started."""

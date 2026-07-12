@@ -256,9 +256,14 @@ class NemotronEngine:
         if self._use_cuda:
             import torch
 
-            self._model.disable_cuda_graphs()
-            torch.cuda.empty_cache()
-            self._model.maybe_enable_cuda_graphs()
+            # Model inference uses the same lock. Mutating CUDA graph state or
+            # clearing its allocator during native inference can crash NeMo.
+            with self._model_lock:
+                self._model.disable_cuda_graphs()
+                try:
+                    torch.cuda.empty_cache()
+                finally:
+                    self._model.maybe_enable_cuda_graphs()
         return NemotronSession(self._model, self._device, self._model_lock)
 
     def shutdown(self) -> None:

@@ -24,19 +24,34 @@ logger = logging.getLogger(__name__)
 _executor: ThreadPoolExecutor | None = None
 _executor_workers: int | None = None
 _inference_lock: asyncio.Lock | None = None
+_executor_config_lock: asyncio.Lock | None = None
 
 
-def get_executor(max_workers: int) -> ThreadPoolExecutor:
+def get_executor_config_lock() -> asyncio.Lock:
+    global _executor_config_lock
+    if _executor_config_lock is None:
+        _executor_config_lock = asyncio.Lock()
+    return _executor_config_lock
+
+
+async def get_executor(max_workers: int) -> ThreadPoolExecutor:
     global _executor, _executor_workers
-    if _executor is None or _executor_workers != max_workers:
-        if _executor is not None:
-            _executor.shutdown(wait=True)
-        _executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="transcribe",
-        )
-        _executor_workers = max_workers
-    return _executor
+    async with get_executor_config_lock():
+        if _executor is None or _executor_workers != max_workers:
+            previous = _executor
+            _executor = None
+            _executor_workers = None
+            if previous is not None:
+                # Draining active native inference can take seconds. Keep that
+                # wait off the event loop so health and WebSocket cleanup stay
+                # responsive while settings from old/new sessions differ.
+                await asyncio.to_thread(previous.shutdown, wait=True)
+            _executor = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="transcribe",
+            )
+            _executor_workers = max_workers
+        return _executor
 
 
 def get_inference_lock() -> asyncio.Lock:
@@ -110,14 +125,16 @@ class TranscriptionProcessor:
             )
 
         if self._allow_overlapping_inference:
+            executor = await get_executor(self._transcription_max_workers)
             result = await loop.run_in_executor(
-                get_executor(self._transcription_max_workers),
+                executor,
                 lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
             )
         else:
             async with get_inference_lock():
+                executor = await get_executor(1)
                 result = await loop.run_in_executor(
-                    get_executor(1),
+                    executor,
                     lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
                 )
 
@@ -324,14 +341,16 @@ class TranscriptionProcessor:
         options: TranscribeOptions | None = None,
     ) -> TranscribeResult:
         if self._allow_overlapping_inference:
+            executor = await get_executor(self._transcription_max_workers)
             return await loop.run_in_executor(
-                get_executor(self._transcription_max_workers),
+                executor,
                 lambda: self._call_session_transcribe(audio, options=options),
             )
 
         async with get_inference_lock():
+            executor = await get_executor(1)
             return await loop.run_in_executor(
-                get_executor(1),
+                executor,
                 lambda: self._call_session_transcribe(audio, options=options),
             )
 
@@ -362,9 +381,10 @@ class TranscriptionProcessor:
 
 
 def shutdown_executor() -> None:
-    global _executor, _executor_workers, _inference_lock
+    global _executor, _executor_workers, _inference_lock, _executor_config_lock
     if _executor is not None:
         _executor.shutdown(wait=True)
         _executor = None
         _executor_workers = None
     _inference_lock = None
+    _executor_config_lock = None

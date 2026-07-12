@@ -177,13 +177,12 @@ class WhisperEngine:
                     path=cache_status.snapshot_path,
                 )
             else:
-                status = "downloading" if cache_status.status == "downloading" else cache_status.status
                 update_model_download_state(
                     model=model,
                     size_gb=model_size_gb,
-                    status=status,
+                    status="downloading",
                     cached=False,
-                    detail=cache_status.detail,
+                    detail=f"download started ({cache_status.detail})",
                     repo_id=repo_id,
                     path=cache_status.snapshot_path or cache_status.repo_path,
                     missing_files=cache_status.missing_files,

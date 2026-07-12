@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Literal
 
 from pydantic import Field, ValidationError
@@ -15,10 +17,17 @@ logger = logging.getLogger(__name__)
 SETTINGS_FILE = Path(__file__).parent.parent / "settings.json"
 
 
+def get_settings_file_path() -> Path:
+    """Return the persisted settings path, honoring the launcher override."""
+    override = os.environ.get("MURMUR_SETTINGS_FILE")
+    return Path(override).expanduser() if override else SETTINGS_FILE
+
+
 def _load_settings_json() -> dict[str, Any]:
-    if SETTINGS_FILE.exists():
+    settings_file = get_settings_file_path()
+    if settings_file.exists():
         try:
-            return json.loads(SETTINGS_FILE.read_text())
+            return json.loads(settings_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read settings.json: %s", e)
     return {}
@@ -30,6 +39,24 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: Any,
+        env_settings: Any,
+        dotenv_settings: Any,
+        file_secret_settings: Any,
+    ) -> tuple[Any, ...]:
+        """Load persisted values below explicit environment configuration."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+            _load_settings_json,
+        )
 
     # Server settings
     host: str = "127.0.0.1"
@@ -323,17 +350,20 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
 _settings: Settings | None = None
 
 
+def _default_settings() -> Settings:
+    """Construct built-in defaults without consulting external sources."""
+    return Settings.model_construct()
+
+
 def get_settings() -> Settings:
     global _settings
     if _settings is not None:
         return _settings
-    # Load from settings.json first, env vars override
-    persisted = _load_settings_json()
     try:
-        _settings = Settings(**persisted) if persisted else Settings()
+        _settings = Settings()
     except ValidationError as e:
         logger.warning("Invalid settings.json values; falling back to defaults: %s", e)
-        _settings = Settings()
+        _settings = _default_settings()
     return _settings
 
 
@@ -354,7 +384,7 @@ def update_settings(patch: dict[str, Any]) -> Settings:
 
 
 def _persist_settings(settings: Settings) -> None:
-    defaults = Settings()
+    defaults = _default_settings()
     default_dict = defaults.model_dump()
     current_dict = settings.model_dump()
     # Only persist values that differ from defaults
@@ -362,7 +392,28 @@ def _persist_settings(settings: Settings) -> None:
     for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
         if key in current_dict and current_dict[key] != default_dict.get(key):
             diff[key] = current_dict[key]
+    settings_file = get_settings_file_path()
+    temp_path: Path | None = None
     try:
-        SETTINGS_FILE.write_text(json.dumps(diff, indent=2) + "\n")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=settings_file.parent,
+            prefix=f".{settings_file.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            json.dump(diff, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
+        os.replace(temp_path, settings_file)
     except OSError as e:
         logger.error("Failed to write settings.json: %s", e)
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
