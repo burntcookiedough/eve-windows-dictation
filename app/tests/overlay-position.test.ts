@@ -53,7 +53,7 @@ describe('calculateOverlayBounds', () => {
     expect(bounds.y).toBe(40);
   });
 
-  test('centers horizontally against full display bounds when work area is reserved', () => {
+  test('centers horizontally inside the safe work area when space is reserved', () => {
     const bounds = calculateOverlayBounds(
       { x: 0, y: 0, width: 2048, height: 1067 },
       { x: 256, y: 0, width: 1792, height: 1067 },
@@ -62,7 +62,26 @@ describe('calculateOverlayBounds', () => {
       OVERLAY_CONFIG.BOTTOM_MARGIN
     );
 
-    expect(bounds.x).toBe(674);
-    expect(bounds.x + bounds.width / 2).toBe(1024);
+    expect(bounds.x).toBe(802);
+    expect(bounds.x + bounds.width / 2).toBe(1152);
+  });
+
+  test('stays clear of a wide left-docked taskbar on a narrow display', () => {
+    const bounds = calculateOverlayBounds(
+      { x: 0, y: 0, width: 800, height: 800 },
+      { x: 200, y: 0, width: 600, height: 800 },
+      OVERLAY_CONFIG.QUICK_WIDTH,
+      OVERLAY_CONFIG.HEIGHT,
+      OVERLAY_CONFIG.BOTTOM_MARGIN
+    );
+
+    expect(bounds).toEqual({
+      x: 216,
+      y: 400,
+      width: 568,
+      height: 320,
+    });
+    expect(bounds.x).toBeGreaterThanOrEqual(200);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(800);
   });
 });
