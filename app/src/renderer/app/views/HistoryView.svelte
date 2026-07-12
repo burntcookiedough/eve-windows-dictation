@@ -27,6 +27,12 @@
 
   // Delete confirmation
   let deleteConfirmId: string | null = $state(null);
+  let deleteDialog: HTMLDivElement | undefined = $state(undefined);
+  let deleteTrigger: HTMLElement | null = null;
+
+  $effect(() => {
+    if (deleteConfirmId) queueMicrotask(() => deleteDialog?.focus());
+  });
 
   // Expanded item
   let expandedId: string | null = $state(null);
@@ -179,7 +185,17 @@
   }
 
   function handleDelete(id: string) {
+    deleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     deleteConfirmId = id;
+  }
+
+  function closeDeleteDialog() {
+    deleteConfirmId = null;
+    const trigger = deleteTrigger;
+    deleteTrigger = null;
+    queueMicrotask(() => {
+      if (trigger?.isConnected) trigger.focus();
+    });
   }
 
   async function confirmDelete() {
@@ -192,17 +208,40 @@
       console.error('Failed to delete:', err);
       toast('Failed to delete', 'error');
     }
-    deleteConfirmId = null;
+    closeDeleteDialog();
   }
 
   function cancelDelete() {
-    deleteConfirmId = null;
+    closeDeleteDialog();
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
-    if (deleteConfirmId && event.key === 'Escape') {
+    if (!deleteConfirmId) return;
+    if (event.key === 'Escape') {
       event.preventDefault();
       cancelDelete();
+      return;
+    }
+    if (event.key === 'Tab' && deleteDialog) {
+      const focusable = Array.from(
+        deleteDialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        deleteDialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   }
 
@@ -623,6 +662,8 @@
 {#if deleteConfirmId}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
     <div
+      bind:this={deleteDialog}
+      tabindex="-1"
       class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl"
       role="dialog"
       aria-modal="true"

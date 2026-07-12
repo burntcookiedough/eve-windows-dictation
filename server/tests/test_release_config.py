@@ -61,17 +61,25 @@ def test_electron_builder_publish_includes_github() -> None:
     assert "github" in providers
 
 
+def test_windows_packaging_never_publishes_implicitly() -> None:
+    package_json = _load_package_json()
+    package_script = package_json.get("scripts", {}).get("package:win", "")
+    assert "--publish never" in package_script
+
+
 def test_release_workflow_installs_extras_and_uploads_payloads() -> None:
     workflow_path = ROOT / ".github" / "workflows" / "release.yml"
     contents = workflow_path.read_text(encoding="utf-8")
     assert "--extra all" in contents
     assert "prepare-python-runtime.ps1" in contents
     assert "portable Python imports" in contents
+    assert "torch, nemo.collections.asr" in contents
     assert '$health.engine.status -eq "ready"' in contents
     assert '$health.model_download.status -eq "ready"' in contents
     assert "$maxAssetBytes = 2100000000" in contents
     assert "uv run --no-sync pytest" in contents
     assert "--group dev" in contents
+    assert "GH_TOKEN" not in contents
     assert 'Get-ChildItem "app\\release" -Recurse -File' in contents
     assert "app/release/**/*.yml" in contents
     assert "app/release/**/*.blockmap" in contents
@@ -105,6 +113,7 @@ def test_ci_runs_app_and_server_tests() -> None:
     contents = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "bun test" in contents
     assert "uv run --no-sync pytest" in contents
+    assert "timeout-minutes: 30" in contents
 
 
 def test_server_manager_uses_portable_runtime_and_user_settings() -> None:

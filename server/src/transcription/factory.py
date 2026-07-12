@@ -285,10 +285,10 @@ class EngineManager:
         info = self.engine_info if self._engine else None
         if self._pending_status:
             status_value = "loading"
-        elif self._swap_error:
-            status_value = "error"
         elif self._engine:
             status_value = "ready"
+        elif self._swap_error:
+            status_value = "error"
         else:
             status_value = "loading"
 

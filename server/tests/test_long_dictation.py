@@ -101,6 +101,27 @@ class _RetryOomSession(_RecordingSession):
         return TranscribeResult(text="recovered words", confidence=0.8, last_speech_end=1.0)
 
 
+class _OverlappingOomSession(_RecordingSession):
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        *,
+        hotwords: str | None = None,
+        options: TranscribeOptions | None = None,
+    ) -> TranscribeResult:
+        self.calls.append((len(audio), options))
+        if len(self.calls) == 2:
+            raise VramExhaustedError(
+                last_result=TranscribeResult(
+                    text="first chunk repeated", confidence=0.9, last_speech_end=24.0
+                )
+            )
+        speech_end = 24.0 if len(self.calls) == 1 else 0.1
+        return TranscribeResult(
+            text=f"chunk {len(self.calls)}", confidence=0.8, last_speech_end=speech_end
+        )
+
+
 def test_plan_chunks_uses_overlap_after_first_chunk() -> None:
     audio = np.zeros(int(62.8 * 16000), dtype=np.float32)
 
@@ -206,6 +227,24 @@ async def test_final_uses_chunked_long_path_and_reports_progress(
     assert progress == [(1, 3), (2, 3), (3, 3)]
     assert all(call[1] is not None for call in session.calls)
     assert all(call[1].condition_on_previous_text is False for call in session.calls if call[1])
+
+
+@pytest.mark.asyncio
+async def test_long_final_skips_oom_chunk_and_keeps_latest_speech_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _OverlappingOomSession()
+    manager = _RecordingManager(session)
+    audio = np.zeros(int(62.8 * 16000), dtype=np.float32)
+    context = SimpleNamespace(session_id="oom", audio_buffer=_FakeAudioBuffer(audio), hotwords=None)
+
+    monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
+    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+
+    result = await processor_module.TranscriptionProcessor(context).transcribe_final()
+
+    assert result.text == "chunk 1 chunk 3"
+    assert result.last_speech_end == pytest.approx(49.35)
 
 
 @pytest.mark.asyncio

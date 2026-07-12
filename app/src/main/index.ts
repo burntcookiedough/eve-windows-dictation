@@ -175,16 +175,16 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   if (
     app.isPackaged &&
     !useExternalServer &&
-    serverState?.engineStatus &&
-    serverState.engineStatus.status !== 'ready'
+    serverState?.engineStatus?.status !== 'ready'
   ) {
-    const message = serverState.engineStatus.status === 'error'
-      ? (serverState.engineStatus.message ?? 'The transcription engine failed to load. Open Server settings for details.')
+    const engineStatus = serverState?.engineStatus;
+    const message = engineStatus?.status === 'error'
+      ? (engineStatus.message ?? 'The transcription engine failed to load. Open Server settings for details.')
       : 'The speech model is still loading. Keep Murmur open and try again when the Server status is ready.';
     log.warn('Cannot start recording: transcription engine is not ready', {
-      engine: serverState.engineStatus.current,
-      engineStatus: serverState.engineStatus.status,
-      message: serverState.engineStatus.message,
+      engine: engineStatus?.current,
+      engineStatus: engineStatus?.status ?? 'unknown',
+      message: engineStatus?.message,
     });
     showTransientOverlayError(message, sessionMode);
     return;
@@ -355,7 +355,15 @@ function toggleLongRecording(): void {
 
 // Handle audio data from overlay renderer
 function setupAudioHandler() {
-  ipcMain.on('audio:data', (_event, audioData: ArrayBuffer) => {
+  ipcMain.on('audio:data', (event, audioData: ArrayBuffer) => {
+    if (
+      !overlayWindow ||
+      overlayWindow.isDestroyed() ||
+      event.sender.id !== overlayWindow.webContents.id ||
+      !(audioData instanceof ArrayBuffer)
+    ) {
+      return;
+    }
     if (transcriptionService && isRecording) {
       transcriptionService.sendAudioBuffer(audioData);
     }
@@ -368,7 +376,12 @@ function setupAudioHandler() {
         !isRecording ||
         !overlayWindow ||
         overlayWindow.isDestroyed() ||
-        event.sender.id !== overlayWindow.webContents.id
+        event.sender.id !== overlayWindow.webContents.id ||
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.code !== 'string' ||
+        typeof payload.message !== 'string' ||
+        (payload.deviceId !== undefined && typeof payload.deviceId !== 'string')
       ) {
         return;
       }
@@ -394,15 +407,21 @@ function setupAudioHandler() {
 
 // Handle main window controls
 function setupMainWindowHandlers() {
-  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_CLOSE, () => {
+  const isMainWindowSender = (senderId: number) =>
+    !!mainWindow && !mainWindow.isDestroyed() && senderId === mainWindow.webContents.id;
+
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_CLOSE, (event) => {
+    if (!isMainWindowSender(event.sender.id)) return;
     mainWindow?.hide();
   });
 
-  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MINIMIZE, () => {
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MINIMIZE, (event) => {
+    if (!isMainWindowSender(event.sender.id)) return;
     mainWindow?.minimize();
   });
 
-  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MAXIMIZE, () => {
+  ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MAXIMIZE, (event) => {
+    if (!isMainWindowSender(event.sender.id)) return;
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize();
     } else {
@@ -410,11 +429,13 @@ function setupMainWindowHandlers() {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RECORDING_GET_STATE, () => {
+  ipcMain.handle(IPC_CHANNELS.RECORDING_GET_STATE, (event) => {
+    if (!isMainWindowSender(event.sender.id)) throw new Error('Unauthorized IPC sender');
     return getRecordingDebugState();
   });
 
-  ipcMain.handle(IPC_CHANNELS.RECORDING_START, async () => {
+  ipcMain.handle(IPC_CHANNELS.RECORDING_START, async (event) => {
+    if (!isMainWindowSender(event.sender.id)) throw new Error('Unauthorized IPC sender');
     if (isRecording && recordingSource !== 'lab') {
       throw new Error('Cannot start Lab session while regular recording is active');
     }
@@ -425,12 +446,14 @@ function setupMainWindowHandlers() {
     return getRecordingDebugState();
   });
 
-  ipcMain.handle(IPC_CHANNELS.RECORDING_STOP, async () => {
+  ipcMain.handle(IPC_CHANNELS.RECORDING_STOP, async (event) => {
+    if (!isMainWindowSender(event.sender.id)) throw new Error('Unauthorized IPC sender');
     await stopRecording();
     return getRecordingDebugState();
   });
 
-  ipcMain.handle(IPC_CHANNELS.RECORDING_TOGGLE, async () => {
+  ipcMain.handle(IPC_CHANNELS.RECORDING_TOGGLE, async (event) => {
+    if (!isMainWindowSender(event.sender.id)) throw new Error('Unauthorized IPC sender');
     if (isStopping) {
       throw new Error('Recording is stopping, please wait a moment');
     }
@@ -483,6 +506,9 @@ app.whenReady().then(async () => {
 
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
   setupIpcHandlers(historyService, serverManager);
+  setupAudioHandler();
+  setupMainWindowHandlers();
+  setupDisplayChangeHandlers();
 
   // Create main window (respects startMinimized setting)
   const startMinimized = getSetting('startMinimized');
@@ -500,10 +526,6 @@ app.whenReady().then(async () => {
   if (['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '')) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
-  setupAudioHandler();
-  setupMainWindowHandlers();
-  setupDisplayChangeHandlers();
-
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService({
     onHoldStart: () => {

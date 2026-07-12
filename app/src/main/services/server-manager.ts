@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron';
-import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFile, spawn, ChildProcess } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants.js';
@@ -25,6 +26,7 @@ const MAX_LOG_ENTRIES = 500;
 const HEALTH_POLL_INTERVAL_MS = 3000;
 const START_TIMEOUT_MS = 30000;
 const STOP_TIMEOUT_MS = 10000;
+const execFileAsync = promisify(execFile);
 
 export class ServerManager {
   private status: ServerStatus = 'idle';
@@ -166,12 +168,12 @@ export class ServerManager {
     return true;
   }
 
-  private isOwnedServerProcess(pid: number): boolean {
+  private async isOwnedServerProcess(pid: number): Promise<boolean> {
     if (this.childProcess?.pid === pid) return true;
     if (process.platform !== 'win32') return false;
 
     try {
-      const commandLine = execFileSync(
+      const { stdout } = await execFileAsync(
         'powershell.exe',
         [
           '-NoProfile',
@@ -180,7 +182,8 @@ export class ServerManager {
           `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
         ],
         { encoding: 'utf8', timeout: 3000, windowsHide: true }
-      ).trim();
+      );
+      const commandLine = stdout.trim();
       return isMurmurServerCommandLine(commandLine);
     } catch (error) {
       log.warn('Could not verify stale server process ownership', {
@@ -448,7 +451,7 @@ export class ServerManager {
       }
       // A stale PID can be reused by an unrelated process. Only terminate a
       // command line that still identifies itself as Murmur's Python entry.
-      if (this.isOwnedServerProcess(existingPid.pid)) {
+      if (await this.isOwnedServerProcess(existingPid.pid)) {
         log.warn('Existing Murmur server is not responding; terminating it');
         try {
           process.kill(existingPid.pid, 'SIGTERM');
@@ -696,7 +699,7 @@ export class ServerManager {
         }
       } else if (this.pidFile?.pid) {
         // No child process ref but have PID (shouldn't happen but handle it)
-        if (this.isOwnedServerProcess(this.pidFile.pid)) {
+        if (await this.isOwnedServerProcess(this.pidFile.pid)) {
           try {
             process.kill(this.pidFile.pid, 'SIGTERM');
           } catch {

@@ -55,7 +55,7 @@ jobs:
         run: |
           $env:PYTHONNOUSERSITE = "1"
           $env:PYTHONPATH = (Resolve-Path ".venv\Lib\site-packages").Path
-          & ".runtime\python.exe" -c "import fastapi, uvicorn, faster_whisper; print('portable runtime imports passed')"
+          & ".runtime\python.exe" -c "import fastapi, uvicorn, faster_whisper, torch, nemo.collections.asr; print('portable runtime imports passed')"
           if ($LASTEXITCODE -ne 0) { throw "Portable Python import smoke test failed." }
 
       - name: Smoke-start server with portable Python
@@ -109,8 +109,6 @@ jobs:
 
       - name: Build Windows installer
         working-directory: app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run package:win
 
       - name: Verify release artifacts fit GitHub

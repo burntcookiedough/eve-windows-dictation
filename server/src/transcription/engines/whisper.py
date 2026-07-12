@@ -21,7 +21,7 @@ import numpy as np
 from config import Settings
 from transcription.base import EngineInfo
 from transcription.model_download import get_repo_cache_status, update_model_download_state
-from transcription.types import TranscribeOptions, TranscribeResult
+from transcription.types import TranscribeOptions, TranscribeResult, resolve_option
 
 logger = logging.getLogger(__name__)
 
@@ -341,32 +341,17 @@ class WhisperSession:
         options: TranscribeOptions | None = None,
     ) -> TranscribeResult:
         start = time.perf_counter()
-        condition_on_previous_text = (
-            self._options.condition_on_previous_text
-            if options is None or options.condition_on_previous_text is None
-            else options.condition_on_previous_text
+        options = options or TranscribeOptions()
+        condition_on_previous_text = resolve_option(
+            self._options.condition_on_previous_text, options.condition_on_previous_text
         )
-        without_timestamps = (
-            self._options.without_timestamps
-            if options is None or options.without_timestamps is None
-            else options.without_timestamps
+        without_timestamps = resolve_option(
+            self._options.without_timestamps, options.without_timestamps
         )
-        vad_filter = (
-            self._options.vad_filter
-            if options is None or options.vad_filter is None
-            else options.vad_filter
-        )
-        temperature = (
-            self._options.temperature
-            if options is None or options.temperature is None
-            else options.temperature
-        )
-        beam_size = (
-            self._options.beam_size
-            if options is None or options.beam_size is None
-            else options.beam_size
-        )
-        segments, info = self._model.transcribe(
+        vad_filter = resolve_option(self._options.vad_filter, options.vad_filter)
+        temperature = resolve_option(self._options.temperature, options.temperature)
+        beam_size = resolve_option(self._options.beam_size, options.beam_size)
+        segments, _info = self._model.transcribe(
             audio,
             language=self._options.language,
             hotwords=hotwords,

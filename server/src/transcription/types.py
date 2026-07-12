@@ -1,7 +1,15 @@
 """Engine-agnostic transcription result type."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeVar
+
+
+T = TypeVar("T")
+
+
+def resolve_option(default: T, override: T | None) -> T:
+    """Return an explicit per-call override, otherwise the configured default."""
+    return default if override is None else override
 
 
 @dataclass(frozen=True, slots=True)

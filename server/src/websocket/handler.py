@@ -558,9 +558,14 @@ async def _finalize_session(
                 final_transcription_time,
                 final_audio_duration,
             )
+        except Exception:
+            logger.debug("[%s] Failed to send final frame", context.session_id, exc_info=True)
 
+        try:
             logger.info("[%s] Sending closing frame", context.session_id)
             await sender.send_closing(reason)
+        except Exception:
+            logger.debug("[%s] Failed to send closing frame", context.session_id, exc_info=True)
         finally:
             if context.state_machine.state != SessionState.CLOSED:
                 context.state_machine.transition_to(SessionState.CLOSED)

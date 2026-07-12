@@ -355,13 +355,12 @@ async def test_silence_send_failure_still_closes_websocket() -> None:
     context.audio_buffer._last_audio_time = time.monotonic() - 1.0
     websocket = _ClosingWebSocket()
 
-    with pytest.raises(RuntimeError, match="socket write failed"):
-        await _silence_monitor_loop(
-            websocket,
-            _FailingFinalSender(),
-            context,
-            _FinalProcessor(),
-        )
+    await _silence_monitor_loop(
+        websocket,
+        _FailingFinalSender(),
+        context,
+        _FinalProcessor(),
+    )
 
     assert websocket.closed is True
     assert context.state_machine.state == SessionState.CLOSED

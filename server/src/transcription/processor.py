@@ -281,15 +281,15 @@ class TranscriptionProcessor:
             chunk_audio = audio[chunk.start_sample:chunk.end_sample]
             try:
                 result = await self._run_transcribe(chunk_audio, loop=loop, options=options)
-            except VramExhaustedError as error:
+            except VramExhaustedError:
                 logger.warning(
                     "[%s] VRAM exhausted during long dictation chunk %d/%d; "
-                    "using last available chunk result",
+                    "skipping failed chunk",
                     self._session_id,
                     chunk.index,
                     chunk.total,
                 )
-                result = error.last_result or TranscribeResult(
+                result = TranscribeResult(
                     text="",
                     confidence=0.0,
                     last_speech_end=None,
@@ -324,7 +324,8 @@ class TranscriptionProcessor:
             weighted_confidence += result.confidence * weight
             total_weight += weight
             if result.last_speech_end is not None:
-                last_speech_end = chunk.start_s + result.last_speech_end
+                absolute_speech_end = chunk.start_s + result.last_speech_end
+                last_speech_end = max(last_speech_end or 0.0, absolute_speech_end)
 
         confidence = weighted_confidence / total_weight if total_weight > 0 else 0.0
         return TranscribeResult(

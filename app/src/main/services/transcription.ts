@@ -221,6 +221,10 @@ export class TranscriptionService {
         }
 
         case 'status': {
+          if (frame.status !== 'long_dictation_started' && frame.status !== 'long_dictation_processing') {
+            log.warn('Ignoring unknown recording status', { status: frame.status });
+            break;
+          }
           const payload: RecordingStatusPayload = {
             status: frame.status,
             message: frame.message,

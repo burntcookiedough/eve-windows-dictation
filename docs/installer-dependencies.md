@@ -90,7 +90,7 @@ Works without any GPU. Set device to `cpu` in Settings. Transcription will be si
 The release copies uv's managed [python-build-standalone](https://github.com/astral-sh/python-build-standalone) distribution into `.runtime` and keeps third-party packages in `.venv/Lib/site-packages`. This avoids copying a virtual-environment launcher that still points to the build machine's base Python.
 
 The packaged app spawns the server via:
-```
+```text
 PYTHONPATH={resources}/server/.venv/Lib/site-packages
 {resources}/server/.runtime/python.exe {resources}/server/src/main.py
 ```

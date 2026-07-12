@@ -20,7 +20,7 @@
     "build:renderer": "vite build",
     "preview": "vite preview",
     "package": "bun run build && electron-builder",
-    "package:win": "bun run build && electron-builder --win",
+    "package:win": "bun run build && electron-builder --win --publish never",
     "clear-data": "node scripts/clear-data.js"
   },
   "devDependencies": {

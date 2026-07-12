@@ -6,7 +6,7 @@
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import { toast } from '$lib/toast.svelte';
-  import type { Settings, Hotkey, EngineStatus, ServerSetting } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DEFAULT_SERVER_HOST = 'localhost';
@@ -15,57 +15,16 @@
 
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
-    hotkey: {
-      keycode: 3675,
-      ctrlKey: true,
-      altKey: false,
-      shiftKey: false,
-      metaKey: false,
-    },
-    longHotkey: {
-      keycode: 3675,
-      ctrlKey: true,
-      altKey: false,
-      shiftKey: true,
-      metaKey: false,
-    },
-    holdToTalk: true,
-    autoCopy: true,
-    autoPaste: true,
-    restoreClipboardAfterPaste: true,
-    clipboardRestoreDelayMs: 250,
-    pasteMethod: 'sendinput',
-    silenceTimeout: 15,
-    serverUrl: 'ws://localhost:51717/transcribe',
-    appendPeriod: false,
-    appendSpace: false,
-    dictationMode: 'clean_prompt',
-    selectedDeviceId: 'default',
-    launchOnBoot: false,
-    startMinimized: false,
-    serverAutoStart: true,
-    useExternalServer: false,
-    hotwordsEnabled: false,
-    hotwordsCsl: '',
+    ...DEFAULT_SETTINGS,
+    hotkey: { ...DEFAULT_SETTINGS.hotkey },
+    longHotkey: { ...DEFAULT_SETTINGS.longHotkey },
   });
 
   // Default hotkey (Ctrl+Meta)
-  const DEFAULT_HOTKEY: Hotkey = {
-    keycode: 3675,
-    ctrlKey: true,
-    altKey: false,
-    shiftKey: false,
-    metaKey: false,
-  };
+  const DEFAULT_HOTKEY: Hotkey = DEFAULT_SETTINGS.hotkey;
 
   // Default long dictation hotkey (Ctrl+Shift+Meta)
-  const DEFAULT_LONG_HOTKEY: Hotkey = {
-    keycode: 3675,
-    ctrlKey: true,
-    altKey: false,
-    shiftKey: true,
-    metaKey: false,
-  };
+  const DEFAULT_LONG_HOTKEY: Hotkey = DEFAULT_SETTINGS.longHotkey;
 
   // Hotkey display name (human-readable)
   let hotkeyDisplayName = $state('Ctrl+Meta');
@@ -366,7 +325,8 @@
     if (enabled) {
       updateExternalServerUrl();
       setTimeout(() => {
-        externalServerCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        externalServerCard?.scrollIntoView({ behavior, block: 'center' });
       }, 50);
     }
   }
