@@ -27,6 +27,8 @@ import type {
   TranscriptionEntry,
 } from '../../shared/types.js';
 
+const INSIGHTS_PHRASE_ENTRY_LIMIT = 5000;
+
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
   const date = new Date(timestamp);
@@ -287,7 +289,7 @@ export class HistoryService {
     const summary = this.buildSummary(rows);
     const indexing = this.getIndexingStatus();
     const commonWords = this.getCommonWords(dayStart, 18);
-    const sourceEntries = this.getSourceEntries(rangeStart);
+    const sourceEntries = this.getSourceEntries(rangeStart, INSIGHTS_PHRASE_ENTRY_LIMIT);
     const commonPhrases = buildPhraseStats(sourceEntries, 12);
     const longestEntries = this.getLongestEntries(rangeStart, 5);
     const slowestEntries = this.getSlowestEntries(rangeStart, 5);
@@ -714,14 +716,15 @@ export class HistoryService {
     return sortWordStats(new Map(rows.map((row) => [row.word, row.count])), limit);
   }
 
-  private getSourceEntries(rangeStart: number | null): InsightSourceEntry[] {
+  private getSourceEntries(rangeStart: number | null, limit: number): InsightSourceEntry[] {
     if (!this.db) throw new Error('Database not initialized');
     if (rangeStart === null) {
       return this.db.prepare(`
         SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
         FROM transcriptions
         ORDER BY timestamp DESC
-      `).all().map(mapInsightSourceEntry);
+        LIMIT @limit
+      `).all({ limit }).map(mapInsightSourceEntry);
     }
 
     return this.db.prepare(`
@@ -729,7 +732,8 @@ export class HistoryService {
         FROM transcriptions
         WHERE timestamp >= @rangeStart
         ORDER BY timestamp DESC
-      `).all({ rangeStart }).map(mapInsightSourceEntry);
+        LIMIT @limit
+      `).all({ rangeStart, limit }).map(mapInsightSourceEntry);
   }
 
   private getLongestEntries(rangeStart: number | null, limit: number): InsightsEntryStat[] {
