@@ -61,6 +61,23 @@ def test_electron_builder_publish_includes_github() -> None:
     assert "github" in providers
 
 
+def test_electron_builder_publish_targets_release_repository() -> None:
+    package_json = _load_package_json()
+    publish = package_json.get("build", {}).get("publish")
+    github_publishers = [
+        entry
+        for entry in publish
+        if isinstance(entry, dict) and entry.get("provider") == "github"
+    ]
+    assert github_publishers == [
+        {
+            "provider": "github",
+            "owner": "burntcookiedough",
+            "repo": "murmur",
+        }
+    ]
+
+
 def test_windows_packaging_never_publishes_implicitly() -> None:
     package_json = _load_package_json()
     package_script = package_json.get("scripts", {}).get("package:win", "")

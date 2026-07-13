@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Desktop voice transcription app",
   "repository": {
     "type": "git",
@@ -97,7 +97,9 @@
     },
     "publish": [
       {
-        "provider": "github"
+        "provider": "github",
+        "owner": "burntcookiedough",
+        "repo": "murmur"
       }
     ]
   }
