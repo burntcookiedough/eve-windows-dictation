@@ -82,10 +82,12 @@ def test_release_workflow_installs_extras_and_uploads_payloads() -> None:
     assert "uv run --no-sync pytest" in contents
     assert "--group dev" in contents
     assert "GH_TOKEN" not in contents
-    assert 'Get-ChildItem "app\\release" -Recurse -File' in contents
-    assert "app/release/**/*.yml" in contents
-    assert "app/release/**/*.blockmap" in contents
-    assert "app/release/**/*.7z" in contents or "app/release/**/*.zip" in contents
+    assert '$releaseDir = "app\\release\\nsis-web"' in contents
+    assert "app/release/nsis-web/*.exe" in contents
+    assert "app/release/nsis-web/*.yml" in contents
+    assert "app/release/nsis-web/*.blockmap" in contents
+    assert "app/release/nsis-web/*.7z" in contents
+    assert "app/release/**/*.exe" not in contents
 
 
 def test_packaging_includes_relocatable_runtime() -> None:

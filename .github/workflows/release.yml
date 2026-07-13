@@ -124,10 +124,20 @@ jobs:
       - name: Verify release artifacts fit GitHub
         shell: pwsh
         run: |
-          $artifacts = Get-ChildItem "app\release" -Recurse -File | Where-Object {
-            $_.Extension -in ".exe", ".7z", ".zip", ".blockmap", ".yml"
+          $releaseDir = "app\release\nsis-web"
+          $artifacts = Get-ChildItem $releaseDir -File | Where-Object {
+            $_.Extension -in ".exe", ".7z", ".blockmap", ".yml"
           }
           if (-not $artifacts) { throw "No release artifacts were produced." }
+          if (-not ($artifacts | Where-Object Extension -eq ".exe")) {
+            throw "No web installer executable was produced."
+          }
+          if (-not ($artifacts | Where-Object Extension -eq ".7z")) {
+            throw "No offline installer payload was produced."
+          }
+          if (-not ($artifacts | Where-Object Name -eq "latest.yml")) {
+            throw "No update manifest was produced."
+          }
           # Keep margin below GitHub's 2 GiB per-file release limit.
           $maxAssetBytes = 2100000000
           $oversized = $artifacts | Where-Object Length -ge $maxAssetBytes
@@ -142,8 +152,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            app/release/**/*.exe
-            app/release/**/*.7z
-            app/release/**/*.zip
-            app/release/**/*.blockmap
-            app/release/**/*.yml
+            app/release/nsis-web/*.exe
+            app/release/nsis-web/*.7z
+            app/release/nsis-web/*.blockmap
+            app/release/nsis-web/*.yml
