@@ -121,15 +121,18 @@ def test_whisper_uncached_model_reports_downloading(
         missing_files=["model.bin"],
         partial_files=[],
     )
-    observed_during_load: list[str | None] = []
+    observed_during_load: list[tuple[str | None, str | None]] = []
 
     class FakeWhisperModel:
         def __init__(self, *args, **kwargs) -> None:
             state = get_model_download_state()
-            observed_during_load.append(state["status"] if state else None)
+            observed_during_load.append(
+                (state["status"], state["phase"]) if state else (None, None)
+            )
 
     monkeypatch.setattr(whisper, "get_repo_cache_status", lambda _repo: cache_status)
     monkeypatch.setattr(whisper, "WhisperModel", FakeWhisperModel)
+    monkeypatch.setattr(whisper, "download_model", lambda _repo: "cache/snapshot")
     monkeypatch.setattr(whisper, "_get_cuda_active", lambda _device: False)
 
     whisper.WhisperEngine(
@@ -140,8 +143,9 @@ def test_whisper_uncached_model_reports_downloading(
         )
     )
 
-    assert observed_during_load == ["downloading"]
+    assert observed_during_load == [("downloading", "loading")]
     assert get_model_download_state()["status"] == "ready"
+    assert get_model_download_state()["phase"] == "ready"
 
 
 @pytest.mark.parametrize(

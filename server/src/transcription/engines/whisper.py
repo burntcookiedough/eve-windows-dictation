@@ -14,13 +14,20 @@ try:
 except ImportError:
     pass
 
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel, download_model
 from numpy.typing import NDArray
 import numpy as np
 
 from config import Settings
 from transcription.base import EngineInfo
-from transcription.model_download import get_repo_cache_status, update_model_download_state
+from transcription.model_download import (
+    begin_model_download_progress,
+    get_cached_required_bytes,
+    get_repo_cache_status,
+    mark_model_loading,
+    track_huggingface_download_progress,
+    update_model_download_state,
+)
 from transcription.types import TranscribeOptions, TranscribeResult, resolve_option
 
 logger = logging.getLogger(__name__)
@@ -162,21 +169,31 @@ class WhisperEngine:
         repo_id = _resolve_repo_id(model)
         cache_status = get_repo_cache_status(repo_id) if repo_id else None
         preflight_cached: bool | None = None
+        model_source = model
 
         if repo_id:
             assert cache_status is not None
             preflight_cached = cache_status.status == "ready"
             if preflight_cached:
+                model_source = cache_status.snapshot_path or model
                 update_model_download_state(
                     model=model,
                     size_gb=model_size_gb,
                     status="ready",
                     cached=True,
-                    detail=cache_status.detail,
+                    detail="cached; loading model",
                     repo_id=repo_id,
                     path=cache_status.snapshot_path,
+                    phase="loading",
+                    progress_percent=100.0,
                 )
             else:
+                begin_model_download_progress(
+                    model=model,
+                    repo_id=repo_id,
+                    size_gb=model_size_gb,
+                    initial_bytes=get_cached_required_bytes(repo_id),
+                )
                 update_model_download_state(
                     model=model,
                     size_gb=model_size_gb,
@@ -187,6 +204,8 @@ class WhisperEngine:
                     path=cache_status.snapshot_path or cache_status.repo_path,
                     missing_files=cache_status.missing_files,
                     partial_files=cache_status.partial_files,
+                    phase="downloading",
+                    progress_percent=0.0,
                 )
                 logger.info(
                     "Whisper model cache status is %s; loading may download (~%.1f GB).",
@@ -199,8 +218,10 @@ class WhisperEngine:
                 size_gb=model_size_gb,
                 status="ready",
                 cached=True,
-                detail="local model",
+                detail="local model; loading",
                 path=model,
+                phase="loading",
+                progress_percent=100.0,
             )
 
         logger.info(
@@ -209,27 +230,36 @@ class WhisperEngine:
         )
         load_start = time.perf_counter()
         try:
-            self._model = WhisperModel(model, device=device, compute_type=compute_type)
+            if repo_id and preflight_cached is False:
+                with track_huggingface_download_progress():
+                    model_source = download_model(repo_id)
+                mark_model_loading()
+            self._model = WhisperModel(
+                model_source,
+                device=device,
+                compute_type=compute_type,
+            )
         except Exception as exc:
             if _is_network_error(exc):
                 logger.warning(
                     "Network/TLS error loading model, retrying with local cache: %s", exc,
                 )
                 try:
+                    mark_model_loading()
                     self._model = WhisperModel(
                         model, device=device, compute_type=compute_type,
                         local_files_only=True,
                     )
                 except Exception as fallback_exc:
-                    if preflight_cached is False:
-                        update_model_download_state(
-                            model=model,
-                            size_gb=model_size_gb,
-                            status="error",
-                            cached=False,
-                            detail="download failed: network error",
-                            repo_id=repo_id,
-                        )
+                    update_model_download_state(
+                        model=model,
+                        size_gb=model_size_gb,
+                        status="error",
+                        cached=False,
+                        detail="download failed: network error",
+                        repo_id=repo_id,
+                        phase="error",
+                    )
                     raise fallback_exc from exc
             elif _is_cuda_dll_error(exc):
                 logger.error(
@@ -237,19 +267,32 @@ class WhisperEngine:
                     "Install/update the NVIDIA driver or switch to CPU mode.",
                     exc_info=exc,
                 )
+                update_model_download_state(
+                    model=model,
+                    size_gb=model_size_gb,
+                    status="error",
+                    cached=preflight_cached,
+                    detail="model loading failed: CUDA runtime unavailable",
+                    repo_id=repo_id,
+                    phase="error",
+                )
                 raise RuntimeError(
                     "CUDA runtime DLLs are missing. Install/update the NVIDIA driver or switch to CPU mode."
                 ) from exc
             else:
-                if preflight_cached is False:
-                    update_model_download_state(
-                        model=model,
-                        size_gb=model_size_gb,
-                        status="error",
-                        cached=False,
-                        detail="download failed",
-                        repo_id=repo_id,
-                    )
+                update_model_download_state(
+                    model=model,
+                    size_gb=model_size_gb,
+                    status="error",
+                    cached=preflight_cached,
+                    detail=(
+                        "download failed"
+                        if preflight_cached is False
+                        else "model loading failed"
+                    ),
+                    repo_id=repo_id,
+                    phase="error",
+                )
                 raise
         self._load_time_s = time.perf_counter() - load_start
         self._model_name = model
@@ -276,6 +319,8 @@ class WhisperEngine:
             detail=detail,
             repo_id=repo_id,
             path=self._model_path,
+            phase="ready",
+            progress_percent=100.0,
         )
         if preflight_cached is False:
             logger.info("Whisper model download complete.")
