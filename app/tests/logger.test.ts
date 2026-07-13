@@ -63,4 +63,14 @@ describe('safe logger stream writer', () => {
 
     expect(stream.writes).toEqual([]);
   });
+
+  test('does not write to a destroyed stream', () => {
+    const stream = new FakeOutputStream();
+    stream.destroyed = true;
+    const write = createSafeStreamWriter(stream);
+
+    write('ignored');
+
+    expect(stream.writes).toEqual([]);
+  });
 });
