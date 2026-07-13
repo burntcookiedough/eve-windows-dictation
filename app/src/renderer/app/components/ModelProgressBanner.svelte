@@ -1,16 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { ServerStatePayload } from '$shared/types';
+  import { shouldShowModelProgress } from '$shared/model-progress';
   import ModelProgressCard from './ModelProgressCard.svelte';
 
   let { visible = true }: { visible?: boolean } = $props();
   let serverState = $state<ServerStatePayload | null>(null);
   let modelDownload = $derived(serverState?.modelDownload);
   let showBanner = $derived(
-    modelDownload?.status === 'error' ||
-    modelDownload?.status === 'downloading' ||
-    modelDownload?.phase === 'checking' ||
-    modelDownload?.phase === 'loading'
+    modelDownload?.status === 'error' || shouldShowModelProgress(modelDownload)
   );
 
   async function refreshServerState() {

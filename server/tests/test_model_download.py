@@ -341,11 +341,11 @@ def test_huggingface_progress_bridge_observes_byte_callbacks(monkeypatch) -> Non
 
     tqdm_module = importlib.import_module("huggingface_hub.utils.tqdm")
     with model_download.track_huggingface_download_progress():
-        with tqdm_module._get_progress_bar_context(
+        with tqdm_module.tqdm(
             desc="model.bin",
-            log_level=100,
             total=100,
             initial=0,
+            disable=True,
         ) as progress:
             clock[0] = 2.0
             progress.update(25)

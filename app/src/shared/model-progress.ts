@@ -37,6 +37,10 @@ function activePhase(
   return state.status === 'downloading' ? 'downloading' : null;
 }
 
+export function shouldShowModelProgress(state?: ModelDownloadState): boolean {
+  return state !== undefined && activePhase(state) !== null;
+}
+
 export function getModelProgressView(
   state?: ModelDownloadState
 ): ModelProgressView | null {

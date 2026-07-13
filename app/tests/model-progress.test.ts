@@ -4,6 +4,7 @@ import {
   formatProgressDuration,
   getModelProgressShortSummary,
   getModelProgressView,
+  shouldShowModelProgress,
 } from '../src/shared/model-progress';
 
 describe('model progress presentation', () => {
@@ -36,15 +37,34 @@ describe('model progress presentation', () => {
   });
 
   test('uses an indeterminate summary until throughput is known', () => {
-    const view = getModelProgressView({
+    const state = {
       model: 'tiny',
       size_gb: 0.07,
-      status: 'downloading',
-      phase: 'downloading',
-    });
+      status: 'downloading' as const,
+      phase: 'downloading' as const,
+    };
+    const view = getModelProgressView(state);
 
     expect(view?.progressPercent).toBeNull();
     expect(view?.metrics).toBe('Estimating time remaining…');
+    expect(getModelProgressShortSummary(state)).toBe(
+      'Downloading speech model — estimating time remaining.'
+    );
+  });
+
+  test('renders the cache-checking stage distinctly', () => {
+    const state = {
+      model: 'large-v3-turbo',
+      size_gb: 1.5,
+      status: 'missing' as const,
+      phase: 'checking' as const,
+    };
+
+    const view = getModelProgressView(state);
+    expect(view?.stepLabel).toBe('Step 1 of 3');
+    expect(view?.metrics).toBeNull();
+    expect(getModelProgressShortSummary(state)).toBe('Checking speech model files.');
+    expect(shouldShowModelProgress(state)).toBeTrue();
   });
 
   test('separates loading from network ETA', () => {

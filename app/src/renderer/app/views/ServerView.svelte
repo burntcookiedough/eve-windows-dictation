@@ -5,6 +5,7 @@
   import SettingsSection from '../components/SettingsSection.svelte';
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import type { ServerStatePayload, ServerLogEntry, Settings } from '$shared/types';
+  import { shouldShowModelProgress } from '$shared/model-progress';
 
   // Server state
   let serverState = $state<ServerStatePayload>({
@@ -45,11 +46,7 @@
   let engineReady = $derived(serverState.engineStatus?.status === 'ready');
   let diagnosticWarnings = $derived(serverState.diagnostics?.warnings ?? []);
   let modelDownload = $derived(serverState.modelDownload);
-  let showModelProgress = $derived(
-    modelDownload?.status === 'downloading' ||
-    modelDownload?.phase === 'checking' ||
-    modelDownload?.phase === 'loading'
-  );
+  let showModelProgress = $derived(shouldShowModelProgress(modelDownload));
   let modelDownloadError = $derived(modelDownload?.status === 'error');
 
   // Format uptime as human-readable string
