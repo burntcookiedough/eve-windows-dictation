@@ -3,6 +3,7 @@
   import Toggle from '../components/Toggle.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
+  import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import type { ServerStatePayload, ServerLogEntry, Settings } from '$shared/types';
 
   // Server state
@@ -44,7 +45,11 @@
   let engineReady = $derived(serverState.engineStatus?.status === 'ready');
   let diagnosticWarnings = $derived(serverState.diagnostics?.warnings ?? []);
   let modelDownload = $derived(serverState.modelDownload);
-  let isDownloadingModel = $derived(modelDownload?.status === 'downloading');
+  let showModelProgress = $derived(
+    modelDownload?.status === 'downloading' ||
+    modelDownload?.phase === 'checking' ||
+    modelDownload?.phase === 'loading'
+  );
   let modelDownloadError = $derived(modelDownload?.status === 'error');
 
   // Format uptime as human-readable string
@@ -64,12 +69,6 @@
   function formatLogTime(timestamp: number): string {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', { hour12: false });
-  }
-
-  function formatModelSize(sizeGb?: number): string {
-    if (!sizeGb || Number.isNaN(sizeGb)) return '';
-    const rounded = Math.round(sizeGb * 10) / 10;
-    return `${rounded} GB`;
   }
 
   // Can start/stop based on status and management mode
@@ -304,20 +303,9 @@
           </div>
         {/if}
 
-        {#if isDownloadingModel}
-          <div class="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
-            <p class="text-sm text-amber-200">
-              Downloading {modelDownload?.model ?? 'model'}
-              {#if modelDownload?.size_gb}
-                <span class="text-amber-300/80">({formatModelSize(modelDownload.size_gb)})</span>
-              {/if}
-            </p>
-            <p class="mt-1 text-xs text-amber-300/80">
-              First run downloads can take a few minutes. Keep the app open while the model is fetched.
-            </p>
-            <p class="mt-2 text-xs text-amber-300/80">
-              If the download stalls, check your connection and use Restart to retry.
-            </p>
+        {#if modelDownload && showModelProgress}
+          <div class="mx-auto mb-4 max-w-2xl">
+            <ModelProgressCard state={modelDownload} />
           </div>
         {/if}
 

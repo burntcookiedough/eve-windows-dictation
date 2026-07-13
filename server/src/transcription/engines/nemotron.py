@@ -122,7 +122,10 @@ class NemotronEngine:
                     size_gb=_MODEL_SIZE_GB,
                     status="ready",
                     cached=True,
-                    detail="cached",
+                    detail="cached; loading model",
+                    repo_id=repo_id,
+                    phase="loading",
+                    progress_percent=100.0,
                 )
             else:
                 update_model_download_state(
@@ -131,6 +134,8 @@ class NemotronEngine:
                     status="downloading",
                     cached=False,
                     detail="download started",
+                    repo_id=repo_id,
+                    phase="downloading",
                 )
                 logger.info(
                     "Nemotron model not found in cache; downloading (~%.1f GB).",
@@ -142,7 +147,9 @@ class NemotronEngine:
                 size_gb=_MODEL_SIZE_GB,
                 status="ready",
                 cached=True,
-                detail="local model",
+                detail="local model; loading",
+                phase="loading",
+                progress_percent=100.0,
             )
 
         # Suppress Python warnings from NeMo/Lhotse before import triggers them.
@@ -185,6 +192,8 @@ class NemotronEngine:
                             status="error",
                             cached=False,
                             detail="download failed: network error",
+                            repo_id=repo_id,
+                            phase="error",
                         )
                     raise offline_exc from exc
                 finally:
@@ -200,6 +209,8 @@ class NemotronEngine:
                         status="error",
                         cached=False,
                         detail="download failed",
+                        repo_id=repo_id,
+                        phase="error",
                     )
                 raise
         self._model.eval()
@@ -232,6 +243,9 @@ class NemotronEngine:
             status="ready",
             cached=True,
             detail=detail,
+            repo_id=repo_id,
+            phase="ready",
+            progress_percent=100.0,
         )
         if preflight_cached is False:
             logger.info("Nemotron model download complete.")

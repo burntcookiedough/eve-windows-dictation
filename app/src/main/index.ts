@@ -13,6 +13,7 @@ import { getSettings, getSetting } from './services/settings.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 import { buildHotwordsPrompt } from '../shared/hotwords.js';
+import { getModelProgressShortSummary } from '../shared/model-progress.js';
 import type {
   RecordingStatePayload,
   ConnectionStatePayload,
@@ -184,9 +185,10 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     serverState?.engineStatus?.status !== 'ready'
   ) {
     const engineStatus = serverState?.engineStatus;
+    const progressSummary = getModelProgressShortSummary(serverState?.modelDownload);
     const message = engineStatus?.status === 'error'
       ? (engineStatus.message ?? 'The transcription engine failed to load. Open Server settings for details.')
-      : 'The speech model is still loading. Keep Murmur open and try again when the Server status is ready.';
+      : progressSummary ?? 'The speech model is still loading. Keep Murmur open and try again when the Server status is ready.';
     log.warn('Cannot start recording: transcription engine is not ready', {
       engine: engineStatus?.current,
       engineStatus: engineStatus?.status ?? 'unknown',

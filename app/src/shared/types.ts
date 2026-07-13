@@ -89,6 +89,14 @@ export interface ModelDownloadState {
   missing_files?: string[];
   partial_files?: string[];
   updated_at?: string;
+  phase?: 'checking' | 'downloading' | 'loading' | 'ready' | 'error';
+  progress_percent?: number;
+  downloaded_bytes?: number;
+  total_bytes?: number;
+  bytes_per_second?: number;
+  eta_seconds?: number;
+  current_file?: string;
+  started_at?: string;
 }
 
 // IPC State payloads

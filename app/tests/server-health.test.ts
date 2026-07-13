@@ -32,6 +32,47 @@ describe('server health parsing', () => {
     expect(health.engineStatus).toBeUndefined();
   });
 
+  test('validates and clamps model download progress', () => {
+    const health = parseHealthyResponse({
+      status: 'healthy',
+      model_download: {
+        model: 'large-v3-turbo',
+        size_gb: 1.5,
+        status: 'downloading',
+        phase: 'downloading',
+        progress_percent: 104.5,
+        downloaded_bytes: 750,
+        total_bytes: 1000,
+        bytes_per_second: 25,
+        eta_seconds: 10,
+      },
+    });
+
+    expect(health.modelDownload?.progress_percent).toBe(100);
+    expect(health.modelDownload?.downloaded_bytes).toBe(750);
+    expect(health.modelDownload?.eta_seconds).toBe(10);
+  });
+
+  test('drops malformed model download progress fields', () => {
+    const health = parseHealthyResponse({
+      status: 'healthy',
+      model_download: {
+        model: 'tiny',
+        size_gb: 0.07,
+        status: 'downloading',
+        phase: 'teleporting',
+        progress_percent: Number.NaN,
+        downloaded_bytes: -1,
+        eta_seconds: Number.POSITIVE_INFINITY,
+      },
+    });
+
+    expect(health.modelDownload?.phase).toBeUndefined();
+    expect(health.modelDownload?.progress_percent).toBeUndefined();
+    expect(health.modelDownload?.downloaded_bytes).toBeUndefined();
+    expect(health.modelDownload?.eta_seconds).toBeUndefined();
+  });
+
   test('rejects a non-object response', () => {
     expect(parseHealthyResponse(null)).toEqual({ healthy: false });
   });

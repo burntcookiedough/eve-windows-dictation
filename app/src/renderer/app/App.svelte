@@ -6,6 +6,7 @@
   import SettingsView from './views/SettingsView.svelte';
   import TestView from './views/TestView.svelte';
   import ServerView from './views/ServerView.svelte';
+  import ModelProgressBanner from './components/ModelProgressBanner.svelte';
 
   type View = 'history' | 'insights' | 'settings' | 'test' | 'server';
 
@@ -46,6 +47,8 @@
       {/each}
     </nav>
   </header>
+
+  <ModelProgressBanner visible={activeView !== 'server'} />
 
   <!-- Main Content -->
   <main class="flex-1 overflow-hidden">
