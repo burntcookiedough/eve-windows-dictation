@@ -27,8 +27,9 @@ describe('AudioCapture startup cancellation', () => {
     const pendingStream = fakeStream();
     const activeStream = fakeStream();
     const firstAcquisition = deferred<MediaStream>();
+    let getUserMediaCallCount = 0;
     const getUserMedia = mock(() =>
-      getUserMedia.mock.calls.length === 1
+      ++getUserMediaCallCount === 1
         ? firstAcquisition.promise
         : Promise.resolve(activeStream.stream)
     );
