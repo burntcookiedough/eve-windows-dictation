@@ -28,6 +28,8 @@ export class AudioCapture {
   private workletNode: AudioWorkletNode | null = null;
   private sequenceNumber = 0;
   private isCapturing = false;
+  private isStarting = false;
+  private startGeneration = 0;
 
   private onAudioData: ((buffer: ArrayBuffer) => void) | null = null;
   private onLevels: ((levels: number[]) => void) | null = null;
@@ -46,7 +48,10 @@ export class AudioCapture {
     onLevels: (levels: number[]) => void,
     options?: AudioCaptureOptions
   ): Promise<void> {
-    if (this.isCapturing) return;
+    if (this.isCapturing || this.isStarting) return;
+
+    const generation = ++this.startGeneration;
+    this.isStarting = true;
 
     this.options = { ...DEFAULTS, ...options };
     this.onAudioData = onAudioData;
@@ -70,13 +75,19 @@ export class AudioCapture {
         audioConstraints.deviceId = { exact: this.options.deviceId };
       }
 
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: audioConstraints,
       });
+      if (generation !== this.startGeneration) {
+        this.disposeMedia(stream, null);
+        return;
+      }
+      this.stream = stream;
 
-      this.audioContext = new AudioContext({
+      const audioContext = new AudioContext({
         sampleRate: TARGET_SAMPLE_RATE,
       });
+      this.audioContext = audioContext;
 
       // Use a Blob URL for the worklet to avoid Vite inlining raw TypeScript
       // as a data: URL (which AudioWorklet can't execute). Blob URLs work
@@ -95,16 +106,25 @@ registerProcessor('audio-processor', AudioProcessor);
 `;
       const blob = new Blob([workletCode], { type: 'application/javascript' });
       const workletUrl = URL.createObjectURL(blob);
-      await this.audioContext.audioWorklet.addModule(workletUrl);
-      URL.revokeObjectURL(workletUrl);
+      try {
+        await audioContext.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
+      if (generation !== this.startGeneration) {
+        if (this.audioContext === audioContext) this.audioContext = null;
+        if (this.stream === stream) this.stream = null;
+        this.disposeMedia(stream, audioContext);
+        return;
+      }
 
-      this.sourceNode = this.audioContext.createMediaStreamSource(this.stream);
+      this.sourceNode = audioContext.createMediaStreamSource(stream);
 
-      this.analyserNode = this.audioContext.createAnalyser();
+      this.analyserNode = audioContext.createAnalyser();
       this.analyserNode.fftSize = 256;
       this.analyserNode.smoothingTimeConstant = 0.5;
 
-      this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-processor');
+      this.workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
       this.workletNode.port.onmessage = (event) => {
         if (!this.isCapturing) return;
         const { audioData } = event.data;
@@ -119,13 +139,20 @@ registerProcessor('audio-processor', AudioProcessor);
       this.isCapturing = true;
       this.startVisualizationLoop();
     } catch (error) {
+      if (generation !== this.startGeneration) return;
       console.error('Failed to start audio capture:', error);
       this.stop();
       throw error;
+    } finally {
+      if (generation === this.startGeneration) {
+        this.isStarting = false;
+      }
     }
   }
 
   stop(): void {
+    this.startGeneration += 1;
+    this.isStarting = false;
     this.isCapturing = false;
 
     if (this.animationFrame) {
@@ -148,18 +175,19 @@ registerProcessor('audio-processor', AudioProcessor);
       this.sourceNode = null;
     }
 
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
-    }
+    this.disposeMedia(this.stream, this.audioContext);
+    this.audioContext = null;
+    this.stream = null;
 
     this.onAudioData = null;
     this.onLevels = null;
+  }
+
+  private disposeMedia(stream: MediaStream | null, audioContext: AudioContext | null): void {
+    if (audioContext) {
+      void audioContext.close().catch(() => undefined);
+    }
+    stream?.getTracks().forEach(track => track.stop());
   }
 
   private startVisualizationLoop(): void {
