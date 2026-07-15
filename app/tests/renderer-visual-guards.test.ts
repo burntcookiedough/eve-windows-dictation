@@ -12,15 +12,22 @@ const overlayView = readFileSync(
 
 describe('renderer visual regression guards', () => {
   test('contains long unbroken history text inside its card', () => {
-    expect(historyView).toContain('group min-w-0 overflow-hidden rounded-2xl');
-    expect(historyView).toContain('[overflow-wrap:anywhere]');
+    const historyCard = historyView.match(/<div\s+class="group[^>]+>/)?.[0];
+    const transcript = historyView.match(/<p\s+class="[^"]+"[^>]*>\s*\{item\.text\}\s*<\/p>/)?.[0];
+
+    expect(historyCard).toContain('min-w-0 overflow-hidden');
+    expect(transcript).toContain('max-w-full');
+    expect(transcript).toContain('[overflow-wrap:anywhere]');
   });
 
   test('uses an accessible dark microphone warning instead of the amber card', () => {
-    expect(overlayView).toContain('border-zinc-500/25 bg-black/95');
-    expect(overlayView).toContain('aria-live="polite"');
-    expect(overlayView).toContain('bg-red-400/35');
-    expect(overlayView).toContain('motion-reduce:animate-none');
-    expect(overlayView).not.toContain('border-amber-500/40 bg-amber-500/10');
+    const warning = overlayView.match(/\{#if warningMessage\}([\s\S]*?)\{\/if\}/)?.[1];
+    const warningCard = warning?.match(/<div\s+class="[^"]+"\s+role="status"\s+aria-live="polite"\s*>/)?.[0];
+    const warningIndicator = warning?.match(/<span\s+class="[^"]*animate-ping[^"]*"[^>]*>/)?.[0];
+
+    expect(warningCard).toContain('border-zinc-500/25 bg-black/95');
+    expect(warningCard).not.toContain('amber');
+    expect(warningIndicator).toContain('bg-red-400/35');
+    expect(warningIndicator).toContain('motion-reduce:animate-none');
   });
 });
