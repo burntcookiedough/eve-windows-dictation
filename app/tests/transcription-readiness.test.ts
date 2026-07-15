@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { once } from 'node:events';
 import type { BrowserWindow } from 'electron';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { TranscriptionService } from '../src/main/services/transcription';
+import {
+  TranscriptionConnectionCancelledError,
+  TranscriptionService,
+} from '../src/main/services/transcription';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -68,6 +71,56 @@ describe('TranscriptionService protocol readiness', () => {
       await audioReceived.promise;
       expect(binaryFrames).toBe(1);
 
+    } finally {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+      server.close();
+    }
+  });
+
+  test('distinguishes a user stop before readiness from a connection failure', async () => {
+    const server = new WebSocketServer({ port: 0 });
+    await once(server, 'listening');
+    const address = server.address();
+    if (typeof address === 'string' || address === null) {
+      throw new Error('Expected an ephemeral TCP address');
+    }
+
+    const startReceived = deferred<void>();
+    const stopReceived = deferred<void>();
+    server.on('connection', (socket) => {
+      socket.on('message', (data, isBinary) => {
+        if (isBinary) return;
+        const frame = JSON.parse(data.toString()) as { type?: string };
+        if (frame.type === 'start') {
+          startReceived.resolve();
+        } else if (frame.type === 'stop') {
+          stopReceived.resolve();
+          socket.close();
+        }
+      });
+    });
+
+    const overlay = {
+      isDestroyed: () => false,
+      webContents: { send: () => undefined },
+    } as unknown as BrowserWindow;
+    const service = new TranscriptionService(
+      `ws://127.0.0.1:${address.port}`,
+      10,
+      overlay
+    );
+
+    try {
+      const connectPromise = service.connect();
+      await startReceived.promise;
+      service.stop();
+
+      await expect(connectPromise).rejects.toBeInstanceOf(
+        TranscriptionConnectionCancelledError
+      );
+      await stopReceived.promise;
     } finally {
       for (const client of server.clients) {
         client.terminate();
