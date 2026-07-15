@@ -152,10 +152,20 @@
 >
   <div class="absolute inset-x-0 bottom-[88px] flex flex-col items-center gap-5 px-4">
     {#if warningMessage}
-      <div class="max-w-xl rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-        <p class="text-center text-xs font-medium text-amber-200">
-          {warningMessage}
-        </p>
+      <div
+        class="max-w-xl rounded-2xl border border-zinc-500/25 bg-black/95 px-4 py-2 shadow-[0_4px_16px_rgba(239,68,68,0.18)]"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-center justify-center gap-2">
+          <span class="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400/35 motion-reduce:animate-none"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-red-400"></span>
+          </span>
+          <p class="text-center text-xs font-medium text-zinc-200 [overflow-wrap:anywhere]">
+            {warningMessage}
+          </p>
+        </div>
       </div>
     {/if}
 
