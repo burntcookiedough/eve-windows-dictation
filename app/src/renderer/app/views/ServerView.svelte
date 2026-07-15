@@ -19,6 +19,8 @@
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
+  let diagnosticsCopyState = $state<'idle' | 'copied' | 'error'>('idle');
+  let diagnosticsCopyTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingLogs: ServerLogEntry[] = [];
   let logFrame: number | null = null;
   let scrollAfterLogBatch = false;
@@ -148,6 +150,21 @@
     setTimeout(() => (logsCopied = false), 2000);
   }
 
+  async function copyDiagnostics() {
+    if (diagnosticsCopyTimer !== null) clearTimeout(diagnosticsCopyTimer);
+    diagnosticsCopyState = 'idle';
+    try {
+      await window.murmurMain.copyDiagnostics();
+      diagnosticsCopyState = 'copied';
+    } catch {
+      diagnosticsCopyState = 'error';
+    }
+    diagnosticsCopyTimer = setTimeout(() => {
+      diagnosticsCopyState = 'idle';
+      diagnosticsCopyTimer = null;
+    }, 2000);
+  }
+
   function queueLog(entry: ServerLogEntry) {
     scrollAfterLogBatch ||= showLogs && isScrolledToBottom();
     pendingLogs.push(entry);
@@ -188,6 +205,7 @@
 
   onDestroy(() => {
     if (logFrame !== null) cancelAnimationFrame(logFrame);
+    if (diagnosticsCopyTimer !== null) clearTimeout(diagnosticsCopyTimer);
     window.murmurMain.removeServerListeners();
   });
 </script>
@@ -220,6 +238,24 @@
         </div>
       </div>
     {/if}
+
+    <SettingsSection title="Diagnostics">
+      <div class="flex w-full items-center justify-between gap-4 rounded-xl bg-zinc-900/50 p-4">
+        <p class="text-xs text-zinc-500">
+          Copies an allowlisted system summary without logs, paths, history, or transcription text.
+        </p>
+        <button
+          onclick={copyDiagnostics}
+          class="shrink-0 rounded-lg bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-600 cursor-pointer"
+        >
+          {diagnosticsCopyState === 'copied'
+            ? 'Copied diagnostics'
+            : diagnosticsCopyState === 'error'
+              ? 'Copy failed'
+              : 'Copy diagnostics'}
+        </button>
+      </div>
+    </SettingsSection>
 
     <div class="space-y-8 {useExternalServer ? 'opacity-45 pointer-events-none select-none' : ''}">
 
@@ -376,6 +412,7 @@
             {/if}
           </div>
         {/if}
+
       </div>
     </SettingsSection>
 
@@ -425,7 +462,8 @@
         </button>
 
         {#if showLogs}
-          <div class="mt-2 flex items-center justify-end px-1">
+          <div class="mt-2 flex items-center justify-between gap-3 px-1">
+            <p class="text-xs text-amber-300/70">Raw logs may contain local paths. Review before sharing.</p>
             <button
               onclick={(e: MouseEvent) => { e.stopPropagation(); copyLogs(); }}
               disabled={logs.length === 0}
@@ -441,7 +479,7 @@
                 Copied
               {:else}
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                Copy
+                Copy raw logs
               {/if}
             </button>
           </div>

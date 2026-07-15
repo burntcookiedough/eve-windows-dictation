@@ -40,6 +40,7 @@ declare global {
       rebuildInsights: () => Promise<void>;
       onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => () => void;
       copyToClipboard: (text: string) => void;
+      copyDiagnostics: () => Promise<void>;
       getRecordingDebugState: () => Promise<RecordingDebugState>;
       startRecording: () => Promise<RecordingDebugState>;
       stopRecording: () => Promise<RecordingDebugState>;
