@@ -20,6 +20,13 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Transcription');
 
+export class TranscriptionConnectionCancelledError extends Error {
+  constructor() {
+    super('Transcription connection cancelled');
+    this.name = 'TranscriptionConnectionCancelledError';
+  }
+}
+
 export class TranscriptionService {
   private ws: WebSocket | null = null;
   private serverUrl: string;
@@ -30,7 +37,6 @@ export class TranscriptionService {
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
-  private stopRequested = false;
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
@@ -41,6 +47,8 @@ export class TranscriptionService {
   private lastTextFrame: TextFrame | null = null;
   private didReceiveFinal = false;
   private didReceiveReady = false;
+  private stopRequested = false;
+  private cancelPendingConnect: (() => void) | null = null;
 
   constructor(
     serverUrl: string,
@@ -60,45 +68,52 @@ export class TranscriptionService {
     return new Promise((resolve, reject) => {
       this.isReady = false;
       this.serverClosing = false;
-      this.stopRequested = false;
       this.lastTextFrame = null;
       this.didReceiveFinal = false;
       this.didReceiveReady = false;
+      this.stopRequested = false;
       this.sendConnectionState('connecting');
       let connectSettled = false;
+
+      const settleConnect = (error?: Error) => {
+        if (connectSettled) return;
+        connectSettled = true;
+        this.cancelPendingConnect = null;
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+      this.cancelPendingConnect = () => {
+        settleConnect(new TranscriptionConnectionCancelledError());
+      };
 
       this.ws = new WebSocket(this.serverUrl);
 
       this.ws.on('open', () => {
         this.sendStartFrame();
         this.sendConnectionState('connected');
-        connectSettled = true;
-        resolve();
-        if (this.stopRequested) {
-          this.stop();
-        }
       });
 
       this.ws.on('message', (data) => {
         this.handleMessage(data.toString());
+        if (this.didReceiveReady) {
+          settleConnect();
+        }
       });
 
       this.ws.on('error', (error) => {
+        if (this.stopRequested) return;
         log.error('WebSocket error', { error });
         this.sendConnectionState('error', error.message);
-        if (!connectSettled) {
-          connectSettled = true;
-          reject(error);
-        }
+        settleConnect(error);
       });
 
       this.ws.on('close', () => {
         this.maybeEmitSyntheticFinal('socket_closed');
         this.sendConnectionState('disconnected');
-        if (!connectSettled) {
-          connectSettled = true;
-          reject(new Error('WebSocket closed before connection was ready'));
-        }
+        settleConnect(new Error('WebSocket closed before connection was ready'));
         this.onCloseCallback?.();
       });
     });
@@ -128,6 +143,7 @@ export class TranscriptionService {
 
   stop(): void {
     this.stopRequested = true;
+    this.cancelPendingConnect?.();
 
     // Don't send stop if server already initiated close
     if (this.serverClosing) {
@@ -198,6 +214,7 @@ export class TranscriptionService {
     if (frame.frame === 'control') {
       switch (frame.type) {
         case 'ready':
+          if (this.stopRequested) break;
           this.didReceiveReady = true;
           this.isReady = true;
           this.sendRecordingState('listening');
