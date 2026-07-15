@@ -17,6 +17,7 @@ export const IPC_CHANNELS = {
 
   // Renderer → Main (commands)
   COMMAND_COPY_TO_CLIPBOARD: 'command:copy-to-clipboard',
+  COMMAND_COPY_DIAGNOSTICS: 'command:copy-diagnostics',
 
   // Main window controls
   MAIN_WINDOW_CLOSE: 'main-window:close',
