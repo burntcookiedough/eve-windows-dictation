@@ -30,7 +30,6 @@ export class TranscriptionService {
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
-  private stopRequested = false;
   private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
@@ -60,7 +59,6 @@ export class TranscriptionService {
     return new Promise((resolve, reject) => {
       this.isReady = false;
       this.serverClosing = false;
-      this.stopRequested = false;
       this.lastTextFrame = null;
       this.didReceiveFinal = false;
       this.didReceiveReady = false;
@@ -72,15 +70,14 @@ export class TranscriptionService {
       this.ws.on('open', () => {
         this.sendStartFrame();
         this.sendConnectionState('connected');
-        connectSettled = true;
-        resolve();
-        if (this.stopRequested) {
-          this.stop();
-        }
       });
 
       this.ws.on('message', (data) => {
         this.handleMessage(data.toString());
+        if (this.didReceiveReady && !connectSettled) {
+          connectSettled = true;
+          resolve();
+        }
       });
 
       this.ws.on('error', (error) => {
@@ -127,8 +124,6 @@ export class TranscriptionService {
   }
 
   stop(): void {
-    this.stopRequested = true;
-
     // Don't send stop if server already initiated close
     if (this.serverClosing) {
       return;
