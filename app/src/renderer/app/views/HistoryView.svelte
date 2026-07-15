@@ -523,7 +523,7 @@
 
           <!-- Entry -->
           <div
-            class="group rounded-2xl border border-zinc-800/60 transition-all duration-200
+            class="group min-w-0 overflow-hidden rounded-2xl border border-zinc-800/60 transition-all duration-200
               {isExpanded ? 'bg-zinc-900 border-zinc-800' : 'hover:bg-zinc-900/50 hover:border-zinc-800'}"
           >
             <!-- Collapsed/Preview State -->
@@ -541,7 +541,7 @@
             >
               <div class="flex items-start gap-3">
                 <div class="flex-1 min-w-0">
-                  <p class="text-sm text-zinc-200 {isExpanded ? '' : 'line-clamp-2'}">
+                  <p class="max-w-full text-sm text-zinc-200 [overflow-wrap:anywhere] {isExpanded ? '' : 'line-clamp-2'}">
                     {item.text}
                   </p>
                   <p class="text-xs text-zinc-500 mt-1.5">
