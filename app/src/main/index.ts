@@ -4,7 +4,10 @@ import { createMainWindow, showMainWindow } from './windows/main.js';
 import { setupHotkeyService } from './services/hotkey.js';
 import { setupTray } from './services/tray.js';
 import { setupIpcHandlers } from './ipc/handlers.js';
-import { TranscriptionService } from './services/transcription.js';
+import {
+  TranscriptionConnectionCancelledError,
+  TranscriptionService,
+} from './services/transcription.js';
 import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
@@ -333,6 +336,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
   } catch (error) {
     if (transcriptionService !== service) {
+      return;
+    }
+    if (error instanceof TranscriptionConnectionCancelledError) {
       return;
     }
     log.error('Failed to connect to transcription server', { error: error as Error });
