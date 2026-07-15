@@ -79,7 +79,7 @@ export class AudioCapture {
         audio: audioConstraints,
       });
       if (generation !== this.startGeneration) {
-        stream.getTracks().forEach(track => track.stop());
+        this.disposeMedia(stream, null);
         return;
       }
       this.stream = stream;
@@ -114,8 +114,7 @@ registerProcessor('audio-processor', AudioProcessor);
       if (generation !== this.startGeneration) {
         if (this.audioContext === audioContext) this.audioContext = null;
         if (this.stream === stream) this.stream = null;
-        void audioContext.close().catch(() => undefined);
-        stream.getTracks().forEach(track => track.stop());
+        this.disposeMedia(stream, audioContext);
         return;
       }
 
@@ -176,18 +175,19 @@ registerProcessor('audio-processor', AudioProcessor);
       this.sourceNode = null;
     }
 
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
-    }
+    this.disposeMedia(this.stream, this.audioContext);
+    this.audioContext = null;
+    this.stream = null;
 
     this.onAudioData = null;
     this.onLevels = null;
+  }
+
+  private disposeMedia(stream: MediaStream | null, audioContext: AudioContext | null): void {
+    if (audioContext) {
+      void audioContext.close().catch(() => undefined);
+    }
+    stream?.getTracks().forEach(track => track.stop());
   }
 
   private startVisualizationLoop(): void {
