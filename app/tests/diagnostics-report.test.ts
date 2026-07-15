@@ -17,10 +17,10 @@ describe('privacy-safe diagnostics report', () => {
       managed: true,
       version: '0.6.2',
       engineStatus: {
-        current: 'parakeet',
+        current: 'nemotron',
         status: 'ready',
         info: {
-          model: 'nvidia/parakeet-tdt-0.6b-v2',
+          model: 'nvidia/nemotron-speech-streaming-en-0.6b',
           device: 'cuda',
           compute_type: 'float16',
           cuda_active: true,
@@ -38,9 +38,9 @@ Windows: 10.0.26100 (x64)
 Server mode: managed
 Server status: running
 Server version: 0.6.2
-Engine: parakeet
+Engine: nemotron
 Engine status: ready
-Model: nvidia/parakeet-tdt-0.6b-v2
+Model: nvidia/nemotron-speech-streaming-en-0.6b
 Device: cuda
 Compute type: float16
 CUDA active: yes
@@ -116,7 +116,7 @@ VC++ runtime installed: yes
     expect(output).toContain('Server mode: external');
     expect(output).toContain('Model: custom/local model');
     expect(output).toContain('- cuda_unavailable: CUDA is unavailable; Murmur may use CPU mode.');
-    expect(output).toContain('- unexpected_probe: Additional details omitted for privacy.');
+    expect(output).toContain('- unknown_warning: Additional details omitted for privacy.');
     for (const sensitive of sensitiveValues) expect(output).not.toContain(sensitive);
     expect(output).not.toContain('51717');
     expect(output).not.toContain('1234');
@@ -151,6 +151,51 @@ VC++ runtime installed: yes
     expect(output).not.toContain('private details');
     expect(output).not.toContain('Model progress:');
     expect(output).not.toContain('ETA:');
+  });
+
+  test('does not copy regex-valid secrets from an external server', () => {
+    const secret = 'top-secret-token';
+    const output = report({
+      status: 'running',
+      managed: false,
+      version: secret,
+      engineStatus: {
+        current: secret,
+        status: 'ready',
+        info: {
+          model: secret,
+          repo_id: secret,
+          device: secret,
+          compute_type: secret,
+          gpu_name: secret,
+        },
+      },
+      diagnostics: {
+        cuda: { available: true, name: secret, compute_capability: '8.9' },
+        nvidia_driver: { version: '560.94', minimum_version: '525.0' },
+        vc_redist: { missing: [`${secret}.dll`] },
+        warnings: [{ code: secret, message: secret }],
+      },
+      modelDownload: { model: secret, repo_id: secret },
+    });
+
+    expect(output).toContain('Model: custom/local model');
+    expect(output).toContain('- unknown_warning: Additional details omitted for privacy.');
+    expect(output).not.toContain(secret);
+    expect(output).not.toContain('GPU:');
+    expect(output).not.toContain('NVIDIA driver:');
+    expect(output).not.toContain('Missing runtime files:');
+  });
+
+  test('bounds the inspected missing-runtime prefix', () => {
+    const missing = Array.from({ length: 150 }, () => 'not-a-runtime.dll');
+    missing[120] = 'vcruntime140.dll';
+
+    expect(report({
+      status: 'running',
+      managed: true,
+      diagnostics: { vc_redist: { missing } },
+    })).not.toContain('Missing runtime files:');
   });
 
   test('handles an unavailable server snapshot', () => {
