@@ -29,6 +29,13 @@ export interface LogEntry {
 
 export type Transport = (entry: LogEntry) => void;
 
+export interface LogOutputStream {
+  readonly destroyed?: boolean;
+  readonly writableEnded?: boolean;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  write(chunk: string): boolean;
+}
+
 // Configuration from environment
 const config = {
   showTrace: process.env.MURMUR_TRACE === '1',
@@ -104,6 +111,34 @@ function formatData(data: Record<string, unknown>): [string, string[]] {
 }
 
 /**
+ * Create a writer that permanently disables itself if its output stream closes
+ * or errors. GUI apps can inherit stdout/stderr pipes from a launcher that exits
+ * before the app, and an unhandled EPIPE must never crash the main process.
+ */
+export function createSafeStreamWriter(
+  stream?: LogOutputStream
+): (line: string) => void {
+  if (!stream) return () => {};
+
+  let available = true;
+  stream.on('error', () => {
+    available = false;
+  });
+
+  return (line: string): void => {
+    if (!available || stream.destroyed || stream.writableEnded) return;
+    try {
+      stream.write(`${line}\n`);
+    } catch {
+      available = false;
+    }
+  };
+}
+
+const writeStdout = createSafeStreamWriter(process.stdout);
+const writeStderr = createSafeStreamWriter(process.stderr);
+
+/**
  * Console transport - formats and writes to stdout/stderr.
  */
 function consoleTransport(entry: LogEntry): void {
@@ -120,8 +155,9 @@ function consoleTransport(entry: LogEntry): void {
     extraLines = stacks;
   }
 
-  // Use stderr for warn/error, stdout for others
-  const output = entry.level === 'warn' || entry.level === 'error' ? console.error : console.log;
+  // Use stderr for warn/error, stdout for others. The safe writers absorb
+  // broken/closed pipe failures from GUI launchers and disable further output.
+  const output = entry.level === 'warn' || entry.level === 'error' ? writeStderr : writeStdout;
   output(line);
   for (const extra of extraLines) {
     output(extra);
