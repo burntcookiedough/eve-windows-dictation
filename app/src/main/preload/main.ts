@@ -98,6 +98,10 @@ const murmurMainAPI = {
     ipcRenderer.send(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
   },
 
+  copyDiagnostics: (): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS);
+  },
+
   // Recording controls and state (for Test view)
   getRecordingDebugState: (): Promise<RecordingDebugState> => {
     return ipcRenderer.invoke(IPC_CHANNELS.RECORDING_GET_STATE);

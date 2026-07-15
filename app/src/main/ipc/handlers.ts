@@ -1,10 +1,12 @@
 import { app, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
+import { arch, release } from 'node:os';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { isInsightsRange } from '../../shared/insights.js';
 import { copyToClipboard } from '../services/clipboard.js';
+import { formatDiagnosticsReport } from '../services/diagnostics-report.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
 import { getSetting, getSettings, updateSetting } from '../services/settings.js';
@@ -45,6 +47,16 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   // Handle clipboard copy requests
   ipcMain.on(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: string) => {
     copyToClipboard(text);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS, () => {
+    const report = formatDiagnosticsReport({
+      appVersion: app.getVersion(),
+      windowsRelease: release(),
+      architecture: arch(),
+      serverState: serverManagerRef?.getState(),
+    });
+    copyToClipboard(report);
   });
 
   // Handle settings requests
