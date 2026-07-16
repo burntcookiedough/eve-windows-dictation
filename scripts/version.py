@@ -30,8 +30,7 @@ README_BADGE_RE = re.compile(
     r'(https://img\.shields\.io/badge/v)(.+?)(-orange\?style=flat-square)'
 )
 UV_LOCK_MURMUR_VERSION_RE = re.compile(
-    r'(\[\[package\]\]\s+name\s*=\s*"murmur"\s+version\s*=\s*")([^"]+)(")',
-    re.MULTILINE,
+    r'(\[\[package\]\]\s+name\s*=\s*"murmur"\s+version\s*=\s*")([^"]+)(")'
 )
 RELEASE_VERIFY_VERSION_RE = re.compile(
     r'(\[string\]\$ExpectedVersion\s*=\s*")([^"]+)(")'
