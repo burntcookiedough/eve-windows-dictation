@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ExpectedVersion = "0.6.0",
+    [string]$ExpectedVersion = "0.6.3",
     [string]$InstallerDir = "E:\MurmurRelease\release-prep\full-nsis-web\nsis-web",
     [string]$InstallDir = "E:\MurmurRelease\release-prep\smoke-install\Murmur",
     [string]$BaseBranch = "trunk",
