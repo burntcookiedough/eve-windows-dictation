@@ -163,7 +163,7 @@ def test_runtime_preparation_script_uses_uv_managed_python() -> None:
     assert 'Join-Path $runtimePath "python.exe"' in contents
 
 
-def test_version_check_includes_readme_badge() -> None:
+def test_version_check_includes_all_release_metadata() -> None:
     version = _load_package_json()["version"]
     completed = subprocess.run(
         [
@@ -180,3 +180,28 @@ def test_version_check_includes_readme_badge() -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert f"Version check passed: {version}" in completed.stdout
+
+    dry_run = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "version.py"),
+            "bump",
+            version,
+            "--dry-run",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert dry_run.returncode == 0, dry_run.stderr
+    dry_run_output = dry_run.stdout.replace("\\", "/")
+    for path in (
+        "app/package.json",
+        "server/pyproject.toml",
+        "server/src/version.py",
+        "server/uv.lock",
+        "README.md",
+        "scripts/release-verify.ps1",
+    ):
+        assert path in dry_run_output

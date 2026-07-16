@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_PACKAGE = ROOT / "app" / "package.json"
 SERVER_PYPROJECT = ROOT / "server" / "pyproject.toml"
 SERVER_VERSION_FILE = ROOT / "server" / "src" / "version.py"
+SERVER_UV_LOCK = ROOT / "server" / "uv.lock"
 README_FILE = ROOT / "README.md"
+RELEASE_VERIFY_FILE = ROOT / "scripts" / "release-verify.ps1"
 
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -26,6 +28,12 @@ SERVER_VERSION_RE = re.compile(r'^SERVER_VERSION\s*=\s*"([^"]+)"\s*$', re.MULTIL
 PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 README_BADGE_RE = re.compile(
     r'(https://img\.shields\.io/badge/v)(.+?)(-orange\?style=flat-square)'
+)
+UV_LOCK_MURMUR_VERSION_RE = re.compile(
+    r'(\[\[package\]\]\s+name\s*=\s*"murmur"\s+version\s*=\s*")([^"]+)(")'
+)
+RELEASE_VERIFY_VERSION_RE = re.compile(
+    r'(\[string\]\$ExpectedVersion\s*=\s*")([^"]+)(")'
 )
 
 
@@ -70,12 +78,30 @@ def read_readme_version() -> str:
     return match.group(2)
 
 
+def read_server_uv_lock_version() -> str:
+    content = SERVER_UV_LOCK.read_text(encoding="utf-8")
+    match = UV_LOCK_MURMUR_VERSION_RE.search(content)
+    if not match:
+        raise ValueError(f"Could not find Murmur package version in {SERVER_UV_LOCK}")
+    return match.group(2)
+
+
+def read_release_verify_version() -> str:
+    content = RELEASE_VERIFY_FILE.read_text(encoding="utf-8")
+    match = RELEASE_VERIFY_VERSION_RE.search(content)
+    if not match:
+        raise ValueError(f"Could not find ExpectedVersion in {RELEASE_VERIFY_FILE}")
+    return match.group(2)
+
+
 def collect_versions() -> dict[str, str]:
     return {
         "app/package.json": read_app_version(),
         "server/pyproject.toml": read_server_pyproject_version(),
         "server/src/version.py": read_server_source_version(),
+        "server/uv.lock": read_server_uv_lock_version(),
         "README.md": read_readme_version(),
+        "scripts/release-verify.ps1": read_release_verify_version(),
     }
 
 
@@ -125,6 +151,26 @@ def write_readme_version(version: str) -> None:
     README_FILE.write_text(updated, encoding="utf-8")
 
 
+def write_server_uv_lock_version(version: str) -> None:
+    content = SERVER_UV_LOCK.read_text(encoding="utf-8")
+    updated, count = UV_LOCK_MURMUR_VERSION_RE.subn(
+        lambda match: f'{match.group(1)}{version}{match.group(3)}', content, count=1
+    )
+    if count != 1:
+        raise ValueError(f"Could not update Murmur package version in {SERVER_UV_LOCK}")
+    SERVER_UV_LOCK.write_text(updated, encoding="utf-8")
+
+
+def write_release_verify_version(version: str) -> None:
+    content = RELEASE_VERIFY_FILE.read_text(encoding="utf-8")
+    updated, count = RELEASE_VERIFY_VERSION_RE.subn(
+        lambda match: f'{match.group(1)}{version}{match.group(3)}', content, count=1
+    )
+    if count != 1:
+        raise ValueError(f"Could not update ExpectedVersion in {RELEASE_VERIFY_FILE}")
+    RELEASE_VERIFY_FILE.write_text(updated, encoding="utf-8")
+
+
 def check_versions(expected_tag: str | None = None) -> int:
     versions = collect_versions()
     unique_versions = set(versions.values())
@@ -163,14 +209,23 @@ def bump_version(version: str, dry_run: bool = False) -> int:
 
     if dry_run:
         print(f"Would set version to {version} in:")
-        for path in [APP_PACKAGE, SERVER_PYPROJECT, SERVER_VERSION_FILE, README_FILE]:
+        for path in [
+            APP_PACKAGE,
+            SERVER_PYPROJECT,
+            SERVER_VERSION_FILE,
+            SERVER_UV_LOCK,
+            README_FILE,
+            RELEASE_VERIFY_FILE,
+        ]:
             print(f"  - {path.relative_to(ROOT)}")
         return 0
 
     write_app_version(version)
     write_server_pyproject_version(version)
     write_server_source_version(version)
+    write_server_uv_lock_version(version)
     write_readme_version(version)
+    write_release_verify_version(version)
 
     print(f"Updated version to {version}")
     return 0
