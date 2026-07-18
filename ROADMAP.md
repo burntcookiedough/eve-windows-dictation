@@ -17,7 +17,7 @@ Before an Eve-branded binary is produced:
 - complete manual trademark checks in relevant software classes and markets;
 - inventory every app ID, executable, installer, protocol, package, update, and data-path identifier;
 - establish a fresh Eve profile that never imports Murmur History, settings, hotwords, browser storage, credentials, or external-server configuration;
-- preserve the inactive Murmur data directory without reading, moving, or deleting it;
+- preserve the inactive Murmur data directory without reading, moving, or deleting personal files; permit only a bounded `server.pid` ownership check when required to prevent process conflicts;
 - test clean install, upgrade, downgrade/rollback, repair, startup registration, and uninstall without deleting either data profile or shared model caches;
 - complete the binary-distribution third-party notice audit.
 

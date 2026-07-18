@@ -43,7 +43,7 @@ This inventory is based on `trunk` at `fc40ad5a6b37f31b861bd904a0e106813fc81eb8`
 | Historical artifacts | `Murmur.Web.Setup.*.exe`, `murmur-*-x64.nsis.7z` | Immutable. Future Eve artifact names do not rename old releases. |
 | Publish repository | `burntcookiedough/eve-windows-dictation` | Already migrated and not part of the app cutover. |
 
-Electron Builder documents that NSIS derives a deterministic GUID from `appId` when `nsis.guid` is absent and warns that changing `appId` can break silent upgrades. It also documents product-name changes as supported when installer identity remains stable. See the official [NSIS configuration](https://www.electron.build/docs/nsis/) and [application configuration](https://www.electron.build/docs/configuration/).
+Electron Builder documents that NSIS derives a deterministic GUID from `appId` when a target-specific GUID is absent and warns that changing `appId` can break silent upgrades. It also documents product-name changes as supported when installer identity remains stable. This repository targets `nsis-web`, so its options belong under `build.nsisWeb`, not `build.nsis`. See the official [NSIS configuration](https://www.electron.build/docs/nsis/), [NSIS web options](https://www.electron.build/docs/api/electron-builder.interface.nsisweboptions/), and [application configuration](https://www.electron.build/docs/configuration/).
 
 ### Legacy Murmur data
 
@@ -53,7 +53,7 @@ Electron Builder documents that NSIS derives a deterministic GUID from `appId` w
 | Window state | `%APPDATA%\murmur\internal.json` | Do not read or copy. |
 | History and Insights | `%APPDATA%\murmur\history.db` plus WAL/SHM when present | Do not open, copy, merge, or index. |
 | Server settings | `%APPDATA%\murmur\server-settings.json` | Do not import. This prevents transfer of external-server details or other saved configuration. |
-| Server PID | `%APPDATA%\murmur\server.pid` | Do not migrate. It may be inspected only to prevent an old owned server from conflicting with Eve startup. |
+| Server PID | `%APPDATA%\murmur\server.pid` | Do not migrate. It may be inspected only to prevent an old owned server from conflicting with Eve startup. A recorded process must pass command-line ownership verification before Eve adopts, stops, or otherwise trusts it, even when the recorded port responds as healthy. |
 | Paste helpers | `%APPDATA%\murmur\paste-helper.vbs`, `paste-sendinput.ps1` | Do not copy; Eve regenerates its own helpers. |
 | Chromium storage and caches | `Local Storage`, `Network`, `Cache`, `GPUCache`, and related entries | Do not read or copy. This prevents accidental transfer of cookies, browser state, or cached data. |
 | Diagnostic traces | for example `hotkey-trace.log` | Do not read or copy. |
@@ -111,8 +111,8 @@ Use compatibility stages so the installer and Windows identity can be tested ind
 
 ### Stage A: compatibility foundation, no visible rename
 
-- Confirm the NSIS uninstall key on a clean published v0.6.3 installation and set `nsis.guid` explicitly.
-- Set `deleteAppDataOnUninstall: false` explicitly even though it is currently Electron Builder's default.
+- Confirm the NSIS uninstall key on a clean published v0.6.3 installation and set `build.nsisWeb.guid` explicitly.
+- Confirm the current one-click behavior, then pin `build.nsisWeb.oneClick: true` and `build.nsisWeb.deleteAppDataOnUninstall: false` so the web uninstaller's data policy is explicit.
 - Add typed constants for legacy installer identity and future Eve identity.
 - Introduce a bootstrap entrypoint that obtains the single-instance lock and selects userData before importing settings, History, clipboard, or server modules.
 - Keep selecting `%APPDATA%\murmur` in this stage so behavior remains unchanged.
@@ -126,7 +126,7 @@ This is the smallest safe implementation PR. It changes no visible product or da
 - Do not test for or inspect Murmur settings, History, Chromium state, or diagnostics.
 - Initialize Eve settings, window state, History, server settings, PID file, and generated helpers from clean defaults.
 - If the Eve directory exists, use it normally. If it is malformed or inaccessible, stop with repair guidance; do not fall back to Murmur data.
-- Permit only a narrow legacy PID ownership check when needed to prevent two managed transcription servers from conflicting.
+- Permit only a narrow legacy PID ownership check when needed to prevent two managed transcription servers from conflicting. Before adopting a process from the recorded PID and port, require the existing command-line ownership proof. Refuse to adopt or terminate a stale or reused PID owned by another process.
 - Leave `%APPDATA%\murmur` byte-for-byte untouched.
 
 ### Stage C: visible Eve identity with stable installer continuity
@@ -179,6 +179,7 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Reinstall the same Eve version.
 - Interrupted install and repair.
 - Uninstall Eve while preserving Eve data, Murmur data, and model caches.
+- Run an explicit nsis-web uninstall regression proving both Eve userData and `%APPDATA%\murmur` survive.
 - Verify executable, shortcuts, Start menu, taskbar grouping, AppUserModelID, Control Panel entry, uninstaller, and artifact names.
 
 ### Data isolation
@@ -189,7 +190,7 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Eve creates a distinct settings file and empty History database.
 - Existing valid Eve data is reused without consulting Murmur.
 - Malformed or read-only Eve data produces repair guidance without Murmur fallback.
-- Process/file tracing confirms no read or write under `%APPDATA%\murmur`, except the separately tested narrow PID ownership check if retained.
+- Process/file tracing confirms Eve does not open Murmur personal files; the only permitted legacy-root access is the separately tested `server.pid` ownership check.
 - Migration and startup logs contain no transcript, settings, credential, token, device-label, or personal-path values.
 
 ### Startup and lifecycle
@@ -197,7 +198,7 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Launch-on-login starts disabled even when Murmur previously enabled it.
 - Multiple exact known historical startup registrations are handled safely.
 - An unrecognized similarly named entry remains untouched.
-- Stale, malformed, live-owned, and live-unrecognized legacy PID cases.
+- Stale, malformed, live-owned, healthy-but-unowned, and PID-reused-by-an-unrelated-process cases.
 - Rapid restart and crash during first Eve initialization.
 - First launch works without developer tools on a fresh Windows VM.
 
@@ -215,6 +216,7 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Changing `appId` before freezing and validating the NSIS GUID can break upgrade and uninstall continuity.
 - Importing `settings.ts` before setting Eve userData can create or write the wrong directory. The current top-level Electron Store construction makes bootstrap ordering a release blocker.
 - Any fallback to `%APPDATA%\murmur` violates the fresh-profile decision and may expose old personal data.
+- Adopting a healthy endpoint from `server.pid` without proving process ownership can connect Eve to an unrelated local service or reused PID.
 - Broad startup-registry cleanup can remove unrelated user entries.
 - Any uninstall configuration that deletes app data can destroy History or settings.
 
@@ -245,7 +247,7 @@ The smallest safe PR is **identity compatibility scaffolding only**:
 
 1. add typed constants for current and proposed identities;
 2. add a bootstrap/userData resolver that still selects the current Murmur path;
-3. freeze the clean-install-verified NSIS GUID and explicitly set `deleteAppDataOnUninstall: false`;
+3. freeze the clean-install-verified `build.nsisWeb.guid` and explicitly set `build.nsisWeb.oneClick: true` plus `deleteAppDataOnUninstall: false`;
 4. add configuration, bootstrap-order, and path-selection tests;
 5. prove that v0.6.3 userData, installer names, executable, startup behavior, and release artifacts remain unchanged.
 

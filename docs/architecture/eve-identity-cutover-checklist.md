@@ -44,10 +44,10 @@ These files define identity and startup ordering. The first implementation PR ma
 
 | File | Current responsibility | Required change |
 |---|---|---|
-| `app/package.json` | `appId`, `productName`, target, publish configuration | Add the clean-install-verified `nsis.guid` and explicit `deleteAppDataOnUninstall: false`. Keep all visible Murmur values. |
+| `app/package.json` | `appId`, `productName`, target, publish configuration | Add the clean-install-verified `build.nsisWeb.guid`; pin `build.nsisWeb.oneClick: true` and `deleteAppDataOnUninstall: false`. Keep all visible Murmur values. |
 | `app/src/main/index.ts` | AppUserModelID, single-instance lock, service startup | Split a minimal bootstrap that resolves userData before importing data consumers. Keep `com.murmur.app`. |
 | new identity module | No centralized identity constants exist | Define typed legacy and proposed identifiers without activating Eve values. |
-| `server/tests/test_release_config.py` | Release/build configuration contract | Assert frozen GUID, no-delete policy, unchanged product name, app ID, target, and repository. |
+| `server/tests/test_release_config.py` | Release/build configuration contract | Assert target-specific `nsisWeb` GUID, one-click/no-delete policy, unchanged product name, app ID, target, and repository. |
 | new app bootstrap tests | No ordering contract exists | Prove userData selection occurs before settings/History/server modules initialize. |
 
 Exit condition: packaged names, executable, data path, startup behavior, release assets, and v0.6.3 compatibility remain unchanged.
@@ -60,13 +60,15 @@ This group owns mutable state. The fresh-profile PR must not include visible ren
 |---|---|---|
 | `app/src/main/services/settings.ts` | Constructs `settings.json` and `internal.json` stores at module load | Initialize only after bootstrap selects Eve userData. Do not read legacy JSON. |
 | `app/src/main/services/history.ts` | Opens `history.db` under userData | Create a new empty Eve database. Never open legacy History. |
-| `app/src/main/services/server-manager.ts` | Uses userData for `server.pid` and `server-settings.json` | Use Eve paths. Allow only a narrow legacy PID ownership check if required for process safety. |
+| `app/src/main/services/server-manager.ts` | Uses userData for `server.pid` and `server-settings.json` | Use Eve paths. Allow only a narrow legacy PID ownership check if required for process safety. Require command-line ownership proof before adopting a healthy recorded process; refuse stale or unrelated PID reuse. |
 | `app/src/main/services/clipboard.ts` | Writes paste helper scripts under userData | Generate new Eve helpers. Do not copy old scripts. |
 | `app/scripts/clear-data.js` | Targets the Murmur directory | Replace with an Eve-specific development helper. It must never target both roots. |
 | `server/src/pidfile.py` and `server/justfile` | Standalone fallback paths use `murmur` | Keep compatibility fallbacks unless a separately tested Eve override is passed by the app. |
 | `server/src/config.py` | Accepts `MURMUR_SETTINGS_FILE` | Keep the environment contract; the Electron launcher supplies the new Eve file path. |
 
-Exit condition: traced first launch performs no read or write under `%APPDATA%\murmur`, Eve starts with defaults and empty History, and both directories survive uninstall.
+Exit condition: traced first launch performs no read or write against Murmur personal files; the only permitted access is the bounded legacy `server.pid` ownership check. Eve starts with defaults and empty History, and both directories survive uninstall.
+
+Focused lifecycle tests must cover a stale PID file, a PID reused by an unrelated process, a healthy endpoint whose recorded PID is not owned, and a verified owned server. No unrelated process may be adopted or terminated.
 
 ### Gate 3: visible Eve name
 
@@ -138,6 +140,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 - `git diff --check` and exact changed-file scope audit;
 - privacy scan of logs and test artifacts;
 - clean Windows VM acceptance when installer or identity changes;
+- nsis-web uninstall regression proving both Eve and Murmur data roots survive;
 - exact pre/post registry, shortcut, install-directory, and data-root comparison;
 - on controlled fixtures, confirmation that `%APPDATA%\murmur` file hashes are unchanged; on a real user profile, confirm through filesystem tracing that Eve never opens the personal files;
 - confirmation that no release, tag, or historical asset changed.
