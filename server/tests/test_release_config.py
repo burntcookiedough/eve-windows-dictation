@@ -73,7 +73,7 @@ def test_electron_builder_publish_targets_release_repository() -> None:
         {
             "provider": "github",
             "owner": "burntcookiedough",
-            "repo": "murmur",
+            "repo": "eve-windows-dictation",
         }
     ]
 
