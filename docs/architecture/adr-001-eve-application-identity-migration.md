@@ -4,6 +4,8 @@
 
 Proposed. This document authorizes no runtime, installer, registry, or data-path changes.
 
+The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
+
 Product decision: Eve will not import Murmur's History, settings, hotwords, external-server configuration, browser storage, credentials, or other personal state. The old Murmur data directory will be left untouched as an inactive archive.
 
 Trademark review is deferred. It remains separate from this technical design.
@@ -86,9 +88,9 @@ A read-only machine audit found three historical entries named `Murmur`, `electr
 The implementation must:
 
 1. enumerate through Electron's supported login-item API where possible;
-2. remove only registrations whose names are in an exact compatibility allowlist and whose normalized paths are exact known Murmur install or test paths;
+2. remove only registrations whose names are in an exact compatibility allowlist and whose normalized paths match the published Murmur installation being upgraded;
 3. never delete registry values through substring matching;
-4. leave an unrecognized entry untouched and report a privacy-safe warning;
+4. leave unrecognized, development, and unpacked-candidate entries untouched and report a privacy-safe warning;
 5. create one Eve registration only after the user enables launch-on-login in Eve;
 6. verify the resulting path and enabled state.
 
