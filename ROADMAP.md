@@ -10,12 +10,15 @@ The repository is now standalone under `burntcookiedough/eve-windows-dictation`,
 
 ## Next: application-identity migration design
 
+The proposed technical contract is documented in [ADR-001](docs/architecture/adr-001-eve-application-identity-migration.md). Trademark work is currently deferred; it remains separate from the compatibility design.
+
 Before an Eve-branded binary is produced:
 
 - complete manual trademark checks in relevant software classes and markets;
 - inventory every app ID, executable, installer, protocol, package, update, and data-path identifier;
-- define migration and rollback for History, settings, model caches, startup registration, and installed versions;
-- test clean install, upgrade, downgrade/rollback, repair, and uninstall without deleting user data;
+- establish a fresh Eve profile that never imports Murmur History, settings, hotwords, browser storage, credentials, or external-server configuration;
+- preserve the inactive Murmur data directory without reading, moving, or deleting personal files; permit only a bounded `server.pid` ownership check when required to prevent process conflicts;
+- test clean install, upgrade, downgrade/rollback, repair, startup registration, and uninstall without deleting either data profile or shared model caches;
 - complete the binary-distribution third-party notice audit.
 
 ## Later: visual system

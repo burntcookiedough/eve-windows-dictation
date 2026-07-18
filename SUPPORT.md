@@ -11,4 +11,4 @@ Before reporting a problem:
 
 Public issue tracking is currently closed. Source fixes can be proposed with a focused draft pull request. Security-sensitive reports must use the private process in [SECURITY.md](SECURITY.md), not a public pull request.
 
-The v0.6.3 download still installs Murmur and stores application data under the existing Murmur path. Do not rename or move that data manually; the later Eve identity migration will define compatibility and rollback behavior.
+The v0.6.3 download still installs Murmur and stores application data under the existing Murmur path. Do not rename or move that data manually. The later Eve application will start with a separate fresh profile and leave Murmur data untouched rather than importing it.

@@ -16,7 +16,7 @@ External-server mode changes the trust boundary because captured audio is sent t
 
 The current v0.6.3 binary uses Electron's Murmur user-data directory, including `%APPDATA%\murmur` on a standard Windows installation. It stores settings and a SQLite transcription History there. Model files use the relevant Hugging Face cache location.
 
-Repository and product naming work does not authorize moving or deleting these locations. A future Eve application-identity migration must preserve History, settings, and model caches, support rollback, and avoid duplicate downloads where practical.
+Repository and product naming work does not authorize moving or deleting these locations. The future Eve application will use a separate fresh profile and will not import Murmur History, settings, hotwords, browser storage, credentials, or external-server configuration. The legacy Murmur directory will remain untouched. Shared third-party model caches are a separate runtime-asset boundary and may be reused without reading Murmur userData.
 
 ## Diagnostics and contributions
 
