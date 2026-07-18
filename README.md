@@ -39,7 +39,7 @@ Models are not embedded in the installer payload. The selected engine downloads 
 | `murmur-0.6.3-x64.nsis.7z` | 2,034,188,308 | `0b557fde05853da1f7c0aef77cecbad1faf8c5fc9314457ea45119d3a69f4fbd` |
 | `latest.yml` | 564 | `b211cdb0322a0f6da01eee77921f6c6961735de59d4ffd8cacc31d9a3f7395a9` |
 
-The small web installer downloads the large application payload during installation. Internet access is also required when an engine fetches its model for the first time.
+The small `nsis-web` installer downloads the large application payload during installation. Internet access is also required when an engine fetches its model for the first time.
 
 ## Engineering record
 
