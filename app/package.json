@@ -4,7 +4,7 @@
   "description": "Desktop voice transcription app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dikkadev/murmur.git"
+    "url": "https://github.com/burntcookiedough/eve-windows-dictation.git"
   },
   "main": "dist/main/index.js",
   "type": "module",
@@ -99,7 +99,7 @@
       {
         "provider": "github",
         "owner": "burntcookiedough",
-        "repo": "murmur"
+        "repo": "eve-windows-dictation"
       }
     ]
   }
