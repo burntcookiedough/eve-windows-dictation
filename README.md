@@ -5,7 +5,7 @@ Local dictation for Windows, built as an Electron desktop client with a packaged
 <img src="https://img.shields.io/badge/v0.6.3-orange?style=flat-square" alt="v0.6.3">
 
 > [!IMPORTANT]
-> Eve is the repository and future product identity. The current v0.6.3 download still uses the **Murmur** application and installer, the `com.murmur.app` app ID, and the `%APPDATA%\murmur` data path. Those identifiers are intentionally unchanged so existing History, settings, and model caches remain accessible while a compatible migration is designed.
+> Eve is the repository and future product identity. The current v0.6.3 download still uses the **Murmur** application and installer, the `com.murmur.app` app ID, and the `%APPDATA%\murmur` data path. The later Eve application will start with a separate, fresh data profile; it will not import or delete Murmur History, settings, or other personal state.
 
 ## What works today
 
