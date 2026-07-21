@@ -44,16 +44,34 @@ oneClick: true
 deleteAppDataOnUninstall: false
 ```
 
-## Acceptance still pending
+## Host acceptance
 
-No Windows Sandbox, Hyper-V VM, VirtualBox, or VMware runner was available on the inspection machine. Therefore these claims remain deliberately unmade:
+Windows Sandbox failed at the host/VM connection layer with `0x80072746`, before it produced an installer result. After reviewing that limitation, the project explicitly approved an equivalent test on the Windows host. The test did not inspect personal data contents.
 
-- a clean published v0.6.3 installation was observed writing the derived key;
-- install-over-v0.6.3, repair, and uninstall behavior passed on a clean VM;
-- the nsis-web uninstaller was observed preserving controlled Eve and Murmur data fixtures.
+The candidate was built from commit `c613ed88b8de2c5e6d59fc7cbe024957f81ee2c3` with the complete published v0.6.3 Python and engine closure:
 
-This compatibility-scaffolding change must remain unmerged until the clean-VM identity check is completed, or the project explicitly approves equivalent isolated evidence. The later visible Eve and data-root cutovers remain separately gated regardless.
+| Candidate asset | Bytes | SHA-256 |
+|---|---:|---|
+| `Murmur Web Setup 0.6.3.exe` | 887,564 | `47df9c7726c7b14cc878790d74ad0a1ffc98654358697287af4437744e70f7f3` |
+| `murmur-0.6.3-x64.nsis.7z` | 2,034,067,298 | `c9811cb6e5c195d63bf86063d6f80ba22b542d6c7d5b8ee4fd38efa4b392f920` |
+| packaged `app.asar` | 11,157,398 | `4619cfeb93633106cc37b181906440c527b0ce770092fe1282aa365d96b69dc2` |
+
+The candidate payload was 115,697 bytes smaller than the published payload. Its unpacked server closure contained PyTorch, NeMo, CTranslate2, and faster-whisper.
+
+The following matrix passed on 2026-07-22:
+
+| Check | Evidence |
+|---|---|
+| Published baseline install | Published v0.6.3 installed as `Murmur 0.6.3` under uninstall key `0204d005-75b3-5b31-b1f6-ef2831e2b204`; application launch and dictation worked. |
+| Candidate repair/upgrade | Installing the same-version candidate replaced the installed `app.asar` with the candidate SHA-256 above while retaining the same display version and uninstall key. |
+| User-data preservation | `%APPDATA%\murmur` existed before and after candidate installation and uninstall. Contents were not inspected. |
+| Runtime behavior | Fast Dictation, Long Dictation, normal launch, and restart were manually accepted. |
+| Single-instance behavior | A second launch exited within ten seconds; the original five Electron processes remained responsive and the process count did not increase. |
+| Candidate uninstall | Registered silent current-user uninstall exited `0`, removed the program directory and uninstall key, and retained `%APPDATA%\murmur`. |
+| Stable restoration | The checksum-verified published installer restored v0.6.3. Installed `app.asar` SHA-256 returned to `98910f5cd2c3a9426ecd7850ee352e47f9c48fb00bb5eef526220660e69fc8fd`, and the application launched responsively. |
+
+This is proportionate evidence for the compatibility-only Gate 1 change. It is not clean-VM acceptance and does not authorize the later Eve visible-identity or data-root cutovers; those remain separately gated.
 
 ## Privacy boundary
 
-The inspection read release metadata and Windows uninstall metadata only. It did not read Murmur History, settings, hotwords, browser storage, credentials, logs, or diagnostic contents. It did not install or uninstall Murmur, write registry values, create Eve data, or modify either user-data root.
+The acceptance run read release metadata, installer fingerprints, executable metadata, process state, and Windows uninstall metadata. It installed and uninstalled Murmur only after explicit approval. It did not read Murmur History, settings, hotwords, browser storage, credentials, logs, or diagnostic contents; delete either user-data root; or create Eve data.
