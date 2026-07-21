@@ -25,7 +25,7 @@ const commonOptions = {
 // Build main process
 const mainOptions = {
   ...commonOptions,
-  entryPoints: [resolve(projectRoot, 'src/main/index.ts')],
+  entryPoints: [resolve(projectRoot, 'src/main/bootstrap.ts')],
   outfile: resolve(projectRoot, 'dist/main/index.js'),
 };
 

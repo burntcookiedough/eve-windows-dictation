@@ -151,10 +151,11 @@ These names are internal or compatibility surfaces. They are not evidence that p
 |---|---|---|
 | Repository detachment and rename | Complete | No |
 | Placement-ready repository documentation | Complete | No |
-| Fresh-profile ADR and cutover checklist | Current PR | Merge after review |
-| Confirm NSIS key from a clean published v0.6.3 install | Pending | Read-only test authorization and clean VM |
+| Fresh-profile ADR and cutover checklist | Complete in PR #14 | No |
+| Derive and cross-check the published v0.6.3 NSIS key | Complete; see Gate 1 evidence | No |
+| Confirm NSIS key from a clean published v0.6.3 install | Pending; no isolated VM is currently available | Clean VM |
 | Select final Eve data-root casing and AppUserModelID | Pending | Explicit decision before activation |
-| Compatibility-scaffolding implementation | Pending | Explicit implementation approval |
+| Compatibility-scaffolding implementation | Draft implementation in progress | Clean-VM gate before merge |
 | Fresh Eve profile implementation | Pending | Separate approval after scaffolding acceptance |
 | Visible installed-product rename | Pending | Separate approval after data isolation passes |
 | AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |

@@ -30,10 +30,6 @@ import { createLogger } from './lib/logger.js';
 
 const log = createLogger('App');
 
-if (process.platform === 'win32') {
-  app.setAppUserModelId('com.murmur.app');
-}
-
 let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
@@ -646,9 +642,3 @@ app.on('will-quit', async (event) => {
   // Now actually quit
   app.exit(0);
 });
-
-// Prevent multiple instances
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-}

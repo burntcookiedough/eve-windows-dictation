@@ -95,6 +95,11 @@
       "target": "nsis-web",
       "icon": "resources/icon.ico"
     },
+    "nsisWeb": {
+      "guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204",
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false
+    },
     "publish": [
       {
         "provider": "github",

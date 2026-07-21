@@ -54,6 +54,38 @@ def test_electron_builder_windows_target_is_nsis_web() -> None:
     assert "nsis-web" in targets
 
 
+def test_nsis_web_identity_and_data_retention_are_explicit() -> None:
+    package_json = _load_package_json()
+    build = package_json.get("build", {})
+    nsis_web = build.get("nsisWeb", {})
+
+    assert build.get("appId") == "com.murmur.app"
+    assert build.get("productName") == "Murmur"
+    assert nsis_web == {
+        "guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204",
+        "oneClick": True,
+        "deleteAppDataOnUninstall": False,
+    }
+
+
+def test_main_build_enters_through_identity_bootstrap() -> None:
+    build_script = (ROOT / "app" / "scripts" / "build-main.js").read_text(
+        encoding="utf-8"
+    )
+    bootstrap = (ROOT / "app" / "src" / "main" / "bootstrap.ts").read_text(
+        encoding="utf-8"
+    )
+    bootstrap_core = (
+        ROOT / "app" / "src" / "main" / "bootstrap-core.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "src/main/bootstrap.ts" in build_script
+    assert "requestSingleInstanceLock" in bootstrap_core
+    assert "setPath('userData'" in bootstrap_core
+    assert "import('./index.js')" in bootstrap
+    assert "await bootstrapApplication" in bootstrap
+
+
 def test_electron_builder_publish_includes_github() -> None:
     package_json = _load_package_json()
     publish = package_json.get("build", {}).get("publish")
