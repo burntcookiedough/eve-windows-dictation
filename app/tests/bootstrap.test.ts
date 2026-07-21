@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import path from 'node:path';
 import { bootstrapApplication, type BootstrapApp } from '../src/main/bootstrap-core';
 import { EVE_PRODUCT_NAME, MURMUR_IDENTITY, resolveUserDataPath } from '../src/main/identity';
+
+const APP_DATA_PATH = path.join('test-root', 'AppData', 'Roaming');
 
 class FakeApp implements BootstrapApp {
   readonly events: string[] = [];
@@ -17,7 +20,7 @@ class FakeApp implements BootstrapApp {
 
   getPath(name: 'appData'): string {
     this.events.push(`get:${name}`);
-    return 'C:\\Users\\test\\AppData\\Roaming';
+    return APP_DATA_PATH;
   }
 
   setPath(name: 'userData', value: string): void {
@@ -41,9 +44,7 @@ describe('application identity bootstrap', () => {
   });
 
   test('resolves the same explicit Murmur userData directory', () => {
-    expect(resolveUserDataPath('C:\\Users\\test\\AppData\\Roaming')).toBe(
-      'C:\\Users\\test\\AppData\\Roaming\\murmur'
-    );
+    expect(resolveUserDataPath(APP_DATA_PATH)).toBe(path.join(APP_DATA_PATH, 'murmur'));
   });
 
   test('locks and selects userData before application modules load', async () => {
@@ -61,7 +62,7 @@ describe('application identity bootstrap', () => {
     expect(fakeApp.events).toEqual([
       'lock',
       'get:appData',
-      'set:userData:C:\\Users\\test\\AppData\\Roaming\\murmur',
+      `set:userData:${path.join(APP_DATA_PATH, 'murmur')}`,
       'app-id:com.murmur.app',
       'load',
     ]);
