@@ -113,10 +113,10 @@ Gate A is sufficient to open a draft PR:
 | Command | Result on 2026-07-23 |
 |---|---|
 | `python scripts/version.py check` | Pass; `0.6.3` |
-| `bun test` | Pass; 86 tests, 265 assertions, including the controlled real-Electron singleton smoke check |
+| `bun test` | Pass; 87 tests, 273 assertions, including the controlled real-Electron singleton smoke check |
 | `bun run test:history` | Pass |
 | `bun run build` | Pass |
-| focused Gate 2 tests | Pass; 25 tests, 56 assertions |
+| focused Gate 2 tests | Pass; 26 tests, 64 assertions |
 | `git diff --check` | Pass before each implementation commit; rerun on final diff |
 | `uv sync --extra whisper --group dev --frozen` | Pass; CI-equivalent Windows environment prepared without changing tracked manifests or locks |
 | `uv run --no-sync pytest` | Pass; 138 tests |

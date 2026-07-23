@@ -12,4 +12,10 @@ describe('launch-on-login Gate 2 boundary', () => {
   test('allows the fresh-profile disabled value without an OS write', () => {
     expect(() => validateLaunchOnBootUpdate(false)).not.toThrow();
   });
+
+  test('rejects non-boolean IPC values before settings persistence', () => {
+    for (const value of [undefined, null, 0, 1, '', 'false', {}, []]) {
+      expect(() => validateLaunchOnBootUpdate(value)).toThrow(TypeError);
+    }
+  });
 });

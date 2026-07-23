@@ -61,7 +61,7 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
     IPC_CHANNELS.UPDATE_SETTING,
     async (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
       if (key === 'launchOnBoot') {
-        validateLaunchOnBootUpdate(value as boolean);
+        validateLaunchOnBootUpdate(value);
       }
 
       updateSetting(key, value);
