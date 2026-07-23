@@ -39,9 +39,7 @@ afterEach(() => {
 });
 
 describe('user-data root preparation', () => {
-  test('sets controlled Eve paths before a real Electron singleton lock', () => {
-    if (process.platform !== 'win32') return;
-
+  test.skipIf(process.platform !== 'win32')('sets controlled Eve paths before a real Electron singleton lock', () => {
     const fixture = createFixtureRoot();
     const appData = path.join(fixture, 'Roaming');
     const localAppData = path.join(fixture, 'Local');
