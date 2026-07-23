@@ -23,6 +23,7 @@ export const MURMUR_IDENTITY = {
  * until a later, separately approved cutover.
  */
 export const EVE_PRODUCT_NAME = 'Eve' as const;
+export const EVE_USER_DATA_DIRECTORY_NAME = 'Eve' as const;
 
 export function resolveUserDataPath(
   appDataPath: string,

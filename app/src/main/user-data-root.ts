@@ -2,6 +2,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+export interface UserDataRootFileSystem {
+  realpath(path: string): string;
+  mkdir(path: string): void;
+  lstat(path: string): Pick<fs.Stats, 'isDirectory' | 'isSymbolicLink'>;
+  open(path: string): number;
+  close(descriptor: number): void;
+  unlink(path: string): void;
+}
+
+const nodeFileSystem: UserDataRootFileSystem = {
+  realpath: (value) => fs.realpathSync.native(value),
+  mkdir: (value) => fs.mkdirSync(value, { recursive: true }),
+  lstat: (value) => fs.lstatSync(value),
+  open: (value) => fs.openSync(value, 'wx'),
+  close: (descriptor) => fs.closeSync(descriptor),
+  unlink: (value) => fs.unlinkSync(value),
+};
+
 function normalizeCanonicalPath(value: string): string {
   return path
     .normalize(value)
@@ -27,20 +45,21 @@ function assertDirectoryName(directoryName: string): void {
  */
 export function prepareUserDataRootSync(
   appDataPath: string,
-  directoryName: string
+  directoryName: string,
+  fileSystem: UserDataRootFileSystem = nodeFileSystem
 ): string {
   assertDirectoryName(directoryName);
 
-  const canonicalAppDataPath = fs.realpathSync.native(appDataPath);
+  const canonicalAppDataPath = fileSystem.realpath(appDataPath);
   const userDataPath = path.join(appDataPath, directoryName);
-  fs.mkdirSync(userDataPath, { recursive: true });
+  fileSystem.mkdir(userDataPath);
 
-  const stats = fs.lstatSync(userDataPath);
+  const stats = fileSystem.lstat(userDataPath);
   if (!stats.isDirectory() || stats.isSymbolicLink()) {
     throw new Error('Application data path is not a regular directory');
   }
 
-  const canonicalUserDataPath = fs.realpathSync.native(userDataPath);
+  const canonicalUserDataPath = fileSystem.realpath(userDataPath);
   const expectedCanonicalPath = path.join(canonicalAppDataPath, directoryName);
   if (
     normalizeCanonicalPath(canonicalUserDataPath) !==
@@ -53,14 +72,14 @@ export function prepareUserDataRootSync(
     userDataPath,
     `.profile-write-probe-${process.pid}-${randomUUID()}`
   );
-  const descriptor = fs.openSync(probePath, 'wx');
+  const descriptor = fileSystem.open(probePath);
   try {
     // Opening the exclusive probe is the write-access check.
   } finally {
     try {
-      fs.closeSync(descriptor);
+      fileSystem.close(descriptor);
     } finally {
-      fs.unlinkSync(probePath);
+      fileSystem.unlink(probePath);
     }
   }
 

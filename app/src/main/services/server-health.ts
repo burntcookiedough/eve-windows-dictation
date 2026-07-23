@@ -2,6 +2,7 @@ import type {
   EngineStatus,
   ModelDownloadState,
   ServerDiagnostics,
+  ServerPidFile,
 } from '../../shared/types.js';
 
 export interface HealthState {
@@ -12,8 +13,38 @@ export interface HealthState {
   engineStatus?: EngineStatus;
 }
 
+export interface ServerProcessSnapshot {
+  processId: number;
+  creationTimeMs: number;
+  executablePath: string;
+  commandLine: string;
+}
+
 const MODEL_DOWNLOAD_STATUSES = new Set(['missing', 'partial', 'downloading', 'ready', 'error']);
 const MODEL_DOWNLOAD_PHASES = new Set(['checking', 'downloading', 'loading', 'ready', 'error']);
+
+export function parseServerPidFile(data: unknown): ServerPidFile {
+  if (!data || typeof data !== 'object') {
+    throw new Error('PID file has invalid structure');
+  }
+  const value = data as Record<string, unknown>;
+  if (
+    !Number.isInteger(value.pid)
+    || Number(value.pid) <= 0
+    || !Number.isInteger(value.port)
+    || Number(value.port) <= 0
+    || Number(value.port) > 65535
+    || !Number.isFinite(value.startedAt)
+    || Number(value.startedAt) <= 0
+  ) {
+    throw new Error('PID file has invalid structure');
+  }
+  return {
+    pid: Number(value.pid),
+    port: Number(value.port),
+    startedAt: Number(value.startedAt),
+  };
+}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
@@ -105,4 +136,37 @@ export function isMurmurServerCommandLine(commandLine: string): boolean {
     /python(?:w)?\.exe/.test(normalized) &&
     /(?:^|\s|["'])[^"']*\\server\\src\\main\.py(?:["']|\s|$)/.test(normalized)
   );
+}
+
+function normalizeWindowsPath(value: string): string {
+  return value.replaceAll('/', '\\').replace(/^"|"$/g, '').toLowerCase();
+}
+
+export function isOwnedMurmurServerProcess(
+  snapshot: ServerProcessSnapshot,
+  pid: number,
+  recordedStartedAt: number
+): boolean {
+  if (
+    snapshot.processId !== pid ||
+    !Number.isFinite(snapshot.creationTimeMs) ||
+    !Number.isFinite(recordedStartedAt)
+  ) {
+    return false;
+  }
+
+  const executablePath = normalizeWindowsPath(snapshot.executablePath);
+  if (!/\\python(?:w)?\.exe$/.test(executablePath)) {
+    return false;
+  }
+
+  const commandLine = snapshot.commandLine.replaceAll('/', '\\').toLowerCase();
+  const executablePrefix = commandLine.startsWith(`${executablePath} `)
+    || commandLine.startsWith(`"${executablePath}" `);
+  if (!executablePrefix || !isMurmurServerCommandLine(snapshot.commandLine)) {
+    return false;
+  }
+
+  const startDeltaMs = recordedStartedAt - snapshot.creationTimeMs;
+  return startDeltaMs >= -5000 && startDeltaMs <= 60000;
 }

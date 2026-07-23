@@ -15,9 +15,11 @@ import type {
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 import {
-  isMurmurServerCommandLine,
+  isOwnedMurmurServerProcess,
+  parseServerPidFile,
   parseHealthyResponse,
   type HealthState,
+  type ServerProcessSnapshot,
 } from './server-health.js';
 
 const log = createLogger('ServerManager');
@@ -57,25 +59,19 @@ export class ServerManager {
   /**
    * Read and parse the PID file.
    */
-  private readPidFile(): ServerPidFile | null {
+  private readPidFile(strict = true): ServerPidFile | null {
     const pidPath = this.getPidFilePath();
     try {
-      if (!fs.existsSync(pidPath)) {
+      const content = fs.readFileSync(pidPath, 'utf-8');
+      return parseServerPidFile(JSON.parse(content));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
       }
-      const content = fs.readFileSync(pidPath, 'utf-8');
-      const data = JSON.parse(content) as ServerPidFile;
-      if (
-        typeof data.pid === 'number' &&
-        typeof data.port === 'number' &&
-        typeof data.startedAt === 'number'
-      ) {
-        return data;
-      }
-      log.warn('PID file has invalid structure');
-      return null;
-    } catch (error) {
       log.warn('Failed to read PID file', { error: error as Error });
+      if (strict) {
+        throw new Error('Server PID state is invalid or inaccessible');
+      }
       return null;
     }
   }
@@ -169,7 +165,7 @@ export class ServerManager {
     return true;
   }
 
-  private async isOwnedServerProcess(pid: number): Promise<boolean> {
+  private async isOwnedServerProcess(pid: number, recordedStartedAt: number): Promise<boolean> {
     if (this.childProcess?.pid === pid) return true;
     if (process.platform !== 'win32') return false;
 
@@ -180,12 +176,34 @@ export class ServerManager {
           '-NoProfile',
           '-NonInteractive',
           '-Command',
-          `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { [pscustomobject]@{ ProcessId = $p.ProcessId; CreationTimeMs = ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds(); ExecutablePath = $p.ExecutablePath; CommandLine = $p.CommandLine } | ConvertTo-Json -Compress }`,
         ],
         { encoding: 'utf8', timeout: 3000, windowsHide: true }
       );
-      const commandLine = stdout.trim();
-      return isMurmurServerCommandLine(commandLine);
+      const snapshot = JSON.parse(stdout.trim()) as {
+        ProcessId?: unknown;
+        CreationTimeMs?: unknown;
+        ExecutablePath?: unknown;
+        CommandLine?: unknown;
+      };
+      if (
+        typeof snapshot.ProcessId !== 'number'
+        || typeof snapshot.CreationTimeMs !== 'number'
+        || typeof snapshot.ExecutablePath !== 'string'
+        || typeof snapshot.CommandLine !== 'string'
+      ) {
+        return false;
+      }
+      return isOwnedMurmurServerProcess(
+        {
+          processId: snapshot.ProcessId,
+          creationTimeMs: snapshot.CreationTimeMs,
+          executablePath: snapshot.ExecutablePath,
+          commandLine: snapshot.CommandLine,
+        } satisfies ServerProcessSnapshot,
+        pid,
+        recordedStartedAt
+      );
     } catch (error) {
       log.warn('Could not verify stale server process ownership', {
         pid,
@@ -319,7 +337,15 @@ export class ServerManager {
       return false;
     }
 
-    // Check health
+    if (!(await this.isOwnedServerProcess(pidData.pid, pidData.startedAt))) {
+      log.warn('PID file belongs to an unverified process; refusing adoption', {
+        pid: pidData.pid,
+      });
+      this.updateStatus('error', 'Server process ownership could not be verified');
+      return false;
+    }
+
+    // Check health only after process ownership is proven.
     const health = await this.getHealthState(pidData.port);
     if (!health.healthy) {
       log.warn('Server process alive but not responding to health checks');
@@ -436,6 +462,14 @@ export class ServerManager {
     // Check for existing server first
     const existingPid = this.readPidFile();
     if (existingPid && this.isProcessAlive(existingPid.pid)) {
+      if (!(await this.isOwnedServerProcess(existingPid.pid, existingPid.startedAt))) {
+        log.warn('PID file belongs to an unverified process; refusing replacement', {
+          pid: existingPid.pid,
+        });
+        this.updateStatus('error', 'Server process ownership could not be verified');
+        return;
+      }
+
       const health = await this.getHealthState(existingPid.port);
       if (health.healthy) {
         log.info('Found existing healthy server, adopting');
@@ -450,21 +484,19 @@ export class ServerManager {
         this.startHealthPolling(existingPid.port);
         return;
       }
-      // A stale PID can be reused by an unrelated process. Only terminate a
-      // command line that still identifies itself as Murmur's Python entry.
-      if (await this.isOwnedServerProcess(existingPid.pid)) {
-        log.warn('Existing Murmur server is not responding; terminating it');
-        try {
-          process.kill(existingPid.pid, 'SIGTERM');
-          await this.waitForProcessExit(existingPid.pid, 5000);
-        } catch {
-          // Ignore errors, proceed with starting a new server.
+      log.warn('Existing owned Murmur server is not responding; terminating it');
+      try {
+        process.kill(existingPid.pid, 'SIGTERM');
+        if (!(await this.waitForProcessExit(existingPid.pid, 5000))) {
+          this.updateStatus('error', 'Existing server did not stop');
+          return;
         }
-      } else {
-        log.warn('Stale PID belongs to an unrelated process; refusing to terminate it', {
-          pid: existingPid.pid,
-        });
+      } catch {
+        this.updateStatus('error', 'Existing server could not be stopped');
+        return;
       }
+      this.cleanupStalePidFile();
+    } else if (existingPid) {
       this.cleanupStalePidFile();
     }
 
@@ -594,7 +626,7 @@ export class ServerManager {
   ): Promise<ServerPidFile | null> {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
-      const pidData = this.readPidFile();
+      const pidData = this.readPidFile(false);
       if (
         pidData &&
         (expectedStartedAfterMs === undefined || pidData.startedAt >= expectedStartedAfterMs)
@@ -700,7 +732,7 @@ export class ServerManager {
         }
       } else if (this.pidFile?.pid) {
         // No child process ref but have PID (shouldn't happen but handle it)
-        if (await this.isOwnedServerProcess(this.pidFile.pid)) {
+        if (await this.isOwnedServerProcess(this.pidFile.pid, this.pidFile.startedAt)) {
           try {
             process.kill(this.pidFile.pid, 'SIGTERM');
           } catch {

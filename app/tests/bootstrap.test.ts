@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 import { bootstrapApplication, type BootstrapApp } from '../src/main/bootstrap-core';
-import { EVE_PRODUCT_NAME, MURMUR_IDENTITY, resolveUserDataPath } from '../src/main/identity';
+import {
+  EVE_PRODUCT_NAME,
+  EVE_USER_DATA_DIRECTORY_NAME,
+  MURMUR_IDENTITY,
+  resolveUserDataPath,
+} from '../src/main/identity';
 
 const APP_DATA_PATH = path.join('test-root', 'AppData', 'Roaming');
 
@@ -41,6 +46,7 @@ describe('application identity bootstrap', () => {
       nsisGuid: '0204d005-75b3-5b31-b1f6-ef2831e2b204',
     });
     expect(EVE_PRODUCT_NAME).toBe('Eve');
+    expect(EVE_USER_DATA_DIRECTORY_NAME).toBe('Eve');
   });
 
   test('resolves the same explicit Murmur userData directory', () => {
@@ -57,6 +63,7 @@ describe('application identity bootstrap', () => {
       },
       {
         platform: 'win32',
+        userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
         prepareUserDataRoot: (appDataPath, directoryName) => {
           fakeApp.events.push(`prepare:${directoryName}`);
           return resolveUserDataPath(appDataPath, directoryName);
@@ -68,9 +75,9 @@ describe('application identity bootstrap', () => {
     expect(fakeApp.events).toEqual([
       'lock',
       'get:appData',
-      'prepare:murmur',
-      `set:userData:${path.join(APP_DATA_PATH, 'murmur')}`,
-      `set:sessionData:${path.join(APP_DATA_PATH, 'murmur')}`,
+      'prepare:Eve',
+      `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
       'app-id:com.murmur.app',
       'load',
     ]);

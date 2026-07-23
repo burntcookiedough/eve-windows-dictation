@@ -2,14 +2,24 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   mkdtempSync,
   mkdirSync,
+  lstatSync,
+  openSync,
+  closeSync,
+  readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { prepareUserDataRootSync } from '../src/main/user-data-root';
+import {
+  prepareUserDataRootSync,
+  type UserDataRootFileSystem,
+} from '../src/main/user-data-root';
+import { EVE_USER_DATA_DIRECTORY_NAME } from '../src/main/identity';
 
 const temporaryRoots: string[] = [];
 
@@ -31,10 +41,58 @@ describe('user-data root preparation', () => {
     const appData = path.join(fixture, 'Roaming');
     mkdirSync(appData);
 
-    const userData = prepareUserDataRootSync(appData, 'murmur');
+    const userData = prepareUserDataRootSync(appData, EVE_USER_DATA_DIRECTORY_NAME);
 
-    expect(userData).toBe(path.join(appData, 'murmur'));
+    expect(userData).toBe(path.join(appData, 'Eve'));
     expect(readdirSync(userData)).toEqual([]);
+  });
+
+  test('records no access to a controlled Murmur sibling', () => {
+    const fixture = createFixtureRoot();
+    const appData = path.join(fixture, 'Roaming');
+    const legacyRoot = path.join(appData, 'murmur');
+    const sentinelPath = path.join(legacyRoot, 'legacy-sentinel.txt');
+    mkdirSync(legacyRoot, { recursive: true });
+    writeFileSync(sentinelPath, 'controlled legacy data');
+    const accesses: string[] = [];
+
+    const tracedFileSystem: UserDataRootFileSystem = {
+      realpath: (value) => {
+        accesses.push(value);
+        return realpathSync.native(value);
+      },
+      mkdir: (value) => {
+        accesses.push(value);
+        mkdirSync(value, { recursive: true });
+      },
+      lstat: (value) => {
+        accesses.push(value);
+        return lstatSync(value);
+      },
+      open: (value) => {
+        accesses.push(value);
+        return openSync(value, 'wx');
+      },
+      close: (descriptor) => closeSync(descriptor),
+      unlink: (value) => {
+        accesses.push(value);
+        unlinkSync(value);
+      },
+    };
+
+    const userData = prepareUserDataRootSync(
+      appData,
+      EVE_USER_DATA_DIRECTORY_NAME,
+      tracedFileSystem
+    );
+
+    expect(userData).toBe(path.join(appData, 'Eve'));
+    expect(
+      accesses.filter(
+        (value) => value === legacyRoot || value.startsWith(`${legacyRoot}${path.sep}`)
+      )
+    ).toEqual([]);
+    expect(readFileSync(sentinelPath, 'utf8')).toBe('controlled legacy data');
   });
 
   test('allows a legitimately redirected appData parent', () => {
@@ -48,19 +106,19 @@ describe('user-data root preparation', () => {
       process.platform === 'win32' ? 'junction' : 'dir'
     );
 
-    const userData = prepareUserDataRootSync(redirectedAppData, 'murmur');
+    const userData = prepareUserDataRootSync(redirectedAppData, EVE_USER_DATA_DIRECTORY_NAME);
 
-    expect(userData).toBe(path.join(redirectedAppData, 'murmur'));
-    expect(readdirSync(path.join(actualAppData, 'murmur'))).toEqual([]);
+    expect(userData).toBe(path.join(redirectedAppData, 'Eve'));
+    expect(readdirSync(path.join(actualAppData, 'Eve'))).toEqual([]);
   });
 
   test('rejects a userData root that is a file', () => {
     const fixture = createFixtureRoot();
     const appData = path.join(fixture, 'Roaming');
     mkdirSync(appData);
-    writeFileSync(path.join(appData, 'murmur'), 'not a directory');
+    writeFileSync(path.join(appData, 'Eve'), 'not a directory');
 
-    expect(() => prepareUserDataRootSync(appData, 'murmur')).toThrow();
+    expect(() => prepareUserDataRootSync(appData, EVE_USER_DATA_DIRECTORY_NAME)).toThrow();
   });
 
   test('rejects a userData root redirected to a controlled legacy fixture', () => {
@@ -71,11 +129,11 @@ describe('user-data root preparation', () => {
     mkdirSync(controlledLegacy);
     symlinkSync(
       controlledLegacy,
-      path.join(appData, 'murmur'),
+      path.join(appData, 'Eve'),
       process.platform === 'win32' ? 'junction' : 'dir'
     );
 
-    expect(() => prepareUserDataRootSync(appData, 'murmur')).toThrow(
+    expect(() => prepareUserDataRootSync(appData, EVE_USER_DATA_DIRECTORY_NAME)).toThrow(
       /regular directory|redirects outside/
     );
     expect(readdirSync(controlledLegacy)).toEqual([]);

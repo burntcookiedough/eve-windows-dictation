@@ -1,8 +1,11 @@
 import { app, dialog } from 'electron';
 import { bootstrapApplication } from './bootstrap-core.js';
+import { EVE_USER_DATA_DIRECTORY_NAME } from './identity.js';
 
 try {
-  await bootstrapApplication(app, () => import('./index.js'));
+  await bootstrapApplication(app, () => import('./index.js'), {
+    userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
+  });
 } catch {
   dialog.showErrorBox(
     'Murmur could not start',

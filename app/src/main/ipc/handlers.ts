@@ -18,15 +18,7 @@ import {
 } from '../services/server-settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
-
-/**
- * Apply the launch-on-boot setting using Electron's login item API.
- */
-function applyLaunchOnBoot(enabled: boolean): void {
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-  });
-}
+import { validateLaunchOnBootUpdate } from '../login-item-policy.js';
 
 let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
@@ -39,10 +31,6 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   if (serverManager) {
     serverManagerRef = serverManager;
   }
-
-  // Sync launch-on-boot setting with OS on startup
-  const settings = getSettings();
-  applyLaunchOnBoot(settings.launchOnBoot);
 
   // Handle clipboard copy requests
   ipcMain.on(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: string) => {
@@ -72,12 +60,11 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   ipcMain.handle(
     IPC_CHANNELS.UPDATE_SETTING,
     async (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
-      updateSetting(key, value);
-
-      // Apply launch-on-boot immediately when changed
       if (key === 'launchOnBoot') {
-        applyLaunchOnBoot(value as boolean);
+        validateLaunchOnBootUpdate(value as boolean);
       }
+
+      updateSetting(key, value);
 
       if (key === 'useExternalServer' && value === true && serverManagerRef) {
         await serverManagerRef.stop();
