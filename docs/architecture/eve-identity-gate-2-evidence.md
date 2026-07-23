@@ -11,8 +11,8 @@ standalone repository's exact merged Gate 1 trunk commit
 This gate activates exactly `%APPDATA%\Eve` while retaining `com.murmur.app`, product
 name `Murmur`, `Murmur.exe`, installer/shortcut/artifact names, the explicit NSIS GUID,
 publish/update configuration, preload globals, `MURMUR_*` names, Python package names,
-visuals, and version `0.6.3`. It does not package, install, publish, tag, mark ready, or
-merge a release.
+visuals, and version `0.6.3`. Gate B built and exercised a local Windows candidate, but
+did not publish, tag, merge, or change a release.
 
 ## Commit and rollback boundaries
 
@@ -76,7 +76,7 @@ deletes the shared cache.
 |---|---|
 | Exact `%APPDATA%\Eve` selected | `bootstrap.test.ts` ordering assertions plus the real Electron controlled-root subprocess smoke check |
 | Selection precedes singleton acquisition, Store, History, server, helper, and session consumers | Real Electron lock-time path record, mocked regression ordering, dynamic-import ordering, and successful full main-process build |
-| Zero legacy-root access, including no legacy PID read | Injectable filesystem access record and real Electron controlled-sibling preservation check in `eve-profile-boundary.test.ts`; source/diff audit; privacy-normalized packaged Process Monitor/ETW proof remains Gate B |
+| Zero legacy-root access, including no legacy PID read | Injectable filesystem access record and real Electron controlled-sibling preservation check in `eve-profile-boundary.test.ts`; source/diff audit; packaged candidate selected Eve and the Murmur manifest remained byte-identical until the published rollback was launched. Path-level tracing was removed from this gate, so its absence is an evidence limitation rather than a failed requirement. |
 | Redirected parent APPDATA remains supported | Controlled redirected-parent fixture |
 | Eve root cannot alias the controlled Murmur fixture | Controlled symlink/junction rejection fixture |
 | Missing root initializes; malformed/file/inaccessible root fails closed | Root creation, file-root, canonical-alias, and write-probe tests; sanitized bootstrap error path |
@@ -86,7 +86,7 @@ deletes the shared cache.
 | Existing `MURMUR_*` overrides are sufficient | App launcher injects Eve PID/settings paths; no Python server-file diff |
 | Shared model cache behavior unchanged | Environment/diff audit; Gate B cache reuse/preservation checks |
 | Gate 1 product/installer/release identity unchanged | `server/tests/test_release_config.py`, version consistency, manifest diff audit |
-| Uninstall preserves both roots | Frozen `deleteAppDataOnUninstall: false`; actual install/repair/uninstall proof deferred to Gate B |
+| Uninstall preserves both roots | Frozen `deleteAppDataOnUninstall: false`; the NSIS repair failure removed the installed candidate while preserving both roots. A normal same-version repair/uninstall cycle did not complete and is not claimed as passed. |
 | No sensitive test artifacts | Fixtures use generated temporary roots and synthetic sentinel text; logs and tracked files are scanned before push |
 
 The injectable access record is evidence about root preparation, not proof of all
@@ -127,29 +127,50 @@ its native `uiohook-napi` postinstall could not link one existing object file lo
 No manifest or lockfile changed; app tests and production builds passed with the
 available Windows dependencies. CI performs a clean frozen install.
 
-## Gate B: packaged disposable Windows acceptance
+## Gate B: packaged Windows acceptance
 
-Gate B requires separate approval and must pass before merge. It uses a disposable
-Windows account or VM, never the real user profile:
+The user approved a current-profile exception after both roots were copied byte-for-byte
+to an E:-resident evidence area. File contents and transcript/history data are not
+recorded in repository evidence. Shared Hugging Face caches were reused read-only and
+were not copied, moved, deleted, or downloaded.
 
-- install published v0.6.3, then install the same-version Gate 2 candidate;
-- same-version repair and rapid restart;
-- controlled Murmur fixtures containing synthetic settings, History/WAL/SHM, Chromium,
-  PID, helper, log, credential-like, and startup-preference sentinels;
-- clean first launch proving Eve defaults, empty History, fresh browser state, fresh
-  server state, and Eve helper generation;
-- stale, reused, malformed, owned, unowned, and healthy-but-unowned Eve PID cases;
-- shared Hugging Face cache reuse without moving or deleting it;
-- uninstall preserving both controlled roots and the shared cache;
-- rollback to checksum-verified published v0.6.3 and responsive launch;
-- exact before/after snapshots of uninstall identity, install files, shortcuts,
-  login-item registrations, roots, tags, releases, and published assets.
+| Check | Result |
+|---|---|
+| Reviewed source | Exact PR head `758a175203006cf27e3bf5881654c814978eb8e4`; tracked tree clean before packaging |
+| Full-runtime candidate | Build duration: 825.792 seconds. Installer: 887,569 bytes, SHA-256 `648667AA31CE094917622DF701F95F626221F5F901D25879C4CD4EE8514D987B`; payload: 2,033,993,463 bytes, SHA-256 `8AA10BFA24C7C70F46833A70FBEF56D7DAA4C3C05D9A6AC90F93C7E60AF928F2` |
+| Runtime closure | Packaged `.runtime\python.exe` imported faster-whisper/CTranslate2, Torch, Torchaudio, and NeMo/Nemotron; required CUDA/native libraries were present; packaged server smoke was healthy at `0.6.3` |
+| Fast/Long dictation exercise | **Not completed.** Import, CUDA/native closure, engine discovery, and packaged server smoke passed, but the candidate was removed before both packaged transcription paths were exercised. No dictation acceptance is claimed. |
+| Frozen identity | Product/app/executable/installer/artifact names, `com.murmur.app`, NSIS GUID, version, publish/update target, and v0.6.3 release assets remained unchanged |
+| Candidate first launch | Exact `%APPDATA%\Eve` initialized; the packaged server PID was owned by the installed runtime and its dynamic endpoint became healthy at `0.6.3` |
+| Rapid restart/singleton | Second launch exited successfully; the process tree stabilized to one main process |
+| Murmur preservation before rollback | The 108-file Murmur manifest remained byte-for-byte identical through candidate install, launch, and removal |
+| Eve preservation | The 44-file Eve candidate fingerprint remained identical through candidate removal and published rollback |
+| Login registrations | The 21-entry canonical Run/StartupApproved snapshot remained unchanged |
+| Candidate same-version repair | **Not passed.** The initial NSIS-web install consumed its local payload. The repair invocation therefore lacked that payload and removed the candidate before it was stopped. Both profile roots remained preserved. No rebuild was performed. |
+| Candidate uninstall | Candidate files were removed by the failed repair path and both roots survived, but a normal repair/uninstall sequence was not completed and is not claimed as passed |
+| Published rollback | Official v0.6.3 installer (887,561 bytes, SHA-256 `366088A4266F54EA7C39E2E7FD1FC7177CAC46BF8A4B3F43D58A6D025E15CD33`) and payload (2,034,188,308 bytes, SHA-256 `0B557FDE05853DA1F7C0AEF77CECBAD1FAF8C5FC9314457EA45119D3A69F4FBD`) matched GitHub release metadata; installed `app.asar` matched `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD`; the server became healthy at `0.6.3` |
+| Murmur state after published launch | The exact 108-file backup matched immediately before rollback launch. Published v0.6.3 then legitimately wrote to its own Murmur profile, leaving 113 files and 21 manifest differences; post-launch byte identity is not claimed |
+| Path-level tracing | **Out-of-scope evidence limitation.** ProcMon/WPR/path tracing was explicitly removed from this gate. No path-trace pass or failure is claimed. Static audit, mocked tests, a real Electron controlled-root subprocess, packaged Eve initialization/ownership/readiness, and before/after manifests remain the available boundary evidence |
 
-Process Monitor or ETW filters must be scoped to the candidate process tree and the two
-controlled fixture roots. Exported evidence must replace account names and temporary
-prefixes with stable tokens, retain operation/result/path-class fields needed for audit,
-exclude file contents and unrelated processes, and prove zero operation beneath the
-controlled Murmur token. Real `%APPDATA%\murmur` contents must never be read or traced.
+The residual standard local account `CodexEveGateB16` was created by the user, was not
+used for this acceptance path, and expires on 2026-07-25. It remains controlled host
+state for later cleanup.
+
+### Fresh Gate A rerun after Gate B
+
+| Command | Result on 2026-07-24 |
+|---|---|
+| `python scripts/version.py check` | Pass; `0.6.3` |
+| `bun test` | Pass; 87 tests, 273 assertions |
+| `bun run test:history` | Pass |
+| `bun run build` | Pass |
+| `uv sync --extra whisper --group dev --frozen` | Pass in an isolated E:-resident environment; tracked manifests and locks unchanged |
+| `uv run --no-sync pytest` | Pass; 138 tests |
+
+Gate B is incomplete because the failed same-version repair cannot be normalized into a
+successful repair/uninstall result. Path tracing is not a readiness blocker because it
+was explicitly removed from this gate; its absence only limits the available evidence.
+PR readiness requires a later successful supported repair check.
 
 ## Stop conditions
 
@@ -165,5 +186,6 @@ Stop and revert the latest commit if the implementation:
   overrides;
 - requires packaging or real-host mutation to make Gate A pass.
 
-Packaging, host installation, registry mutation, marking ready, merging, tags, and
-release publication remain explicit no-go actions until their later approvals.
+The approved Gate B host work is recorded above. Further host remediation, marking
+ready, merging, tags, and release publication remain no-go actions unless separately
+approved; this evidence does not authorize them.
