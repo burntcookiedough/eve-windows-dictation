@@ -1,4 +1,4 @@
-import { MURMUR_IDENTITY, resolveUserDataPath } from './identity.js';
+import { MURMUR_IDENTITY } from './identity.js';
 import { prepareUserDataRootSync } from './user-data-root.js';
 
 export interface BootstrapApp {
@@ -30,11 +30,6 @@ export async function bootstrapApplication(
   loadApplication: ApplicationLoader,
   options: BootstrapOptions
 ): Promise<boolean> {
-  if (!electronApp.requestSingleInstanceLock()) {
-    electronApp.quit();
-    return false;
-  }
-
   const appDataPath = electronApp.getPath('appData');
   const prepareUserDataRoot =
     options.prepareUserDataRoot ?? prepareUserDataRootSync;
@@ -45,6 +40,11 @@ export async function bootstrapApplication(
 
   electronApp.setPath('userData', userDataPath);
   electronApp.setPath('sessionData', userDataPath);
+
+  if (!electronApp.requestSingleInstanceLock()) {
+    electronApp.quit();
+    return false;
+  }
 
   if ((options.platform ?? process.platform) === 'win32') {
     electronApp.setAppUserModelId(MURMUR_IDENTITY.appId);

@@ -632,8 +632,9 @@ async function startApplication(): Promise<void> {
 
 void app.whenReady()
   .then(startApplication)
-  .catch(() => {
-    log.error('Application startup failed');
+  .catch((error: unknown) => {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    log.error('Application startup failed', { error: cause });
     dialog.showErrorBox(
       'Murmur could not start',
       'Murmur could not initialize its application data. Verify that the application data folder is accessible and valid, then try again.'

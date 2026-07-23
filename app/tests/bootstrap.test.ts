@@ -5,7 +5,6 @@ import {
   EVE_PRODUCT_NAME,
   EVE_USER_DATA_DIRECTORY_NAME,
   MURMUR_IDENTITY,
-  resolveUserDataPath,
 } from '../src/main/identity';
 
 const APP_DATA_PATH = path.join('test-root', 'AppData', 'Roaming');
@@ -49,13 +48,7 @@ describe('application identity bootstrap', () => {
     expect(EVE_USER_DATA_DIRECTORY_NAME).toBe('Eve');
   });
 
-  test('resolves the same explicit Murmur userData directory', () => {
-    expect(resolveUserDataPath(APP_DATA_PATH, MURMUR_IDENTITY.userDataDirectoryName)).toBe(
-      path.join(APP_DATA_PATH, 'murmur')
-    );
-  });
-
-  test('locks and selects userData before application modules load', async () => {
+  test('selects Eve paths before locking and loading application modules', async () => {
     const fakeApp = new FakeApp();
 
     const loaded = await bootstrapApplication(
@@ -68,24 +61,24 @@ describe('application identity bootstrap', () => {
         userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
         prepareUserDataRoot: (appDataPath, directoryName) => {
           fakeApp.events.push(`prepare:${directoryName}`);
-          return resolveUserDataPath(appDataPath, directoryName);
+          return path.join(appDataPath, directoryName);
         },
       }
     );
 
     expect(loaded).toBeTrue();
     expect(fakeApp.events).toEqual([
-      'lock',
       'get:appData',
       'prepare:Eve',
       `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
       `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      'lock',
       'app-id:com.murmur.app',
       'load',
     ]);
   });
 
-  test('does not select paths or load modules when another instance owns the lock', async () => {
+  test('selects Eve paths but does not load modules when another Eve instance owns the lock', async () => {
     const fakeApp = new FakeApp();
     fakeApp.lockGranted = false;
 
@@ -98,12 +91,18 @@ describe('application identity bootstrap', () => {
         platform: 'win32',
         userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
         prepareUserDataRoot: (appDataPath, directoryName) =>
-          resolveUserDataPath(appDataPath, directoryName),
+          path.join(appDataPath, directoryName),
       }
     );
 
     expect(loaded).toBeFalse();
-    expect(fakeApp.events).toEqual(['lock', 'quit']);
+    expect(fakeApp.events).toEqual([
+      'get:appData',
+      `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      'lock',
+      'quit',
+    ]);
   });
 
   test('does not set Electron paths or load modules when root preparation fails', async () => {
@@ -127,7 +126,6 @@ describe('application identity bootstrap', () => {
     ).rejects.toThrow('write denied');
 
     expect(fakeApp.events).toEqual([
-      'lock',
       'get:appData',
       'prepare:failed',
     ]);

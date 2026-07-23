@@ -15,6 +15,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildSync } from 'esbuild';
 import {
   prepareUserDataRootSync,
   type UserDataRootFileSystem,
@@ -22,6 +24,7 @@ import {
 import { EVE_USER_DATA_DIRECTORY_NAME } from '../src/main/identity';
 
 const temporaryRoots: string[] = [];
+const appRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function createFixtureRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'murmur-profile-boundary-'));
@@ -36,6 +39,174 @@ afterEach(() => {
 });
 
 describe('user-data root preparation', () => {
+  test('sets controlled Eve paths before a real Electron singleton lock', () => {
+    if (process.platform !== 'win32') return;
+
+    const fixture = createFixtureRoot();
+    const appData = path.join(fixture, 'Roaming');
+    const localAppData = path.join(fixture, 'Local');
+    const userProfile = path.join(fixture, 'Profile');
+    const temp = path.join(fixture, 'Temp');
+    const legacyRoot = path.join(appData, 'murmur');
+    const legacySentinel = path.join(legacyRoot, 'legacy-sentinel.txt');
+    const bundlePath = path.join(fixture, 'bootstrap-core.cjs');
+    const runnerPath = path.join(fixture, 'electron-bootstrap-smoke.cjs');
+    const resultPath = path.join(fixture, 'electron-bootstrap-result.json');
+    const preBootstrapUserData = path.join(fixture, 'PreBootstrapUserData');
+    const electronPath = path.join(
+      appRoot,
+      'node_modules',
+      'electron',
+      'dist',
+      'electron.exe'
+    );
+
+    mkdirSync(legacyRoot, { recursive: true });
+    mkdirSync(localAppData);
+    mkdirSync(userProfile);
+    mkdirSync(temp);
+    writeFileSync(legacySentinel, 'controlled legacy data');
+
+    buildSync({
+      entryPoints: [path.join(appRoot, 'src', 'main', 'bootstrap-core.ts')],
+      outfile: bundlePath,
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'cjs',
+      logLevel: 'silent',
+    });
+
+    writeFileSync(
+      runnerPath,
+      `
+const fs = require('node:fs');
+const { app } = require('electron');
+const { bootstrapApplication } = require(${JSON.stringify(bundlePath)});
+
+app.setPath('appData', ${JSON.stringify(appData)});
+app.setName('Murmur');
+const events = [];
+const electronApp = {
+  getPath(name) {
+    const value = app.getPath(name);
+    events.push(\`get:\${name}:\${value}\`);
+    return value;
+  },
+  setPath(name, value) {
+    app.setPath(name, value);
+    events.push(\`set:\${name}:\${value}\`);
+  },
+  requestSingleInstanceLock() {
+    events.push(
+      \`lock:userData:\${app.getPath('userData')}:sessionData:\${app.getPath('sessionData')}\`
+    );
+    return app.requestSingleInstanceLock();
+  },
+  quit() {
+    events.push('quit');
+    app.quit();
+  },
+  setAppUserModelId(id) {
+    events.push(\`app-id:\${id}\`);
+    app.setAppUserModelId(id);
+  },
+};
+
+(async () => {
+  try {
+    const loaded = await bootstrapApplication(
+      electronApp,
+      async () => {
+        events.push('load');
+      },
+      { platform: 'win32', userDataDirectoryName: 'Eve' }
+    );
+    fs.writeFileSync(
+      ${JSON.stringify(resultPath)},
+      JSON.stringify({
+        loaded,
+        events,
+        userData: app.getPath('userData'),
+        sessionData: app.getPath('sessionData'),
+        lockHeld: app.hasSingleInstanceLock(),
+        electronVersion: process.versions.electron,
+      })
+    );
+    app.releaseSingleInstanceLock();
+    app.exit(0);
+  } catch (error) {
+    fs.writeFileSync(
+      ${JSON.stringify(resultPath)},
+      JSON.stringify({ events, error: String(error && error.stack ? error.stack : error) })
+    );
+    if (app.hasSingleInstanceLock()) app.releaseSingleInstanceLock();
+    app.exit(1);
+  }
+})();
+`,
+      'utf8'
+    );
+
+    const result = Bun.spawnSync({
+      cmd: [
+        electronPath,
+        `--user-data-dir=${preBootstrapUserData}`,
+        runnerPath,
+      ],
+      cwd: fixture,
+      env: {
+        APPDATA: appData,
+        LOCALAPPDATA: localAppData,
+        USERPROFILE: userProfile,
+        HOME: userProfile,
+        TEMP: temp,
+        TMP: temp,
+        PATH: process.env.PATH,
+        PATHEXT: process.env.PATHEXT,
+        SystemRoot: process.env.SystemRoot,
+        windir: process.env.windir,
+        ComSpec: process.env.ComSpec,
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      },
+      timeout: 30_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    expect(result.success).toBeTrue();
+    expect(result.exitCode).toBe(0);
+
+    const smoke = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      loaded: boolean;
+      events: string[];
+      userData: string;
+      sessionData: string;
+      lockHeld: boolean;
+      electronVersion: string;
+    };
+    const eveRoot = path.join(appData, 'Eve');
+    const { electronVersion, ...smokeState } = smoke;
+
+    expect(electronVersion).toMatch(/^40\./);
+    expect(smokeState).toEqual({
+      loaded: true,
+      events: [
+        `get:appData:${appData}`,
+        `set:userData:${eveRoot}`,
+        `set:sessionData:${eveRoot}`,
+        `lock:userData:${eveRoot}:sessionData:${eveRoot}`,
+        'app-id:com.murmur.app',
+        'load',
+      ],
+      userData: eveRoot,
+      sessionData: eveRoot,
+      lockHeld: true,
+    });
+    expect(readFileSync(legacySentinel, 'utf8')).toBe('controlled legacy data');
+    expect(readdirSync(legacyRoot)).toEqual(['legacy-sentinel.txt']);
+  });
+
   test('creates a regular direct child and removes its write probe', () => {
     const fixture = createFixtureRoot();
     const appData = path.join(fixture, 'Roaming');

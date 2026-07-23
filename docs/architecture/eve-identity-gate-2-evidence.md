@@ -30,12 +30,12 @@ outside the allowed diff.
 
 The bootstrap order is:
 
-1. obtain the single-instance lock;
-2. resolve Electron's `appData` parent;
-3. create and validate its direct `Eve` child, including an exclusive write probe;
-4. reject files, symbolic-link/junction roots, canonical redirects, and inaccessible
+1. resolve Electron's `appData` parent;
+2. create and validate its direct `Eve` child, including an exclusive write probe;
+3. reject files, symbolic-link/junction roots, canonical redirects, and inaccessible
    roots;
-5. set both Electron `userData` and `sessionData` to the prepared root;
+4. set both Electron `userData` and `sessionData` to the prepared root;
+5. obtain the single-instance lock scoped to the prepared Eve root;
 6. retain `com.murmur.app`;
 7. dynamically import the application.
 
@@ -52,6 +52,16 @@ before data-consuming imports and shows bounded repair guidance with no fallback
 Malformed/inaccessible Eve PID state fails closed. No generalized migration mechanism
 and no server fallback changes were added.
 
+This ordering is not inferred only from a mocked Electron app. The Electron 40.1.0
+source for `App::RequestSingleInstanceLock` resolves and creates
+`chrome::DIR_USER_DATA`, then constructs `ProcessSingleton` with that path. Gate 2
+therefore sets the two Eve paths before calling the real API. The frozen dependency
+environment currently runs Electron 40.10.6. A Windows Electron 40.x subprocess smoke
+check compiles the actual `bootstrapApplication` implementation into a temporary
+controlled fixture, records the real paths at singleton acquisition, and confirms that
+the controlled Murmur sibling gains no files and its synthetic sentinel remains
+unchanged.
+
 Gate 2 makes zero call to `app.setLoginItemSettings`, including no `false` call. A fresh
 profile reads the existing `launchOnBoot: false` default. An enable attempt is rejected
 before persistence; the renderer reverts the optimistic toggle and displays an error.
@@ -64,9 +74,9 @@ deletes the shared cache.
 
 | Requirement | Test or evidence |
 |---|---|
-| Exact `%APPDATA%\Eve` selected | `bootstrap.test.ts` identity and ordering assertions |
-| Selection precedes Store, History, server, helper, and session consumers | Dynamic-import ordering test plus successful full main-process build |
-| Zero legacy-root access, including no legacy PID read | Injectable filesystem access record in `eve-profile-boundary.test.ts`; controlled sibling sentinel remains unchanged; source/diff audit; full-process proof deferred to Gate B |
+| Exact `%APPDATA%\Eve` selected | `bootstrap.test.ts` ordering assertions plus the real Electron controlled-root subprocess smoke check |
+| Selection precedes singleton acquisition, Store, History, server, helper, and session consumers | Real Electron lock-time path record, mocked regression ordering, dynamic-import ordering, and successful full main-process build |
+| Zero legacy-root access, including no legacy PID read | Injectable filesystem access record and real Electron controlled-sibling preservation check in `eve-profile-boundary.test.ts`; source/diff audit; privacy-normalized packaged Process Monitor/ETW proof remains Gate B |
 | Redirected parent APPDATA remains supported | Controlled redirected-parent fixture |
 | Eve root cannot alias the controlled Murmur fixture | Controlled symlink/junction rejection fixture |
 | Missing root initializes; malformed/file/inaccessible root fails closed | Root creation, file-root, canonical-alias, and write-probe tests; sanitized bootstrap error path |
@@ -80,8 +90,21 @@ deletes the shared cache.
 | No sensitive test artifacts | Fixtures use generated temporary roots and synthetic sentinel text; logs and tracked files are scanned before push |
 
 The injectable access record is evidence about root preparation, not proof of all
-filesystem behavior. A passing unit test must not be represented as full-process
-non-access proof.
+filesystem behavior. The unpackaged Electron subprocess demonstrates actual singleton
+path selection and controlled-sibling preservation, but it is not a packaged filesystem
+trace. Neither check may be represented as final full-process non-access proof; that
+acceptance remains Gate B.
+
+### Local smoke-harness correction
+
+An initial uncommitted smoke-harness invocation attempted to redirect Electron with the
+child `APPDATA` environment variable alone. Windows known-folder resolution ignored
+that variable, so the subprocess selected the actual user's Eve root before exiting. It
+did not select the Murmur root. The Eve location was not inspected or removed. The
+committed harness instead sets a controlled Electron `appData` path before invoking the
+production bootstrap and supplies a controlled pre-bootstrap `--user-data-dir`. This
+incident is another reason the packaged privacy boundary is not finally accepted until
+Gate B tracing passes.
 
 ## Gate A: automated controlled fixtures
 
@@ -90,10 +113,10 @@ Gate A is sufficient to open a draft PR:
 | Command | Result on 2026-07-23 |
 |---|---|
 | `python scripts/version.py check` | Pass; `0.6.3` |
-| `bun test` | Pass; 86 tests, 260 assertions |
+| `bun test` | Pass; 86 tests, 265 assertions, including the controlled real-Electron singleton smoke check |
 | `bun run test:history` | Pass |
 | `bun run build` | Pass |
-| focused Gate 2 tests | Pass; 25 tests, 51 assertions |
+| focused Gate 2 tests | Pass; 25 tests, 56 assertions |
 | `git diff --check` | Pass before each implementation commit; rerun on final diff |
 | `uv sync --extra whisper --group dev --frozen` | Pass; CI-equivalent Windows environment prepared without changing tracked manifests or locks |
 | `uv run --no-sync pytest` | Pass; 138 tests |
