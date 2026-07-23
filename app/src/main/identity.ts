@@ -26,7 +26,7 @@ export const EVE_PRODUCT_NAME = 'Eve' as const;
 
 export function resolveUserDataPath(
   appDataPath: string,
-  identity: ApplicationIdentity = MURMUR_IDENTITY
+  directoryName: string = MURMUR_IDENTITY.userDataDirectoryName
 ): string {
-  return path.join(appDataPath, identity.userDataDirectoryName);
+  return path.join(appDataPath, directoryName);
 }

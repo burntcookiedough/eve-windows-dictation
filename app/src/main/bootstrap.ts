@@ -1,4 +1,12 @@
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import { bootstrapApplication } from './bootstrap-core.js';
 
-await bootstrapApplication(app, () => import('./index.js'));
+try {
+  await bootstrapApplication(app, () => import('./index.js'));
+} catch {
+  dialog.showErrorBox(
+    'Murmur could not start',
+    'Murmur could not initialize its application data folder. Verify that the folder is a regular directory and that your account can write to it, then try again.'
+  );
+  app.quit();
+}

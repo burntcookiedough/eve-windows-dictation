@@ -23,7 +23,7 @@ class FakeApp implements BootstrapApp {
     return APP_DATA_PATH;
   }
 
-  setPath(name: 'userData', value: string): void {
+  setPath(name: 'userData' | 'sessionData', value: string): void {
     this.events.push(`set:${name}:${value}`);
   }
 
@@ -55,14 +55,22 @@ describe('application identity bootstrap', () => {
       async () => {
         fakeApp.events.push('load');
       },
-      'win32'
+      {
+        platform: 'win32',
+        prepareUserDataRoot: (appDataPath, directoryName) => {
+          fakeApp.events.push(`prepare:${directoryName}`);
+          return resolveUserDataPath(appDataPath, directoryName);
+        },
+      }
     );
 
     expect(loaded).toBeTrue();
     expect(fakeApp.events).toEqual([
       'lock',
       'get:appData',
+      'prepare:murmur',
       `set:userData:${path.join(APP_DATA_PATH, 'murmur')}`,
+      `set:sessionData:${path.join(APP_DATA_PATH, 'murmur')}`,
       'app-id:com.murmur.app',
       'load',
     ]);
@@ -77,10 +85,40 @@ describe('application identity bootstrap', () => {
       async () => {
         fakeApp.events.push('load');
       },
-      'win32'
+      {
+        platform: 'win32',
+        prepareUserDataRoot: (appDataPath, directoryName) =>
+          resolveUserDataPath(appDataPath, directoryName),
+      }
     );
 
     expect(loaded).toBeFalse();
     expect(fakeApp.events).toEqual(['lock', 'quit']);
+  });
+
+  test('does not set Electron paths or load modules when root preparation fails', async () => {
+    const fakeApp = new FakeApp();
+
+    await expect(
+      bootstrapApplication(
+        fakeApp,
+        async () => {
+          fakeApp.events.push('load');
+        },
+        {
+          platform: 'win32',
+          prepareUserDataRoot: () => {
+            fakeApp.events.push('prepare:failed');
+            throw new Error('write denied');
+          },
+        }
+      )
+    ).rejects.toThrow('write denied');
+
+    expect(fakeApp.events).toEqual([
+      'lock',
+      'get:appData',
+      'prepare:failed',
+    ]);
   });
 });
