@@ -60,13 +60,15 @@ This group owns mutable state. The fresh-profile PR must not include visible ren
 |---|---|---|
 | `app/src/main/services/settings.ts` | Constructs `settings.json` and `internal.json` stores at module load | Initialize only after bootstrap selects Eve userData. Do not read legacy JSON. |
 | `app/src/main/services/history.ts` | Opens `history.db` under userData | Create a new empty Eve database. Never open legacy History. |
-| `app/src/main/services/server-manager.ts` | Uses userData for `server.pid` and `server-settings.json` | Use Eve paths. Allow only a narrow legacy PID ownership check if required for process safety. Require command-line ownership proof before adopting a healthy recorded process; refuse stale or unrelated PID reuse. |
+| `app/src/main/services/server-manager.ts` | Uses userData for `server.pid` and `server-settings.json` | Use Eve paths supplied through the existing app-side overrides. Do not read the legacy PID. Require PID, executable, command-line, and creation-epoch ownership proof before adopting or terminating a process referenced by Eve's PID file. |
 | `app/src/main/services/clipboard.ts` | Writes paste helper scripts under userData | Generate new Eve helpers. Do not copy old scripts. |
 | `app/scripts/clear-data.js` | Targets the Murmur directory | Replace with an Eve-specific development helper. It must never target both roots. |
 | `server/src/pidfile.py` and `server/justfile` | Standalone fallback paths use `murmur` | Keep compatibility fallbacks unless a separately tested Eve override is passed by the app. |
 | `server/src/config.py` | Accepts `MURMUR_SETTINGS_FILE` | Keep the environment contract; the Electron launcher supplies the new Eve file path. |
 
-Exit condition: traced first launch performs no read or write against Murmur personal files; the only permitted access is the bounded legacy `server.pid` ownership check. Eve starts with defaults and empty History, and both directories survive uninstall.
+Exit condition: traced first launch performs zero access against the controlled Murmur
+root, with no legacy PID exception. Eve starts with defaults and empty History, and both
+directories survive uninstall.
 
 Focused lifecycle tests must cover a stale PID file, a PID reused by an unrelated process, a healthy endpoint whose recorded PID is not owned, and a verified owned server. No unrelated process may be adopted or terminated.
 
@@ -142,7 +144,10 @@ These names are internal or compatibility surfaces. They are not evidence that p
 - clean Windows VM acceptance when installer or identity changes;
 - nsis-web uninstall regression proving both Eve and Murmur data roots survive;
 - exact pre/post registry, shortcut, install-directory, and data-root comparison;
-- on controlled fixtures, confirmation that `%APPDATA%\murmur` file hashes are unchanged; on a real user profile, confirm through filesystem tracing that Eve never opens the personal files;
+- on controlled fixtures, confirmation that `%APPDATA%\murmur` sentinel hashes are
+  unchanged; in a disposable Windows account/VM, use a privacy-normalized filesystem
+  trace to prove the candidate never opens the controlled legacy root. Never trace or
+  inspect a real user's Murmur contents;
 - confirmation that no release, tag, or historical asset changed.
 
 ## Remaining-work ledger
@@ -153,10 +158,11 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Placement-ready repository documentation | Complete | No |
 | Fresh-profile ADR and cutover checklist | Complete in PR #14 | No |
 | Derive and cross-check the published v0.6.3 NSIS key | Complete; see Gate 1 evidence | No |
-| Confirm NSIS key from a clean published v0.6.3 install | Pending; no isolated VM is currently available | Clean VM |
-| Select final Eve data-root casing and AppUserModelID | Pending | Explicit decision before activation |
-| Compatibility-scaffolding implementation | Draft implementation in progress | Clean-VM gate before merge |
-| Fresh Eve profile implementation | Pending | Separate approval after scaffolding acceptance |
+| Confirm NSIS key from published v0.6.3 installation | Complete in Gate 1 host acceptance | No |
+| Select final Eve data-root casing | Complete: exact `%APPDATA%\Eve` | No |
+| Select final AppUserModelID | Pending; Gate 4 only | Separate approval |
+| Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
+| Fresh Eve profile implementation | Gate A implementation in progress on `codex/eve-fresh-profile-gate-2`; packaged Gate B pending | Separate approval for Gate B |
 | Visible installed-product rename | Pending | Separate approval after data isolation passes |
 | AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |
 | Visual identity and homepage | Pending | Later design phase |

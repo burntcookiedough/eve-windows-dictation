@@ -50,7 +50,9 @@ describe('application identity bootstrap', () => {
   });
 
   test('resolves the same explicit Murmur userData directory', () => {
-    expect(resolveUserDataPath(APP_DATA_PATH)).toBe(path.join(APP_DATA_PATH, 'murmur'));
+    expect(resolveUserDataPath(APP_DATA_PATH, MURMUR_IDENTITY.userDataDirectoryName)).toBe(
+      path.join(APP_DATA_PATH, 'murmur')
+    );
   });
 
   test('locks and selects userData before application modules load', async () => {
@@ -94,6 +96,7 @@ describe('application identity bootstrap', () => {
       },
       {
         platform: 'win32',
+        userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
         prepareUserDataRoot: (appDataPath, directoryName) =>
           resolveUserDataPath(appDataPath, directoryName),
       }
@@ -114,6 +117,7 @@ describe('application identity bootstrap', () => {
         },
         {
           platform: 'win32',
+          userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
           prepareUserDataRoot: () => {
             fakeApp.events.push('prepare:failed');
             throw new Error('write denied');

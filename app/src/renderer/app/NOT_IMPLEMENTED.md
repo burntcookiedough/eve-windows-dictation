@@ -23,7 +23,9 @@ When a feature is fully implemented:
 ## Settings - Behavior Section
 - [x] **Auto-copy**: Persisted and used in pipeline.ts.
 - [x] **Auto-paste**: Persisted and used in pipeline.ts.
-- [ ] **Launch on boot**: Toggle works locally but doesn't do anything. Needs: electron `app.setLoginItemSettings()` + settings persistence.
+- [ ] **Launch on boot**: Gate 2 intentionally rejects and visibly reverts enable attempts
+  without making a login-item or registry write. Eve registration belongs to the later
+  visible identity/AppUserModelID cutover.
 - [ ] **Start minimized**: Toggle works locally but doesn't do anything. Needs: main window logic + settings persistence.
 
 ## Settings - Server Section

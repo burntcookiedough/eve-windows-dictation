@@ -17,7 +17,7 @@ export type UserDataRootPreparer = (
 
 export interface BootstrapOptions {
   readonly platform?: NodeJS.Platform;
-  readonly userDataDirectoryName?: string;
+  readonly userDataDirectoryName: string;
   readonly prepareUserDataRoot?: UserDataRootPreparer;
 }
 
@@ -28,7 +28,7 @@ export interface BootstrapOptions {
 export async function bootstrapApplication(
   electronApp: BootstrapApp,
   loadApplication: ApplicationLoader,
-  options: BootstrapOptions = {}
+  options: BootstrapOptions
 ): Promise<boolean> {
   if (!electronApp.requestSingleInstanceLock()) {
     electronApp.quit();
@@ -36,11 +36,12 @@ export async function bootstrapApplication(
   }
 
   const appDataPath = electronApp.getPath('appData');
-  const directoryName =
-    options.userDataDirectoryName ?? MURMUR_IDENTITY.userDataDirectoryName;
   const prepareUserDataRoot =
     options.prepareUserDataRoot ?? prepareUserDataRootSync;
-  const userDataPath = prepareUserDataRoot(appDataPath, directoryName);
+  const userDataPath = prepareUserDataRoot(
+    appDataPath,
+    options.userDataDirectoryName
+  );
 
   electronApp.setPath('userData', userDataPath);
   electronApp.setPath('sessionData', userDataPath);
