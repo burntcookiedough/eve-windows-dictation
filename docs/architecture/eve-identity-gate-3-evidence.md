@@ -20,15 +20,18 @@ assets, manifests, temporary helpers, dependency changes, or diagnostic artifact
 
 ## Automated verification
 
-| Check | Result |
-|---|---|
-| `python scripts/version.py check` | Passed at `0.6.3`. |
-| App suite, `bun test` | 89 passed, 0 failed. |
-| Server suite, `uv run --no-sync pytest -q` | 139 passed. |
-| Production app build, `bun run build` | Passed. |
-| PowerShell and JSON parsing | Passed for the changed installer/release scripts and package configuration. |
-| `git diff --check` | Passed. |
-| Scope audit | No lockfile, dependency, workflow, runtime, model, server-source, release, or generated-output changes. |
+Commands ran natively in Windows PowerShell 7.5.8. Copy-pasteable wrapper invocations
+from the repository root are recorded below.
+
+| Check | Windows PowerShell invocation | Result |
+|---|---|---|
+| Version consistency | `& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "python scripts/version.py check"` | Passed at `0.6.3`. |
+| App suite | `& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Set-Location app; bun test"` | 89 passed, 0 failed. |
+| Server suite | `& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Set-Location server; uv run --no-sync pytest -q"` | 139 passed. |
+| Production app build | `& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Set-Location app; bun run build"` | Passed. |
+| PowerShell and JSON parsing | — | Passed for the changed installer/release scripts and package configuration. |
+| `git diff --check` | — | Passed. |
+| Scope audit | — | No lockfile, dependency, workflow, runtime, model, server-source, release, or generated-output changes. |
 
 The new regression test checks only visible identity surfaces and explicitly permits
 the frozen internal compatibility token `getMurmurTrayIcon`. Its first local run exposed

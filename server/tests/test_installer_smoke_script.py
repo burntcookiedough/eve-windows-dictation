@@ -28,5 +28,9 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     assert '"Eve*Setup*.exe"' in contents
     assert '"Uninstall Eve.exe"' in contents
     assert '"Uninstall Murmur.exe"' in contents
+    assert "Resolve-UninstallerPaths -Directories @($InstallDir, $legacyInstallDir)" in contents
+    assert '"$env:LOCALAPPDATA\\Programs\\murmur"' in contents
+    assert "foreach ($uninstaller in $uninstallers)" in contents
+    assert "Assert-ExitCode -Process $uninstallProc" in contents
     assert '"Eve.exe"' in contents
     assert 'Get-Process -Name "Eve","Murmur"' in contents

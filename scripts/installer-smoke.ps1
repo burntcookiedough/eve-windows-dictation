@@ -58,17 +58,17 @@ function Stop-ProductProcesses {
     Get-Process -Name "Eve","Murmur" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
-function Resolve-UninstallerPath {
-    param([string]$Directory)
+function Resolve-UninstallerPaths {
+    param([string[]]$Directories)
 
-    foreach ($name in @("Uninstall Eve.exe", "Uninstall Murmur.exe")) {
-        $candidate = Join-Path $Directory $name
-        if (Test-Path $candidate) {
-            return $candidate
+    foreach ($directory in ($Directories | Select-Object -Unique)) {
+        foreach ($name in @("Uninstall Eve.exe", "Uninstall Murmur.exe")) {
+            $candidate = Join-Path $directory $name
+            if (Test-Path $candidate) {
+                $candidate
+            }
         }
     }
-
-    return $null
 }
 
 function Wait-For-Health {
@@ -153,11 +153,12 @@ if (-not $SkipUninstall) {
     Write-Step "Stopping any running Eve or legacy Murmur processes"
     Stop-ProductProcesses
 
-    $uninstaller = Resolve-UninstallerPath -Directory $InstallDir
-    if ($uninstaller) {
-        Write-Step "Uninstalling existing Eve or legacy Murmur installation"
+    $legacyInstallDir = "$env:LOCALAPPDATA\Programs\murmur"
+    $uninstallers = @(Resolve-UninstallerPaths -Directories @($InstallDir, $legacyInstallDir))
+    foreach ($uninstaller in $uninstallers) {
+        Write-Step "Uninstalling existing Eve or legacy Murmur installation at $uninstaller"
         $uninstallProc = Start-Process -Wait -FilePath $uninstaller -ArgumentList "/S" -PassThru
-        Assert-ExitCode -Process $uninstallProc -Step "Uninstall"
+        Assert-ExitCode -Process $uninstallProc -Step "Uninstall $uninstaller"
     }
 }
 

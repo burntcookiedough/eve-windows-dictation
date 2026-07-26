@@ -246,7 +246,9 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 
 During the authorized Gate 3 implementation:
 
-- change only the visible `productName`, executable, installer, shortcut, and current artifact names to Eve;
+- change only the visible `productName`, executable, installer, shortcut, current
+  artifact names, and active UI copy in tray strings, dialogs, diagnostics, and
+  model-progress text to Eve;
 - do not change `com.murmur.app`, the explicit NSIS GUID, internal package name, or compatibility payload name;
 - do not add, edit, or remove registry entries or startup registrations;
 - do not read, copy, merge, rename, or delete Murmur History, settings, browser storage, logs, or other personal data;
