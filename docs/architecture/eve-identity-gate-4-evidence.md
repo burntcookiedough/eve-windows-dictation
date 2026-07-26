@@ -72,24 +72,39 @@ passed. This was environment preparation, not a product defect.
 
 ## Gate B Windows lifecycle acceptance
 
-The separately authorized lifecycle will use exactly one package invocation from an
-exact detached candidate head after validating the complete runtime/engine/CUDA
-closure. Independent hash-verified copies will be made before repair consumes a
-payload. Acceptance must cover:
+The replacement lifecycle ran from exact fixed head
+`c6d9d3a45354d6cd9f5be914843fa928558df9fc`. The detached build tree was clean and
+its split Python runtime passed imports for Torch 2.6.0+cu124, CTranslate2 4.6.3,
+Faster-Whisper 1.2.1, and NeMo 2.6.2 with CUDA active and the required native DLLs
+present.
 
-- published Murmur v0.6.3 baseline and same-GUID Eve upgrade;
-- one Control Panel identity and the legacy install chain;
-- package/runtime AppUserModelID, taskbar grouping, notifications, permissions,
-  shortcuts, executable, uninstaller, and install location;
-- default launch-on-login disabled with no startup write;
-- exact user opt-in creating only the Eve entry;
-- exact known legacy installed-path entries removed and unknown controlled fixtures
-  untouched;
-- current PID-file health, controlled Fast/Long smoke, and singleton;
-- independent same-version repair;
-- normal uninstall preserving both profile manifests, shared model-cache presence, and
-  controlled unknown login state;
-- checksum-verified official rollback and fresh current PID-file health.
+Exactly one replacement `bun run package:win` invocation ran and exited `0` in
+846.6 seconds. The rejected first-cycle outputs were not reused. Two fresh independent
+artifact sets were copied and verified against the exact build outputs before Set A
+installation and Set B repair.
+
+| Output | Bytes | SHA-256 |
+|---|---:|---|
+| `Eve.Web.Setup.0.6.3.exe` | 887,518 | `6AA2016A46B93C7F9298ACC134628A79E2D49CFEC20734D782587EE26176DAA6` |
+| `murmur-0.6.3-x64.nsis.7z` | 2,034,073,193 | `54963E55DE6CCA3FD26BA0755B59AC99C05878D7D01AD939B3B82D09E6B94547` |
+| `latest.yml` | 558 | `BEE065C9A98FFC04914E3354F6E6BAE2997F80FEB06EC24931056B1D17FCC603` |
+
+The manifest wrapper and payload sizes and SHA-512 values matched the generated files.
+The packaged and installed candidate `app.asar` SHA-256 was
+`D7B188732B504705F3A8277B7A4488714F6B744F76E15EE9F377C77DAD5E4B62`.
+
+| Boundary | Result |
+|---|---|
+| Same-GUID in-place install | Set A exited `0` in 285.319 seconds. The published install root was reused, exactly one frozen-GUID uninstall entry existed, and it displayed `Eve 0.6.3`. The install did not alter either stopped profile aggregate or any scoped startup value. |
+| Installed identity | Only `Eve.exe` was installed. Its product and file metadata were Eve/0.6.3. `Get-StartApps` and both installed shortcuts exposed exact AppUserModelID `io.github.burntcookiedough.eve`. |
+| Ordinary launch policy | All three exact user-scope, argument-free legacy names at the installed Murmur path were removed. The controlled unknown entry remained exact, and ordinary launch created no Eve entry. |
+| Explicit opt-in and opt-out | The live packaged Settings toggle changed from disabled to enabled and created only the exact Eve name/path registration. The unknown fixture remained and no legacy entry returned. Toggling off removed the exact Eve registration and left the unknown fixture unchanged. |
+| Runtime and singleton | Current PID-file ownership matched the packaged Python runtime. Health reported 0.6.3, engine/model ready, CUDA and CUDA DLLs available, and zero warnings. A second Eve invocation exited without changing the five Electron process IDs or server PID/port. |
+| Controlled dictation | The repository WAV fixture was converted in memory to 16 kHz mono. Fast Dictation produced a non-empty final result for 10.0 seconds. Long Dictation produced a non-empty final result for 47.334 seconds and emitted both `long_dictation_started` and `long_dictation_processing`. No transcript or audio output was retained. |
+| Independent repair | Untouched, hash-verified Set B exited `0` in 269.345 seconds. Candidate `app.asar`, both stopped profile aggregates, and all scoped startup values remained exact. Relaunch used a fresh owned PID-file port and returned ready CUDA health with zero warnings. |
+| Normal uninstall | The candidate stopped before the comparison. Uninstall exited `0` in 0.953 seconds and removed the install root and frozen-GUID uninstall key. Both stopped profile aggregates remained exact (Murmur: 113 files/13,353,837 bytes; Eve: 45 files/3,031,628 bytes), all scoped startup values remained exact, and the shared model-cache root remained present. |
+| Published rollback | Official wrapper SHA-256 `366088A4266F54EA7C39E2E7FD1FC7177CAC46BF8A4B3F43D58A6D025E15CD33` and payload SHA-256 `0B557FDE05853DA1F7C0AEF77CECBAD1FAF8C5FC9314457EA45119D3A69F4FBD` matched the immutable v0.6.3 release set. Install exited `0` in 208.814 seconds; installed `app.asar` matched `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD`. Fresh owned PID-file health returned Murmur 0.6.3, ready engine/model, CUDA and DLLs available, and zero warnings. |
+| Final host restoration | All ten explicitly captured pre-test startup values were restored and remained exact after the official launch. No broad registry cleanup ran. |
 
 No personal profile contents, transcript text, audio output, unknown startup value
 contents, or shared model files may be recorded or deleted. No tag, release, asset,
@@ -114,5 +129,12 @@ registry cleanup was performed.
 The correction queries and verifies `launchItems` using the exact allowlisted legacy
 executable path. The fake Electron boundary now applies the same path-and-arguments
 filter, so the regression fails if reconciliation queries the current Eve executable.
-The rejected artifacts are not eligible for further acceptance evidence. A fresh
-exact-head package is required before Gate B can resume.
+The rejected artifacts were not used for acceptance evidence.
+
+### Smoke-harness correction
+
+The first replacement-cycle smoke harness used `/ws`, which the repository does not
+route, and received HTTP 403 before sending audio. Repository routing identifies
+`/transcribe` as the protocol endpoint. The corrected in-memory invocation passed
+immediately. This was a local acceptance-harness error and did not require a product
+change or another package run.

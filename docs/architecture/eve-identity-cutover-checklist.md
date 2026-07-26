@@ -178,7 +178,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
 | Fresh Eve profile implementation | Complete in merged PR #16 at `ca9eddb`; Gate A/B evidence includes Fast/Long smoke, repair, normal uninstall preservation, and official rollback | No |
 | Visible installed-product rename | Complete on `codex/eve-visible-identity-gate-3`; see [Gate 3 evidence](eve-identity-gate-3-evidence.md). AppUserModelID and startup registrations remain deferred | Merge approval |
-| AppUserModelID cutover | In progress on Gate 4 | Merge remains separately approved |
+| AppUserModelID cutover | Complete on Gate 4 draft PR #18; Gate A and the full Windows lifecycle passed from fixed head `c6d9d3a` | Merge approval |
 | Visual identity and homepage | Pending | Later design phase |
 | Thin-client/component packs and ASR profiles | Pending | Later technical phase |
 
