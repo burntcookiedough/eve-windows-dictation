@@ -94,3 +94,25 @@ payload. Acceptance must cover:
 No personal profile contents, transcript text, audio output, unknown startup value
 contents, or shared model files may be recorded or deleted. No tag, release, asset,
 update manifest, merge, or publication is authorized.
+
+### Rejected first candidate
+
+The first exact-head package run at commit
+`ee36b07fc20ee131fd2f2d6a755cf02f1c8fb4c5` was rejected during the ordinary-launch
+startup boundary. Electron filters `launchItems` by the `path` supplied to
+`getLoginItemSettings`; querying with `Eve.exe` therefore did not enumerate exact
+legacy registrations whose path was `Murmur.exe`. The controlled host check found the
+legacy entry still present, while the unknown fixture remained untouched and no Eve
+entry was created.
+
+Lifecycle testing stopped at that boundary. The candidate was normally uninstalled,
+the checksum-verified official v0.6.3 rollback was restored and became healthy with a
+ready Whisper engine, CUDA active, required CUDA DLLs present, and zero diagnostics
+warnings. All ten explicitly captured startup values were restored exactly; no broad
+registry cleanup was performed.
+
+The correction queries and verifies `launchItems` using the exact allowlisted legacy
+executable path. The fake Electron boundary now applies the same path-and-arguments
+filter, so the regression fails if reconciliation queries the current Eve executable.
+The rejected artifacts are not eligible for further acceptance evidence. A fresh
+exact-head package is required before Gate B can resume.

@@ -144,14 +144,13 @@ export function reconcileLegacyLoginItems(
     };
   }
 
-  const executablePath = app.getPath('exe');
   const legacyExecutablePath = path.win32.join(
     context.localAppData,
     'Programs',
     'murmur',
     'Murmur.exe'
   );
-  const launchItems = getLaunchItems(app, executablePath);
+  const launchItems = getLaunchItems(app, legacyExecutablePath);
   const exactLegacyItems = launchItems.filter(
     (item) =>
       LEGACY_LOGIN_ITEM_NAMES.includes(
@@ -177,7 +176,7 @@ export function reconcileLegacyLoginItems(
     setExactLoginItem(app, item.name, legacyExecutablePath, false);
   }
 
-  const remainingItems = getLaunchItems(app, executablePath);
+  const remainingItems = getLaunchItems(app, legacyExecutablePath);
   const legacyEntryRemains = remainingItems.some((item) =>
     exactLegacyItems.some((legacyItem) =>
       isExactUserLoginItem(item, legacyItem.name, legacyExecutablePath)

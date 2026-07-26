@@ -62,15 +62,19 @@ class FakeLoginItemApp implements LoginItemApp {
     const args = options.args ?? [];
     const matchingItems = this.items.filter(
       (item) =>
-        item.scope === 'user' &&
         path.win32.normalize(item.path).toLowerCase() ===
           path.win32.normalize(executablePath).toLowerCase() &&
         item.args.join('\0') === args.join('\0')
     );
     return {
-      openAtLogin: matchingItems.length > 0,
-      executableWillLaunchAtLogin: matchingItems.some((item) => item.enabled),
-      launchItems: this.items.map((item) => ({ ...item, args: [...item.args] })),
+      openAtLogin: matchingItems.some((item) => item.scope === 'user'),
+      executableWillLaunchAtLogin: matchingItems.some(
+        (item) => item.scope === 'user' && item.enabled
+      ),
+      launchItems: matchingItems.map((item) => ({
+        ...item,
+        args: [...item.args],
+      })),
     };
   }
 
@@ -175,7 +179,7 @@ describe('Gate 4 launch-on-login policy', () => {
         ...LEGACY_LOGIN_ITEM_NAMES.map((name) => item(name, LEGACY_EXE)),
         item('Murmur', unpackedPath),
         item('murmur', LEGACY_EXE),
-        item('Murmur Candidate', unpackedPath),
+        item('Murmur Candidate', LEGACY_EXE),
         item('Murmur', LEGACY_EXE, { args: ['--hidden'] }),
         item('Murmur', LEGACY_EXE, { scope: 'machine' }),
         item('Unrelated', String.raw`C:\Elsewhere\Other.exe`),
@@ -189,12 +193,12 @@ describe('Gate 4 launch-on-login policy', () => {
 
     expect(result).toEqual({
       removedLegacyEntries: 3,
-      ignoredLegacyCandidates: 5,
+      ignoredLegacyCandidates: 3,
     });
     expect(app.items).toEqual([
       item('Murmur', unpackedPath),
       item('murmur', LEGACY_EXE),
-      item('Murmur Candidate', unpackedPath),
+      item('Murmur Candidate', LEGACY_EXE),
       item('Murmur', LEGACY_EXE, { args: ['--hidden'] }),
       item('Murmur', LEGACY_EXE, { scope: 'machine' }),
       item('Unrelated', String.raw`C:\Elsewhere\Other.exe`),
