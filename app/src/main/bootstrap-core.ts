@@ -1,4 +1,4 @@
-import { MURMUR_IDENTITY } from './identity.js';
+import { EVE_IDENTITY } from './identity.js';
 import { prepareUserDataRootSync } from './user-data-root.js';
 
 export interface BootstrapApp {
@@ -47,7 +47,7 @@ export async function bootstrapApplication(
   }
 
   if ((options.platform ?? process.platform) === 'win32') {
-    electronApp.setAppUserModelId(MURMUR_IDENTITY.appId);
+    electronApp.setAppUserModelId(EVE_IDENTITY.appId);
   }
 
   await loadApplication();

@@ -17,7 +17,15 @@ export const MURMUR_IDENTITY = {
 } as const satisfies ApplicationIdentity;
 
 /**
- * Active visible product name and isolated user-data directory.
+ * Active Eve process and data identity. The installer GUID remains frozen to
+ * preserve the published Murmur upgrade and uninstall chain.
  */
-export const EVE_PRODUCT_NAME = 'Eve' as const;
-export const EVE_USER_DATA_DIRECTORY_NAME = 'Eve' as const;
+export const EVE_IDENTITY = {
+  productName: 'Eve',
+  appId: 'io.github.burntcookiedough.eve',
+  userDataDirectoryName: 'Eve',
+  nsisGuid: MURMUR_IDENTITY.nsisGuid,
+} as const satisfies ApplicationIdentity;
+
+export const EVE_PRODUCT_NAME = EVE_IDENTITY.productName;
+export const EVE_USER_DATA_DIRECTORY_NAME = EVE_IDENTITY.userDataDirectoryName;

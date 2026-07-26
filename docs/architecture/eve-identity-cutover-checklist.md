@@ -2,7 +2,15 @@
 
 ## One-minute brief
 
-Eve will be a new Windows application identity, but it must remain in Murmur's existing NSIS upgrade chain. It will start with an empty History and default settings in a separate Eve directory. It will not import or delete Murmur History, settings, hotwords, external-server configuration, browser storage, credentials, logs, or startup preference. The old Murmur data directory stays inactive and untouched. Generic Hugging Face model weights may be reused because they are downloaded runtime assets outside Murmur userData. Implementation is split into compatibility scaffolding, the fresh Eve data boundary, the visible product rename, and the later AppUserModelID cutover. Each step gets its own PR and Windows acceptance gate.
+Eve uses the approved Windows AppUserModelID `io.github.burntcookiedough.eve` while
+remaining in Murmur's existing frozen NSIS upgrade chain. It starts with an empty
+History and default settings in a separate Eve directory. It does not import or delete
+Murmur History, settings, hotwords, external-server configuration, browser storage,
+credentials, logs, or startup preference. The old Murmur data directory stays inactive
+and untouched. Generic Hugging Face model weights may be reused because they are
+downloaded runtime assets outside Murmur userData. Compatibility scaffolding, the fresh
+Eve data boundary, and the visible product rename are merged; Gate 4 is the focused
+AppUserModelID and startup-registration cutover.
 
 The controlling architecture decision is [ADR-001](adr-001-eve-application-identity-migration.md).
 
@@ -94,11 +102,16 @@ Exit condition: an upgrade from published Murmur succeeds, Eve starts with a fre
 | File or system | Required work |
 |---|---|
 | `app/package.json` | Change `appId` only after the exact future ID is approved; retain explicit NSIS GUID. |
-| `app/src/main/index.ts` | Change `app.setAppUserModelId()` with the packaged ID. |
+| `app/src/main/identity.ts`, `bootstrap-core.ts` | Activate the approved ID in the typed identity and in `app.setAppUserModelId()` before application import. |
 | `app/src/main/ipc/handlers.ts` | Register only Eve launch-on-login after user opt-in; reconcile exact known legacy registrations. |
 | Windows installation | Verify taskbar grouping, notifications, shortcuts, uninstall key, install location, repair, and upgrade. |
 
-Exit condition: no duplicate installer entry, no stale enabled startup entry, and no loss of the existing uninstall/upgrade path.
+Approved Gate 4 identity: `io.github.burntcookiedough.eve`. Version remains `0.6.3`;
+the explicit NSIS GUID remains `0204d005-75b3-5b31-b1f6-ef2831e2b204`.
+
+Exit condition: package/runtime IDs match, no duplicate installer entry, opt-in creates
+one exact Eve startup entry, exact known legacy installed-path entries are removed,
+unknown entries remain untouched, and the existing uninstall/upgrade path is intact.
 
 ### Keep stable during the cutover
 
@@ -161,11 +174,11 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Derive and cross-check the published v0.6.3 NSIS key | Complete; see Gate 1 evidence | No |
 | Confirm NSIS key from published v0.6.3 installation | Complete in Gate 1 host acceptance | No |
 | Select final Eve data-root casing | Complete: exact `%APPDATA%\Eve` | No |
-| Select final AppUserModelID | Pending; Gate 4 only | Separate approval |
+| Select final AppUserModelID | Complete: `io.github.burntcookiedough.eve` approved 2026-07-27 | No |
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
 | Fresh Eve profile implementation | Complete in merged PR #16 at `ca9eddb`; Gate A/B evidence includes Fast/Long smoke, repair, normal uninstall preservation, and official rollback | No |
 | Visible installed-product rename | Complete on `codex/eve-visible-identity-gate-3`; see [Gate 3 evidence](eve-identity-gate-3-evidence.md). AppUserModelID and startup registrations remain deferred | Merge approval |
-| AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |
+| AppUserModelID cutover | Complete on Gate 4 draft PR #18; Gate A and the full Windows lifecycle passed from fixed head `c6d9d3a` | Merge approval |
 | Visual identity and homepage | Pending | Later design phase |
 | Thin-client/component packs and ASR profiles | Pending | Later technical phase |
 

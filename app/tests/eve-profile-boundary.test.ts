@@ -194,7 +194,7 @@ const electronApp = {
         `set:userData:${eveRoot}`,
         `set:sessionData:${eveRoot}`,
         `lock:userData:${eveRoot}:sessionData:${eveRoot}`,
-        'app-id:com.murmur.app',
+        'app-id:io.github.burntcookiedough.eve',
         'load',
       ],
       userData: eveRoot,
