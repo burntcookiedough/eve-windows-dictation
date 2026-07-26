@@ -92,8 +92,8 @@ deletes the shared cache.
 The injectable access record is evidence about root preparation, not proof of all
 filesystem behavior. The unpackaged Electron subprocess demonstrates actual singleton
 path selection and controlled-sibling preservation, but it is not a packaged filesystem
-trace. Neither check may be represented as final full-process non-access proof; that
-acceptance remains Gate B.
+trace. Neither check may be represented as final full-process non-access proof. Path-level
+tracing is explicitly out of scope for this gate and is not a readiness criterion.
 
 ### Local smoke-harness correction
 

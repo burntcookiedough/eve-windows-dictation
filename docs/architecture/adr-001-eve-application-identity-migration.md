@@ -256,11 +256,12 @@ Until a later implementation phase is approved:
 
 ## Implementation progress
 
-Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is a separate,
-test-only compatibility PR that activates `%APPDATA%\Eve` before importing data consumers
-while retaining all published Murmur product and installer identities. Gate 2 must remain
-draft until automated Gate A passes and must not merge until the separately approved,
-disposable-account/VM Gate B matrix and privacy-safe filesystem trace pass.
+Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is a separate
+compatibility PR that activates `%APPDATA%\Eve` before importing data consumers while
+retaining all published Murmur product and installer identities. Its automated Gate A and
+approved Gate B package/lifecycle acceptance are recorded in the companion evidence.
+Filesystem path tracing is explicitly out of scope for this gate: its absence limits the
+available evidence but is not a draft, readiness, or merge criterion.
 
 ## Consequences
 

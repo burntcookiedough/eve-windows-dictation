@@ -163,7 +163,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Select final Eve data-root casing | Complete: exact `%APPDATA%\Eve` | No |
 | Select final AppUserModelID | Pending; Gate 4 only | Separate approval |
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
-| Fresh Eve profile implementation | Gate A passes on `codex/eve-fresh-profile-gate-2`; Gate B candidate Fast/Long smoke, repair, normal uninstall preservation, and rollback evidence captured; path tracing is an out-of-scope evidence limitation | Fresh CI and substantive review before Ready |
+| Fresh Eve profile implementation | Gate A passes on `codex/eve-fresh-profile-gate-2`; Gate B candidate Fast/Long smoke, repair, normal uninstall preservation, and rollback evidence captured; path tracing is an out-of-scope evidence limitation | Fresh CI and substantive review passed; merge remains separately approved |
 | Visible installed-product rename | Pending | Separate approval after data isolation passes |
 | AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |
 | Visual identity and homepage | Pending | Later design phase |
