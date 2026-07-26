@@ -66,9 +66,10 @@ This group owns mutable state. The fresh-profile PR must not include visible ren
 | `server/src/pidfile.py` and `server/justfile` | Standalone fallback paths use `murmur` | Keep compatibility fallbacks unless a separately tested Eve override is passed by the app. |
 | `server/src/config.py` | Accepts `MURMUR_SETTINGS_FILE` | Keep the environment contract; the Electron launcher supplies the new Eve file path. |
 
-Exit condition: traced first launch performs zero access against the controlled Murmur
-root, with no legacy PID exception. Eve starts with defaults and empty History, and both
-directories survive uninstall.
+Exit condition: available static, controlled-fixture, and packaged runtime evidence
+shows no legacy PID exception; filesystem path tracing is explicitly out of scope for
+this gate. Eve starts with defaults and empty History, and both directories survive a
+normal candidate uninstall.
 
 Focused lifecycle tests must cover a stale PID file, a PID reused by an unrelated process, a healthy endpoint whose recorded PID is not owned, and a verified owned server. No unrelated process may be adopted or terminated.
 
@@ -126,7 +127,8 @@ These names are internal or compatibility surfaces. They are not evidence that p
 2. Merge compatibility scaffolding with no behavior change.
 3. Build and install that bridge on a clean VM and over published v0.6.2/v0.6.3.
 4. Implement the fresh Eve data root without visible rename.
-5. Trace filesystem access and prove Murmur personal files are not opened.
+5. Capture the approved boundary evidence. Filesystem path tracing is explicitly out of
+   scope for this gate and must not be represented as a pass requirement.
 6. Change visible product/installer names while preserving the explicit NSIS GUID.
 7. Repair exact known startup entries and leave unknown entries untouched.
 8. Run the complete upgrade, clean-install, repair, uninstall, and rollback matrix.
@@ -145,8 +147,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 - nsis-web uninstall regression proving both Eve and Murmur data roots survive;
 - exact pre/post registry, shortcut, install-directory, and data-root comparison;
 - on controlled fixtures, confirmation that `%APPDATA%\murmur` sentinel hashes are
-  unchanged; in a disposable Windows account/VM, use a privacy-normalized filesystem
-  trace to prove the candidate never opens the controlled legacy root. Never trace or
+  unchanged. Filesystem path tracing is out of scope for this gate; never trace or
   inspect a real user's Murmur contents;
 - confirmation that no release, tag, or historical asset changed.
 
@@ -162,7 +163,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Select final Eve data-root casing | Complete: exact `%APPDATA%\Eve` | No |
 | Select final AppUserModelID | Pending; Gate 4 only | Separate approval |
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
-| Fresh Eve profile implementation | Gate A passes on `codex/eve-fresh-profile-gate-2`; Gate B candidate launch/rollback evidence captured; path tracing is an out-of-scope evidence limitation, while same-version repair did not pass | Successful supported repair check before Ready |
+| Fresh Eve profile implementation | Gate A passes on `codex/eve-fresh-profile-gate-2`; Gate B candidate Fast/Long smoke, repair, normal uninstall preservation, and rollback evidence captured; path tracing is an out-of-scope evidence limitation | Fresh CI and substantive review before Ready |
 | Visible installed-product rename | Pending | Separate approval after data isolation passes |
 | AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |
 | Visual identity and homepage | Pending | Later design phase |

@@ -86,7 +86,7 @@ deletes the shared cache.
 | Existing `MURMUR_*` overrides are sufficient | App launcher injects Eve PID/settings paths; no Python server-file diff |
 | Shared model cache behavior unchanged | Environment/diff audit; Gate B cache reuse/preservation checks |
 | Gate 1 product/installer/release identity unchanged | `server/tests/test_release_config.py`, version consistency, manifest diff audit |
-| Uninstall preserves both roots | Frozen `deleteAppDataOnUninstall: false`; the NSIS repair failure removed the installed candidate while preserving both roots. A normal same-version repair/uninstall cycle did not complete and is not claimed as passed. |
+| Uninstall preserves both roots | **Passed.** Frozen `deleteAppDataOnUninstall: false`; the supported candidate uninstaller removed application files while both current profile manifests and the login snapshot remained exact. |
 | No sensitive test artifacts | Fixtures use generated temporary roots and synthetic sentinel text; logs and tracked files are scanned before push |
 
 The injectable access record is evidence about root preparation, not proof of all
@@ -103,8 +103,9 @@ that variable, so the subprocess selected the actual user's Eve root before exit
 did not select the Murmur root. The Eve location was not inspected or removed. The
 committed harness instead sets a controlled Electron `appData` path before invoking the
 production bootstrap and supplies a controlled pre-bootstrap `--user-data-dir`. This
-incident is another reason the packaged privacy boundary is not finally accepted until
-Gate B tracing passes.
+incident is another reason to retain the available packaged boundary evidence with its
+stated limitations. ProcMon/WPR/path tracing is explicitly out of scope for this gate
+and is neither a pass criterion nor a readiness blocker.
 
 ## Gate A: automated controlled fixtures
 
@@ -137,19 +138,19 @@ were not copied, moved, deleted, or downloaded.
 | Check | Result |
 |---|---|
 | Reviewed source | Exact PR head `758a175203006cf27e3bf5881654c814978eb8e4`; tracked tree clean before packaging |
-| Full-runtime candidate | Build duration: 825.792 seconds. Installer: 887,569 bytes, SHA-256 `648667AA31CE094917622DF701F95F626221F5F901D25879C4CD4EE8514D987B`; payload: 2,033,993,463 bytes, SHA-256 `8AA10BFA24C7C70F46833A70FBEF56D7DAA4C3C05D9A6AC90F93C7E60AF928F2` |
+| Full-runtime candidate | The preserved full-runtime source produced a 887,569-byte recovery installer (SHA-256 `D58922D65215668D30D7A339F114D9715C0AB889BAFAA1C13777B219C07ADF52`) and payload (2,033,993,463 bytes, SHA-256 `8AA10BFA24C7C70F46833A70FBEF56D7DAA4C3C05D9A6AC90F93C7E60AF928F2`). The application payload/closure was equivalent to the earlier verified candidate; only the wrapper hash differed. |
 | Runtime closure | Packaged `.runtime\python.exe` imported faster-whisper/CTranslate2, Torch, Torchaudio, and NeMo/Nemotron; required CUDA/native libraries were present; packaged server smoke was healthy at `0.6.3` |
-| Fast/Long dictation exercise | **Not completed.** Import, CUDA/native closure, engine discovery, and packaged server smoke passed, but the candidate was removed before both packaged transcription paths were exercised. No dictation acceptance is claimed. |
+| Fast/Long dictation exercise | **Passed on the recovered full-runtime candidate.** A repository-controlled WAV fixture was converted in memory to 16 kHz mono without persisting content. Fast Dictation delivered a final result for 10.0 seconds through faster-whisper; Long Dictation delivered a final result for 47.334 seconds and emitted `long_dictation_started` plus processing status. Only engine, status, duration, timing, and output-presence metadata were retained. |
 | Frozen identity | Product/app/executable/installer/artifact names, `com.murmur.app`, NSIS GUID, version, publish/update target, and v0.6.3 release assets remained unchanged |
-| Candidate first launch | Exact `%APPDATA%\Eve` initialized; the packaged server PID was owned by the installed runtime and its dynamic endpoint became healthy at `0.6.3` |
+| Candidate first launch | Exact `%APPDATA%\Eve` initialized; the packaged server PID was owned by the installed runtime and its current PID-file port `51908` became healthy at `0.6.3` |
 | Rapid restart/singleton | Second launch exited successfully; the process tree stabilized to one main process |
-| Murmur preservation before rollback | The 108-file Murmur manifest remained byte-for-byte identical through candidate install, launch, and removal |
-| Eve preservation | The 44-file Eve candidate fingerprint remained identical through candidate removal and published rollback |
-| Login registrations | The 21-entry canonical Run/StartupApproved snapshot remained unchanged |
-| Candidate same-version repair | **Not passed.** The initial NSIS-web install consumed its local payload. The repair invocation therefore lacked that payload and removed the candidate before it was stopped. Both profile roots remained preserved. No rebuild was performed. |
-| Candidate uninstall | Candidate files were removed by the failed repair path and both roots survived, but a normal repair/uninstall sequence was not completed and is not claimed as passed |
-| Published rollback | Official v0.6.3 installer (887,561 bytes, SHA-256 `366088A4266F54EA7C39E2E7FD1FC7177CAC46BF8A4B3F43D58A6D025E15CD33`) and payload (2,034,188,308 bytes, SHA-256 `0B557FDE05853DA1F7C0AEF77CECBAD1FAF8C5FC9314457EA45119D3A69F4FBD`) matched GitHub release metadata; installed `app.asar` matched `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD`; the server became healthy at `0.6.3` |
-| Murmur state after published launch | The exact 108-file backup matched immediately before rollback launch. Published v0.6.3 then legitimately wrote to its own Murmur profile, leaving 113 files and 21 manifest differences; post-launch byte identity is not claimed |
+| Murmur preservation before repaired relaunch | **Passed.** The fresh current-profile baseline (113 files, 12,673,961 bytes) was byte-identical after candidate install, dictation, repair, and candidate uninstall. This is manifest evidence, not a filesystem trace. |
+| Eve preservation | Eve was the active root. The repair and normal candidate uninstall both preserved its exact pre-operation manifest. |
+| Login registrations | The current 21-entry Run/StartupApproved raw snapshot (SHA-256 `120B24D7724A3E0106EE1144170519B33D8F7AF56D3ECDF17DF2EDF72424F014`) remained exact across repair and normal candidate uninstall. |
+| Candidate same-version repair | **Passed.** An independent, hash-verified Set B payload ran the supported NSIS-web repair with exit `0` in 288.316 seconds. Candidate `app.asar` and runtime closure remained intact; both profiles and the login snapshot were exact; repaired relaunch used its current PID-file port `50452` and became healthy at `0.6.3`. An earlier apparent health failure was an acceptance-harness error: its later probes reused the preceding launch's port `51003` instead of the repaired PID file's port `65325`. No product source change was warranted. |
+| Candidate uninstall | **Passed.** The supported uninstaller exited `0` in 20.397 seconds, removed the install root and matching uninstall entry, and preserved both exact pre-uninstall profile manifests and the login snapshot. |
+| Published rollback | Official v0.6.3 installer (887,561 bytes, SHA-256 `366088A4266F54EA7C39E2E7FD1FC7177CAC46BF8A4B3F43D58A6D025E15CD33`) and re-downloaded immutable payload (2,034,188,308 bytes, SHA-256 `0B557FDE05853DA1F7C0AEF77CECBAD1FAF8C5FC9314457EA45119D3A69F4FBD`) matched GitHub release metadata. The installer exited `0` in 217.273 seconds; installed `app.asar` matched `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD`; the server became healthy at `0.6.3` on its current PID-file port `60173`. |
+| Murmur state after published launch | The 113-file candidate-cycle baseline matched immediately before rollback launch. Published v0.6.3 may legitimately write to its own Murmur profile after launch; post-launch byte identity is not claimed. |
 | Path-level tracing | **Out-of-scope evidence limitation.** ProcMon/WPR/path tracing was explicitly removed from this gate. No path-trace pass or failure is claimed. Static audit, mocked tests, a real Electron controlled-root subprocess, packaged Eve initialization/ownership/readiness, and before/after manifests remain the available boundary evidence |
 
 The residual standard local account `CodexEveGateB16` was created by the user, was not
@@ -167,10 +168,11 @@ state for later cleanup.
 | `uv sync --extra whisper --group dev --frozen` | Pass in an isolated E:-resident environment; tracked manifests and locks unchanged |
 | `uv run --no-sync pytest` | Pass; 138 tests |
 
-Gate B is incomplete because the failed same-version repair cannot be normalized into a
-successful repair/uninstall result. Path tracing is not a readiness blocker because it
-was explicitly removed from this gate; its absence only limits the available evidence.
-PR readiness requires a later successful supported repair check.
+Gate B lifecycle acceptance is complete. The repaired-health incident was traced to a
+stale-port acceptance probe, not the product: `MURMUR_PORT=0` assigns a new port for
+each launch, the server writes it to the PID file, and the shipped server manager polls
+that current `pidData.port`. Path tracing is not a readiness blocker because it was
+explicitly removed from this gate; its absence only limits the available evidence.
 
 ## Stop conditions
 
