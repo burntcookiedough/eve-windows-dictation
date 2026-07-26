@@ -299,7 +299,7 @@
       await window.murmurMain.updateSetting('launchOnBoot', enabled);
     } catch {
       settings.launchOnBoot = previous;
-      toast('Launch on boot is unavailable in this compatibility build', 'error');
+      toast('Eve could not update launch on boot', 'error');
     }
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 import { bootstrapApplication, type BootstrapApp } from '../src/main/bootstrap-core';
 import {
+  EVE_IDENTITY,
   EVE_PRODUCT_NAME,
   EVE_USER_DATA_DIRECTORY_NAME,
   MURMUR_IDENTITY,
@@ -37,11 +38,17 @@ class FakeApp implements BootstrapApp {
 }
 
 describe('application identity bootstrap', () => {
-  test('keeps the published Murmur compatibility identity while Eve is visible', () => {
+  test('uses the approved Eve application ID with the frozen installer GUID', () => {
     expect(MURMUR_IDENTITY).toEqual({
       productName: 'Murmur',
       appId: 'com.murmur.app',
       userDataDirectoryName: 'murmur',
+      nsisGuid: '0204d005-75b3-5b31-b1f6-ef2831e2b204',
+    });
+    expect(EVE_IDENTITY).toEqual({
+      productName: 'Eve',
+      appId: 'io.github.burntcookiedough.eve',
+      userDataDirectoryName: 'Eve',
       nsisGuid: '0204d005-75b3-5b31-b1f6-ef2831e2b204',
     });
     expect(EVE_PRODUCT_NAME).toBe('Eve');
@@ -73,7 +80,7 @@ describe('application identity bootstrap', () => {
       `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
       `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
       'lock',
-      'app-id:com.murmur.app',
+      'app-id:io.github.burntcookiedough.eve',
       'load',
     ]);
   });

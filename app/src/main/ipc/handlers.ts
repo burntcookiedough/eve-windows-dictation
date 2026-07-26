@@ -18,8 +18,13 @@ import {
 } from '../services/server-settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
-import { validateLaunchOnBootUpdate } from '../login-item-policy.js';
+import { createLogger } from '../lib/logger.js';
+import {
+  applyLaunchOnBoot,
+  reconcileLegacyLoginItems,
+} from '../login-item-policy.js';
 
+const log = createLogger('IpcHandlers');
 let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
 
@@ -30,6 +35,19 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   }
   if (serverManager) {
     serverManagerRef = serverManager;
+  }
+
+  try {
+    const result = reconcileLegacyLoginItems(app, {
+      localAppData: process.env.LOCALAPPDATA,
+    });
+    if (result.ignoredLegacyCandidates > 0) {
+      log.warn('Left unrecognized launch-on-login entries unchanged', {
+        count: result.ignoredLegacyCandidates,
+      });
+    }
+  } catch {
+    log.warn('Could not reconcile exact legacy launch-on-login entries');
   }
 
   // Handle clipboard copy requests
@@ -61,7 +79,14 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
     IPC_CHANNELS.UPDATE_SETTING,
     async (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
       if (key === 'launchOnBoot') {
-        validateLaunchOnBootUpdate(value);
+        const result = applyLaunchOnBoot(app, value, {
+          localAppData: process.env.LOCALAPPDATA,
+        });
+        if (result.ignoredLegacyCandidates > 0) {
+          log.warn('Left unrecognized launch-on-login entries unchanged', {
+            count: result.ignoredLegacyCandidates,
+          });
+        }
       }
 
       updateSetting(key, value);

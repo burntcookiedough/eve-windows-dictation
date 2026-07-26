@@ -60,7 +60,7 @@ def test_nsis_web_identity_and_data_retention_are_explicit() -> None:
     nsis_web = build.get("nsisWeb", {})
 
     assert package_json.get("name") == "murmur"
-    assert build.get("appId") == "com.murmur.app"
+    assert build.get("appId") == "io.github.burntcookiedough.eve"
     assert build.get("productName") == "Eve"
     assert build.get("executableName") == "Eve"
     assert nsis_web == {

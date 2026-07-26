@@ -2,11 +2,10 @@
 
 ## Status
 
-Accepted for staged implementation. Gate 1 compatibility scaffolding merged in PR #15 at
-`5e5b3a3c458d56279e8ece37c51827ce60cfa7a0`, and Gate 2 merged in PR #16 at
-`ca9eddbc8c6a40af7194fbb6a2f172109f46b84d`. Gate 3 is authorized for the visible
-Eve-name bridge described here. AppUserModelID, startup-registration changes, visual
-redesign, publication, and merge remain separately gated.
+Accepted for staged implementation. Gates 1–3 are merged through PR #17 at
+`822a353d9e232a1b365b61c972db4195ac23ba48`. Gate 4 is authorized with the exact
+AppUserModelID `io.github.burntcookiedough.eve`. Visual redesign, publication, and
+merge remain separately gated.
 
 The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
 
@@ -40,17 +39,24 @@ notation and contain no user-specific directory.
 | Surface | Current value or behavior | Consequence |
 |---|---|---|
 | Electron package name | `murmur` | Build-tool identifier; change separately from installer continuity work. |
-| Product name | `Murmur` | Controls executable and installer-facing names. |
-| Application ID | `com.murmur.app` | Used as the Windows Application User Model ID and as input to the default NSIS GUID. |
-| Runtime AppUserModelID | `com.murmur.app` | Set explicitly in `app/src/main/index.ts`. |
-| Observed NSIS uninstall key | `0204d005-75b3-5b31-b1f6-ef2831e2b204` | Treat as the installed upgrade identity. Confirm on a clean v0.6.3 installation, then freeze it explicitly before changing `appId`. |
-| Executable | `Murmur.exe` | Renaming affects startup paths, shortcuts, firewall prompts, and user expectations. |
-| Uninstaller | `Uninstall Murmur.exe` | Must remain discoverable across an in-place upgrade. |
+| Product name | `Eve` | Controls current executable and installer-facing names. |
+| Application ID | `io.github.burntcookiedough.eve` | Active Electron Builder application identity after Gate 4. |
+| Runtime AppUserModelID | `io.github.burntcookiedough.eve` | Set explicitly during bootstrap before application import. |
+| Frozen NSIS uninstall key | `0204d005-75b3-5b31-b1f6-ef2831e2b204` | Preserves the published `com.murmur.app` upgrade and uninstall chain independently of the new app ID. |
+| Executable | `Eve.exe` | Activated in Gate 3 and retained by Gate 4. |
+| Uninstaller | `Uninstall Eve.exe` | Remains discoverable through the frozen installer identity. |
 | Existing install directory | `%LOCALAPPDATA%\Programs\murmur` | An upgrade should continue to recognize this installation. New clean Eve installs may use an Eve directory after testing. |
 | Historical artifacts | `Murmur.Web.Setup.*.exe`, `murmur-*-x64.nsis.7z` | Immutable. Future Eve artifact names do not rename old releases. |
 | Publish repository | `burntcookiedough/eve-windows-dictation` | Already migrated and not part of the app cutover. |
 
-Electron Builder documents that NSIS derives a deterministic GUID from `appId` when a target-specific GUID is absent and warns that changing `appId` can break silent upgrades. It also documents product-name changes as supported when installer identity remains stable. This repository targets `nsis-web`, so its options belong under `build.nsisWeb`, not `build.nsis`. See the official [NSIS configuration](https://www.electron.build/docs/nsis/), [NSIS web options](https://www.electron.build/docs/api/electron-builder.interface.nsisweboptions/), and [application configuration](https://www.electron.build/docs/configuration/).
+Electron Builder documents that NSIS derives a deterministic GUID from `appId` when a
+target-specific GUID is absent and warns that changing `appId` can break silent
+upgrades. Gate 1 therefore froze the published derived GUID explicitly before Gate 4
+changed `appId`. This repository targets `nsis-web`, so its options belong under
+`build.nsisWeb`, not `build.nsis`. See the official
+[NSIS configuration](https://www.electron.build/docs/nsis/),
+[NSIS web options](https://www.electron.build/docs/api/electron-builder.interface.nsisweboptions/),
+and [application configuration](https://www.electron.build/docs/configuration/).
 
 ### Legacy Murmur data
 
@@ -152,12 +158,20 @@ This is the smallest safe implementation PR. It changes no visible product or da
 
 ### Stage D: AppUserModelID cutover
 
-- Change to a distinctive identifier such as `io.github.burntcookiedough.eve` only after Stage C upgrade tests pass.
+- Change to the approved identifier `io.github.burntcookiedough.eve`.
 - Preserve the explicit NSIS GUID.
 - Update `app.setAppUserModelId()` and launch-on-login handling together.
+- Keep version `0.6.3`; versioning remains release-phase work.
+- Ordinary packaged launch may remove exact stale project-owned legacy registrations,
+  but it never creates an Eve registration. Only explicit user interaction may create
+  or remove the exact Eve registration.
+- On opt-in, enumerate through Electron, remove only the exact known legacy names at
+  `%LOCALAPPDATA%\Programs\murmur\Murmur.exe`, and leave development, machine-scope,
+  argument-bearing, differently cased, and otherwise unknown entries untouched.
 - Validate notifications, taskbar grouping, shortcuts, Control Panel metadata, install-over-existing behavior, and uninstall/reinstall behavior.
 
-The exact future AppUserModelID remains separately approved. The example value is not authorized by this ADR.
+The exact AppUserModelID was approved on 2026-07-27. The explicit NSIS GUID remains the
+installer continuity boundary and does not derive from the new `appId`.
 
 ### Stage E: optional internal cleanup
 
@@ -260,14 +274,12 @@ During the authorized Gate 3 implementation:
 
 ## Implementation progress
 
-Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is complete in
-merged PR #16 and activates `%APPDATA%\Eve` before importing data consumers while
-retaining the published installer identity. Gate 3 changes visible product surfaces to
-Eve while preserving the AppUserModelID, NSIS GUID, internal APIs, and legacy data
-boundary. Its automated and Windows lifecycle acceptance is recorded in
-[Gate 3 evidence](eve-identity-gate-3-evidence.md). Filesystem path tracing is explicitly
-out of scope for this gate: its absence limits the available evidence but is not a
-draft, readiness, or merge criterion.
+Gate 1 compatibility scaffolding, Gate 2's `%APPDATA%\Eve` boundary, and Gate 3's
+visible Eve identity are complete in merged PRs #15–#17. Gate 4 activates
+`io.github.burntcookiedough.eve` in Electron Builder and the running process while
+retaining the frozen NSIS GUID, internal APIs, release identity, and legacy data
+boundary. Its implementation and acceptance are recorded in
+[Gate 4 evidence](eve-identity-gate-4-evidence.md).
 
 ## Consequences
 
