@@ -3,9 +3,10 @@
 ## Status
 
 Accepted for staged implementation. Gate 1 compatibility scaffolding merged in PR #15 at
-`5e5b3a3c458d56279e8ece37c51827ce60cfa7a0`. Gate 2 implementation is authorized only
-for the clean Eve data boundary described here; packaging, host installation, registry
-changes, visible renaming, publication, and merge remain separately gated.
+`5e5b3a3c458d56279e8ece37c51827ce60cfa7a0`, and Gate 2 merged in PR #16 at
+`ca9eddbc8c6a40af7194fbb6a2f172109f46b84d`. Gate 3 is authorized for the visible
+Eve-name bridge described here. AppUserModelID, startup-registration changes, visual
+redesign, publication, and merge remain separately gated.
 
 The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
 
@@ -243,9 +244,12 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 
 ## Explicit no-go actions
 
-Until a later implementation phase is approved:
+During the authorized Gate 3 implementation:
 
-- do not change `com.murmur.app`, `productName`, executable, installer, shortcut, package, or artifact names;
+- change only the visible `productName`, executable, installer, shortcut, current
+  artifact names, and active UI copy in tray strings, dialogs, diagnostics, and
+  model-progress text to Eve;
+- do not change `com.murmur.app`, the explicit NSIS GUID, internal package name, or compatibility payload name;
 - do not add, edit, or remove registry entries or startup registrations;
 - do not read, copy, merge, rename, or delete Murmur History, settings, browser storage, logs, or other personal data;
 - do not move or delete `%APPDATA%\murmur`;
@@ -256,12 +260,14 @@ Until a later implementation phase is approved:
 
 ## Implementation progress
 
-Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is a separate
-compatibility PR that activates `%APPDATA%\Eve` before importing data consumers while
-retaining all published Murmur product and installer identities. Its automated Gate A and
-approved Gate B package/lifecycle acceptance are recorded in the companion evidence.
-Filesystem path tracing is explicitly out of scope for this gate: its absence limits the
-available evidence but is not a draft, readiness, or merge criterion.
+Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is complete in
+merged PR #16 and activates `%APPDATA%\Eve` before importing data consumers while
+retaining the published installer identity. Gate 3 changes visible product surfaces to
+Eve while preserving the AppUserModelID, NSIS GUID, internal APIs, and legacy data
+boundary. Its automated and Windows lifecycle acceptance is recorded in
+[Gate 3 evidence](eve-identity-gate-3-evidence.md). Filesystem path tracing is explicitly
+out of scope for this gate: its absence limits the available evidence but is not a
+draft, readiness, or merge criterion.
 
 ## Consequences
 

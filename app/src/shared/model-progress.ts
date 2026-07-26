@@ -113,8 +113,8 @@ export function getModelProgressView(
     stepLabel: 'Step 2 of 3',
     title: `Downloading ${state.model}`,
     summary: state.current_file
-      ? `Fetching ${state.current_file}. Keep Murmur open.`
-      : 'Fetching the speech model. Keep Murmur open.',
+      ? `Fetching ${state.current_file}. Keep Eve open.`
+      : 'Fetching the speech model. Keep Eve open.',
     metrics: metricParts.join(' • '),
     progressPercent,
   };

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallerPath,
-    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Murmur",
+    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\Eve",
     [string]$Model = "",
     [int]$HealthTimeoutSec = 180,
     [int]$DownloadTimeoutSec = 1200,
@@ -45,7 +45,7 @@ function Resolve-InstallerPath {
     foreach ($root in $roots) {
         $resolved = Resolve-Path $root -ErrorAction SilentlyContinue
         if (-not $resolved) { continue }
-        $candidate = Get-ChildItem -Path $resolved -Filter "Murmur*Setup*.exe" -File |
+        $candidate = Get-ChildItem -Path $resolved -Filter "Eve*Setup*.exe" -File |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
         if ($candidate) { return $candidate.FullName }
@@ -54,8 +54,21 @@ function Resolve-InstallerPath {
     return $null
 }
 
-function Stop-MurmurProcesses {
-    Get-Process -Name "Murmur" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+function Stop-ProductProcesses {
+    Get-Process -Name "Eve","Murmur" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
+function Resolve-UninstallerPaths {
+    param([string[]]$Directories)
+
+    foreach ($directory in ($Directories | Select-Object -Unique)) {
+        foreach ($name in @("Uninstall Eve.exe", "Uninstall Murmur.exe")) {
+            $candidate = Join-Path $directory $name
+            if (Test-Path $candidate) {
+                $candidate
+            }
+        }
+    }
 }
 
 function Wait-For-Health {
@@ -131,24 +144,25 @@ if ($env:OS -ne "Windows_NT") {
 
 $resolvedInstaller = Resolve-InstallerPath -ExplicitPath $InstallerPath
 if (-not $resolvedInstaller) {
-    throw "Installer not found. Pass -InstallerPath or ensure app/release has a Murmur Setup*.exe."
+    throw "Installer not found. Pass -InstallerPath or ensure app/release has an Eve Setup*.exe."
 }
 
 Write-Step "Using installer: $resolvedInstaller"
 
 if (-not $SkipUninstall) {
-    Write-Step "Stopping any running Murmur processes"
-    Stop-MurmurProcesses
+    Write-Step "Stopping any running Eve or legacy Murmur processes"
+    Stop-ProductProcesses
 
-    $uninstaller = Join-Path $InstallDir "Uninstall Murmur.exe"
-    if (Test-Path $uninstaller) {
-        Write-Step "Uninstalling existing Murmur"
+    $legacyInstallDir = "$env:LOCALAPPDATA\Programs\murmur"
+    $uninstallers = @(Resolve-UninstallerPaths -Directories @($InstallDir, $legacyInstallDir))
+    foreach ($uninstaller in $uninstallers) {
+        Write-Step "Uninstalling existing Eve or legacy Murmur installation at $uninstaller"
         $uninstallProc = Start-Process -Wait -FilePath $uninstaller -ArgumentList "/S" -PassThru
-        Assert-ExitCode -Process $uninstallProc -Step "Uninstall"
+        Assert-ExitCode -Process $uninstallProc -Step "Uninstall $uninstaller"
     }
 }
 
-$hfHome = Join-Path $env:LOCALAPPDATA "Murmur\hf-smoke"
+$hfHome = Join-Path $env:LOCALAPPDATA "Eve\hf-smoke"
 $env:HF_HOME = $hfHome
 $env:HF_HUB_CACHE = Join-Path $hfHome "hub"
 
@@ -170,7 +184,7 @@ if (Test-Path $PidFilePath) {
     Remove-Item -Path $PidFilePath -Force
 }
 
-Write-Step "Installing Murmur"
+Write-Step "Installing Eve"
 $installProc = Start-Process -Wait -FilePath $resolvedInstaller -ArgumentList @("/S", "/D=$InstallDir") -PassThru
 Assert-ExitCode -Process $installProc -Step "Install"
 
@@ -179,13 +193,13 @@ if ($SkipLaunch) {
     exit 0
 }
 
-$exePath = Join-Path $InstallDir "Murmur.exe"
+$exePath = Join-Path $InstallDir "Eve.exe"
 if (-not (Test-Path $exePath)) {
     throw "Installed app not found at $exePath"
 }
 
 $launchStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-Write-Step "Launching Murmur"
+Write-Step "Launching Eve"
 $launchTimeUtc = (Get-Date).ToUniversalTime()
 $process = Start-Process -FilePath $exePath -WorkingDirectory $InstallDir -PassThru
 
@@ -242,7 +256,7 @@ try {
         throw "Expected a fresh download, but detail=$($state.detail)"
     }
 } finally {
-    Write-Step "Stopping Murmur"
+    Write-Step "Stopping Eve"
     if ($process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }

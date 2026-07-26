@@ -32,7 +32,7 @@ describe('privacy-safe diagnostics report', () => {
         vc_redist: { installed: true },
         warnings: [],
       },
-    })).toBe(`Murmur diagnostics
+    })).toBe(`Eve diagnostics
 App version: 0.6.2
 Windows: 10.0.26100 (x64)
 Server mode: managed
@@ -115,7 +115,7 @@ VC++ runtime installed: yes
 
     expect(output).toContain('Server mode: external');
     expect(output).toContain('Model: custom/local model');
-    expect(output).toContain('- cuda_unavailable: CUDA is unavailable; Murmur may use CPU mode.');
+    expect(output).toContain('- cuda_unavailable: CUDA is unavailable; Eve may use CPU mode.');
     expect(output).toContain('- unknown_warning: Additional details omitted for privacy.');
     for (const sensitive of sensitiveValues) expect(output).not.toContain(sensitive);
     expect(output).not.toContain('51717');

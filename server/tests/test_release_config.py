@@ -59,12 +59,17 @@ def test_nsis_web_identity_and_data_retention_are_explicit() -> None:
     build = package_json.get("build", {})
     nsis_web = build.get("nsisWeb", {})
 
+    assert package_json.get("name") == "murmur"
     assert build.get("appId") == "com.murmur.app"
-    assert build.get("productName") == "Murmur"
+    assert build.get("productName") == "Eve"
+    assert build.get("executableName") == "Eve"
     assert nsis_web == {
         "guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204",
         "oneClick": True,
         "deleteAppDataOnUninstall": False,
+        "artifactName": "Eve.Web.Setup.${version}.${ext}",
+        "shortcutName": "Eve",
+        "uninstallDisplayName": "Eve ${version}",
     }
 
 
@@ -114,6 +119,15 @@ def test_windows_packaging_never_publishes_implicitly() -> None:
     package_json = _load_package_json()
     package_script = package_json.get("scripts", {}).get("package:win", "")
     assert "--publish never" in package_script
+
+
+def test_release_verification_targets_eve_with_legacy_payload_name() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '"Eve.Web.Setup.$ExpectedVersion.exe"' in contents
+    assert '"Eve.exe"' in contents
+    assert '"murmur-$ExpectedVersion-x64.nsis.7z"' in contents
 
 
 def test_release_workflow_installs_extras_and_uploads_payloads() -> None:

@@ -6,8 +6,8 @@ export interface ApplicationIdentity {
 }
 
 /**
- * Published Murmur installer and application identity. Gate 2 retains these
- * compatibility values while selecting the Eve user-data root separately.
+ * Published Murmur compatibility identity. The explicit installer GUID and
+ * AppUserModelID remain active through the visible Eve-name bridge release.
  */
 export const MURMUR_IDENTITY = {
   productName: 'Murmur',
@@ -17,8 +17,7 @@ export const MURMUR_IDENTITY = {
 } as const satisfies ApplicationIdentity;
 
 /**
- * Selected future display identity. It is descriptive only and is not active
- * until a later, separately approved cutover.
+ * Active visible product name and isolated user-data directory.
  */
 export const EVE_PRODUCT_NAME = 'Eve' as const;
 export const EVE_USER_DATA_DIRECTORY_NAME = 'Eve' as const;

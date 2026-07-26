@@ -36,7 +36,7 @@ const SAFE_DRIVER_VERSION = /^[0-9.]{1,30}$/;
 
 const WARNING_MESSAGES: Record<string, string> = {
   vc_redist_missing: 'The required Microsoft Visual C++ runtime was not detected.',
-  cuda_unavailable: 'CUDA is unavailable; Murmur may use CPU mode.',
+  cuda_unavailable: 'CUDA is unavailable; Eve may use CPU mode.',
   cuda_dll_missing: 'One or more required CUDA runtime files were not detected.',
   nvidia_driver_old: 'The NVIDIA driver is older than the supported minimum.',
 };
@@ -119,7 +119,7 @@ export function formatDiagnosticsReport(input: DiagnosticsReportInput): string {
   const managed = typeof state?.managed === 'boolean' ? (state.managed ? 'managed' : 'external') : 'unknown';
   const serverStatus = enumString(state?.status, SERVER_STATUSES) ?? 'unknown';
   const lines = [
-    'Murmur diagnostics',
+    'Eve diagnostics',
     `App version: ${appVersion}`,
     `Windows: ${windowsRelease} (${architecture})`,
     `Server mode: ${managed}`,

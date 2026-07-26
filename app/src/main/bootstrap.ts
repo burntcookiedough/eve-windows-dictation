@@ -13,8 +13,8 @@ try {
   const cause = error instanceof Error ? error : new Error(String(error));
   log.error('Application data bootstrap failed', { error: cause });
   dialog.showErrorBox(
-    'Murmur could not start',
-    'Murmur could not initialize its application data folder. Verify that the folder is a regular directory and that your account can write to it, then try again.'
+    'Eve could not start',
+    'Eve could not initialize its application data folder. Verify that the folder is a regular directory and that your account can write to it, then try again.'
   );
   app.quit();
 }

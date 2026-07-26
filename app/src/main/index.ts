@@ -187,7 +187,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     const progressSummary = getModelProgressShortSummary(serverState?.modelDownload);
     const message = engineStatus?.status === 'error'
       ? (engineStatus.message ?? 'The transcription engine failed to load. Open Server settings for details.')
-      : progressSummary ?? 'The speech model is still loading. Keep Murmur open and try again when the Server status is ready.';
+      : progressSummary ?? 'The speech model is still loading. Keep Eve open and try again when the Server status is ready.';
     log.warn('Cannot start recording: transcription engine is not ready', {
       engine: engineStatus?.current,
       engineStatus: engineStatus?.status ?? 'unknown',
@@ -522,7 +522,7 @@ function setupDisplayChangeHandlers() {
 }
 
 async function startApplication(): Promise<void> {
-  log.info('Murmur starting');
+  log.info('Eve starting');
 
   // Initialize history service early
   historyService = new HistoryService();
@@ -614,7 +614,7 @@ async function startApplication(): Promise<void> {
     }
   }
 
-  log.info('Murmur ready');
+  log.info('Eve ready');
 
   // Handle app lifecycle
   app.on('window-all-closed', () => {
@@ -636,8 +636,8 @@ void app.whenReady()
     const cause = error instanceof Error ? error : new Error(String(error));
     log.error('Application startup failed', { error: cause });
     dialog.showErrorBox(
-      'Murmur could not start',
-      'Murmur could not initialize its application data. Verify that the application data folder is accessible and valid, then try again.'
+      'Eve could not start',
+      'Eve could not initialize its application data. Verify that the application data folder is accessible and valid, then try again.'
     );
     app.quit();
   });
