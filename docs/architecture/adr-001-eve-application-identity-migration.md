@@ -262,9 +262,10 @@ Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is complet
 merged PR #16 and activates `%APPDATA%\Eve` before importing data consumers while
 retaining the published installer identity. Gate 3 changes visible product surfaces to
 Eve while preserving the AppUserModelID, NSIS GUID, internal APIs, and legacy data
-boundary. Its acceptance evidence will be recorded before the Gate 3 PR is marked ready.
-Filesystem path tracing is explicitly out of scope for this gate: its absence limits the
-available evidence but is not a draft, readiness, or merge criterion.
+boundary. Its automated and Windows lifecycle acceptance is recorded in
+[Gate 3 evidence](eve-identity-gate-3-evidence.md). Filesystem path tracing is explicitly
+out of scope for this gate: its absence limits the available evidence but is not a
+draft, readiness, or merge criterion.
 
 ## Consequences
 

@@ -164,7 +164,7 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Select final AppUserModelID | Pending; Gate 4 only | Separate approval |
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
 | Fresh Eve profile implementation | Complete in merged PR #16 at `ca9eddb`; Gate A/B evidence includes Fast/Long smoke, repair, normal uninstall preservation, and official rollback | No |
-| Visible installed-product rename | In progress on `codex/eve-visible-identity-gate-3`; AppUserModelID and startup registrations remain deferred | Gate 3 acceptance and merge approval |
+| Visible installed-product rename | Complete on `codex/eve-visible-identity-gate-3`; see [Gate 3 evidence](eve-identity-gate-3-evidence.md). AppUserModelID and startup registrations remain deferred | Merge approval |
 | AppUserModelID cutover | Pending | Separate approval after upgrade acceptance |
 | Visual identity and homepage | Pending | Later design phase |
 | Thin-client/component packs and ASR profiles | Pending | Later technical phase |
