@@ -52,7 +52,8 @@
   },
   "build": {
     "appId": "com.murmur.app",
-    "productName": "Murmur",
+    "productName": "Eve",
+    "executableName": "Eve",
     "directories": {
       "output": "release"
     },
@@ -98,7 +99,10 @@
     "nsisWeb": {
       "guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204",
       "oneClick": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Eve.Web.Setup.${version}.${ext}",
+      "shortcutName": "Eve",
+      "uninstallDisplayName": "Eve ${version}"
     },
     "publish": [
       {

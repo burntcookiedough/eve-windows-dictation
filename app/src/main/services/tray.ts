@@ -6,18 +6,18 @@ let tray: Tray | null = null;
 function getTrayIcon(): Electron.NativeImage {
   const icon = getMurmurTrayIcon();
   if (!icon) {
-    throw new Error('Murmur tray icon resource is missing or invalid');
+    throw new Error('Eve tray icon resource is missing or invalid');
   }
   return icon;
 }
 
 export function setupTray(onShowMainWindow?: () => void): void {
   tray = new Tray(getTrayIcon());
-  tray.setToolTip('Murmur - Press Ctrl+Win to dictate');
+  tray.setToolTip('Eve - Press Ctrl+Win to dictate');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Murmur',
+      label: 'Eve',
       enabled: false,
     },
     { type: 'separator' },
@@ -48,9 +48,9 @@ export function updateTrayState(state: 'idle' | 'recording' | 'error'): void {
   if (!tray) return;
 
   const tooltips: Record<typeof state, string> = {
-    idle: 'Murmur - Press Ctrl+Win to dictate',
-    recording: 'Murmur - Recording...',
-    error: 'Murmur - Error occurred',
+    idle: 'Eve - Press Ctrl+Win to dictate',
+    recording: 'Eve - Recording...',
+    error: 'Eve - Error occurred',
   };
 
   tray.setToolTip(tooltips[state]);

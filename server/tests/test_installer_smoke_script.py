@@ -24,3 +24,9 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     assert "RequireVcRedist" in contents
     assert "RequireDriverMinimum" in contents
     assert "RequireModelDownload" in contents
+    assert '"$env:LOCALAPPDATA\\Programs\\Eve"' in contents
+    assert '"Eve*Setup*.exe"' in contents
+    assert '"Uninstall Eve.exe"' in contents
+    assert '"Uninstall Murmur.exe"' in contents
+    assert '"Eve.exe"' in contents
+    assert 'Get-Process -Name "Eve","Murmur"' in contents

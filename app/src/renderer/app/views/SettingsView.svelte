@@ -952,7 +952,7 @@
     </SettingsSection>
 
     <SettingsSection title="About">
-      <SettingsRow label="Version" description="Installed Murmur build version">
+      <SettingsRow label="Version" description="Installed Eve build version">
         <button
           type="button"
           onclick={copyVersionToClipboard}
@@ -981,7 +981,7 @@
           <div bind:this={externalServerCard} class="mt-2 p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 w-full">
             <p class="text-sm text-zinc-200 mb-1">Custom server endpoint</p>
             <p class="text-xs text-zinc-500 mb-3">
-              Set the host and port for your transcription server. Murmur connects to <span class="font-mono">/transcribe</span>.
+              Set the host and port for your transcription server. Eve connects to <span class="font-mono">/transcribe</span>.
             </p>
 
             {#if externalServerError}

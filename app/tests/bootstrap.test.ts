@@ -37,7 +37,7 @@ class FakeApp implements BootstrapApp {
 }
 
 describe('application identity bootstrap', () => {
-  test('keeps the published Murmur identity active', () => {
+  test('keeps the published Murmur compatibility identity while Eve is visible', () => {
     expect(MURMUR_IDENTITY).toEqual({
       productName: 'Murmur',
       appId: 'com.murmur.app',

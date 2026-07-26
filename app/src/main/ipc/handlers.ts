@@ -93,7 +93,7 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   ipcMain.handle(IPC_CHANNELS.HOTWORDS_EXPORT, async (_event, hotwordsCsl: string) => {
     const result = await dialog.showSaveDialog({
       title: 'Export Hotwords',
-      defaultPath: 'murmur-hotwords.csv',
+      defaultPath: 'eve-hotwords.csv',
       filters: [
         { name: 'CSV', extensions: ['csv'] },
         { name: 'Text', extensions: ['txt'] },

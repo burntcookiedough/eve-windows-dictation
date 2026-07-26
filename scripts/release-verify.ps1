@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ExpectedVersion = "0.6.3",
-    [string]$InstallerDir = "E:\MurmurRelease\release-prep\full-nsis-web\nsis-web",
-    [string]$InstallDir = "E:\MurmurRelease\release-prep\smoke-install\Murmur",
+    [string]$InstallerDir = "E:\EveRelease\release-prep\full-nsis-web\nsis-web",
+    [string]$InstallDir = "E:\EveRelease\release-prep\smoke-install\Eve",
     [string]$BaseBranch = "trunk",
     [int]$HealthPort = 8765,
     [int]$HealthTimeoutSec = 180
@@ -82,7 +82,7 @@ try {
     Pop-Location
 }
 
-$setupExe = Join-Path $InstallerDir "Murmur Web Setup $ExpectedVersion.exe"
+$setupExe = Join-Path $InstallerDir "Eve.Web.Setup.$ExpectedVersion.exe"
 $payload7z = Join-Path $InstallerDir "murmur-$ExpectedVersion-x64.nsis.7z"
 $latestYml = Join-Path $InstallerDir "latest.yml"
 
@@ -93,10 +93,10 @@ Assert-Path $latestYml "latest.yml"
 Assert-Contains -Value (Get-Content -LiteralPath $latestYml -Raw) -Expected $ExpectedVersion -Description "latest.yml"
 
 Write-Step "Checking installed payload contents"
-$appExe = Join-Path $InstallDir "Murmur.exe"
+$appExe = Join-Path $InstallDir "Eve.exe"
 $serverRoot = Join-Path $InstallDir "resources\server"
 $pythonExe = Join-Path $serverRoot ".venv\Scripts\python.exe"
-Assert-Path $appExe "Installed Murmur.exe"
+Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\faster_whisper") "faster-whisper package"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\torch") "torch package"
