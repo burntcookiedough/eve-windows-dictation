@@ -14,22 +14,22 @@ function getAppDataDir() {
     const home = homedir();
     const match = home.match(/\/mnt\/c\/Users\/([^/]+)/);
     if (match) {
-      return join('/mnt/c/Users', match[1], 'AppData/Roaming/murmur');
+      return join('/mnt/c/Users', match[1], 'AppData/Roaming/Eve');
     }
     // Fallback: try to find it from /mnt/c/Users
     const username = process.env.USER || process.env.USERNAME;
     if (username) {
-      return join('/mnt/c/Users', username, 'AppData/Roaming/murmur');
+      return join('/mnt/c/Users', username, 'AppData/Roaming/Eve');
     }
   }
 
   // Windows native or fallback
   if (process.env.APPDATA) {
-    return join(process.env.APPDATA, 'murmur');
+    return join(process.env.APPDATA, 'Eve');
   }
 
   // Linux/Mac fallback
-  return join(homedir(), '.config', 'murmur');
+  return join(homedir(), '.config', 'Eve');
 }
 
 const appDataDir = getAppDataDir();

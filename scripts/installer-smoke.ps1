@@ -5,7 +5,7 @@ param(
     [string]$Model = "",
     [int]$HealthTimeoutSec = 180,
     [int]$DownloadTimeoutSec = 1200,
-    [string]$PidFilePath = "$env:APPDATA\murmur\server.pid",
+    [string]$PidFilePath = "$env:APPDATA\Eve\server.pid",
     [string]$ExpectedVersion = "",
     [switch]$SkipUninstall,
     [switch]$SkipLaunch,

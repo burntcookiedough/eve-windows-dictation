@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 import { bootstrapApplication, type BootstrapApp } from '../src/main/bootstrap-core';
-import { EVE_PRODUCT_NAME, MURMUR_IDENTITY, resolveUserDataPath } from '../src/main/identity';
+import {
+  EVE_PRODUCT_NAME,
+  EVE_USER_DATA_DIRECTORY_NAME,
+  MURMUR_IDENTITY,
+} from '../src/main/identity';
 
 const APP_DATA_PATH = path.join('test-root', 'AppData', 'Roaming');
 
@@ -23,7 +27,7 @@ class FakeApp implements BootstrapApp {
     return APP_DATA_PATH;
   }
 
-  setPath(name: 'userData', value: string): void {
+  setPath(name: 'userData' | 'sessionData', value: string): void {
     this.events.push(`set:${name}:${value}`);
   }
 
@@ -41,13 +45,10 @@ describe('application identity bootstrap', () => {
       nsisGuid: '0204d005-75b3-5b31-b1f6-ef2831e2b204',
     });
     expect(EVE_PRODUCT_NAME).toBe('Eve');
+    expect(EVE_USER_DATA_DIRECTORY_NAME).toBe('Eve');
   });
 
-  test('resolves the same explicit Murmur userData directory', () => {
-    expect(resolveUserDataPath(APP_DATA_PATH)).toBe(path.join(APP_DATA_PATH, 'murmur'));
-  });
-
-  test('locks and selects userData before application modules load', async () => {
+  test('selects Eve paths before locking and loading application modules', async () => {
     const fakeApp = new FakeApp();
 
     const loaded = await bootstrapApplication(
@@ -55,20 +56,29 @@ describe('application identity bootstrap', () => {
       async () => {
         fakeApp.events.push('load');
       },
-      'win32'
+      {
+        platform: 'win32',
+        userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
+        prepareUserDataRoot: (appDataPath, directoryName) => {
+          fakeApp.events.push(`prepare:${directoryName}`);
+          return path.join(appDataPath, directoryName);
+        },
+      }
     );
 
     expect(loaded).toBeTrue();
     expect(fakeApp.events).toEqual([
-      'lock',
       'get:appData',
-      `set:userData:${path.join(APP_DATA_PATH, 'murmur')}`,
+      'prepare:Eve',
+      `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      'lock',
       'app-id:com.murmur.app',
       'load',
     ]);
   });
 
-  test('does not select paths or load modules when another instance owns the lock', async () => {
+  test('selects Eve paths but does not load modules when another Eve instance owns the lock', async () => {
     const fakeApp = new FakeApp();
     fakeApp.lockGranted = false;
 
@@ -77,10 +87,47 @@ describe('application identity bootstrap', () => {
       async () => {
         fakeApp.events.push('load');
       },
-      'win32'
+      {
+        platform: 'win32',
+        userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
+        prepareUserDataRoot: (appDataPath, directoryName) =>
+          path.join(appDataPath, directoryName),
+      }
     );
 
     expect(loaded).toBeFalse();
-    expect(fakeApp.events).toEqual(['lock', 'quit']);
+    expect(fakeApp.events).toEqual([
+      'get:appData',
+      `set:userData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      `set:sessionData:${path.join(APP_DATA_PATH, 'Eve')}`,
+      'lock',
+      'quit',
+    ]);
+  });
+
+  test('does not set Electron paths or load modules when root preparation fails', async () => {
+    const fakeApp = new FakeApp();
+
+    await expect(
+      bootstrapApplication(
+        fakeApp,
+        async () => {
+          fakeApp.events.push('load');
+        },
+        {
+          platform: 'win32',
+          userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
+          prepareUserDataRoot: () => {
+            fakeApp.events.push('prepare:failed');
+            throw new Error('write denied');
+          },
+        }
+      )
+    ).rejects.toThrow('write denied');
+
+    expect(fakeApp.events).toEqual([
+      'get:appData',
+      'prepare:failed',
+    ]);
   });
 });

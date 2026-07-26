@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 export interface ApplicationIdentity {
   readonly productName: string;
   readonly appId: string;
@@ -8,8 +6,8 @@ export interface ApplicationIdentity {
 }
 
 /**
- * Published Murmur identity. These values remain active during compatibility
- * scaffolding so installer, application, and user-data behavior do not change.
+ * Published Murmur installer and application identity. Gate 2 retains these
+ * compatibility values while selecting the Eve user-data root separately.
  */
 export const MURMUR_IDENTITY = {
   productName: 'Murmur',
@@ -23,10 +21,4 @@ export const MURMUR_IDENTITY = {
  * until a later, separately approved cutover.
  */
 export const EVE_PRODUCT_NAME = 'Eve' as const;
-
-export function resolveUserDataPath(
-  appDataPath: string,
-  identity: ApplicationIdentity = MURMUR_IDENTITY
-): string {
-  return path.join(appDataPath, identity.userDataDirectoryName);
-}
+export const EVE_USER_DATA_DIRECTORY_NAME = 'Eve' as const;

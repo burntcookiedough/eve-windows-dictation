@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron';
 import { createOverlayWindow, showOverlay, hideOverlay, positionOverlayOnActiveDisplay } from './windows/overlay.js';
 import { createMainWindow, showMainWindow } from './windows/main.js';
 import { setupHotkeyService } from './services/hotkey.js';
@@ -521,7 +521,7 @@ function setupDisplayChangeHandlers() {
   });
 }
 
-app.whenReady().then(async () => {
+async function startApplication(): Promise<void> {
   log.info('Murmur starting');
 
   // Initialize history service early
@@ -628,7 +628,19 @@ app.whenReady().then(async () => {
       });
     }
   });
-});
+}
+
+void app.whenReady()
+  .then(startApplication)
+  .catch((error: unknown) => {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    log.error('Application startup failed', { error: cause });
+    dialog.showErrorBox(
+      'Murmur could not start',
+      'Murmur could not initialize its application data. Verify that the application data folder is accessible and valid, then try again.'
+    );
+    app.quit();
+  });
 
 app.on('will-quit', async (event) => {
   // Prevent immediate quit to allow async cleanup

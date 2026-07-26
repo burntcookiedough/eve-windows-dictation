@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed. This document authorizes no runtime, installer, registry, or data-path changes.
+Accepted for staged implementation. Gate 1 compatibility scaffolding merged in PR #15 at
+`5e5b3a3c458d56279e8ece37c51827ce60cfa7a0`. Gate 2 implementation is authorized only
+for the clean Eve data boundary described here; packaging, host installation, registry
+changes, visible renaming, publication, and merge remain separately gated.
 
 The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
 
@@ -26,7 +29,10 @@ The project targets Windows and is maintained by a small team. A direct, explici
 
 ## Current identity inventory
 
-This inventory is based on `trunk` at `fc40ad5a6b37f31b861bd904a0e106813fc81eb8` and a read-only inspection of an installed Windows build. Paths use environment-variable notation and contain no user-specific directory.
+This inventory was established at `fc40ad5a6b37f31b861bd904a0e106813fc81eb8`
+and reconciled after Gate 1 merged at
+`5e5b3a3c458d56279e8ece37c51827ce60cfa7a0`. Paths use environment-variable
+notation and contain no user-specific directory.
 
 ### Installer and Windows identity
 
@@ -53,12 +59,13 @@ Electron Builder documents that NSIS derives a deterministic GUID from `appId` w
 | Window state | `%APPDATA%\murmur\internal.json` | Do not read or copy. |
 | History and Insights | `%APPDATA%\murmur\history.db` plus WAL/SHM when present | Do not open, copy, merge, or index. |
 | Server settings | `%APPDATA%\murmur\server-settings.json` | Do not import. This prevents transfer of external-server details or other saved configuration. |
-| Server PID | `%APPDATA%\murmur\server.pid` | Do not migrate. It may be inspected only to prevent an old owned server from conflicting with Eve startup. A recorded process must pass command-line ownership verification before Eve adopts, stops, or otherwise trusts it, even when the recorded port responds as healthy. |
+| Server PID | `%APPDATA%\murmur\server.pid` | Do not read or migrate. Gate 2 performs zero legacy-root access, including no legacy PID safety check. Eve trusts only its own PID record after process ownership and creation-epoch verification. |
 | Paste helpers | `%APPDATA%\murmur\paste-helper.vbs`, `paste-sendinput.ps1` | Do not copy; Eve regenerates its own helpers. |
 | Chromium storage and caches | `Local Storage`, `Network`, `Cache`, `GPUCache`, and related entries | Do not read or copy. This prevents accidental transfer of cookies, browser state, or cached data. |
 | Diagnostic traces | for example `hotkey-trace.log` | Do not read or copy. |
 
-The complete `%APPDATA%\murmur` directory remains untouched. Eve will use a distinct root such as `%APPDATA%\Eve`, with the final casing and constant approved during implementation.
+The complete `%APPDATA%\murmur` directory remains untouched and inactive. The approved
+Gate 2 root is exactly `%APPDATA%\Eve`.
 
 Electron documents `userData` as an app-name-derived directory that also contains Chromium-managed state. Eve must set its explicit path before any module constructs Electron Store or calls a service that uses `app.getPath('userData')`. See Electron's [app path documentation](https://www.electronjs.org/docs/latest/api/app#appgetpathname).
 
@@ -85,7 +92,9 @@ Eve may reuse an already verified standard model cache to avoid a multi-gigabyte
 
 A read-only machine audit found three historical entries named `Murmur`, `electron.app.Murmur`, and `com.murmur.app`, pointing at an installed executable and different unpacked candidates. Eve must not import the old `launchOnBoot` setting, so it starts with launch-on-login disabled. The cutover must still neutralize stale known Murmur registrations safely.
 
-The implementation must:
+Gate 2 makes no login-item API or registry write, including no disabling write. An attempt
+to enable launch-on-login is rejected before persistence, the visible toggle is reverted,
+and an error is shown. The later visible-identity/AppUserModelID gates must:
 
 1. enumerate through Electron's supported login-item API where possible;
 2. remove only registrations whose names are in an exact compatibility allowlist and whose normalized paths match the published Murmur installation being upgraded;
@@ -126,7 +135,10 @@ This is the smallest safe implementation PR. It changes no visible product or da
 - Do not test for or inspect Murmur settings, History, Chromium state, or diagnostics.
 - Initialize Eve settings, window state, History, server settings, PID file, and generated helpers from clean defaults.
 - If the Eve directory exists, use it normally. If it is malformed or inaccessible, stop with repair guidance; do not fall back to Murmur data.
-- Permit only a narrow legacy PID ownership check when needed to prevent two managed transcription servers from conflicting. Before adopting a process from the recorded PID and port, require the existing command-line ownership proof. Refuse to adopt or terminate a stale or reused PID owned by another process.
+- Perform zero access to the legacy Murmur root, including no legacy PID read.
+- Before adopting or terminating a process referenced by Eve's own PID file, require PID,
+  executable, command-line, and process-creation-epoch ownership proof. Refuse stale,
+  reused, malformed, or unowned records even when the recorded port responds as healthy.
 - Leave `%APPDATA%\murmur` byte-for-byte untouched.
 
 ### Stage C: visible Eve identity with stable installer continuity
@@ -190,7 +202,8 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Eve creates a distinct settings file and empty History database.
 - Existing valid Eve data is reused without consulting Murmur.
 - Malformed or read-only Eve data produces repair guidance without Murmur fallback.
-- Process/file tracing confirms Eve does not open Murmur personal files; the only permitted legacy-root access is the separately tested `server.pid` ownership check.
+- Process/file tracing confirms Eve does not open any path under the controlled Murmur
+  root. No legacy-root exception is permitted.
 - Migration and startup logs contain no transcript, settings, credential, token, device-label, or personal-path values.
 
 ### Startup and lifecycle
@@ -241,17 +254,14 @@ Until a later implementation phase is approved:
 - do not combine visual redesign, signing, thin-client packaging, ASR model work, or dependency upgrades with identity changes;
 - do not rename internal preload bridges or `MURMUR_*` variables for cosmetic consistency.
 
-## First implementation PR after approval
+## Implementation progress
 
-The smallest safe PR is **identity compatibility scaffolding only**:
-
-1. add typed constants for current and proposed identities;
-2. add a bootstrap/userData resolver that still selects the current Murmur path;
-3. freeze the clean-install-verified `build.nsisWeb.guid` and explicitly set `build.nsisWeb.oneClick: true` plus `deleteAppDataOnUninstall: false`;
-4. add configuration, bootstrap-order, and path-selection tests;
-5. prove that v0.6.3 userData, installer names, executable, startup behavior, and release artifacts remain unchanged.
-
-It must not import data, create the Eve data directory, or display Eve inside the installed application.
+Gate 1 compatibility scaffolding is complete in merged PR #15. Gate 2 is a separate
+compatibility PR that activates `%APPDATA%\Eve` before importing data consumers while
+retaining all published Murmur product and installer identities. Its automated Gate A and
+approved Gate B package/lifecycle acceptance are recorded in the companion evidence.
+Filesystem path tracing is explicitly out of scope for this gate: its absence limits the
+available evidence but is not a draft, readiness, or merge criterion.
 
 ## Consequences
 

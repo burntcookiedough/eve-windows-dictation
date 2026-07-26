@@ -292,6 +292,17 @@
     window.murmurMain.updateSetting(key, value);
   }
 
+  async function updateLaunchOnBoot(enabled: boolean) {
+    const previous = settings.launchOnBoot;
+    settings.launchOnBoot = enabled;
+    try {
+      await window.murmurMain.updateSetting('launchOnBoot', enabled);
+    } catch {
+      settings.launchOnBoot = previous;
+      toast('Launch on boot is unavailable in this compatibility build', 'error');
+    }
+  }
+
   function updateHotwordsCsl(value: string) {
     settings.hotwordsCsl = value;
     window.murmurMain.updateSetting('hotwordsCsl', value);
@@ -707,7 +718,7 @@
       <SettingsRow label="Launch on boot" description="Start application when system starts">
         <Toggle
           enabled={settings.launchOnBoot}
-          onchange={(v) => updateSetting('launchOnBoot', v)}
+          onchange={(v) => void updateLaunchOnBoot(v)}
           label="Launch on boot"
         />
       </SettingsRow>
