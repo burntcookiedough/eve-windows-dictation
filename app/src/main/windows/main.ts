@@ -94,9 +94,14 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
     minWidth,
     minHeight,
     show: false,
-    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#08090a',
+      symbolColor: '#f4f4f5',
+      height: 36,
+    },
     transparent: false,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#08090a',
     icon: getMurmurIcon('icon.ico'),
     webPreferences: {
       preload: preloadPath,

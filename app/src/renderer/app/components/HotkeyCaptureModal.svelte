@@ -10,8 +10,23 @@
   let { isOpen, onCapture, onCancel }: Props = $props();
 
   let isCapturing = $state(false);
+  let dialogRef: HTMLDivElement | null = $state(null);
+  let cancelButton: HTMLButtonElement | null = $state(null);
+  let returnFocus: HTMLElement | null = null;
+  let wasOpen = false;
 
   $effect(() => {
+    if (isOpen && !wasOpen) {
+      returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      queueMicrotask(() => cancelButton?.focus());
+    } else if (!isOpen && wasOpen) {
+      queueMicrotask(() => {
+        if (returnFocus?.isConnected) returnFocus?.focus();
+        returnFocus = null;
+      });
+    }
+    wasOpen = isOpen;
+
     if (isOpen && !isCapturing) {
       startCapture();
     }
@@ -43,7 +58,29 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
+      e.preventDefault();
       handleCancel();
+      return;
+    }
+
+    if (e.key === 'Tab' && dialogRef) {
+      const focusable = Array.from(
+        dialogRef.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        e.preventDefault();
+        dialogRef.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   }
 </script>
@@ -60,7 +97,9 @@
   >
     <!-- Modal -->
     <div
-      class="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-[320px] shadow-2xl"
+      bind:this={dialogRef}
+      tabindex="-1"
+      class="w-[320px] rounded-[14px] border border-white/15 bg-[#111214] p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="hotkey-dialog-title"
@@ -75,15 +114,17 @@
 
       <!-- Visual indicator -->
       <div class="flex justify-center mb-6">
-        <div class="w-16 h-16 rounded-xl bg-zinc-800 border-2 border-zinc-600 flex items-center justify-center">
-          <div class="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
+        <div class="flex h-16 w-16 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06]">
+          <div class="h-3 w-3 animate-pulse rounded-full bg-zinc-100 motion-reduce:animate-none"></div>
         </div>
       </div>
 
       <!-- Cancel button -->
       <button
+        bind:this={cancelButton}
+        type="button"
         onclick={handleCancel}
-        class="w-full py-2 px-4 text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer"
+        class="w-full rounded-lg bg-white/[0.06] px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.09] hover:text-zinc-100 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
       >
         Cancel
       </button>

@@ -34,10 +34,10 @@
   );
 </script>
 
-<div class="flex items-center justify-center px-2" style={containerStyle} style:gap="{gap}px">
+<div class="flex items-center justify-center px-2" style={containerStyle} style:gap="{gap}px" aria-hidden="true">
   {#each displayLevels as level}
     <div
-      class="shrink-0 min-h-[2px] bg-gradient-to-t from-zinc-300/60 to-zinc-100/90"
+      class="shrink-0 min-h-[2px] bg-zinc-100/90"
       style="{barStyle} height: {level * height}px;"
     ></div>
   {/each}

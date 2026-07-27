@@ -446,11 +446,11 @@ rollback cannot be proven, or publication would be required.
 | Stage | Status | Evidence location | Required approval | What happens next |
 |---|---|---|---|---|
 | Gate 5 references selected | Passed | This document and two tracked assets | Complete | Verify exact hashes. |
-| Gate 5 permanent contract | In progress | This document and planning commit | Already authorized | Commit before production code. |
-| Gate 5A focused implementation | Planned | Feature commits and focused tests | Authorized | Implement within 28-file ceiling. |
-| Gate 5A design QA | Planned | `design-qa.md`; local synthetic screenshots | None unless capture permission is required | Compare exact reference and implementation. |
-| Gate 5A accessibility/Windows | Planned | `docs/architecture/eve-gate-5a-evidence.md` | None unless a material compromise appears | Complete full matrix. |
-| Gate 5A Gate A | Planned | Evidence document and command results | None | Run full validation. |
+| Gate 5 permanent contract | Passed | This document and commit `1b4de8e` | Complete | Preserve exact targets and boundaries. |
+| Gate 5A focused implementation | Passed | Scoped implementation and focused tests | Authorized | Run final validation from exact head. |
+| Gate 5A design QA | Passed | `design-qa.md`; local synthetic screenshots | None | Preserve the passed target comparison. |
+| Gate 5A accessibility/Windows | Passed | `docs/architecture/eve-gate-5a-evidence.md` | None | Preserve accessibility and native-window behavior. |
+| Gate 5A Gate A | In progress | Evidence document and command results | None | Commit, then rerun from the exact head. |
 | Gate 5A PR/CI/CodeRabbit | Planned | Hosted checks and review threads | None for creation/review | Leave Ready but unmerged. |
 | Gate 5A merge | Deferred | PR merge commit | Explicit user approval | Merge only if separately authorized. |
 | Gate 5B branch/implementation | Deferred | Future 5B branch and evidence | Explicit user authorization after 5A review | Branch from accepted 5A state. |

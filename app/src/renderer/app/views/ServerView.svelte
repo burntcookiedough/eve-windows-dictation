@@ -7,6 +7,12 @@
   import type { ServerStatePayload, ServerLogEntry, Settings } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
 
+  interface Props {
+    embedded?: boolean;
+  }
+
+  let { embedded = false }: Props = $props();
+
   // Server state
   let serverState = $state<ServerStatePayload>({
     status: 'idle',
@@ -210,9 +216,7 @@
   });
 </script>
 
-<div class="h-full p-6 pr-2">
-  <div class="h-full overflow-y-auto pr-4">
-    <div class="space-y-8">
+<div class={embedded ? 'space-y-4' : 'h-full space-y-6 overflow-y-auto p-4 pr-3'}>
 
     {#if useExternalServer}
       <div class="rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3">
@@ -220,7 +224,7 @@
           <div>
             <p class="text-sm text-amber-200">External server mode is enabled</p>
             <p class="mt-1 text-xs text-amber-300/80">
-              Managed server controls are disabled. Configure host and port in Settings > Server.
+              Managed server controls are disabled. Configure host and port in Settings > Advanced.
             </p>
           </div>
           {#if serverState.managed && serverState.status === 'running'}
@@ -257,11 +261,11 @@
       </div>
     </SettingsSection>
 
-    <div class="space-y-8 {useExternalServer ? 'opacity-45 pointer-events-none select-none' : ''}">
+    <div class="space-y-5 {useExternalServer ? 'opacity-45 pointer-events-none select-none' : ''}">
 
     <!-- Status Card -->
     <SettingsSection title="Status">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
+      <div class="p-4 bg-zinc-900/50 rounded-xl w-full" role="status" aria-live="polite">
         <div class="flex items-center justify-between mb-4">
           <!-- Status Badge -->
           <div class="flex items-center gap-3">
@@ -431,12 +435,15 @@
     <SettingsSection title="Logs">
       <div class="w-full">
         <button
+          type="button"
           onclick={() => {
             showLogs = !showLogs;
             if (showLogs) {
               setTimeout(scrollLogsToBottom, 0);
             }
           }}
+          aria-expanded={showLogs}
+          aria-controls="server-log-output"
           class="w-full flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
         >
           <div class="flex items-center gap-2">
@@ -484,6 +491,7 @@
             </button>
           </div>
           <div
+            id="server-log-output"
             bind:this={logsContainer}
             class="mt-1 h-64 overflow-y-auto bg-zinc-950 rounded-xl border border-zinc-800 p-3 font-mono text-xs"
           >
@@ -504,8 +512,5 @@
       </div>
     </SettingsSection>
 
-    </div>
-
-    </div>
-  </div>
+</div>
 </div>

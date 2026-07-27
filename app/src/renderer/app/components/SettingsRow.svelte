@@ -11,11 +11,15 @@
   let { label, description, notImplemented = false, children }: Props = $props();
 </script>
 
-<div class="flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl hover:bg-zinc-900 transition-colors w-full {notImplemented ? 'border border-red-900' : ''}">
+<div
+  class="flex min-h-12 w-full items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/[0.035] {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
+  role="group"
+  aria-label={description ? `${label}. ${description}` : label}
+>
   <div class="flex-1 min-w-0 mr-4">
-    <p class="text-sm text-zinc-200">{label}</p>
+    <p class="text-[13px] leading-5 text-zinc-100">{label}</p>
     {#if description}
-      <p class="text-xs text-zinc-500 mt-0.5">{description}</p>
+      <p class="mt-0.5 text-[11px] leading-4 text-zinc-500">{description}</p>
     {/if}
   </div>
   <div class="shrink-0">

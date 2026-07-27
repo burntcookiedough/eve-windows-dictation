@@ -170,28 +170,27 @@
   });
 </script>
 
-<div class="h-full flex flex-col p-4 pr-2 sm:p-6 sm:pr-2">
-  <div bind:this={scrollContainer} class="flex-1 overflow-y-auto pr-2 sm:pr-4">
-    <div class="mx-auto w-full max-w-5xl">
-    <div class="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+<div class="mx-auto flex h-full w-full max-w-[560px] flex-col px-4 py-4 pr-2">
+  <div bind:this={scrollContainer} class="flex-1 overflow-y-auto pr-3">
+    <div class="mx-auto w-full">
+    <div class="mb-4 flex items-center justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="text-xl font-semibold text-zinc-100">Insights</h1>
-        <p class="mt-1 text-xs text-zinc-500">Local aggregate profile from your transcription history</p>
+        <h1 class="sr-only">Insights</h1>
+        <p class="text-[11px] text-zinc-500">Local insights from your transcription history</p>
       </div>
 
-      <div class="flex w-full shrink-0 rounded-full border border-zinc-800 bg-zinc-900/70 p-1 sm:w-auto">
-        {#each ranges as option}
-          <button
-            onclick={() => selectRange(option.id)}
-            class="min-w-0 flex-1 px-3 py-1.5 text-xs font-medium rounded-full transition-colors cursor-pointer sm:flex-none
-              {range === option.id
-                ? 'bg-zinc-100 text-zinc-950'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
+      <label class="shrink-0">
+        <span class="sr-only">Insights time range</span>
+        <select
+          value={range}
+          onchange={(event) => selectRange(event.currentTarget.value as InsightsRange)}
+          class="rounded-[8px] border border-white/10 bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-zinc-200"
+        >
+          {#each ranges as option}
+            <option value={option.id}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
     </div>
 
     {#if error}
@@ -211,90 +210,62 @@
       </div>
     {:else}
       {#if insights.indexing.isIndexing}
-        <div class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+        <div class="mb-4 rounded-lg border border-white/15 bg-white/[0.06] px-4 py-3 text-xs text-zinc-200" role="status">
           Indexing older history: {formatInteger(insights.indexing.processedEntries)} of {formatInteger(insights.indexing.totalEntries)} entries included.
         </div>
       {/if}
 
-      <div class="grid grid-cols-2 gap-3">
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Words spoken</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalWords)}</p>
-          <p class="mt-1 text-xs text-emerald-400">{formatInteger(insights.summary.avgWordsPerDictation)} avg / dictation</p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Dictations</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalDictations)}</p>
-          <p class="mt-1 text-xs text-zinc-500">
-            {insights.summary.busiestDay ? `${insights.summary.busiestDay.label} busiest` : 'No active day'}
-          </p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Dictation time</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
-          <p class="mt-1 text-xs text-amber-400">{formatInteger(insights.summary.avgWpm)} WPM</p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Processing</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatProcessing(insights.summary.totalProcessingMs)}</p>
-          <p class="mt-1 text-xs text-emerald-400">{formatRatio(insights.summary.avgProcessingRatio)} realtime</p>
-        </div>
-      </div>
-
-      <div class="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div class="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-          <div class="min-w-0">
-            <h2 class="text-sm font-medium text-zinc-200">Trends</h2>
-            <p class="mt-1 text-xs text-zinc-500">
-              Confidence {formatPercent(insights.summary.avgConfidence)}
-              <span class="mx-1 text-zinc-700">/</span>
-              {insights.summary.longestStreakDays} day streak
+      <div class="grid grid-cols-1 gap-2.5">
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictation-time-heading">
+          <div>
+            <h2 id="dictation-time-heading" class="text-xs text-zinc-400">Dictation time</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
+            <p class="mt-2 text-[11px] text-zinc-500">Total dictation time</p>
+          </div>
+          {@render MiniBars(insights.trends, 'audioSeconds')}
+        </section>
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictations-heading">
+          <div>
+            <h2 id="dictations-heading" class="text-xs text-zinc-400">Dictations</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">{formatInteger(insights.summary.totalDictations)}</p>
+            <p class="mt-2 text-[11px] text-zinc-500">Total dictations</p>
+          </div>
+          <div class="grid w-40 grid-cols-8 gap-1.5" role="img" aria-label="{formatInteger(insights.summary.totalDictations)} total dictations">
+            {#each Array(48) as _, index}
+              <span class="h-2 w-2 rounded-full {index < Math.min(insights.summary.totalDictations, 48) ? 'bg-zinc-300/75' : 'bg-zinc-700/45'}"></span>
+            {/each}
+          </div>
+        </section>
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="average-length-heading">
+          <div>
+            <h2 id="average-length-heading" class="text-xs text-zinc-400">Average dictation length</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">
+              {formatDuration(insights.summary.totalDictations > 0 ? insights.summary.totalAudioSeconds / insights.summary.totalDictations : 0)}
             </p>
+            <p class="mt-2 text-[11px] text-zinc-500">Per dictation</p>
           </div>
-          <div class="grid w-full grid-cols-4 rounded-lg bg-zinc-950/60 p-1 sm:w-auto">
-            {#each trendMetrics as metric}
-              <button
-                onclick={() => (trendMetric = metric.id)}
-                class="px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer
-                  {trendMetric === metric.id
-                    ? 'bg-zinc-800 text-zinc-100'
-                    : 'text-zinc-500 hover:text-zinc-300'}"
-              >
-                {metric.label}
-              </button>
-            {/each}
-          </div>
-        </div>
+          {@render MiniLine(insights.trends)}
+        </section>
 
-        <div class="mx-auto h-44 w-full max-w-3xl overflow-hidden">
-          <svg viewBox="0 0 520 176" preserveAspectRatio="none" class="h-full w-full">
-            <line x1="0" y1="137" x2="520" y2="137" stroke="rgb(63 63 70 / 0.6)" stroke-width="1" />
-            {#each insights.trends as point, index}
-              {@const geometry = getBarGeometry(index, insights.trends.length)}
-              {@const height = barHeight(point)}
-              {@const y = 137 - height}
-              {@const value = getTrendValue(point, trendMetric)}
-              <rect
-                x={geometry.x}
-                y={y}
-                width={geometry.width}
-                height={height}
-                rx="3"
-                class="{value > 0 ? 'fill-emerald-500/75' : 'fill-zinc-800'}"
-              />
-              {#if insights.trends.length <= 14 || index % Math.ceil(insights.trends.length / 8) === 0}
-                <text x={geometry.x + geometry.width / 2} y="160" text-anchor="middle" class="fill-zinc-500 text-[10px]">
-                  {point.label}
-                </text>
-              {/if}
-            {/each}
-            {#if peakTrendValue > 0}
-              <text x="0" y="12" class="fill-zinc-500 text-[10px]">
-                {formatTrendValue(peakTrendValue, trendMetric)}
-              </text>
-            {/if}
-          </svg>
-        </div>
+        <section class="overflow-hidden rounded-[9px] border border-white/10 bg-white/[0.025]" aria-labelledby="day-table-heading">
+          <h2 id="day-table-heading" class="border-b border-white/[0.08] px-3 py-2.5 text-xs text-zinc-300">Dictation time by day</h2>
+          <table class="w-full text-left text-[11px]">
+            <thead class="text-zinc-500">
+              <tr><th class="px-3 py-2 font-normal">Day</th><th class="px-3 py-2 font-normal">Time</th><th class="px-3 py-2 font-normal"><span class="sr-only">Relative duration</span></th></tr>
+            </thead>
+            <tbody class="divide-y divide-white/[0.07] text-zinc-300">
+              {#each insights.trends.slice(-7) as point}
+                <tr>
+                  <th scope="row" class="px-3 py-2 font-normal">{point.label}</th>
+                  <td class="px-3 py-2 tabular-nums">{formatDuration(point.audioSeconds)}</td>
+                  <td class="w-1/2 px-3 py-2">
+                    <span class="block h-1 rounded-full bg-zinc-300/70" style:width={`${Math.max(4, (point.audioSeconds / Math.max(...insights.trends.map((trend) => trend.audioSeconds), 1)) * 100)}%`}></span>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </section>
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-4">
@@ -314,12 +285,12 @@
               <p class="mt-1 text-lg font-medium text-zinc-100">{formatPercent(insights.summary.avgConfidence)}</p>
             </div>
             <div class="rounded-lg bg-zinc-950/50 px-3 py-3">
-              <p class="text-xs text-zinc-500">Realtime</p>
-              <p class="mt-1 text-lg font-medium text-emerald-400">{formatRatio(insights.summary.avgProcessingRatio)}</p>
+              <p class="text-xs text-zinc-400">Realtime</p>
+              <p class="mt-1 text-lg font-medium text-zinc-100">{formatRatio(insights.summary.avgProcessingRatio)}</p>
             </div>
             <div class="rounded-lg bg-zinc-950/50 px-3 py-3">
-              <p class="text-xs text-zinc-500">Streak</p>
-              <p class="mt-1 text-lg font-medium text-amber-400">{insights.summary.longestStreakDays}d</p>
+              <p class="text-xs text-zinc-400">Streak</p>
+              <p class="mt-1 text-lg font-medium text-zinc-100">{insights.summary.longestStreakDays}d</p>
             </div>
           </div>
         </section>
@@ -345,6 +316,52 @@
   </div>
 </div>
 
+{#snippet MiniBars(points: InsightsTrendPoint[], metric: 'dictations' | 'words' | 'audioSeconds' | 'processingMs')}
+  {@const peak = Math.max(...points.map((point) => point[metric]), 1)}
+  <svg
+    viewBox="0 0 160 52"
+    class="h-[52px] w-40 shrink-0"
+    role="img"
+    aria-label="Recent {metric === 'audioSeconds' ? 'dictation time' : metric} trend"
+  >
+    <line x1="0" y1="49" x2="160" y2="49" stroke="rgb(113 113 122 / 0.35)" stroke-width="1" />
+    {#each points.slice(-7) as point, index}
+      {@const height = Math.max(3, (point[metric] / peak) * 42)}
+      <rect
+        x={index * 22 + 3}
+        y={49 - height}
+        width="12"
+        height={height}
+        rx="2"
+        class="fill-zinc-300/80"
+      >
+        <title>{point.label}: {point[metric]}</title>
+      </rect>
+    {/each}
+  </svg>
+{/snippet}
+
+{#snippet MiniLine(points: InsightsTrendPoint[])}
+  {@const recent = points.slice(-7)}
+  {@const peak = Math.max(...recent.map((point) => point.audioSeconds), 1)}
+  {@const coordinates = recent.map((point, index) => `${index * 25 + 5},${48 - (point.audioSeconds / peak) * 38}`).join(' ')}
+  <svg viewBox="0 0 160 52" class="h-[52px] w-40 shrink-0" role="img" aria-label="Average dictation length trend">
+    <polyline
+      points={coordinates}
+      fill="none"
+      stroke="rgb(212 212 216 / 0.9)"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    {#each recent as point, index}
+      <circle cx={index * 25 + 5} cy={48 - (point.audioSeconds / peak) * 38} r="2" class="fill-zinc-200">
+        <title>{point.label}: {formatDuration(point.audioSeconds)}</title>
+      </circle>
+    {/each}
+  </svg>
+{/snippet}
+
 {#snippet WordCloud(title: string, words: InsightsWordStat[])}
   <div>
     <div class="mb-2 flex items-center justify-between">
@@ -360,7 +377,7 @@
         {#each words as word}
           <span class="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-300">
             {word.text}
-            <span class="ml-1 text-emerald-400/80">{word.count}</span>
+            <span class="ml-1 text-zinc-100">{word.count}</span>
           </span>
         {/each}
       </div>
@@ -391,7 +408,7 @@
                 {entry.wordCount} words
               </p>
             </div>
-            <span class="shrink-0 rounded-md bg-zinc-950/70 px-2 py-1 text-xs font-medium text-amber-300">
+            <span class="shrink-0 rounded-md bg-zinc-950/70 px-2 py-1 text-xs font-medium text-zinc-100">
               {metric(entry)}
             </span>
           </div>
