@@ -29,7 +29,7 @@ Retry, and manual review are absent and deferred.
 | Check | Result |
 |---|---|
 | Focused Gate 5 tests | Passed: 14 |
-| Complete app test suite | Passed: 105 |
+| Complete app test suite | Passed: 107 |
 | TypeScript main configuration | Passed |
 | Main-process build | Passed |
 | Renderer production build | Passed |
@@ -89,15 +89,14 @@ screenshot, downloaded reference, or diagnostic artifact is tracked.
 
 ## Pull request handoff
 
-Before Ready:
+Local Gate A passed from implementation commit `fad9515`. Before Ready:
 
-1. rerun fresh Gate A from the final exact head;
-2. push the minimal branch and open a draft PR;
-3. wait for CI;
-4. mark Ready only after local and hosted checks pass;
-5. trigger and disposition the real CodeRabbit review;
-6. rerun affected validation for any justified fix;
-7. audit exact head, scope, and clean worktree.
+1. push the minimal branch and open a draft PR;
+2. wait for CI;
+3. mark Ready only after local and hosted checks pass;
+4. trigger and disposition the real CodeRabbit review;
+5. rerun affected validation for any justified fix;
+6. audit exact head, scope, and clean worktree.
 
 Leave Gate 5A Ready but unmerged. Gate 5B requires separate authorization and must
 branch from the accepted Gate 5A state.

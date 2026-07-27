@@ -450,7 +450,7 @@ rollback cannot be proven, or publication would be required.
 | Gate 5A focused implementation | Passed | Scoped implementation and focused tests | Authorized | Run final validation from exact head. |
 | Gate 5A design QA | Passed | `design-qa.md`; local synthetic screenshots | None | Preserve the passed target comparison. |
 | Gate 5A accessibility/Windows | Passed | `docs/architecture/eve-gate-5a-evidence.md` | None | Preserve accessibility and native-window behavior. |
-| Gate 5A Gate A | In progress | Evidence document and command results | None | Commit, then rerun from the exact head. |
+| Gate 5A Gate A | Passed | `docs/architecture/eve-gate-5a-evidence.md`; exact-head command results | None | Open the draft PR and run hosted review. |
 | Gate 5A PR/CI/CodeRabbit | Planned | Hosted checks and review threads | None for creation/review | Leave Ready but unmerged. |
 | Gate 5A merge | Deferred | PR merge commit | Explicit user approval | Merge only if separately authorized. |
 | Gate 5B branch/implementation | Deferred | Future 5B branch and evidence | Explicit user authorization after 5A review | Branch from accepted 5A state. |
