@@ -1,14 +1,25 @@
-import { Tray, Menu, app } from 'electron';
-import { getMurmurTrayIcon } from './app-icon.js';
+import { Tray, Menu, app, nativeTheme } from 'electron';
+import { getMurmurTrayIcon, type TrayIconVariant } from './app-icon.js';
 
 let tray: Tray | null = null;
 
+function getTrayIconVariant(): TrayIconVariant {
+  if (nativeTheme.inForcedColorsMode || nativeTheme.shouldUseHighContrastColors) {
+    return 'high-contrast';
+  }
+  return nativeTheme.shouldUseDarkColorsForSystemIntegratedUI ? 'dark' : 'light';
+}
+
 function getTrayIcon(): Electron.NativeImage {
-  const icon = getMurmurTrayIcon();
+  const icon = getMurmurTrayIcon(getTrayIconVariant());
   if (!icon) {
     throw new Error('Eve tray icon resource is missing or invalid');
   }
   return icon;
+}
+
+function refreshTrayIcon(): void {
+  tray?.setImage(getTrayIcon());
 }
 
 export function setupTray(onShowMainWindow?: () => void): void {
@@ -37,6 +48,7 @@ export function setupTray(onShowMainWindow?: () => void): void {
   ]);
 
   tray.setContextMenu(contextMenu);
+  nativeTheme.on('updated', refreshTrayIcon);
 
   // Left-click also shows the main window
   tray.on('click', () => {
