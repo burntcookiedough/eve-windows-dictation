@@ -13,6 +13,7 @@ const titleBar = source('../src/renderer/app/components/TitleBar.svelte');
 const hotkeyModal = source('../src/renderer/app/components/HotkeyCaptureModal.svelte');
 const toggle = source('../src/renderer/app/components/Toggle.svelte');
 const overlayView = source('../src/renderer/overlay/App.svelte');
+const overlayCss = source('../src/renderer/overlay/app.css');
 const overlayText = source('../src/renderer/overlay/components/TextDisplay.svelte');
 const overlayPill = source('../src/renderer/overlay/components/Pill.svelte');
 
@@ -31,6 +32,9 @@ describe('Gate 5 accessibility contracts', () => {
     expect(appCss).toContain('@media (forced-colors: active)');
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
     expect(appCss).toContain('@media (prefers-reduced-transparency: reduce)');
+    expect(overlayCss).toContain('@media (forced-colors: active)');
+    expect(overlayCss).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(overlayCss).toContain('@media (prefers-reduced-transparency: reduce)');
   });
 
   test('keeps switch semantics and a minimum target', () => {

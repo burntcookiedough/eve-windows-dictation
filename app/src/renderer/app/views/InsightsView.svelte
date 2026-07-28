@@ -9,8 +9,6 @@
   } from '$shared/types';
   import { createLatestRequestGuard } from '../latest-request';
 
-  type TrendMetric = 'words' | 'audio' | 'processing' | 'wpm';
-
   const ranges: Array<{ id: InsightsRange; label: string }> = [
     { id: 'today', label: 'Today' },
     { id: '7d', label: '7D' },
@@ -18,25 +16,12 @@
     { id: 'all', label: 'All' },
   ];
 
-  const trendMetrics: Array<{ id: TrendMetric; label: string }> = [
-    { id: 'words', label: 'Words' },
-    { id: 'audio', label: 'Dictation' },
-    { id: 'processing', label: 'Processing' },
-    { id: 'wpm', label: 'WPM' },
-  ];
-
   let range = $state<InsightsRange>('7d');
-  let trendMetric = $state<TrendMetric>('words');
   let insights: InsightsResponse | null = $state(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
   const insightRequests = createLatestRequestGuard();
-
-  let peakTrendValue = $derived.by(() => {
-    if (!insights) return 0;
-    return Math.max(...insights.trends.map((point) => getTrendValue(point, trendMetric)), 0);
-  });
 
   async function loadInsights() {
     const requestId = insightRequests.begin();
@@ -78,11 +63,6 @@
     return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
   }
 
-  function formatProcessing(ms: number): string {
-    if (ms < 1000) return `${Math.round(ms)}ms`;
-    return formatDuration(ms / 1000);
-  }
-
   function formatPercent(value: number): string {
     if (value <= 0) return '0%';
     return `${Math.round(value * 100)}%`;
@@ -98,48 +78,6 @@
       month: 'short',
       day: 'numeric',
     });
-  }
-
-  function getTrendValue(point: InsightsTrendPoint, metric: TrendMetric): number {
-    switch (metric) {
-      case 'words':
-        return point.words;
-      case 'audio':
-        return point.audioSeconds / 60;
-      case 'processing':
-        return point.processingMs / 1000;
-      case 'wpm':
-        return point.avgWpm;
-    }
-  }
-
-  function formatTrendValue(value: number, metric: TrendMetric): string {
-    switch (metric) {
-      case 'words':
-        return formatInteger(value);
-      case 'audio':
-        return `${value.toFixed(value >= 10 ? 0 : 1)}m`;
-      case 'processing':
-        return `${value.toFixed(value >= 10 ? 0 : 1)}s`;
-      case 'wpm':
-        return formatInteger(value);
-    }
-  }
-
-  function getBarGeometry(index: number, total: number) {
-    const gap = total > 90 ? 1 : total > 45 ? 2 : 6;
-    const availableGap = gap * Math.max(0, total - 1);
-    const width = total > 0 ? Math.max(1, (520 - availableGap) / total) : 1;
-    return {
-      x: index * (width + gap),
-      width,
-    };
-  }
-
-  function barHeight(point: InsightsTrendPoint): number {
-    if (!peakTrendValue) return 2;
-    const value = getTrendValue(point, trendMetric);
-    return Math.max((value / peakTrendValue) * 112, value > 0 ? 4 : 2);
   }
 
   function truncateText(text: string): string {
@@ -343,8 +281,9 @@
 
 {#snippet MiniLine(points: InsightsTrendPoint[])}
   {@const recent = points.slice(-7)}
-  {@const peak = Math.max(...recent.map((point) => point.audioSeconds), 1)}
-  {@const coordinates = recent.map((point, index) => `${index * 25 + 5},${48 - (point.audioSeconds / peak) * 38}`).join(' ')}
+  {@const averages = recent.map((point) => point.dictations > 0 ? point.audioSeconds / point.dictations : 0)}
+  {@const peak = Math.max(...averages, 1)}
+  {@const coordinates = averages.map((average, index) => `${index * 25 + 5},${48 - (average / peak) * 38}`).join(' ')}
   <svg viewBox="0 0 160 52" class="h-[52px] w-40 shrink-0" role="img" aria-label="Average dictation length trend">
     <polyline
       points={coordinates}
@@ -355,8 +294,8 @@
       stroke-linejoin="round"
     />
     {#each recent as point, index}
-      <circle cx={index * 25 + 5} cy={48 - (point.audioSeconds / peak) * 38} r="2" class="fill-zinc-200">
-        <title>{point.label}: {formatDuration(point.audioSeconds)}</title>
+      <circle cx={index * 25 + 5} cy={48 - (averages[index] / peak) * 38} r="2" class="fill-zinc-200">
+        <title>{point.label}: {formatDuration(averages[index])} average</title>
       </circle>
     {/each}
   </svg>

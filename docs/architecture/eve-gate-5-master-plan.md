@@ -292,7 +292,7 @@ main application rather than treating overlay screenshots as proof of operabilit
 
 ### Gate A and PR acceptance
 
-- `python scripts/version.py check`;
+- `/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd <repo>; python scripts/version.py check"`;
 - focused Gate 5 tests;
 - complete app tests;
 - History/Insights checks;
@@ -398,7 +398,8 @@ are not duplicated in Gate 5B's changed-file count.
 
 1. Validate the complete tracked source, app tests, server tests, TypeScript, production
    build, runtime/engine/CUDA closure, and exact clean head.
-2. Run exactly one `bun run package:win`.
+2. Run exactly one
+   `/mnt/c/Program\ Files/PowerShell/7/pwsh.exe -NoProfile -Command "cd <repo>\app; bun run package:win"`.
 3. Record fresh output sizes and SHA-256/SHA-512 values.
 4. Create independent hash-verified artifact sets only if repair consumes an installer
    payload.

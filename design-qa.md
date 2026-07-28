@@ -91,4 +91,4 @@ captures contain synthetic data only and are intentionally excluded from Git.
 - P3 polish: cactus icon/resource replacement belongs to Gate 5B and is not a Gate 5A
   defect.
 
-Final result: **Passed**
+final result: passed

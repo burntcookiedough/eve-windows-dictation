@@ -265,7 +265,7 @@
 
     <!-- Status Card -->
     <SettingsSection title="Status">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full" role="status" aria-live="polite">
+      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
         <div class="flex items-center justify-between mb-4">
           <!-- Status Badge -->
           <div class="flex items-center gap-3">
@@ -276,7 +276,12 @@
               {/if}
               <span class="relative w-3 h-3 rounded-full {statusDisplay.bgColor}"></span>
             </div>
-            <span class="text-lg font-medium {statusDisplay.color}">
+            <span
+              class="text-lg font-medium {statusDisplay.color}"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {statusDisplay.label}
             </span>
             {#if !serverState.managed && serverState.status === 'running'}

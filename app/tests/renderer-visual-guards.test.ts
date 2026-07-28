@@ -46,6 +46,8 @@ describe('renderer visual regression guards', () => {
     expect(insightsView).toContain('Dictation time by day');
     expect(insightsView).toContain("MiniBars(insights.trends, 'audioSeconds')");
     expect(insightsView).toContain('MiniLine(insights.trends)');
+    expect(insightsView).toContain('point.audioSeconds / point.dictations');
+    expect(insightsView).toContain('formatDuration(averages[index])');
     expect(insightsView).toContain('insights.trends.slice(-7)');
     expect(insightsView).not.toContain('gpt-4o-transcribe');
   });

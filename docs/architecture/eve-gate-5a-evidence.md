@@ -100,3 +100,31 @@ Local Gate A passed from implementation commit `fad9515`. Before Ready:
 
 Leave Gate 5A Ready but unmerged. Gate 5B requires separate authorization and must
 branch from the accepted Gate 5A state.
+
+## CodeRabbit and focused bloat disposition
+
+The Ready review identified seven inline findings. Five were accepted:
+
+- the average-duration line now plots `audioSeconds / dictations`, including a
+  zero-dictation guard and matching accessible titles;
+- the Server live region is scoped to the changing status label instead of the card
+  containing controls;
+- overlay forced-colors, reduced-motion, and reduced-transparency CSS is included in
+  the accessibility guard;
+- `design-qa.md` ends with the exact required terminal status literal; and
+- WSL-facing runtime examples in the master plan invoke Windows PowerShell explicitly.
+
+Two cursor-only suggestions were rejected. A Windows title bar conventionally retains
+the arrow cursor rather than implying canvas-style grab behavior, and a native
+`select` conventionally retains the platform cursor rather than link/button pointer
+semantics. Neither cursor changed usability, accessibility, or the approved target.
+
+The focused bloat audit removed 71 lines of obsolete Insights trend-selector state,
+formatting, and chart geometry left behind when the approved fixed Insights
+composition replaced the earlier generic chart. Strict TypeScript unused checks found
+no additional unused code in the changed renderer or overlay files. The two pre-existing
+unused main-process findings are outside Gate 5A and were not churned.
+
+Targeted source assertions and TypeScript passed locally. The correction must retain
+the same 25-file PR scope and pass hosted app tests, server tests, production build, and
+CodeRabbit re-review before the Ready handoff is final.
