@@ -22,11 +22,18 @@ export function getMurmurIcon(fileName = 'icon.ico'): Electron.NativeImage | und
   return undefined;
 }
 
-export function getMurmurTrayIcon(): Electron.NativeImage | undefined {
-  const icon = getMurmurIcon('icon.ico') ?? getMurmurIcon('icon.png');
+export type TrayIconVariant = 'light' | 'dark' | 'high-contrast';
+
+export function getMurmurTrayIcon(
+  variant: TrayIconVariant = 'dark'
+): Electron.NativeImage | undefined {
+  const icon =
+    getMurmurIcon(`tray-${variant}.ico`) ??
+    getMurmurIcon('icon.ico') ??
+    getMurmurIcon('icon.png');
   if (!icon || icon.isEmpty()) {
     return undefined;
   }
 
-  return icon.resize({ width: 16, height: 16, quality: 'best' });
+  return icon;
 }

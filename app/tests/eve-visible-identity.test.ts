@@ -36,4 +36,20 @@ describe('Eve visible identity', () => {
     expect(handlers).toContain("defaultPath: 'eve-hotwords.csv'");
     expect(handlers).not.toContain("defaultPath: 'murmur-hotwords.csv'");
   });
+
+  test('uses the cactus resource family across application and tray surfaces', () => {
+    const appIcon = readFileSync(
+      path.join(APP_ROOT, 'src/main/services/app-icon.ts'),
+      'utf8'
+    );
+    const tray = readFileSync(
+      path.join(APP_ROOT, 'src/main/services/tray.ts'),
+      'utf8'
+    );
+
+    expect(appIcon).toContain('tray-${variant}.ico');
+    expect(tray).toContain('nativeTheme.inForcedColorsMode');
+    expect(tray).toContain('nativeTheme.shouldUseDarkColorsForSystemIntegratedUI');
+    expect(tray).toContain("nativeTheme.on('updated', refreshTrayIcon)");
+  });
 });

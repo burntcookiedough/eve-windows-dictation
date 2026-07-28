@@ -16,6 +16,7 @@
     "dev:main": "bun run build:main --watch",
     "dev:electron": "NODE_ENV=development node scripts/wait-for-vite.js && electron .",
     "build": "bun run build:main && bun run build:renderer",
+    "build:icons": "electron scripts/build-icons.mjs",
     "build:main": "node scripts/build-main.js",
     "build:renderer": "vite build",
     "test:history": "node tests/run-history-insights-check.mjs",
