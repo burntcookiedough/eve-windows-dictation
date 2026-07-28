@@ -142,5 +142,17 @@ its frozen scope forbids unrelated dependency churn. This is recorded as the
 current repository baseline for a separately scoped dependency-maintenance
 follow-up, not represented as a Gate 5B regression or silently suppressed.
 
-Hosted CI, CodeRabbit review, exact final head, and clean worktree results are
-recorded only after they complete.
+Hosted acceptance completed on 2026-07-28:
+
+- PR `#20` reached Ready for review at accepted code/test head
+  `c30fc663e549b29eddcacba2754036d247f3d9d2`.
+- `Version Consistency`, `App Test And Build`, and `Server Tests` passed on that
+  head.
+- A real CodeRabbit review produced one actionable test finding. The package
+  script's deterministic icon check is now executed by the regression test
+  through the current Bun runtime; focused and full Gate A validation passed.
+- The single review thread was answered and resolved, leaving zero unresolved
+  threads. CodeRabbit's final status was successful.
+- The pre-record worktree was clean and the PR contained exactly the 15 planned
+  Gate 5B files. This evidence-only record does not alter the accepted packaged
+  resources, application behavior, installer identity, or lifecycle result.
