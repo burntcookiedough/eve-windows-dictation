@@ -78,5 +78,14 @@ describe('Gate 5B cactus resources', () => {
     expect(script).toContain("const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]");
     expect(script).toContain("process.argv.includes('--check')");
     expect(script).not.toContain('sharp');
+
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'run', 'build:icons', '--', '--check'],
+      cwd: APP_ROOT,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const output = `${result.stderr.toString()}${result.stdout.toString()}`;
+    expect(result.exitCode, output).toBe(0);
   });
 });
