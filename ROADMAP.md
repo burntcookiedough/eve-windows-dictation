@@ -4,26 +4,42 @@ This roadmap separates shipped behavior from design and research. It is not a re
 
 ## Current baseline
 
-v0.6.3 is the production baseline. It retains the Murmur application identity and ships a packaged Python runtime with faster-whisper/CTranslate2 and NeMo/PyTorch/CUDA dependency stacks. Models download separately on first use.
+Eve v0.7.0 is the prepared source baseline; it is not yet a public release. The latest
+public download remains the historical Murmur v0.6.3 release. The prepared Eve source
+retains the frozen Murmur installer chain while using the Eve product identity, an
+isolated Eve profile, the approved visual/accessibility system, and packaged cactus
+resources. Its portable Python runtime and separately downloaded models remain subject to
+their existing release gates.
 
-The repository is now standalone under `burntcookiedough/eve-windows-dictation`, and its release configuration targets that repository. Existing app IDs, installer identity, update behavior, and user-data paths remain unchanged.
+The repository is standalone under `burntcookiedough/eve-windows-dictation`, and its
+release configuration targets that repository. Existing app IDs, installer identity,
+update behavior, and user-data paths remain unchanged.
 
-## Next: application-identity migration design
+## Completed: application identity and visual system
 
-The proposed technical contract is documented in [ADR-001](docs/architecture/adr-001-eve-application-identity-migration.md). Trademark work is currently deferred; it remains separate from the compatibility design.
+The technical contract is documented in [ADR-001](docs/architecture/adr-001-eve-application-identity-migration.md).
+Gates 1–4 completed the compatibility, fresh-profile, visible-identity, and
+AppUserModelID cutover. Gates 5A and 5B completed the approved renderer/accessibility
+system and cactus Windows resources. Trademark work remains separate and incomplete.
 
-Before an Eve-branded binary is produced:
+Before Eve v0.7.0 is published:
 
-- complete manual trademark checks in relevant software classes and markets;
-- inventory every app ID, executable, installer, protocol, package, update, and data-path identifier;
-- establish a fresh Eve profile that never imports Murmur History, settings, hotwords, browser storage, credentials, or external-server configuration;
-- preserve the inactive Murmur data directory without reading, moving, or deleting personal files; permit only a bounded `server.pid` ownership check when required to prevent process conflicts;
-- test clean install, upgrade, downgrade/rollback, repair, startup registration, and uninstall without deleting either data profile or shared model caches;
-- complete the binary-distribution third-party notice audit.
+- complete the binary-distribution third-party notice audit;
+- resolve or explicitly accept the Eve name/mark publication risk; and
+- run a fresh exact-head release-candidate lifecycle, then follow a separately approved
+  tag/publication procedure.
 
-## Later: visual system
+The completed gates established a fresh Eve profile that does not automatically import
+Murmur History, settings, hotwords, browser storage, credentials, or external-server
+configuration. They also proved the compatibility lifecycle for the accepted candidates;
+the public release still requires fresh Gate 6 evidence.
 
-Design Eve's icon, typography, color, windows, overlay, onboarding, and public screenshots after identity and migration constraints are fixed. Do not reskin the existing product and treat that as an identity migration.
+## Next: release readiness
+
+Gate 6 prepares version metadata, release notes, factual status records, NOTICE readiness,
+and publication controls. It does not publish merely because the source is prepared. The
+final package, lifecycle, merge, tag, release, and public-download checks remain separate
+approval gates.
 
 ## Later: component-based distribution
 

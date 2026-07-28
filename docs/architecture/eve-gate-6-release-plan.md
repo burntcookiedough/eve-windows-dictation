@@ -1,6 +1,6 @@
 # Eve Gate 6 release plan
 
-- Status: Gate 6A planning contract committed; mechanical 6A work pending review
+- Status: Gate 6A contract parent-reviewed and passed; mechanical implementation in progress
 - Repository: `burntcookiedough/eve-windows-dictation`
 - Canonical base: `0d6605d07aa783036d61fc93af7ce043a808f1a6`
 - Tracking issue: [#21](https://github.com/burntcookiedough/eve-windows-dictation/issues/21)
@@ -479,9 +479,9 @@ explicit authorization.
 |---|---|---|---|---|
 | Canonical Gate 6 base | Passed | Fresh clone; exact `0d6605d…`; clean `trunk` | Complete | Preserve base ancestry. |
 | Gate 6 tracking issue | Passed | Issue #21, `ready`, execution allowed | Complete | Keep issue state authoritative. |
-| Permanent Gate 6 contract | In progress | This file and its first commit | Parent review | Review allowlist, blockers, and next commands. |
-| Gate 6A mechanical edits | Planned | Future scoped commit(s) | Continue only after contract review | Apply factual/version/release-note/notice work. |
-| Gate 6A local Gate A | Planned | `eve-gate-6a-evidence.md` | None beyond authorized 6A | Run full validation without dependency mutation. |
+| Permanent Gate 6 contract | Passed | Commit `e33c9304f6c133867c6a9f0948a943a75fedaca5`; independent parent review | Complete | Preserve the allowlist and stage boundaries. |
+| Gate 6A mechanical edits | Passed | Scoped 13-file diff and `eve-gate-6a-evidence.md` | Complete | Commit the reviewed release-preparation head. |
+| Gate 6A local Gate A | Passed | `eve-gate-6a-evidence.md`; exact scope/privacy/frozen-boundary audit | Complete | Push and open the draft PR. |
 | Gate 6A PR/CI/CodeRabbit | Planned | Future PR and hosted checks | None for draft/review | Leave Ready but unmerged. |
 | Gate 6A merge | Deferred | Future merge commit | Explicit authorization | Do not infer from Ready status. |
 | Gate 6B exact candidate | Deferred | External artifact/lifecycle evidence | Separate explicit authorization | One package and full lifecycle only. |
