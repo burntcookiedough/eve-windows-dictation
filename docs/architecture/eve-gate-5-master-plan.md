@@ -1,9 +1,9 @@
 # Eve Gate 5 master plan
 
-Status: Gate 5A authorized; Gate 5B planned and separately gated  
-Canonical base: `20a781f78d638bc5884a8e85511cf3c8507eca4b`  
-Gate 4 accepted head contained by the base: `e2086fd8f36020ced09483311dde0530d6b8fe77`  
-Repository: `burntcookiedough/eve-windows-dictation`  
+- Status: Gate 5A authorized; Gate 5B planned and separately gated
+- Canonical base: `20a781f78d638bc5884a8e85511cf3c8507eca4b`
+- Gate 4 accepted head contained by the base: `e2086fd8f36020ced09483311dde0530d6b8fe77`
+- Repository: `burntcookiedough/eve-windows-dictation`
 Last updated: 2026-07-27 (Asia/Calcutta)
 
 ## Purpose and user outcome
