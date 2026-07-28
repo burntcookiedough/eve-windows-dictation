@@ -9,8 +9,6 @@
   } from '$shared/types';
   import { createLatestRequestGuard } from '../latest-request';
 
-  type TrendMetric = 'words' | 'audio' | 'processing' | 'wpm';
-
   const ranges: Array<{ id: InsightsRange; label: string }> = [
     { id: 'today', label: 'Today' },
     { id: '7d', label: '7D' },
@@ -18,25 +16,16 @@
     { id: 'all', label: 'All' },
   ];
 
-  const trendMetrics: Array<{ id: TrendMetric; label: string }> = [
-    { id: 'words', label: 'Words' },
-    { id: 'audio', label: 'Dictation' },
-    { id: 'processing', label: 'Processing' },
-    { id: 'wpm', label: 'WPM' },
-  ];
-
   let range = $state<InsightsRange>('7d');
-  let trendMetric = $state<TrendMetric>('words');
   let insights: InsightsResponse | null = $state(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
+  let rangeMenuContainer: HTMLDivElement | undefined = $state(undefined);
+  let rangeMenu: HTMLDivElement | undefined = $state(undefined);
+  let rangeButton: HTMLButtonElement | undefined = $state(undefined);
+  let rangeMenuOpen = $state(false);
   const insightRequests = createLatestRequestGuard();
-
-  let peakTrendValue = $derived.by(() => {
-    if (!insights) return 0;
-    return Math.max(...insights.trends.map((point) => getTrendValue(point, trendMetric)), 0);
-  });
 
   async function loadInsights() {
     const requestId = insightRequests.begin();
@@ -59,9 +48,60 @@
   }
 
   function selectRange(nextRange: InsightsRange) {
+    rangeMenuOpen = false;
+    rangeButton?.focus();
     if (range === nextRange) return;
     range = nextRange;
     loadInsights();
+  }
+
+  function openRangeMenu(focus: 'first' | 'selected' | 'last' = 'selected') {
+    rangeMenuOpen = true;
+    queueMicrotask(() => {
+      const options = Array.from(rangeMenu?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+      const selectedIndex = ranges.findIndex((option) => option.id === range);
+      const targetIndex = focus === 'first' ? 0 : focus === 'last' ? options.length - 1 : selectedIndex;
+      options[Math.max(0, targetIndex)]?.focus();
+    });
+  }
+
+  function handleRangeButtonKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openRangeMenu(event.key === 'ArrowDown' ? 'first' : 'last');
+    }
+  }
+
+  function handleRangeMenuKeydown(event: KeyboardEvent) {
+    const options = Array.from(rangeMenu?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      rangeMenuOpen = false;
+      rangeButton?.focus();
+      return;
+    }
+
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      options[event.key === 'Home' ? 0 : options.length - 1]?.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = (currentIndex + direction + options.length) % options.length;
+      options[nextIndex]?.focus();
+    }
+  }
+
+  function handleRangeMenuFocusout(event: FocusEvent) {
+    const nextTarget = event.relatedTarget;
+    if (!(nextTarget instanceof Node) || !rangeMenuContainer?.contains(nextTarget)) {
+      rangeMenuOpen = false;
+    }
   }
 
   function formatInteger(value: number): string {
@@ -76,11 +116,6 @@
     const hours = Math.floor(minutes / 60);
     const remainingMinutes = minutes % 60;
     return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-  }
-
-  function formatProcessing(ms: number): string {
-    if (ms < 1000) return `${Math.round(ms)}ms`;
-    return formatDuration(ms / 1000);
   }
 
   function formatPercent(value: number): string {
@@ -100,48 +135,6 @@
     });
   }
 
-  function getTrendValue(point: InsightsTrendPoint, metric: TrendMetric): number {
-    switch (metric) {
-      case 'words':
-        return point.words;
-      case 'audio':
-        return point.audioSeconds / 60;
-      case 'processing':
-        return point.processingMs / 1000;
-      case 'wpm':
-        return point.avgWpm;
-    }
-  }
-
-  function formatTrendValue(value: number, metric: TrendMetric): string {
-    switch (metric) {
-      case 'words':
-        return formatInteger(value);
-      case 'audio':
-        return `${value.toFixed(value >= 10 ? 0 : 1)}m`;
-      case 'processing':
-        return `${value.toFixed(value >= 10 ? 0 : 1)}s`;
-      case 'wpm':
-        return formatInteger(value);
-    }
-  }
-
-  function getBarGeometry(index: number, total: number) {
-    const gap = total > 90 ? 1 : total > 45 ? 2 : 6;
-    const availableGap = gap * Math.max(0, total - 1);
-    const width = total > 0 ? Math.max(1, (520 - availableGap) / total) : 1;
-    return {
-      x: index * (width + gap),
-      width,
-    };
-  }
-
-  function barHeight(point: InsightsTrendPoint): number {
-    if (!peakTrendValue) return 2;
-    const value = getTrendValue(point, trendMetric);
-    return Math.max((value / peakTrendValue) * 112, value > 0 ? 4 : 2);
-  }
-
   function truncateText(text: string): string {
     const cleaned = text.replace(/\s+/g, ' ').trim();
     return cleaned.length > 88 ? `${cleaned.slice(0, 85)}...` : cleaned;
@@ -156,7 +149,16 @@
         loadInsights();
       }
     };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rangeMenuOpen && !rangeMenuContainer?.contains(event.target as Node)) {
+        rangeMenuOpen = false;
+        if (rangeMenu?.contains(document.activeElement)) {
+          rangeButton?.focus({ preventScroll: true });
+        }
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('pointerdown', handlePointerDown);
 
     const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry(() => {
       loadInsights();
@@ -165,32 +167,68 @@
     return () => {
       insightRequests.invalidate();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('pointerdown', handlePointerDown);
       unsubscribeNewHistoryEntry();
     };
   });
 </script>
 
-<div class="h-full flex flex-col p-4 pr-2 sm:p-6 sm:pr-2">
-  <div bind:this={scrollContainer} class="flex-1 overflow-y-auto pr-2 sm:pr-4">
-    <div class="mx-auto w-full max-w-5xl">
-    <div class="mb-5 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+<div class="mx-auto flex h-full w-full max-w-[560px] flex-col px-4 py-4 pr-2">
+  <div bind:this={scrollContainer} class="flex-1 overflow-y-auto pr-3">
+    <div class="mx-auto w-full">
+    <div class="mb-4 flex items-center justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="text-xl font-semibold text-zinc-100">Insights</h1>
-        <p class="mt-1 text-xs text-zinc-500">Local aggregate profile from your transcription history</p>
+        <h1 class="sr-only">Insights</h1>
+        <p class="text-[11px] text-zinc-500">Local insights from your transcription history</p>
       </div>
 
-      <div class="flex w-full shrink-0 rounded-full border border-zinc-800 bg-zinc-900/70 p-1 sm:w-auto">
-        {#each ranges as option}
-          <button
-            onclick={() => selectRange(option.id)}
-            class="min-w-0 flex-1 px-3 py-1.5 text-xs font-medium rounded-full transition-colors cursor-pointer sm:flex-none
-              {range === option.id
-                ? 'bg-zinc-100 text-zinc-950'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}"
+      <div bind:this={rangeMenuContainer} class="relative shrink-0">
+        <button
+          bind:this={rangeButton}
+          type="button"
+          aria-label="Insights time range"
+          aria-haspopup="listbox"
+          aria-expanded={rangeMenuOpen}
+          aria-controls="insights-range-listbox"
+          class="flex min-w-[76px] items-center justify-between gap-2 rounded-[8px] border border-white/10 bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.055] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-200"
+          onclick={() => rangeMenuOpen ? (rangeMenuOpen = false) : openRangeMenu()}
+          onkeydown={handleRangeButtonKeydown}
+        >
+          <span>{ranges.find((option) => option.id === range)?.label}</span>
+          <svg viewBox="0 0 12 12" class="h-3 w-3 text-zinc-500" aria-hidden="true">
+            <path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        {#if rangeMenuOpen}
+          <div
+            bind:this={rangeMenu}
+            id="insights-range-listbox"
+            role="listbox"
+            tabindex="-1"
+            aria-label="Insights time range"
+            class="absolute right-0 z-30 mt-1.5 w-28 overflow-hidden rounded-[9px] border border-white/12 bg-zinc-950/98 p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+            onkeydown={handleRangeMenuKeydown}
+            onfocusout={handleRangeMenuFocusout}
           >
-            {option.label}
-          </button>
-        {/each}
+            {#each ranges as option}
+              <button
+                type="button"
+                role="option"
+                tabindex="-1"
+                aria-selected={option.id === range}
+                class="flex w-full items-center justify-between rounded-[6px] px-2.5 py-2 text-left text-[11px] transition-colors
+                  {option.id === range ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'}"
+                onclick={() => selectRange(option.id)}
+              >
+                <span>{option.label}</span>
+                {#if option.id === range}
+                  <span class="text-zinc-400" aria-hidden="true">✓</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -211,90 +249,62 @@
       </div>
     {:else}
       {#if insights.indexing.isIndexing}
-        <div class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+        <div class="mb-4 rounded-lg border border-white/15 bg-white/[0.06] px-4 py-3 text-xs text-zinc-200" role="status">
           Indexing older history: {formatInteger(insights.indexing.processedEntries)} of {formatInteger(insights.indexing.totalEntries)} entries included.
         </div>
       {/if}
 
-      <div class="grid grid-cols-2 gap-3">
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Words spoken</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalWords)}</p>
-          <p class="mt-1 text-xs text-emerald-400">{formatInteger(insights.summary.avgWordsPerDictation)} avg / dictation</p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Dictations</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatInteger(insights.summary.totalDictations)}</p>
-          <p class="mt-1 text-xs text-zinc-500">
-            {insights.summary.busiestDay ? `${insights.summary.busiestDay.label} busiest` : 'No active day'}
-          </p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Dictation time</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
-          <p class="mt-1 text-xs text-amber-400">{formatInteger(insights.summary.avgWpm)} WPM</p>
-        </div>
-        <div class="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-          <p class="text-xs text-zinc-500">Processing</p>
-          <p class="mt-2 text-2xl font-semibold text-zinc-100">{formatProcessing(insights.summary.totalProcessingMs)}</p>
-          <p class="mt-1 text-xs text-emerald-400">{formatRatio(insights.summary.avgProcessingRatio)} realtime</p>
-        </div>
-      </div>
-
-      <div class="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div class="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-          <div class="min-w-0">
-            <h2 class="text-sm font-medium text-zinc-200">Trends</h2>
-            <p class="mt-1 text-xs text-zinc-500">
-              Confidence {formatPercent(insights.summary.avgConfidence)}
-              <span class="mx-1 text-zinc-700">/</span>
-              {insights.summary.longestStreakDays} day streak
+      <div class="grid grid-cols-1 gap-2.5">
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictation-time-heading">
+          <div>
+            <h2 id="dictation-time-heading" class="text-xs text-zinc-400">Dictation time</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
+            <p class="mt-2 text-[11px] text-zinc-500">Total dictation time</p>
+          </div>
+          {@render MiniBars(insights.trends, 'audioSeconds')}
+        </section>
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictations-heading">
+          <div>
+            <h2 id="dictations-heading" class="text-xs text-zinc-400">Dictations</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">{formatInteger(insights.summary.totalDictations)}</p>
+            <p class="mt-2 text-[11px] text-zinc-500">Total dictations</p>
+          </div>
+          <div class="grid w-40 grid-cols-8 gap-1.5" role="img" aria-label="{formatInteger(insights.summary.totalDictations)} total dictations">
+            {#each Array(48) as _, index}
+              <span class="h-2 w-2 rounded-full {index < Math.min(insights.summary.totalDictations, 48) ? 'bg-zinc-300/75' : 'bg-zinc-700/45'}"></span>
+            {/each}
+          </div>
+        </section>
+        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="average-length-heading">
+          <div>
+            <h2 id="average-length-heading" class="text-xs text-zinc-400">Average dictation length</h2>
+            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">
+              {formatDuration(insights.summary.totalDictations > 0 ? insights.summary.totalAudioSeconds / insights.summary.totalDictations : 0)}
             </p>
+            <p class="mt-2 text-[11px] text-zinc-500">Per dictation</p>
           </div>
-          <div class="grid w-full grid-cols-4 rounded-lg bg-zinc-950/60 p-1 sm:w-auto">
-            {#each trendMetrics as metric}
-              <button
-                onclick={() => (trendMetric = metric.id)}
-                class="px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer
-                  {trendMetric === metric.id
-                    ? 'bg-zinc-800 text-zinc-100'
-                    : 'text-zinc-500 hover:text-zinc-300'}"
-              >
-                {metric.label}
-              </button>
-            {/each}
-          </div>
-        </div>
+          {@render MiniLine(insights.trends)}
+        </section>
 
-        <div class="mx-auto h-44 w-full max-w-3xl overflow-hidden">
-          <svg viewBox="0 0 520 176" preserveAspectRatio="none" class="h-full w-full">
-            <line x1="0" y1="137" x2="520" y2="137" stroke="rgb(63 63 70 / 0.6)" stroke-width="1" />
-            {#each insights.trends as point, index}
-              {@const geometry = getBarGeometry(index, insights.trends.length)}
-              {@const height = barHeight(point)}
-              {@const y = 137 - height}
-              {@const value = getTrendValue(point, trendMetric)}
-              <rect
-                x={geometry.x}
-                y={y}
-                width={geometry.width}
-                height={height}
-                rx="3"
-                class="{value > 0 ? 'fill-emerald-500/75' : 'fill-zinc-800'}"
-              />
-              {#if insights.trends.length <= 14 || index % Math.ceil(insights.trends.length / 8) === 0}
-                <text x={geometry.x + geometry.width / 2} y="160" text-anchor="middle" class="fill-zinc-500 text-[10px]">
-                  {point.label}
-                </text>
-              {/if}
-            {/each}
-            {#if peakTrendValue > 0}
-              <text x="0" y="12" class="fill-zinc-500 text-[10px]">
-                {formatTrendValue(peakTrendValue, trendMetric)}
-              </text>
-            {/if}
-          </svg>
-        </div>
+        <section class="overflow-hidden rounded-[9px] border border-white/10 bg-white/[0.025]" aria-labelledby="day-table-heading">
+          <h2 id="day-table-heading" class="border-b border-white/[0.08] px-3 py-2.5 text-xs text-zinc-300">Dictation time by day</h2>
+          <table class="w-full text-left text-[11px]">
+            <thead class="text-zinc-500">
+              <tr><th class="px-3 py-2 font-normal">Day</th><th class="px-3 py-2 font-normal">Time</th><th class="px-3 py-2 font-normal"><span class="sr-only">Relative duration</span></th></tr>
+            </thead>
+            <tbody class="divide-y divide-white/[0.07] text-zinc-300">
+              {#each insights.trends.slice(-7) as point}
+                <tr>
+                  <th scope="row" class="px-3 py-2 font-normal">{point.label}</th>
+                  <td class="px-3 py-2 tabular-nums">{formatDuration(point.audioSeconds)}</td>
+                  <td class="w-1/2 px-3 py-2">
+                    <span class="block h-1 rounded-full bg-zinc-300/70" style:width={`${Math.max(4, (point.audioSeconds / Math.max(...insights.trends.map((trend) => trend.audioSeconds), 1)) * 100)}%`}></span>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </section>
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-4">
@@ -314,12 +324,12 @@
               <p class="mt-1 text-lg font-medium text-zinc-100">{formatPercent(insights.summary.avgConfidence)}</p>
             </div>
             <div class="rounded-lg bg-zinc-950/50 px-3 py-3">
-              <p class="text-xs text-zinc-500">Realtime</p>
-              <p class="mt-1 text-lg font-medium text-emerald-400">{formatRatio(insights.summary.avgProcessingRatio)}</p>
+              <p class="text-xs text-zinc-400">Realtime</p>
+              <p class="mt-1 text-lg font-medium text-zinc-100">{formatRatio(insights.summary.avgProcessingRatio)}</p>
             </div>
             <div class="rounded-lg bg-zinc-950/50 px-3 py-3">
-              <p class="text-xs text-zinc-500">Streak</p>
-              <p class="mt-1 text-lg font-medium text-amber-400">{insights.summary.longestStreakDays}d</p>
+              <p class="text-xs text-zinc-400">Streak</p>
+              <p class="mt-1 text-lg font-medium text-zinc-100">{insights.summary.longestStreakDays}d</p>
             </div>
           </div>
         </section>
@@ -345,6 +355,53 @@
   </div>
 </div>
 
+{#snippet MiniBars(points: InsightsTrendPoint[], metric: 'dictations' | 'words' | 'audioSeconds' | 'processingMs')}
+  {@const peak = Math.max(...points.map((point) => point[metric]), 1)}
+  <svg
+    viewBox="0 0 160 52"
+    class="h-[52px] w-40 shrink-0"
+    role="img"
+    aria-label="Recent {metric === 'audioSeconds' ? 'dictation time' : metric} trend"
+  >
+    <line x1="0" y1="49" x2="160" y2="49" stroke="rgb(113 113 122 / 0.35)" stroke-width="1" />
+    {#each points.slice(-7) as point, index}
+      {@const height = Math.max(3, (point[metric] / peak) * 42)}
+      <rect
+        x={index * 22 + 3}
+        y={49 - height}
+        width="12"
+        height={height}
+        rx="2"
+        class="fill-zinc-300/80"
+      >
+        <title>{point.label}: {point[metric]}</title>
+      </rect>
+    {/each}
+  </svg>
+{/snippet}
+
+{#snippet MiniLine(points: InsightsTrendPoint[])}
+  {@const recent = points.slice(-7)}
+  {@const averages = recent.map((point) => point.dictations > 0 ? point.audioSeconds / point.dictations : 0)}
+  {@const peak = Math.max(...averages, 1)}
+  {@const coordinates = averages.map((average, index) => `${index * 25 + 5},${48 - (average / peak) * 38}`).join(' ')}
+  <svg viewBox="0 0 160 52" class="h-[52px] w-40 shrink-0" role="img" aria-label="Average dictation length trend">
+    <polyline
+      points={coordinates}
+      fill="none"
+      stroke="rgb(212 212 216 / 0.9)"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    {#each recent as point, index}
+      <circle cx={index * 25 + 5} cy={48 - (averages[index] / peak) * 38} r="2" class="fill-zinc-200">
+        <title>{point.label}: {formatDuration(averages[index])} average</title>
+      </circle>
+    {/each}
+  </svg>
+{/snippet}
+
 {#snippet WordCloud(title: string, words: InsightsWordStat[])}
   <div>
     <div class="mb-2 flex items-center justify-between">
@@ -360,7 +417,7 @@
         {#each words as word}
           <span class="rounded-full border border-zinc-800 bg-zinc-950/70 px-2.5 py-1 text-xs text-zinc-300">
             {word.text}
-            <span class="ml-1 text-emerald-400/80">{word.count}</span>
+            <span class="ml-1 text-zinc-100">{word.count}</span>
           </span>
         {/each}
       </div>
@@ -391,7 +448,7 @@
                 {entry.wordCount} words
               </p>
             </div>
-            <span class="shrink-0 rounded-md bg-zinc-950/70 px-2 py-1 text-xs font-medium text-amber-300">
+            <span class="shrink-0 rounded-md bg-zinc-950/70 px-2 py-1 text-xs font-medium text-zinc-100">
               {metric(entry)}
             </span>
           </div>

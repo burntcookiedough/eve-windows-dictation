@@ -5,6 +5,7 @@
   import SettingsSection from '../components/SettingsSection.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
+  import ServerView from './ServerView.svelte';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -465,14 +466,14 @@
   }
 </script>
 
-<div class="h-full p-6 pr-2">
+<div class="mx-auto h-full w-full max-w-[560px] px-4 py-4 pr-2">
   <div class="h-full overflow-y-auto pr-4">
     {#if settingsLoaded}
-    <div class="space-y-8">
+    <div class="space-y-6">
 
     <!-- Activation -->
     <SettingsSection title="Activation">
-      <SettingsRow label="Hotkey" description="Keyboard shortcut to trigger recording">
+      <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
         <div class="flex items-center gap-2">
           <button
             onclick={() => openHotkeyCapture('quick')}
@@ -495,7 +496,7 @@
         </div>
       </SettingsRow>
 
-      <SettingsRow label="Long Hotkey" description="Toggle hands-free long dictation">
+      <SettingsRow label="Long dictation hotkey" description="Start or stop hands-free long dictation">
         <div class="flex items-center gap-2">
           <button
             onclick={() => openHotkeyCapture('long')}
@@ -732,6 +733,15 @@
       </SettingsRow>
     </SettingsSection>
 
+    <section aria-labelledby="advanced-settings-heading" class="space-y-4">
+      <div>
+        <h2 id="advanced-settings-heading" class="text-base font-semibold text-zinc-100">Advanced</h2>
+        <p class="mt-1 text-xs text-zinc-400">
+          Engine, connection, diagnostics, and local server controls.
+        </p>
+      </div>
+      <div class="space-y-6">
+
     <!-- Engine -->
     <SettingsSection title="Engine">
       {#if !serverConnected}
@@ -951,19 +961,6 @@
       {/if}
     </SettingsSection>
 
-    <SettingsSection title="About">
-      <SettingsRow label="Version" description="Installed Eve build version">
-        <button
-          type="button"
-          onclick={copyVersionToClipboard}
-          title="Click to copy version"
-          class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
-        >
-          v{appVersion}
-        </button>
-      </SettingsRow>
-    </SettingsSection>
-
     <SettingsSection title="Server">
       <SettingsRow
         label="Use external server"
@@ -1045,6 +1042,24 @@
           </div>
         {/if}
       </div>
+    </SettingsSection>
+
+    <ServerView embedded />
+
+      </div>
+    </section>
+
+    <SettingsSection title="About">
+      <SettingsRow label="Version" description="Installed Eve build version">
+        <button
+          type="button"
+          onclick={copyVersionToClipboard}
+          title="Click to copy version"
+          class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+        >
+          v{appVersion}
+        </button>
+      </SettingsRow>
     </SettingsSection>
 
     </div>

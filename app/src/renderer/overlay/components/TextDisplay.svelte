@@ -22,12 +22,16 @@
   });
 </script>
 
-<div class="{mode === 'long' ? 'max-w-3xl' : 'max-w-xl'} bg-black rounded-3xl border border-zinc-500/25 px-3.5 py-2.5">
+<div
+  class="h-16 rounded-[20px] border border-white/15 bg-black/90 px-4 py-2.5
+    {mode === 'long' ? 'w-full max-w-[320px]' : 'w-full max-w-[280px]'}"
+  data-overflowing={isOverflowing}
+>
   <div
-    class="max-h-30 overflow-y-auto scrollbar-hide {isOverflowing ? '[mask-image:linear-gradient(to_bottom,transparent_0%,black_30%,black_100%)]' : ''}"
+    class="h-11 overflow-hidden {isOverflowing ? '[mask-image:linear-gradient(to_bottom,transparent_0%,black_28%,black_100%)]' : ''}"
     bind:this={scrollRef}
   >
-    <p class="text-zinc-100 text-base font-medium leading-relaxed text-center break-words">
+    <p class="line-clamp-2 break-words text-center text-sm font-medium leading-[22px] text-zinc-100">
       {text}
     </p>
   </div>

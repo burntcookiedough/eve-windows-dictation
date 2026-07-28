@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { fly } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import Pill from './components/Pill.svelte';
   import TextDisplay from './components/TextDisplay.svelte';
   import { audioCapture } from './audio-capture';
@@ -148,12 +150,13 @@
 </script>
 
 <div
-  class="relative h-screen w-screen pointer-events-none transition-all duration-150 ease-out {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+  class="relative h-screen w-screen pointer-events-none transition-all duration-[180ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+  aria-hidden="true"
 >
-  <div class="absolute inset-x-0 bottom-[88px] flex flex-col items-center gap-5 px-4">
+  <div class="absolute inset-x-0 bottom-[86px] flex flex-col items-center gap-3 px-4">
     {#if warningMessage}
       <div
-        class="max-w-xl rounded-2xl border border-zinc-500/25 bg-black/95 px-4 py-2 shadow-[0_4px_16px_rgba(239,68,68,0.18)]"
+        class="max-w-xl rounded-[20px] border border-white/15 bg-black/95 px-4 py-2"
         role="status"
         aria-live="polite"
       >
@@ -170,11 +173,13 @@
     {/if}
 
     {#if transcriptionText}
-      <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
+      <div in:fly={{ y: 50, duration: 220, easing: cubicOut }}>
+        <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
+      </div>
     {/if}
 
-    {#if statusMessage && isVisible}
-      <div class="rounded-full border border-zinc-500/25 bg-black px-3 py-1">
+    {#if statusMessage && isVisible && !transcriptionText}
+      <div class="rounded-full border border-white/15 bg-black/90 px-3 py-1">
         <p class="text-center text-xs font-medium text-zinc-300">
           {statusMessage}
         </p>

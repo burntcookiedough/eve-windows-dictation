@@ -8,13 +8,15 @@
   }
 }
 
-@layer utilities {
-  .scrollbar-hide {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    &::-webkit-scrollbar {
-      display: none;
-    }
+@media (prefers-reduced-transparency: reduce) {
+  [class*="bg-black/"] {
+    background-color: #000 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  * {
+    forced-color-adjust: auto;
   }
 }
 

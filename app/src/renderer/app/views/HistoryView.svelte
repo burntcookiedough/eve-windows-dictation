@@ -11,6 +11,7 @@
   let history: HistoryEntryWithGroup[] = $state([]);
   let hasMore = $state(true);
   let loading = $state(false);
+  let loadError = $state('');
   let offset = $state(0);
   let requestGeneration = 0;
   let resetQueued = false;
@@ -101,6 +102,7 @@
     const requestOffset = offset;
     const filters = buildFilters();
     loading = true;
+    loadError = '';
     try {
       const response = await window.murmurMain.getHistoryEntries(
         requestOffset,
@@ -116,6 +118,7 @@
     } catch (err) {
       if (generation === requestGeneration) {
         console.error('Failed to load history:', err);
+        loadError = 'History could not be loaded. Check that Eve is ready, then try again.';
       }
     } finally {
       loading = false;
@@ -268,6 +271,11 @@
     return history[index]?.dateGroup !== history[index - 1]?.dateGroup;
   }
 
+  function isLastInGroup(index: number): boolean {
+    if (index === history.length - 1) return true;
+    return history[index]?.dateGroup !== history[index + 1]?.dateGroup;
+  }
+
   // Check if any filters are active
   let hasActiveFilters = $derived(
     dateFrom || dateTo || minDuration || maxDuration || minConfidence || editedOnly
@@ -360,9 +368,9 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class="h-full flex flex-col p-6 pr-2">
+<div class="mx-auto flex h-full w-full max-w-[560px] flex-col px-4 py-4 pr-2">
   <!-- Search Bar -->
-  <div class="pb-4 pr-4">
+  <div class="pb-3 pr-3">
     <div class="relative">
       <svg
         class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
@@ -375,16 +383,20 @@
       </svg>
       <input
         type="text"
+        aria-label="Search transcriptions"
         placeholder="Search transcriptions..."
         bind:value={searchQuery}
         oninput={handleSearchInput}
-        class="w-full bg-zinc-900/80 border border-zinc-800 rounded-full
-          pl-10 pr-12 py-2.5 text-sm text-zinc-100 placeholder-zinc-500
+        class="w-full bg-zinc-900/65 border border-white/10 rounded-full
+          pl-10 pr-12 py-2 text-[13px] text-zinc-100 placeholder-zinc-500
           focus:outline-none focus:border-zinc-700 focus:bg-zinc-900"
       />
       <!-- Filter toggle button -->
       <button
+        type="button"
         onclick={() => (showFilters = !showFilters)}
+        aria-label="Toggle history filters"
+        aria-expanded={showFilters}
         class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-colors cursor-pointer
           {showFilters || hasActiveFilters ? 'text-blue-400 bg-blue-950/50' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
         title="Filters"
@@ -496,25 +508,37 @@
   </div>
 
   <!-- History List -->
-  <div class="flex-1 overflow-y-auto pr-4">
-    {#if history.length === 0 && !loading}
+  <div class="flex-1 overflow-y-auto pr-3">
+    {#if loadError}
+      <div class="rounded-[10px] border border-red-400/40 bg-red-950/30 p-4" role="alert">
+        <p class="text-sm text-red-200">{loadError}</p>
+        <button
+          type="button"
+          onclick={() => loadEntries(true)}
+          class="mt-3 rounded-md border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-100 hover:bg-white/[0.09] cursor-pointer"
+        >
+          Try again
+        </button>
+      </div>
+    {:else if history.length === 0 && !loading}
       <div class="text-center py-12 text-zinc-500 text-sm">
         {searchQuery || hasActiveFilters ? 'No matching transcriptions' : 'No transcriptions yet'}
       </div>
     {:else}
-      <div class="space-y-2">
+      <div>
         {#each history as item, index (item.id)}
           {@const isExpanded = expandedId === item.id}
           {@const showHeader = isFirstInGroup(index)}
+          {@const closeGroup = isLastInGroup(index)}
 
           <!-- Date Group Header -->
           {#if showHeader}
             <div class="pt-4 pb-2 first:pt-0 flex items-center justify-between">
-              <span class="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              <span class="text-[11px] font-medium text-zinc-500 uppercase tracking-[0.08em]">
                 {item.dateGroup}
               </span>
               {#if index === 0 && lastUpdated}
-                <span class="text-xs text-zinc-600">
+                <span class="text-[11px] text-zinc-500">
                   Updated {formatFullDate(lastUpdated)}
                 </span>
               {/if}
@@ -523,42 +547,38 @@
 
           <!-- Entry -->
           <div
-            class="group min-w-0 overflow-hidden rounded-2xl border border-zinc-800/60 transition-all duration-200
-              {isExpanded ? 'bg-zinc-900 border-zinc-800' : 'hover:bg-zinc-900/50 hover:border-zinc-800'}"
+            class="group min-w-0 overflow-hidden border border-white/[0.09] bg-white/[0.018] transition-colors duration-150
+              {showHeader ? 'rounded-t-[8px]' : 'border-t-0'}
+              {closeGroup ? 'rounded-b-[8px]' : ''}
+              {isExpanded ? 'bg-white/[0.045]' : 'hover:bg-white/[0.035]'}"
           >
             <!-- Collapsed/Preview State -->
-            <div
-              class="p-4 cursor-pointer"
-              onclick={() => toggleExpand(item.id)}
-              onkeydown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  toggleExpand(item.id);
-                }
-              }}
-              role="button"
-              tabindex="0"
-            >
-              <div class="flex items-start gap-3">
-                <div class="flex-1 min-w-0">
-                  <p class="max-w-full text-sm text-zinc-200 [overflow-wrap:anywhere] {isExpanded ? '' : 'line-clamp-2'}">
+            <div class="px-3 py-3">
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  onclick={() => toggleExpand(item.id)}
+                  aria-expanded={isExpanded}
+                  class="flex-1 min-w-0 rounded-md text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]"
+                >
+                  <p class="max-w-full text-[13px] leading-[1.45] text-zinc-100 [overflow-wrap:anywhere] {isExpanded ? '' : 'line-clamp-2'}">
                     {item.text}
                   </p>
-                  <p class="text-xs text-zinc-500 mt-1.5">
+                  <p class="mt-1 text-[11px] text-zinc-500">
                     {formatTime(item.timestamp)}
                     {#if item.editedAt}
                       <span class="ml-2 text-blue-400/70">edited</span>
                     {/if}
                   </p>
-                </div>
+                </button>
 
                 <!-- Quick Action Buttons (stacked vertically) -->
-                <div class="flex flex-col gap-0.5 shrink-0 transition-opacity
-                  {isExpanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}">
+                <div class="flex shrink-0 gap-1.5">
                   <button
+                    type="button"
                     onclick={(e) => { e.stopPropagation(); handleCopy(item.text); }}
                     aria-label="Copy transcription"
-                    class="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
+                    class="min-h-8 min-w-8 p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.09] rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
                     title="Copy"
                   >
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -566,9 +586,10 @@
                     </svg>
                   </button>
                   <button
+                    type="button"
                     onclick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
                     aria-label="Delete transcription"
-                    class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
+                    class="min-h-8 min-w-8 p-1.5 text-zinc-400 hover:text-red-300 hover:bg-white/[0.09] rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
                     title="Delete"
                   >
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">

@@ -9,11 +9,11 @@
   let { title, children }: Props = $props();
 </script>
 
-<section class="w-full">
-  <h2 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+<section class="w-full" aria-label={title}>
+  <h2 class="mb-3 text-xs font-medium text-zinc-400">
     {title}
   </h2>
-  <div class="space-y-2 w-full">
+  <div class="w-full overflow-hidden rounded-[10px] border border-white/10 bg-white/[0.025] divide-y divide-white/[0.08]">
     {@render children()}
   </div>
 </section>
