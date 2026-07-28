@@ -80,7 +80,7 @@ describe('Gate 5B cactus resources', () => {
     expect(script).not.toContain('sharp');
 
     const result = Bun.spawnSync({
-      cmd: ['bun', 'run', 'build:icons', '--', '--check'],
+      cmd: [process.execPath, 'run', 'build:icons', '--', '--check'],
       cwd: APP_ROOT,
       stdout: 'pipe',
       stderr: 'pipe',

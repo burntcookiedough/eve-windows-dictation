@@ -126,7 +126,7 @@ Local Gate A on 2026-07-28 passed:
 |---|---|
 | Focused Gate 5B resource/identity tests | 6 passed, 0 failed; 254 assertions |
 | Deterministic derivative check | `build:icons -- --check` passed |
-| Full application suite | 111 passed, 0 failed; 639 assertions |
+| Full application suite | 111 passed, 0 failed; 640 assertions |
 | History/Insights aggregate guard | Passed |
 | TypeScript | Main and renderer no-emit checks passed |
 | Production build | Main, preloads, and renderer passed |
