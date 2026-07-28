@@ -21,6 +21,10 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
+  let rangeMenuContainer: HTMLDivElement | undefined = $state(undefined);
+  let rangeMenu: HTMLDivElement | undefined = $state(undefined);
+  let rangeButton: HTMLButtonElement | undefined = $state(undefined);
+  let rangeMenuOpen = $state(false);
   const insightRequests = createLatestRequestGuard();
 
   async function loadInsights() {
@@ -44,9 +48,60 @@
   }
 
   function selectRange(nextRange: InsightsRange) {
+    rangeMenuOpen = false;
+    rangeButton?.focus();
     if (range === nextRange) return;
     range = nextRange;
     loadInsights();
+  }
+
+  function openRangeMenu(focus: 'first' | 'selected' | 'last' = 'selected') {
+    rangeMenuOpen = true;
+    queueMicrotask(() => {
+      const options = Array.from(rangeMenu?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+      const selectedIndex = ranges.findIndex((option) => option.id === range);
+      const targetIndex = focus === 'first' ? 0 : focus === 'last' ? options.length - 1 : selectedIndex;
+      options[Math.max(0, targetIndex)]?.focus();
+    });
+  }
+
+  function handleRangeButtonKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      openRangeMenu(event.key === 'ArrowDown' ? 'first' : 'last');
+    }
+  }
+
+  function handleRangeMenuKeydown(event: KeyboardEvent) {
+    const options = Array.from(rangeMenu?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      rangeMenuOpen = false;
+      rangeButton?.focus();
+      return;
+    }
+
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      options[event.key === 'Home' ? 0 : options.length - 1]?.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = (currentIndex + direction + options.length) % options.length;
+      options[nextIndex]?.focus();
+    }
+  }
+
+  function handleRangeMenuFocusout(event: FocusEvent) {
+    const nextTarget = event.relatedTarget;
+    if (!(nextTarget instanceof Node) || !rangeMenuContainer?.contains(nextTarget)) {
+      rangeMenuOpen = false;
+    }
   }
 
   function formatInteger(value: number): string {
@@ -94,7 +149,16 @@
         loadInsights();
       }
     };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (rangeMenuOpen && !rangeMenuContainer?.contains(event.target as Node)) {
+        rangeMenuOpen = false;
+        if (rangeMenu?.contains(document.activeElement)) {
+          rangeButton?.focus({ preventScroll: true });
+        }
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('pointerdown', handlePointerDown);
 
     const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry(() => {
       loadInsights();
@@ -103,6 +167,7 @@
     return () => {
       insightRequests.invalidate();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('pointerdown', handlePointerDown);
       unsubscribeNewHistoryEntry();
     };
   });
@@ -117,18 +182,54 @@
         <p class="text-[11px] text-zinc-500">Local insights from your transcription history</p>
       </div>
 
-      <label class="shrink-0">
-        <span class="sr-only">Insights time range</span>
-        <select
-          value={range}
-          onchange={(event) => selectRange(event.currentTarget.value as InsightsRange)}
-          class="rounded-[8px] border border-white/10 bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-zinc-200"
+      <div bind:this={rangeMenuContainer} class="relative shrink-0">
+        <button
+          bind:this={rangeButton}
+          type="button"
+          aria-label="Insights time range"
+          aria-haspopup="listbox"
+          aria-expanded={rangeMenuOpen}
+          aria-controls="insights-range-listbox"
+          class="flex min-w-[76px] items-center justify-between gap-2 rounded-[8px] border border-white/10 bg-white/[0.025] px-2.5 py-1.5 text-[11px] text-zinc-200 transition-colors hover:border-white/20 hover:bg-white/[0.055] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-200"
+          onclick={() => rangeMenuOpen ? (rangeMenuOpen = false) : openRangeMenu()}
+          onkeydown={handleRangeButtonKeydown}
         >
-          {#each ranges as option}
-            <option value={option.id}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
+          <span>{ranges.find((option) => option.id === range)?.label}</span>
+          <svg viewBox="0 0 12 12" class="h-3 w-3 text-zinc-500" aria-hidden="true">
+            <path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        {#if rangeMenuOpen}
+          <div
+            bind:this={rangeMenu}
+            id="insights-range-listbox"
+            role="listbox"
+            tabindex="-1"
+            aria-label="Insights time range"
+            class="absolute right-0 z-30 mt-1.5 w-28 overflow-hidden rounded-[9px] border border-white/12 bg-zinc-950/98 p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+            onkeydown={handleRangeMenuKeydown}
+            onfocusout={handleRangeMenuFocusout}
+          >
+            {#each ranges as option}
+              <button
+                type="button"
+                role="option"
+                tabindex="-1"
+                aria-selected={option.id === range}
+                class="flex w-full items-center justify-between rounded-[6px] px-2.5 py-2 text-left text-[11px] transition-colors
+                  {option.id === range ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.055] hover:text-zinc-200'}"
+                onclick={() => selectRange(option.id)}
+              >
+                <span>{option.label}</span>
+                {#if option.id === range}
+                  <span class="text-zinc-400" aria-hidden="true">✓</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
 
     {#if error}

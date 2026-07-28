@@ -49,6 +49,20 @@ describe('renderer visual regression guards', () => {
     expect(insightsView).toContain('point.audioSeconds / point.dictations');
     expect(insightsView).toContain('formatDuration(averages[index])');
     expect(insightsView).toContain('insights.trends.slice(-7)');
+    expect(insightsView).toContain('aria-haspopup="listbox"');
+    expect(insightsView).toContain('aria-controls="insights-range-listbox"');
+    expect(insightsView).toContain('id="insights-range-listbox"');
+    expect(insightsView).toContain('role="listbox"');
+    expect(insightsView).toContain('role="option"');
+    expect(insightsView).toMatch(/role="option"\s+tabindex="-1"/);
+    expect(insightsView).toContain("event.key === 'Escape'");
+    expect(insightsView).toContain("event.key === 'ArrowDown' || event.key === 'ArrowUp'");
+    expect(insightsView).toContain("event.key === 'Home' || event.key === 'End'");
+    expect(insightsView).toContain('onfocusout={handleRangeMenuFocusout}');
+    expect(insightsView).toContain('rangeButton?.focus({ preventScroll: true })');
+    expect(insightsView).toContain('onclick={() => selectRange(option.id)}');
+    expect(insightsView).toMatch(/function selectRange[\s\S]*?loadInsights\(\);[\s\S]*?\n  }/);
+    expect(insightsView).not.toContain('<select');
     expect(insightsView).not.toContain('gpt-4o-transcribe');
   });
 
