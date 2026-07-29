@@ -29,7 +29,8 @@ Status: prepared release notes; Eve v0.7.0 has not been published.
 ## Before publication
 
 These notes describe the accepted source preparation, not an available download. A fresh
-exact-head package and Windows lifecycle, complete third-party notice readiness, an
-explicit Eve name/mark publication decision, and an approved tag/publication procedure
-are still required. The Windows release remains unsigned unless a separately approved
-signing decision changes that status.
+exact-head package and Windows lifecycle, complete third-party notice readiness, and the
+approved draft-release procedure are still required. The user accepted the Eve name/mark
+publication risk; this is not legal clearance. The planned Windows release is unsigned:
+Windows may show an Unknown Publisher warning and Microsoft Defender SmartScreen may
+require an explicit user decision before installation.

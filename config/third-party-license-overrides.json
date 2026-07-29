@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "overrides": {
+    "is-reference": { "license": "MIT", "source": "https://github.com/rich-harris/estree-walker/blob/master/LICENSE" },
+    "locate-character": { "license": "MIT", "source": "https://github.com/Rich-Harris/locate-character/blob/master/LICENSE" },
+    "sentencepiece": { "license": "Apache-2.0", "source": "https://github.com/google/sentencepiece/blob/master/LICENSE" },
+    "tokenizers": { "license": "Apache-2.0", "source": "https://github.com/huggingface/tokenizers/blob/main/LICENSE" },
+    "colorama": { "license": "BSD-3-Clause", "source": "https://github.com/tartley/colorama/blob/0.4.6/LICENSE.txt", "sha256": "cac35c02686e5d04a5a7140bfb3b36e73aed496656e891102e428886d7930318" },
+    "Jinja2": { "license": "BSD-3-Clause", "source": "https://github.com/pallets/jinja/blob/3.1.6/LICENSE.txt", "sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b" },
+    "llvmlite": { "license": "BSD-3-Clause", "source": "https://github.com/numba/llvmlite/blob/v0.46.0/LICENSE", "sha256": "7d6aa93e52a7ae9a995ff6a40c0ea5628311cdf1bd8dcd29c8ce9181f4af3a81" }
+  },
+  "native": {
+    "ctranslate2": { "license": "MIT", "source": "https://github.com/OpenNMT/CTranslate2/blob/master/LICENSE" },
+    "onnx": { "license": "Apache-2.0", "source": "https://github.com/onnx/onnx/blob/main/LICENSE" },
+    "onnxruntime": { "license": "MIT", "source": "https://github.com/microsoft/onnxruntime/blob/main/LICENSE" },
+    "cuda": { "license": "NVIDIA CUDA EULA", "source": "https://docs.nvidia.com/cuda/eula/index.html" }
+  }
+}

@@ -1,8 +1,8 @@
 # Eve Gate 6 release plan
 
-- Status: Gate 6A contract parent-reviewed and passed; mechanical implementation in progress
+- Status: Gate 6B accepted; Gate 6C preparation PR authorized
 - Repository: `burntcookiedough/eve-windows-dictation`
-- Canonical base: `0d6605d07aa783036d61fc93af7ce043a808f1a6`
+- Canonical release-candidate base: `f88067ff7bb31ec7f0b5a124fefbeaff0d7829ca`
 - Tracking issue: [#21](https://github.com/burntcookiedough/eve-windows-dictation/issues/21)
 - Proposed release: Eve `v0.7.0`
 - Last updated: 2026-07-28 (Asia/Calcutta)
@@ -59,7 +59,10 @@ installer identity.
 | Do not claim automatic Murmur History import | Frozen | Eve ships a fresh profile. A one-time user-requested local migration was not product behavior. |
 | Do not package in Gate 6A | Frozen | Gate 6B owns the single final exact-head candidate package. |
 | Do not tag while the current publication procedure is unresolved | Frozen | A `v*` tag immediately invokes a workflow that builds and publishes. |
-| Treat unresolved notice or name/mark risk as a Gate 6C blocker | Frozen | Record limitations; do not invent legal conclusions or speculative code changes. |
+| Gate 6B candidate | Passed | Exact candidate hashes and lifecycle evidence outside Git; final machine state Eve v0.7.0 healthy. |
+| Eve name/mark publication risk | Accepted by user | Risk acceptance is not legal clearance and remains explicit in release controls. |
+| Unsigned Windows publication | Accepted by user | Promotion defaults false and requires explicit `allow_unsigned=true`; notes retain SmartScreen warning. |
+| Gate 6C exact-artifact publication | Approved design | Manual draft upload, dispatch verification, protected approval, and no rebuild. |
 
 ## Canonical program state
 

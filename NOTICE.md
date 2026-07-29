@@ -15,8 +15,8 @@ production Python dependencies; models download separately on first use. Third-p
 libraries, runtimes, models, and tools remain subject to their respective licenses and
 notices.
 
-This file is not a complete binary-distribution notice inventory. The release workflow
-packages the full runtime closure, whose embedded notices and redistribution terms still
-require a complete, evidence-backed audit. That inventory, together with the separately
-deferred Eve name/mark review, is a Gate 6C publication blocker. Nothing in this notice
-claims legal or trademark clearance.
+The Windows package also ships a closure-derived readable notice inventory, project
+LICENSE/NOTICE material, and the existing Electron/Chromium and managed-Python notices.
+`THIRD_PARTY_NOTICES.md` records the enforcement method and its limits. NVIDIA/CUDA and
+downloaded-model terms require authoritative final-candidate review; nothing here claims
+legal or trademark clearance. The user has accepted the Eve name/mark publication risk.

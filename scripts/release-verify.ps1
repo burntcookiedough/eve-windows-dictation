@@ -95,7 +95,7 @@ Assert-Contains -Value (Get-Content -LiteralPath $latestYml -Raw) -Expected $Exp
 Write-Step "Checking installed payload contents"
 $appExe = Join-Path $InstallDir "Eve.exe"
 $serverRoot = Join-Path $InstallDir "resources\server"
-$pythonExe = Join-Path $serverRoot ".venv\Scripts\python.exe"
+$pythonExe = Join-Path $serverRoot ".runtime\python.exe"
 Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\faster_whisper") "faster-whisper package"
@@ -110,21 +110,30 @@ Remove-Item -LiteralPath $outLog,$errLog,$pidFile -ErrorAction SilentlyContinue
 
 $oldEnv = @{
     MURMUR_PID_FILE = $env:MURMUR_PID_FILE
+    MURMUR_SETTINGS_FILE = $env:MURMUR_SETTINGS_FILE
     MURMUR_PORT = $env:MURMUR_PORT
     MURMUR_ENGINE = $env:MURMUR_ENGINE
     MURMUR_ENGINE_PREFERENCE_MODE = $env:MURMUR_ENGINE_PREFERENCE_MODE
     MURMUR_WHISPER_MODEL = $env:MURMUR_WHISPER_MODEL
     MURMUR_WHISPER_DEVICE = $env:MURMUR_WHISPER_DEVICE
+    MURMUR_WHISPER_COMPUTE_TYPE = $env:MURMUR_WHISPER_COMPUTE_TYPE
     MURMUR_LOG_LEVEL = $env:MURMUR_LOG_LEVEL
+    PYTHONNOUSERSITE = $env:PYTHONNOUSERSITE
+    PYTHONPATH = $env:PYTHONPATH
 }
 
 $env:MURMUR_PID_FILE = $pidFile
+$env:MURMUR_SETTINGS_FILE = Join-Path (Split-Path $InstallDir -Parent) "release-verify-server-settings.json"
 $env:MURMUR_PORT = [string]$HealthPort
 $env:MURMUR_ENGINE = "whisper"
 $env:MURMUR_ENGINE_PREFERENCE_MODE = "manual"
 $env:MURMUR_WHISPER_MODEL = "tiny"
 $env:MURMUR_WHISPER_DEVICE = "cpu"
+$env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
 $env:MURMUR_LOG_LEVEL = "INFO"
+$env:PYTHONNOUSERSITE = "1"
+$env:PYTHONPATH = Join-Path $serverRoot ".venv\Lib\site-packages"
+Invoke-Native $pythonExe -c "import faster_whisper, torch, nemo.collections.asr"
 
 $process = Start-Process -FilePath $pythonExe `
     -ArgumentList @("src\main.py") `
@@ -146,7 +155,8 @@ try {
         $process.WaitForExit(5000) | Out-Null
     }
     foreach ($key in $oldEnv.Keys) {
-        Set-Item -Path "env:$key" -Value $oldEnv[$key] -ErrorAction SilentlyContinue
+        if ($null -eq $oldEnv[$key]) { Remove-Item -Path "env:$key" -ErrorAction SilentlyContinue }
+        else { Set-Item -Path "env:$key" -Value $oldEnv[$key] -ErrorAction Stop }
     }
 }
 
