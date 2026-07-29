@@ -1,9 +1,123 @@
 """Static guards for the no-rebuild Gate 6C release promotion path."""
 
+import base64
+import hashlib
+import json
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+RELEASE_COMMIT = "d03c7eab7e3e10afc2f62662d25ccd63427c22e9"
+
+
+def _digest(path: Path, algorithm: str) -> str:
+    digest = hashlib.new(algorithm)
+    digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _signed_wrapper_fixture() -> bytes:
+    where_exe = shutil.which("where.exe")
+    assert where_exe, "The signed Windows where.exe fixture is required."
+    return Path(where_exe).read_bytes()
+
+
+def _latest_yml(*, release_date_after_packages: bool = False) -> str:
+    wrapper = _signed_wrapper_fixture()
+    payload = b"payload fixture"
+    wrapper_sha512 = base64.b64encode(hashlib.sha512(wrapper).digest()).decode()
+    payload_sha512 = base64.b64encode(hashlib.sha512(payload).digest()).decode()
+    release_date = "releaseDate: '2026-07-29T18:45:18.746Z'\n"
+    packages = (
+        "packages:\n"
+        "  x64:\n"
+        f"    size: {len(payload)}\n"
+        f"    sha512: {payload_sha512}\n"
+        "    blockMapSize: 123\n"
+        "    path: murmur-1.2.3-x64.nsis.7z\n"
+        "    file: murmur-1.2.3-x64.nsis.7z\n"
+    )
+    top = (
+        "version: 1.2.3\n"
+        "files:\n"
+        "  - url: Eve.Web.Setup.1.2.3.exe\n"
+        f"    sha512: {wrapper_sha512}\n"
+        "path: Eve.Web.Setup.1.2.3.exe\n"
+        f"sha512: {wrapper_sha512}\n"
+    )
+    if release_date_after_packages:
+        return top + packages + release_date
+    return top + release_date + packages
+
+
+def _write_release_fixture(directory: Path, latest: str) -> str:
+    files = {
+        "Eve.Web.Setup.1.2.3.exe": _signed_wrapper_fixture(),
+        "murmur-1.2.3-x64.nsis.7z": b"payload fixture",
+        "latest.yml": latest.encode(),
+        "THIRD_PARTY_NOTICES.txt": b"Generated from the exact pre-package closure\n",
+    }
+    for name, content in files.items():
+        (directory / name).write_bytes(content)
+
+    base_names = tuple(files)
+    for algorithm in ("sha256", "sha512"):
+        lines = [f"{_digest(directory / name, algorithm)} *{name}" for name in base_names]
+        (directory / f"{algorithm.upper()}SUMS.txt").write_text(
+            "\n".join(lines) + "\n", encoding="ascii"
+        )
+
+    asset_names = (*base_names, "SHA256SUMS.txt", "SHA512SUMS.txt")
+    manifest = {
+        "schema": 1,
+        "tag": "v1.2.3",
+        "commit": RELEASE_COMMIT,
+        "version": "1.2.3",
+        "assets": [
+            {
+                "name": name,
+                "bytes": (directory / name).stat().st_size,
+                "sha256": _digest(directory / name, "sha256"),
+                "sha512": _digest(directory / name, "sha512"),
+            }
+            for name in asset_names
+        ],
+    }
+    manifest_path = directory / "eve-v1.2.3-artifact-manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return _digest(manifest_path, "sha256")
+
+
+def _verify_release_fixture(
+    directory: Path, manifest_sha256: str
+) -> subprocess.CompletedProcess[str]:
+    pwsh = shutil.which("pwsh")
+    assert pwsh, "PowerShell 7 is required for release-control tests."
+    return subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(ROOT / "scripts" / "release-artifacts.ps1"),
+            "-Mode",
+            "Verify",
+            "-ArtifactDir",
+            str(directory),
+            "-ExpectedTag",
+            "v1.2.3",
+            "-ExpectedCommit",
+            RELEASE_COMMIT,
+            "-ExpectedManifestSha256",
+            manifest_sha256,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_release_workflow_is_manual_and_never_builds_or_uploads() -> None:
@@ -52,8 +166,14 @@ def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
 
 def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert "persist-credentials: false" in workflow
-    assert "targetCommitish -ne $env:EXPECTED_COMMIT" in workflow
+    assert workflow.count("persist-credentials: false") == 2
+    assert workflow.count("ref: ${{ github.sha }}") == 2
+    assert "ref: ${{ inputs.expected_commit }}" not in workflow
+    assert workflow.count("$head -ne $env:GITHUB_SHA") == 2
+    assert workflow.count("$env:GITHUB_REF -ne 'refs/heads/trunk'") == 2
+    assert workflow.count("Release tag commit does not match ExpectedCommit.") == 2
+    assert workflow.count("$release.tagName -ne $env:TAG") == 2
+    assert workflow.count("targetCommitish -ne $env:EXPECTED_COMMIT") == 2
     assert "EXPECTED_MANIFEST_SHA256" in workflow
     assert "-AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')" in workflow
     assert "gh release edit $env:TAG" in workflow
@@ -69,3 +189,42 @@ def test_packaged_resource_and_runtime_harness_guards() -> None:
     assert ".runtime\\python.exe" in verify
     assert "import faster_whisper, torch, nemo.collections.asr" in verify
     assert 'Remove-Item -Path "env:$key"' in verify
+
+
+@pytest.mark.parametrize("release_date_after_packages", [False, True])
+def test_release_artifacts_accepts_electron_builder_latest_yml_ordering(
+    tmp_path: Path, release_date_after_packages: bool
+) -> None:
+    manifest_sha256 = _write_release_fixture(
+        tmp_path, _latest_yml(release_date_after_packages=release_date_after_packages)
+    )
+    result = _verify_release_fixture(tmp_path, manifest_sha256)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_error"),
+    [
+        (
+            lambda latest: latest.replace(
+                "    size: 15\n", "    size: 15\n    size: 15\n"
+            ),
+            "Malformed or duplicate latest.yml package property.",
+        ),
+        (
+            lambda latest: latest.replace("    size: 15\n", "   size: 15\n"),
+            "Unknown or malformed latest.yml line",
+        ),
+        (
+            lambda latest: latest.replace("    size: 15\n", "    size: 16\n"),
+            "latest.yml hash or size mismatch.",
+        ),
+    ],
+)
+def test_release_artifacts_rejects_adversarial_package_fields(
+    tmp_path: Path, mutate, expected_error: str
+) -> None:
+    manifest_sha256 = _write_release_fixture(tmp_path, mutate(_latest_yml()))
+    result = _verify_release_fixture(tmp_path, manifest_sha256)
+    assert result.returncode != 0
+    assert expected_error in result.stdout + result.stderr

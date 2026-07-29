@@ -445,6 +445,9 @@ Before publication:
 
 - re-audit PR/head/tree, mergeability, CI, CodeRabbit, allowlist, version, and clean
   worktree;
+- run release verification from the reviewed default-branch workflow-dispatch commit,
+  while independently requiring the release tag, draft target, and artifact manifest to
+  identify the accepted release/artifact commit;
 - merge only the accepted release change using the repository's approved merge method;
 - prove canonical `trunk` contains the accepted tree;
 - prove tag `v0.7.0` points at the explicitly approved release commit;

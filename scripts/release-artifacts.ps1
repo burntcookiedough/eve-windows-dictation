@@ -41,14 +41,20 @@ foreach($line in ($latest -split "`r?`n")){
   if($line -eq ''){continue}
   if($line -match '^files:$'){if($state -ne 'top' -or $top.Contains('files')){throw 'Malformed or duplicate latest.yml files section.'};$top.files=$true;$state='files';continue}
   if($line -match '^  - url: ([^\s]+)$'){if($state -ne 'files' -or $file.Count){throw 'Malformed or duplicate latest.yml file entry.'};$file.url=$Matches[1];continue}
-  if($line -match '^    (sha512|size): ([^\s]+)$'){if($state -ne 'files' -or !$file.Contains('url') -or $file.Contains($Matches[1])){throw 'Malformed or duplicate latest.yml file property.'};$file[$Matches[1]]=$Matches[2];continue}
+  if($state -eq 'files' -and $line -match '^    (sha512|size): ([^\s]+)$'){if(!$file.Contains('url') -or $file.Contains($Matches[1])){throw 'Malformed or duplicate latest.yml file property.'};$file[$Matches[1]]=$Matches[2];continue}
   if($line -match '^packages:$'){if($state -ne 'top' -or $top.Contains('packages')){throw 'Malformed or duplicate latest.yml packages section.'};$top.packages=$true;$state='packages';continue}
   if($line -match '^  x64:$'){if($state -ne 'packages' -or $package.Count){throw 'Malformed or duplicate latest.yml x64 package.'};$package.present=$true;$state='package';continue}
-  if($line -match '^    (size|sha512|blockMapSize|path|file): ([^\s]+)$'){if($state -ne 'package' -or $package.Contains($Matches[1])){throw 'Malformed or duplicate latest.yml package property.'};$package[$Matches[1]]=$Matches[2];continue}
+  if($state -eq 'package' -and $line -match '^    (size|sha512|blockMapSize|path|file): ([^\s]+)$'){if($package.Contains($Matches[1])){throw 'Malformed or duplicate latest.yml package property.'};$package[$Matches[1]]=$Matches[2];continue}
   if($line -match '^(version|path|sha512|releaseDate): (.+)$'){if($state -eq 'files' -and !$file.Contains('sha512')){throw 'Incomplete latest.yml file entry.'};if($state -eq 'package' -and (!$package.Contains('size') -or !$package.Contains('sha512') -or !$package.Contains('path') -or !$package.Contains('file'))){throw 'Incomplete latest.yml package entry.'};$state='top';if($top.Contains($Matches[1])){throw 'Duplicate latest.yml field.'};$top[$Matches[1]]=$Matches[2].Trim("'");continue}
   throw "Unknown or malformed latest.yml line: $line"
 }
 if(!$top.Contains('version') -or !$top.Contains('path') -or !$top.Contains('sha512') -or !$top.Contains('releaseDate') -or !$file.Contains('url') -or !$file.Contains('sha512') -or !$package.Contains('size') -or !$package.Contains('sha512') -or !$package.Contains('path') -or !$package.Contains('file')){throw 'Missing required latest.yml fields.'}
 if($top.version -ne $version -or $top.path -ne "Eve.Web.Setup.$version.exe" -or $file.url -ne $top.path -or $package.path -ne "murmur-$version-x64.nsis.7z" -or $package.file -ne $package.path -or $package.size -notmatch '^\d+$' -or ($file.Contains('size') -and $file.size -notmatch '^\d+$')){throw 'latest.yml identity or numeric fields mismatch.'}
-foreach($pair in @(@($top.path,$top.sha512,$null),@($file.url,$file.sha512,$file.Contains('size') ? $file.size : $null),@($package.path,$package.sha512,$package.size))){$manifestEntry=$data.assets|Where-Object name -eq $pair[0];if(!$manifestEntry){throw 'latest.yml asset missing from manifest.'};$expectedBase64=[Convert]::ToBase64String([Convert]::FromHexString([string]$manifestEntry.sha512));if($pair[1] -ne $expectedBase64 -or ($null -ne $pair[2] -and [int64]$pair[2] -ne [int64]$manifestEntry.bytes)){throw 'latest.yml hash or size mismatch.'}}
+$fileSize=if($file.Contains('size')){$file['size']}else{$null}
+$latestAssets=@(
+  [pscustomobject]@{Name=$top.path;Sha512=$top.sha512;Size=$null}
+  [pscustomobject]@{Name=$file.url;Sha512=$file.sha512;Size=$fileSize}
+  [pscustomobject]@{Name=$package.path;Sha512=$package.sha512;Size=$package.size}
+)
+foreach($pair in $latestAssets){$manifestEntry=$data.assets|Where-Object name -eq $pair.Name;if(!$manifestEntry){throw 'latest.yml asset missing from manifest.'};$expectedBase64=[Convert]::ToBase64String([Convert]::FromHexString([string]$manifestEntry.sha512));if($pair.Sha512 -ne $expectedBase64 -or ($null -ne $pair.Size -and [int64]$pair.Size -ne [int64]$manifestEntry.bytes)){throw 'latest.yml hash or size mismatch.'}}
 if(!(Select-String -LiteralPath (Join-Path $dir 'THIRD_PARTY_NOTICES.txt') -Pattern 'Generated from the exact pre-package closure' -Quiet)){throw 'Third-party notice asset is not the generated notice.'}
