@@ -42,25 +42,41 @@ jobs:
         with:
           ref: ${{ inputs.expected_commit }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Require default-branch dispatch and explicit risk gates
         shell: pwsh
+        env:
+          TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          ACCEPTED_NAME_RISK: ${{ inputs.accepted_name_risk }}
         run: |
-          if ('${{ github.ref }}' -ne 'refs/heads/trunk') { throw 'Dispatch only from trunk.' }
-          if (-not ${{ inputs.allow_unsigned }}) { throw 'Unsigned publication requires allow_unsigned=true.' }
-          if (-not ${{ inputs.accepted_name_risk }}) { throw 'Name-risk acceptance must be explicit.' }
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/trunk') { throw 'Dispatch only from trunk.' }
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Malformed release inputs.' }
+          if ($env:ACCEPTED_NAME_RISK -ne 'true') { throw 'Name-risk acceptance must be explicit.' }
       - name: Download existing draft assets only
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: |
-          gh release view '${{ inputs.tag }}' --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
+          gh release view $env:TAG --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
           $release = Get-Content release.json -Raw | ConvertFrom-Json
-          if (-not $release.isDraft -or $release.isPrerelease) { throw 'An existing non-prerelease draft release is required.' }
-          gh release download '${{ inputs.tag }}' --repo '${{ github.repository }}' --dir release-assets
+          if (-not $release.isDraft -or $release.isPrerelease -or $release.targetCommitish -ne $env:EXPECTED_COMMIT) { throw 'An exact-target non-prerelease draft release is required.' }
+          gh release download $env:TAG --repo '${{ github.repository }}' --dir release-assets
       - name: Verify draft manifest and artifacts
         shell: pwsh
+        env:
+          TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
         run: |
-          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag '${{ inputs.tag }}' -ExpectedCommit '${{ inputs.expected_commit }}' -ExpectedManifestSha256 '${{ inputs.expected_manifest_sha256 }}' -AllowUnsigned:$${{ inputs.allow_unsigned }}
+          $ErrorActionPreference = 'Stop'
+          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag $env:TAG -ExpectedCommit $env:EXPECTED_COMMIT -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256 -AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')
+          if ($LASTEXITCODE -ne 0) { throw 'Artifact verification failed.' }
 
   promote:
     name: Reverify and publish the verified draft
@@ -74,18 +90,27 @@ jobs:
         with:
           ref: ${{ inputs.expected_commit }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Re-download and reverify after approval
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
         run: |
-          gh release view '${{ inputs.tag }}' --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
+          $ErrorActionPreference = 'Stop'
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_MANIFEST_SHA256 -notmatch '^[0-9a-fA-F]{64}$' -or $env:ALLOW_UNSIGNED -notin @('true', 'false')) { throw 'Malformed release inputs.' }
+          gh release view $env:TAG --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
           $release = Get-Content release.json -Raw | ConvertFrom-Json
-          if (-not $release.isDraft -or $release.isPrerelease) { throw 'Draft state changed after verification.' }
-          gh release download '${{ inputs.tag }}' --repo '${{ github.repository }}' --dir release-assets
-          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag '${{ inputs.tag }}' -ExpectedCommit '${{ inputs.expected_commit }}' -ExpectedManifestSha256 '${{ inputs.expected_manifest_sha256 }}' -AllowUnsigned:$${{ inputs.allow_unsigned }}
+          if (-not $release.isDraft -or $release.isPrerelease -or $release.targetCommitish -ne $env:EXPECTED_COMMIT) { throw 'Draft target or state changed after verification.' }
+          gh release download $env:TAG --repo '${{ github.repository }}' --dir release-assets
+          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag $env:TAG -ExpectedCommit $env:EXPECTED_COMMIT -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256 -AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')
+          if ($LASTEXITCODE -ne 0) { throw 'Artifact re-verification failed.' }
       - name: Publish the existing verified draft only
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit '${{ inputs.tag }}' --repo '${{ github.repository }}' --draft=false --prerelease=false --latest
+          TAG: ${{ inputs.tag }}
+        run: gh release edit $env:TAG --repo '${{ github.repository }}' --draft=false --prerelease=false --latest

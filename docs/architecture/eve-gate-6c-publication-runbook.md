@@ -9,6 +9,7 @@
 6. Dispatch the verifier with exact tag, commit, manifest hash, `allow_unsigned=true`, and
    `accepted_name_risk=true`. It downloads and verifies only; it never builds or uploads.
 7. A configured `production-release` environment reviewer approves the promotion job.
-   The job re-downloads and re-verifies, then changes only `draft=false`.
+   The job re-downloads and re-verifies, then changes `draft=false`, `prerelease=false`,
+   and marks the verified release latest.
 8. Download public assets and compare hashes. On any mismatch stop: never move the tag or
    replace assets. Preserve evidence and follow the incident withdrawal procedure.

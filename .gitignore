@@ -103,8 +103,8 @@ server_err.log
 app/resources/generated/
 release-assets/
 eve-v*-artifact-manifest.json
-SHA256SUMS.txt
-SHA512SUMS.txt
+/SHA256SUMS.txt
+/SHA512SUMS.txt
 
 # Claude/AI tooling
 .claude/settings.local.json
