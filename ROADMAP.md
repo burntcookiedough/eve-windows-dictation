@@ -12,8 +12,10 @@ resources. Its portable Python runtime and separately downloaded models remain s
 their existing release gates.
 
 The repository is standalone under `burntcookiedough/eve-windows-dictation`, and its
-release configuration targets that repository. Existing app IDs, installer identity,
-update behavior, and user-data paths remain unchanged.
+release configuration targets that repository. The approved cutovers use the Eve
+product identity, AppUserModelID `io.github.burntcookiedough.eve`, and isolated
+`%APPDATA%\Eve` profile. The frozen Murmur installer chain and GUID, update
+compatibility, and internal compatibility interfaces remain unchanged.
 
 ## Completed: application identity and visual system
 
