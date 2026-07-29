@@ -1,6 +1,7 @@
 # Eve Gate 5 master plan
 
-- Status: Gate 5A authorized; Gate 5B planned and separately gated
+- Status: Gate 5A and Gate 5B passed and merged through PRs #19 and #20; Gate 6 owns
+  release preparation and publication.
 - Canonical base: `20a781f78d638bc5884a8e85511cf3c8507eca4b`
 - Gate 4 accepted head contained by the base: `e2086fd8f36020ced09483311dde0530d6b8fe77`
 - Repository: `burntcookiedough/eve-windows-dictation`
@@ -331,7 +332,9 @@ commits or close the unmerged PR. Never use a destructive reset against user wor
 
 ## Gate 5B — cactus resources and Windows icon lifecycle
 
-Status: planned; not authorized for implementation, branch creation, packaging, or PR.
+Status: passed and merged in PR #20. The planning-time scope and lifecycle contract below
+are preserved as historical evidence; no Gate 5B artifact may be reused as a Gate 6
+release artifact.
 
 ### Dependency and order
 
@@ -452,12 +455,12 @@ rollback cannot be proven, or publication would be required.
 | Gate 5A design QA | Passed | `design-qa.md`; local synthetic screenshots | None | Preserve the passed target comparison. |
 | Gate 5A accessibility/Windows | Passed | `docs/architecture/eve-gate-5a-evidence.md` | None | Preserve accessibility and native-window behavior. |
 | Gate 5A Gate A | Passed | `docs/architecture/eve-gate-5a-evidence.md`; exact-head command results | None | Open the draft PR and run hosted review. |
-| Gate 5A PR/CI/CodeRabbit | Planned | Hosted checks and review threads | None for creation/review | Leave Ready but unmerged. |
-| Gate 5A merge | Deferred | PR merge commit | Explicit user approval | Merge only if separately authorized. |
-| Gate 5B branch/implementation | Deferred | Future 5B branch and evidence | Explicit user authorization after 5A review | Branch from accepted 5A state. |
-| Gate 5B one-package lifecycle | Deferred | Future 5B evidence | Included only in explicit 5B authorization | Package exactly once from final 5B head. |
-| Gate 5B merge | Deferred | Future PR merge commit | Explicit user approval | Merge only if separately authorized. |
-| Release/publication | Deferred | Future release plan | Separate explicit approval | Never infer from Gate 5 acceptance. |
+| Gate 5A PR/CI/CodeRabbit | Passed | PR #19 hosted checks and resolved CodeRabbit review | Complete | Gate 5A merged after explicit approval. |
+| Gate 5A merge | Passed | Merge commit `c7a5e8b596337396b6754cf64e7b535fcb1a0a31` | Complete | Gate 5B branched from the accepted state. |
+| Gate 5B branch/implementation | Passed | PR #20 and `eve-gate-5b-icon-evidence.md` | Complete | Preserve resource provenance and evidence. |
+| Gate 5B one-package lifecycle | Passed | Exact-head package/lifecycle in `eve-gate-5b-icon-evidence.md` | Complete | Do not reuse its candidate artifacts for a release. |
+| Gate 5B merge | Passed | Merge commit `0d6605d07aa783036d61fc93af7ce043a808f1a6` | Complete | Gate 6 release preparation follows. |
+| Release/publication | Deferred | Gate 6 release plan | Separate explicit approval | Never infer publication from Gate 5 acceptance. |
 
 ## Continuation instructions
 

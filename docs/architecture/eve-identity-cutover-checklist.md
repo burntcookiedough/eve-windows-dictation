@@ -9,8 +9,9 @@ Murmur History, settings, hotwords, external-server configuration, browser stora
 credentials, logs, or startup preference. The old Murmur data directory stays inactive
 and untouched. Generic Hugging Face model weights may be reused because they are
 downloaded runtime assets outside Murmur userData. Compatibility scaffolding, the fresh
-Eve data boundary, and the visible product rename are merged; Gate 4 is the focused
-AppUserModelID and startup-registration cutover.
+Eve data boundary, the visible product rename, and the AppUserModelID/startup-registration
+cutover are merged. Gates 5A and 5B subsequently completed the approved
+visual/accessibility system and cactus Windows resources.
 
 The controlling architecture decision is [ADR-001](adr-001-eve-application-identity-migration.md).
 
@@ -23,7 +24,7 @@ The controlling architecture decision is [ADR-001](adr-001-eve-application-ident
 - Eve data: a distinct fresh profile.
 - Shared model cache: may be reused without reading Murmur userData.
 - Existing installer chain: preserve through an explicit NSIS GUID.
-- Visual redesign: later phase.
+- Visual redesign and cactus resource lifecycle: complete in merged Gates 5A and 5B.
 - Thin-client and new ASR profiles: later phase.
 
 ## Audit coverage
@@ -177,9 +178,10 @@ These names are internal or compatibility surfaces. They are not evidence that p
 | Select final AppUserModelID | Complete: `io.github.burntcookiedough.eve` approved 2026-07-27 | No |
 | Compatibility-scaffolding implementation | Complete in merged PR #15 at `5e5b3a3` | No |
 | Fresh Eve profile implementation | Complete in merged PR #16 at `ca9eddb`; Gate A/B evidence includes Fast/Long smoke, repair, normal uninstall preservation, and official rollback | No |
-| Visible installed-product rename | Complete on `codex/eve-visible-identity-gate-3`; see [Gate 3 evidence](eve-identity-gate-3-evidence.md). AppUserModelID and startup registrations remain deferred | Merge approval |
-| AppUserModelID cutover | Complete on Gate 4 draft PR #18; Gate A and the full Windows lifecycle passed from fixed head `c6d9d3a` | Merge approval |
-| Visual identity and homepage | Pending | Later design phase |
+| Visible installed-product rename | Complete in merged PR #17; see [Gate 3 evidence](eve-identity-gate-3-evidence.md) | No |
+| AppUserModelID cutover | Complete in merged PR #18; Gate A and the full Windows lifecycle passed from fixed head `c6d9d3a` | No |
+| Visual identity | Complete in merged PRs #19 and #20; see Gate 5 evidence | No |
+| Homepage | Pending | Later public-presence phase |
 | Thin-client/component packs and ASR profiles | Pending | Later technical phase |
 
 ## Stop conditions

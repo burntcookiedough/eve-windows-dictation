@@ -4,6 +4,19 @@ Eve contains software derived from the MIT-licensed Murmur project created by Ra
 
 Subsequent contributors retain authorship of their changes. Repository documentation distinguishes later implementation and release-hardening work from the inherited codebase; it does not claim that those contributors created the original project.
 
-The v0.6.3 Windows artifacts retain the Murmur application and installer identity during the compatibility-preserving transition to Eve.
+The public v0.6.3 Windows artifacts retain the historical Murmur application and
+installer identity. The source prepared for Eve v0.7.0 retains the frozen installer
+continuity boundary while using the Eve product identity; it is not yet a published
+release.
 
-Third-party libraries, models, and tools remain subject to their respective licenses and notices. This file does not replace those terms or claim that a complete binary-distribution notice audit has been finished. That audit is a release gate for a future Eve-branded distribution.
+Gate 6A verified from the tracked manifests and release configuration that the Windows
+distribution includes an Electron application, a managed Python runtime, and packaged
+production Python dependencies; models download separately on first use. Third-party
+libraries, runtimes, models, and tools remain subject to their respective licenses and
+notices.
+
+This file is not a complete binary-distribution notice inventory. The release workflow
+packages the full runtime closure, whose embedded notices and redistribution terms still
+require a complete, evidence-backed audit. That inventory, together with the separately
+deferred Eve name/mark review, is a Gate 6C publication blocker. Nothing in this notice
+claims legal or trademark clearance.
