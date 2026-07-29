@@ -138,6 +138,10 @@ def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
     assert "release-artifacts.ps1 -Mode Verify" in contents
     assert "gh release download" in contents
     assert "draft=false" in contents
+    allow_block = contents.split("allow_unsigned:", 1)[1].split("accepted_name_risk:", 1)[0]
+    name_block = contents.split("accepted_name_risk:", 1)[1].split("permissions:", 1)[0]
+    assert "default: false" in allow_block
+    assert "default: false" in name_block
     for forbidden in ("push:", "package:win", "electron-builder", "softprops/action-gh-release", "gh release upload"):
         assert forbidden not in contents
 
@@ -153,7 +157,12 @@ def test_packaging_includes_relocatable_runtime() -> None:
         if isinstance(entry, str)
     ]
     assert ".runtime/**/*" in filters
-    assert "resources/generated/legal" in json.dumps(resources)
+    assert any(
+        resource.get("from") == "resources/generated/legal"
+        and resource.get("to") == "legal"
+        for resource in resources
+        if isinstance(resource, dict)
+    )
     assert "!.venv/**/pip*" not in filters
     assert "!.venv/**/wheel*" not in filters
     assert "!.venv/**/setuptools*" not in filters

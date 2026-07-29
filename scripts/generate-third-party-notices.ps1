@@ -59,7 +59,9 @@ while($pending.Count -gt 0) {
   Add-Component $data.name ([string]$data.version) 'node' ($pkgPath.Substring($RepositoryRoot.Length+1)) $license $source
   foreach($groupName in @('dependencies','optionalDependencies')){$groupProperty=$data.PSObject.Properties[$groupName];if($null -ne $groupProperty){foreach($property in $groupProperty.Value.PSObject.Properties){$pending.Enqueue($property.Name)}}}
 }
-foreach($dist in Get-ChildItem (Join-Path $server '.venv\Lib\site-packages') -Directory -Filter '*.dist-info' -ErrorAction SilentlyContinue) {
+$sitePackages=Join-Path $server '.venv\Lib\site-packages'
+if(!(Test-Path -LiteralPath $sitePackages)){throw "Managed Python site-packages is missing: $sitePackages"}
+foreach($dist in Get-ChildItem -LiteralPath $sitePackages -Directory -Filter '*.dist-info') {
   $meta=Join-Path $dist.FullName 'METADATA'; $name=$dist.Name; $version='unknown'; $license=''; if(Test-Path $meta){$m=Get-Content $meta -Raw; if($m -match '(?m)^Name: (.+)$'){$name=$Matches[1].Trim()}; if($m -match '(?m)^Version: (.+)$'){$version=$Matches[1].Trim()}; if($m -match '(?m)^License-Expression: (.+)$'){$license=$Matches[1].Trim()}elseif($m -match '(?m)^License: (.+)$'){$license=$Matches[1].Trim()}}
   if($name -eq 'murmur-testui'){continue} # validation-only test fixture; not copied by the packaged server filter
   $license=Normalize-License $license; $licenseFile=Get-ChildItem $dist.FullName -Recurse -File | Where-Object {$_.Name -like 'LICENSE*' -or $_.Name -like 'COPYING*' -or $_.Name -like 'NOTICE*'} | Select-Object -First 1; $override=$overrideLookup[[string]$name.Trim().ToLowerInvariant()]
