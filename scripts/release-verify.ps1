@@ -95,7 +95,7 @@ Assert-Contains -Value (Get-Content -LiteralPath $latestYml -Raw) -Expected $Exp
 Write-Step "Checking installed payload contents"
 $appExe = Join-Path $InstallDir "Eve.exe"
 $serverRoot = Join-Path $InstallDir "resources\server"
-$pythonExe = Join-Path $serverRoot ".venv\Scripts\python.exe"
+$pythonExe = Join-Path $serverRoot ".runtime\python.exe"
 Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\faster_whisper") "faster-whisper package"
@@ -119,12 +119,16 @@ $oldEnv = @{
 }
 
 $env:MURMUR_PID_FILE = $pidFile
+$env:MURMUR_SETTINGS_FILE = Join-Path (Split-Path $InstallDir -Parent) "release-verify-server-settings.json"
 $env:MURMUR_PORT = [string]$HealthPort
 $env:MURMUR_ENGINE = "whisper"
 $env:MURMUR_ENGINE_PREFERENCE_MODE = "manual"
 $env:MURMUR_WHISPER_MODEL = "tiny"
 $env:MURMUR_WHISPER_DEVICE = "cpu"
+$env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
 $env:MURMUR_LOG_LEVEL = "INFO"
+$env:PYTHONNOUSERSITE = "1"
+$env:PYTHONPATH = Join-Path $serverRoot ".venv\Lib\site-packages"
 
 $process = Start-Process -FilePath $pythonExe `
     -ArgumentList @("src\main.py") `

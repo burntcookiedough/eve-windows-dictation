@@ -130,27 +130,16 @@ def test_release_verification_targets_eve_with_legacy_payload_name() -> None:
     assert '"murmur-$ExpectedVersion-x64.nsis.7z"' in contents
 
 
-def test_release_workflow_installs_extras_and_uploads_payloads() -> None:
+def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
     workflow_path = ROOT / ".github" / "workflows" / "release.yml"
     contents = workflow_path.read_text(encoding="utf-8")
-    assert "--extra all" in contents
-    assert "prepare-python-runtime.ps1" in contents
-    assert "portable Python imports" in contents
-    assert "Verify packaged Python imports" in contents
-    assert "release\\win-unpacked\\resources\\server" in contents
-    assert "torch, nemo.collections.asr" in contents
-    assert '$health.engine.status -eq "ready"' in contents
-    assert '$health.model_download.status -eq "ready"' in contents
-    assert "$maxAssetBytes = 2100000000" in contents
-    assert "uv run --no-sync pytest" in contents
-    assert "--group dev" in contents
-    assert "GH_TOKEN" not in contents
-    assert '$releaseDir = "app\\release\\nsis-web"' in contents
-    assert "app/release/nsis-web/*.exe" in contents
-    assert "app/release/nsis-web/*.yml" in contents
-    assert "app/release/nsis-web/*.blockmap" in contents
-    assert "app/release/nsis-web/*.7z" in contents
-    assert "app/release/**/*.exe" not in contents
+    assert "workflow_dispatch:" in contents
+    assert "production-release" in contents
+    assert "release-artifacts.ps1 -Mode Verify" in contents
+    assert "gh release download" in contents
+    assert "draft=false" in contents
+    for forbidden in ("push:", "package:win", "electron-builder", "softprops/action-gh-release", "gh release upload"):
+        assert forbidden not in contents
 
 
 def test_packaging_includes_relocatable_runtime() -> None:
@@ -164,6 +153,7 @@ def test_packaging_includes_relocatable_runtime() -> None:
         if isinstance(entry, str)
     ]
     assert ".runtime/**/*" in filters
+    assert "resources/generated/legal" in json.dumps(resources)
     assert "!.venv/**/pip*" not in filters
     assert "!.venv/**/wheel*" not in filters
     assert "!.venv/**/setuptools*" not in filters
@@ -200,6 +190,14 @@ def test_server_manager_uses_portable_runtime_and_user_settings() -> None:
     assert "PYTHONPATH" in contents
     assert "MURMUR_SETTINGS_FILE" in contents
     assert "path.join(app.getPath('userData'), 'server-settings.json')" in contents
+
+
+def test_release_verify_uses_packaged_runtime_and_controlled_environment() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(encoding="utf-8")
+    assert '.runtime\\python.exe' in contents
+    assert '.venv\\Lib\\site-packages' in contents
+    assert "MURMUR_SETTINGS_FILE" in contents
+    assert "MURMUR_WHISPER_COMPUTE_TYPE" in contents
 
 
 def test_runtime_preparation_script_uses_uv_managed_python() -> None:

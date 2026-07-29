@@ -22,7 +22,8 @@
     "test:history": "node tests/run-history-insights-check.mjs",
     "preview": "vite preview",
     "package": "bun run build && electron-builder",
-    "package:win": "bun run build && electron-builder --win --publish never",
+    "notices:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/generate-third-party-notices.ps1",
+    "package:win": "bun run notices:generate && bun run build && electron-builder --win --publish never",
     "clear-data": "node scripts/clear-data.js"
   },
   "devDependencies": {
@@ -63,6 +64,13 @@
       "resources/**/*"
     ],
     "extraResources": [
+      {
+        "from": "resources/generated/legal",
+        "to": "legal",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "../server",
         "to": "server",

@@ -1,158 +1,91 @@
-name: Release Windows
+name: Verify And Promote Windows Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact existing release tag
+        required: true
+        type: string
+      expected_commit:
+        description: Exact 40-character release commit
+        required: true
+        type: string
+      expected_manifest_sha256:
+        description: SHA-256 of the uploaded manifest
+        required: true
+        type: string
+      allow_unsigned:
+        description: Permit an intentionally unsigned Windows wrapper
+        required: true
+        default: false
+        type: boolean
+      accepted_name_risk:
+        description: Confirm the documented Eve name/mark risk acceptance
+        required: true
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: eve-release-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build And Publish Release
+  verify-draft:
+    name: Verify existing draft assets (no build or upload)
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          python-version: "3.11"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Validate tag version matches repository version
-        run: python scripts/version.py check --tag "${{ github.ref_name }}"
-
-      - name: Prepare managed Python and server dependencies
-        working-directory: server
+          ref: ${{ inputs.expected_commit }}
+          fetch-depth: 0
+      - name: Require default-branch dispatch and explicit risk gates
         shell: pwsh
         run: |
-          & "..\scripts\prepare-python-runtime.ps1" -ServerDir "." -PythonVersion "3.11"
-          $python = (Resolve-Path ".runtime\python.exe").Path
-          uv sync --python $python --extra all --group dev --frozen
-
-      - name: Run server tests
-        working-directory: server
-        run: uv run --no-sync pytest
-
-      - name: Remove development-only server packages
-        working-directory: server
+          if ('${{ github.ref }}' -ne 'refs/heads/trunk') { throw 'Dispatch only from trunk.' }
+          if (-not ${{ inputs.allow_unsigned }}) { throw 'Unsigned publication requires allow_unsigned=true.' }
+          if (-not ${{ inputs.accepted_name_risk }}) { throw 'Name-risk acceptance must be explicit.' }
+      - name: Download existing draft assets only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view '${{ inputs.tag }}' --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          if (-not $release.isDraft -or $release.isPrerelease) { throw 'An existing non-prerelease draft release is required.' }
+          gh release download '${{ inputs.tag }}' --repo '${{ github.repository }}' --dir release-assets
+      - name: Verify draft manifest and artifacts
         shell: pwsh
         run: |
-          $python = (Resolve-Path ".runtime\python.exe").Path
-          uv sync --python $python --extra all --no-dev --frozen
+          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag '${{ inputs.tag }}' -ExpectedCommit '${{ inputs.expected_commit }}' -ExpectedManifestSha256 '${{ inputs.expected_manifest_sha256 }}' -AllowUnsigned:$${{ inputs.allow_unsigned }}
 
-      - name: Verify portable Python imports
-        working-directory: server
-        shell: pwsh
-        run: |
-          $env:PYTHONNOUSERSITE = "1"
-          $env:PYTHONPATH = (Resolve-Path ".venv\Lib\site-packages").Path
-          & ".runtime\python.exe" -c "import fastapi, uvicorn, faster_whisper, torch, nemo.collections.asr; print('portable runtime imports passed')"
-          if ($LASTEXITCODE -ne 0) { throw "Portable Python import smoke test failed." }
-
-      - name: Smoke-start server with portable Python
-        working-directory: server
-        shell: pwsh
-        run: |
-          $env:PYTHONNOUSERSITE = "1"
-          $env:PYTHONPATH = (Resolve-Path ".venv\Lib\site-packages").Path
-          $env:MURMUR_PID_FILE = Join-Path $env:RUNNER_TEMP "murmur-release-smoke.pid"
-          $env:MURMUR_SETTINGS_FILE = Join-Path $env:RUNNER_TEMP "murmur-release-smoke-settings.json"
-          $env:MURMUR_PORT = "51819"
-          $env:MURMUR_ENGINE = "whisper"
-          $env:MURMUR_WHISPER_MODEL = "tiny"
-          $env:MURMUR_WHISPER_DEVICE = "cpu"
-          $env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
-          $process = Start-Process -FilePath ".runtime\python.exe" -ArgumentList "src\main.py" -WorkingDirectory $PWD -WindowStyle Hidden -PassThru
-          try {
-            $deadline = (Get-Date).AddMinutes(10)
-            $ready = $false
-            $lastState = $null
-            while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
-              try {
-                $health = Invoke-RestMethod -Uri "http://127.0.0.1:51819/health" -TimeoutSec 5
-                $lastState = $health
-                if (
-                  $health.status -eq "healthy" -and
-                  $health.engine.status -eq "ready" -and
-                  $health.model_download.status -eq "ready"
-                ) {
-                  $ready = $true
-                  break
-                }
-              } catch {}
-              Start-Sleep -Seconds 2
-            }
-            if (-not $ready) {
-              $lastJson = $lastState | ConvertTo-Json -Depth 8 -Compress
-              throw "Portable server did not reach transcription readiness before timeout. Last state: $lastJson"
-            }
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-          }
-
-      - name: Install app dependencies
-        working-directory: app
-        run: bun install --frozen-lockfile
-
-      - name: Run app tests
-        working-directory: app
-        run: bun test
-
-      - name: Build Windows installer
-        working-directory: app
-        run: bun run package:win
-
-      - name: Verify packaged Python imports
-        working-directory: app
-        shell: pwsh
-        run: |
-          $server = (Resolve-Path "release\win-unpacked\resources\server").Path
-          $env:PYTHONNOUSERSITE = "1"
-          $env:PYTHONPATH = (Resolve-Path "$server\.venv\Lib\site-packages").Path
-          & "$server\.runtime\python.exe" -c "import fastapi, uvicorn, faster_whisper, torch, nemo.collections.asr; print('packaged runtime imports passed')"
-          if ($LASTEXITCODE -ne 0) { throw "Packaged Python import smoke test failed." }
-
-      - name: Verify release artifacts fit GitHub
-        shell: pwsh
-        run: |
-          $releaseDir = "app\release\nsis-web"
-          $artifacts = Get-ChildItem $releaseDir -File | Where-Object {
-            $_.Extension -in ".exe", ".7z", ".blockmap", ".yml"
-          }
-          if (-not $artifacts) { throw "No release artifacts were produced." }
-          if (-not ($artifacts | Where-Object Extension -eq ".exe")) {
-            throw "No web installer executable was produced."
-          }
-          if (-not ($artifacts | Where-Object Extension -eq ".7z")) {
-            throw "No offline installer payload was produced."
-          }
-          if (-not ($artifacts | Where-Object Name -eq "latest.yml")) {
-            throw "No update manifest was produced."
-          }
-          # Keep margin below GitHub's 2 GiB per-file release limit.
-          $maxAssetBytes = 2100000000
-          $oversized = $artifacts | Where-Object Length -ge $maxAssetBytes
-          if ($oversized) {
-            $names = ($oversized | ForEach-Object { "$($_.Name) ($([math]::Round($_.Length / 1GB, 2)) GiB)" }) -join ", "
-            throw "Release asset exceeds the 2.10 GB safety budget: $names"
-          }
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+  promote:
+    name: Reverify and publish the verified draft
+    needs: verify-draft
+    runs-on: windows-latest
+    environment: production-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: |
-            app/release/nsis-web/*.exe
-            app/release/nsis-web/*.7z
-            app/release/nsis-web/*.blockmap
-            app/release/nsis-web/*.yml
+          ref: ${{ inputs.expected_commit }}
+          fetch-depth: 0
+      - name: Re-download and reverify after approval
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view '${{ inputs.tag }}' --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
+          $release = Get-Content release.json -Raw | ConvertFrom-Json
+          if (-not $release.isDraft -or $release.isPrerelease) { throw 'Draft state changed after verification.' }
+          gh release download '${{ inputs.tag }}' --repo '${{ github.repository }}' --dir release-assets
+          & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag '${{ inputs.tag }}' -ExpectedCommit '${{ inputs.expected_commit }}' -ExpectedManifestSha256 '${{ inputs.expected_manifest_sha256 }}' -AllowUnsigned:$${{ inputs.allow_unsigned }}
+      - name: Publish the existing verified draft only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit '${{ inputs.tag }}' --repo '${{ github.repository }}' --draft=false --prerelease=false --latest
