@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { get } from 'svelte/store';
 import {
   disposeServerStatus,
+  getDownloadMilestone,
   getServerStatusPhase,
   initializeServerStatus,
   refresh,
@@ -114,6 +115,16 @@ describe('Home and shared server status', () => {
     expect(statusController).toContain('publish(null);');
   });
 
+  test('announces only bounded download milestones after 25%', () => {
+    expect(getDownloadMilestone(0)).toBeNull();
+    expect(getDownloadMilestone(24)).toBeNull();
+    expect(getDownloadMilestone(25)).toBe(25);
+    expect(getDownloadMilestone(50)).toBe(50);
+    expect(getDownloadMilestone(75)).toBe(75);
+    expect(getDownloadMilestone(100)).toBe(100);
+    expect(getDownloadMilestone(99)).toBe(75);
+  });
+
   test('owns one root subscription and bounded transfer-only polling with cleanup', () => {
     expect(statusController).toContain('let unsubscribe: (() => void) | null = null;');
     expect(statusController).toContain('unsubscribe = window.murmurMain.onServerStateChange');
@@ -144,6 +155,8 @@ describe('Home and shared server status', () => {
     expect(mount).not.toContain('updateServerSettings');
     expect(homeView).toContain('onclick={retry}');
     expect(homeView).toContain('External server — Eve cannot restart this endpoint.');
+    expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Advanced.');
+    expect(homeView).toContain('useExternalServer = settings.useExternalServer;');
     expect(statusController).toContain('if (!current.state?.managed) return false;');
     expect(statusController).toContain('await window.murmurMain.restartServer()');
   });
@@ -157,10 +170,14 @@ describe('Home and shared server status', () => {
     expect(homeView).toContain("onNavigate('insights')");
     expect(homeView).toContain("onNavigate('settings')");
     expect(appView).toContain('aria-live="polite"');
-    expect(statusController).toContain('Math.floor(percent / 25)');
+    expect(statusController).toContain('percent < 25');
     expect(card).toContain("aria-live={announce ? 'polite' : undefined}");
     expect(banner).not.toContain('aria-live="assertive"');
     expect(serverView).not.toContain('aria-live="polite"');
+    expect(banner).toContain('Open Settings &gt; Advanced for details.');
+    expect(banner).not.toContain('Open Server and use Restart');
+    expect(homeView).toContain('By default, Eve processes speech locally.');
+    expect(homeView).toContain('audio is sent to that endpoint under your control.');
   });
 
   test('preserves the frozen Eve identity and version baseline', () => {

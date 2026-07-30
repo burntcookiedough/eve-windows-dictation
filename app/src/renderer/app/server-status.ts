@@ -62,9 +62,13 @@ function phaseAnnouncement(phase: ServerStatusPhase, state: ServerStatePayload |
   }
 }
 
+export function getDownloadMilestone(percent?: number): number | null {
+  if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 25) return null;
+  return Math.min(100, Math.floor(percent / 25) * 25);
+}
+
 function milestone(state: ServerStatePayload | null): number | null {
-  const percent = state?.modelDownload?.progress_percent;
-  return typeof percent === 'number' && Number.isFinite(percent) ? Math.floor(percent / 25) : null;
+  return getDownloadMilestone(state?.modelDownload?.progress_percent);
 }
 
 let current = initialStatus;
@@ -84,7 +88,7 @@ function publish(state: ServerStatePayload | null): void {
   const phaseChanged = phase !== current.phase;
   const milestoneChanged = phase === 'downloading' && nextMilestone !== null && nextMilestone !== announcedMilestone;
   const announcement = phaseChanged || milestoneChanged
-    ? (milestoneChanged ? `Speech model download ${nextMilestone * 25}% complete.` : phaseAnnouncement(phase, state))
+    ? (milestoneChanged ? `Speech model download ${nextMilestone}% complete.` : phaseAnnouncement(phase, state))
     : current.announcement;
 
   announcedMilestone = nextMilestone;

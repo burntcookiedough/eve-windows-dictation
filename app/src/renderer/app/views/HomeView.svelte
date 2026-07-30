@@ -13,6 +13,7 @@
   let quickHotkey = $state('Checking shortcut…');
   let longHotkey = $state('Checking shortcut…');
   let shortcutsError = $state(false);
+  let useExternalServer = $state<boolean | null>(null);
   let snapshot = $derived($serverStatusState);
   let server = $derived(snapshot.state);
   let engine = $derived(server?.engineStatus?.info);
@@ -33,11 +34,13 @@
   };
 
   let readiness = $derived(phaseCopy[snapshot.phase]);
-  let externalMode = $derived(server !== null && !server.managed);
+  let externalMode = $derived(useExternalServer === true || (server !== null && !server.managed));
+  let managementModeUnknown = $derived(server === null && useExternalServer === null);
 
   onMount(async () => {
     try {
       const settings = await window.murmurMain.getSettings();
+      useExternalServer = settings.useExternalServer;
       [quickHotkey, longHotkey] = await Promise.all([
         window.murmurMain.getHotkeyDisplayName(settings.hotkey),
         window.murmurMain.getHotkeyDisplayName(settings.longHotkey),
@@ -67,7 +70,7 @@
           <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
             External server — Eve cannot restart this endpoint.
           </p>
-        {:else if snapshot.phase === 'error' || snapshot.phase === 'unavailable'}
+        {:else if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
           <button
             type="button"
             onclick={retry}
@@ -77,6 +80,10 @@
           >
             Retry managed server
           </button>
+        {:else if managementModeUnknown && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
+          <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
+            Management mode cannot be confirmed. Open Settings &gt; Advanced.
+          </p>
         {/if}
       </div>
 
@@ -130,8 +137,8 @@
     </section>
 
     <section class="rounded-2xl border border-white/10 bg-white/[0.03] p-5" aria-labelledby="home-privacy-heading">
-      <h2 id="home-privacy-heading" class="text-base font-semibold text-zinc-100">Private by design</h2>
-      <p class="mt-1 text-sm leading-6 text-zinc-400">Speech processing uses your configured local or external speech service. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
+      <h2 id="home-privacy-heading" class="text-base font-semibold text-zinc-100">Processing and privacy</h2>
+      <p class="mt-1 text-sm leading-6 text-zinc-400">By default, Eve processes speech locally. If you configure an external endpoint, audio is sent to that endpoint under your control. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
       {#if shortcutsError}
         <p class="mt-3 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>
       {/if}
