@@ -13,6 +13,8 @@
    `targetCommitish`, and manifest must independently identify the accepted release
    commit. The workflow fetches the draft by release ID and downloads each of the exact
    seven assets through its authenticated asset API URL; it never builds or uploads.
+   GitHub requires `contents: write` on this otherwise read/download/verify-only job to
+   access an existing draft release; checkout credentials remain disabled.
 7. A configured `production-release` environment reviewer approves the promotion job.
    The job re-downloads and re-verifies, then changes `draft=false`, `prerelease=false`,
    and marks the verified release latest.

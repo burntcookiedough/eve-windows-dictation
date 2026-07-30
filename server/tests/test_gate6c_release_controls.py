@@ -166,6 +166,25 @@ def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
 
 def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    verify_draft = workflow.split("  verify-draft:\n", 1)[1].split("\n  promote:", 1)[0]
+    assert "permissions:\n      contents: write" in verify_draft
+    for forbidden in (
+        "gh release edit",
+        "gh release upload",
+        "gh release create",
+        "gh release delete",
+        "gh api --method",
+        "gh api -X",
+        "curl.exe -X",
+        "curl.exe --request",
+        "--data",
+        "--form",
+        "git tag",
+        "git update-ref",
+        "git replace",
+        "git push",
+    ):
+        assert forbidden not in verify_draft
     assert workflow.count("persist-credentials: false") == 2
     assert workflow.count("ref: ${{ github.sha }}") == 2
     assert "ref: ${{ inputs.expected_commit }}" not in workflow
