@@ -2,10 +2,10 @@
 
 Local dictation for Windows, built as an Electron desktop client with a packaged Python transcription service.
 
-<img src="https://img.shields.io/badge/v0.7.0-orange?style=flat-square" alt="v0.7.0">
+<img src="https://img.shields.io/badge/v0.8.0-orange?style=flat-square" alt="v0.8.0">
 
 > [!IMPORTANT]
-> Current source builds use the visible **Eve** product, executable, installer, and shortcut names, the `io.github.burntcookiedough.eve` AppUserModelID, and a separate `%APPDATA%\Eve` profile. The published v0.6.3 download remains **Murmur** and is listed below unchanged. The frozen installer GUID, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable for upgrade compatibility. Eve does not import or delete Murmur History, settings, or other personal state.
+> Current source builds use the visible **Eve** product, executable, installer, and shortcut names, the `io.github.burntcookiedough.eve` AppUserModelID, and a separate `%APPDATA%\Eve` profile. Eve v0.7.0 is public; the historical v0.6.3 **Murmur** download table below remains unchanged. The frozen installer GUID, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable for upgrade compatibility. Eve does not import or delete Murmur History, settings, or other personal state.
 
 ## What works today
 

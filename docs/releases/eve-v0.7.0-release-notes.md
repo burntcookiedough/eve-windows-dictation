@@ -1,6 +1,7 @@
 # Eve v0.7.0 release notes
 
-Status: prepared release notes; Eve v0.7.0 has not been published.
+Status: historical release notes. Eve v0.7.0 is public; its release assets and hashes
+remain immutable.
 
 ## Highlights
 
@@ -26,11 +27,9 @@ Status: prepared release notes; Eve v0.7.0 has not been published.
 - The internal `murmur` package name, payload compatibility name, `MURMUR_*` interfaces,
   preload bridges, and local protocol remain unchanged for compatibility.
 
-## Before publication
+## Historical publication notes
 
-These notes describe the accepted source preparation, not an available download. A fresh
-exact-head package and Windows lifecycle, complete third-party notice readiness, and the
-approved draft-release procedure are still required. The user accepted the Eve name/mark
-publication risk; this is not legal clearance. The planned Windows release is unsigned:
-Windows may show an Unknown Publisher warning and Microsoft Defender SmartScreen may
-require an explicit user decision before installation.
+Eve v0.7.0 was published after its separately approved release procedure. The release was
+unsigned: Windows may show an Unknown Publisher warning and Microsoft Defender SmartScreen
+may require an explicit user decision before installation. The accepted Eve name/mark risk
+was not legal clearance.
