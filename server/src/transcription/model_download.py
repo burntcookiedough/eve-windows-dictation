@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import importlib
 from pathlib import Path
+import shutil
 import threading
 import time
 from typing import Iterator, Literal
@@ -38,6 +39,9 @@ _DEFAULT_REQUIRED_FILES = (
     "model.bin",
     "tokenizer.json",
 )
+_MIB = 1024**2
+_GIB = 1024**3
+_MIN_DOWNLOAD_CUSHION_BYTES = 512 * _MIB
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,19 @@ class ModelCacheStatus:
     snapshot_path: str | None = None
     missing_files: list[str] = field(default_factory=list)
     partial_files: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DownloadDiskPreflight:
+    available_bytes: int
+    required_bytes: int
+    remaining_estimated_bytes: int
+    cushion_bytes: int
+    inspected_path: str
+
+
+class DownloadDiskPreflightError(RuntimeError):
+    """The selected model cannot safely begin its existing cache download."""
 
 
 _MODEL_DOWNLOAD_STATE: ModelDownloadState | None = None
@@ -260,6 +277,36 @@ def get_cached_required_bytes(repo_id: str) -> int:
                 continue
         totals.append(total)
     return max(totals, default=0)
+
+
+def check_download_disk_space(repo_id: str, model_size_gb: float) -> DownloadDiskPreflight:
+    """Check free capacity for one selected Hugging Face repo without touching cache data.
+
+    Model metadata is approximate, so the remaining estimate includes the larger of a
+    10% cushion or 512 MiB. Only the selected repo's required-file metadata is read.
+    """
+    cache_dir = _get_hf_cache_dir()
+    inspected = cache_dir
+    while not inspected.exists() and inspected.parent != inspected:
+        inspected = inspected.parent
+    if not inspected.exists():
+        raise DownloadDiskPreflightError("Cannot inspect the selected model cache filesystem.")
+    try:
+        available = shutil.disk_usage(inspected).free
+    except OSError as exc:
+        raise DownloadDiskPreflightError("Cannot inspect free space for the selected model cache filesystem.") from exc
+
+    estimated = max(0, int(model_size_gb * _GIB))
+    cached = get_cached_required_bytes(repo_id)
+    remaining = max(0, estimated - cached)
+    cushion = max(int(estimated * 0.10), _MIN_DOWNLOAD_CUSHION_BYTES)
+    required = remaining + cushion
+    result = DownloadDiskPreflight(available, required, remaining, cushion, str(inspected))
+    if available < required:
+        raise DownloadDiskPreflightError(
+            f"Not enough free space to prepare the selected model (needs about {required / _GIB:.1f} GB free; {available / _GIB:.1f} GB available)."
+        )
+    return result
 
 
 def update_model_download_state(

@@ -6,6 +6,9 @@
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
+  import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
+  import { SPEECH_MODEL_PRESETS, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
+  import { getServerManagementMode, serverStatusState } from '../server-status';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -78,6 +81,9 @@
 
   // Local engine settings (track pending changes before apply)
   let pendingEngine = $state<Record<string, unknown>>({});
+  let sharedServerState = $derived($serverStatusState.state);
+  let sharedEngineStatus = $derived(sharedServerState?.engineStatus ?? engineStatus);
+  let externalMode = $derived(getServerManagementMode($serverStatusState) === 'external');
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -87,6 +93,14 @@
   }
 
   let selectedEngine = $derived(getSettingValue<string>('engine') ?? 'nemotron');
+  let selectedPreset = $derived(SPEECH_MODEL_PRESETS.find((preset) =>
+    getSettingValue<string>('engine') === preset.engine && getSettingValue<string>(preset.setting) === preset.model
+  ) ?? null);
+  let stagedPreset = $derived(stagedPresetFromPending(pendingEngine));
+  let preparationFailed = $derived(
+    !!sharedEngineStatus?.message || sharedEngineStatus?.status === 'error' || sharedEngineStatus?.pending?.status === 'error' ||
+    (stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
+  );
 
   // Whether the current engine supports hotwords (Whisper: yes, Nemotron: no)
   let hotwordsSupported = $derived(engineStatus?.info?.supports_hotwords ?? true);
@@ -403,6 +417,19 @@
     pendingEngine = { ...pendingEngine, [key]: value };
   }
 
+  function selectPreset(preset: typeof SPEECH_MODEL_PRESETS[number]): void {
+    if (externalMode || !isEngineAvailable(preset.engine)) return;
+    pendingEngine = { ...pendingEngine, ...presetPatch(preset) };
+    engineApplyError = '';
+  }
+
+  function revertPreset(): void {
+    if (!stagedPreset) return;
+    const { engine: _engine, [stagedPreset.setting]: _model, ...advancedPending } = pendingEngine;
+    pendingEngine = advancedPending;
+    engineApplyError = '';
+  }
+
   async function applyEngineSettings() {
     if (engineApplying || Object.keys(pendingEngine).length === 0) return;
     engineApplying = true;
@@ -415,16 +442,7 @@
       serverSettings = response.settings;
       engineStatus = response.engine_status;
       availableEngines = response.available_engines ?? availableEngines;
-      pendingEngine = {};
-
-      // Poll when a reload has started (or is already visible as pending/loading).
-      if (
-        response.reload_started ||
-        response.engine_status.status === 'loading' ||
-        response.engine_status.pending
-      ) {
-        pollEngineStatus();
-      }
+      if (!response.reload_started && response.engine_status.status === 'ready' && !response.engine_status.pending) pendingEngine = {};
     } catch (error) {
       // Keep pending changes on failure so user can retry
       engineApplyError = error instanceof Error ? error.message : 'Failed to apply engine settings.';
@@ -433,37 +451,17 @@
     }
   }
 
-  async function pollEngineStatus() {
-    const maxAttempts = 60; // 30 seconds at 500ms interval
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      try {
-        const status = await window.murmurMain.getEngineStatus();
-        engineStatus = status;
-        if (status.status === 'ready' && !status.pending) {
-          // Refresh full settings to get updated values
-          const data = await window.murmurMain.getServerSettings();
-          serverSettings = data.settings;
-          engineStatus = data.engine_status;
-          availableEngines = data.available_engines ?? availableEngines;
-          return;
-        }
-        if (status.status === 'error') {
-          engineApplyError = status.message ?? 'Engine reload failed.';
-          const data = await window.murmurMain.getServerSettings();
-          serverSettings = data.settings;
-          engineStatus = data.engine_status;
-          availableEngines = data.available_engines ?? availableEngines;
-          return;
-        }
-      } catch {
-        engineApplyError = 'Failed while checking engine status.';
-        return;
-      }
+  $effect(() => {
+    if (Object.keys(pendingEngine).length === 0) return;
+    if (preparationFailed) {
+      engineApplyError = sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.';
+      return;
     }
-
-    engineApplyError = 'Timed out waiting for engine reload to finish.';
-  }
+    if (stagedPreset && presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)) {
+      pendingEngine = {};
+      engineApplyError = '';
+    }
+  });
 </script>
 
 <div class="mx-auto h-full w-full max-w-[560px] px-4 py-4 pr-2">
@@ -471,8 +469,8 @@
     {#if settingsLoaded}
     <div class="space-y-6">
 
-    <!-- Activation -->
-    <SettingsSection title="Activation">
+    <!-- Shortcuts & activation -->
+    <SettingsSection title="Shortcuts &amp; activation">
       <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
         <div class="flex items-center gap-2">
           <button
@@ -566,8 +564,8 @@
 
     </SettingsSection>
 
-    <!-- Post-Processing -->
-    <SettingsSection title="Post-Processing">
+    <!-- Dictation/output -->
+    <SettingsSection title="Dictation/output">
       <SettingsRow label="Append period" description="Add a period at the end of transcriptions">
         <Toggle
           enabled={settings.appendPeriod}
@@ -598,10 +596,7 @@
           <option value="command">Command Mode</option>
         </select>
       </SettingsRow>
-    </SettingsSection>
-
-    <!-- Recognition -->
-    <SettingsSection title="Recognition">
+    <!-- Recognition/output controls remain in Dictation/output. -->
       {#if !hotwordsSupported}
         <div class="flex items-start gap-3 p-4 bg-zinc-900/50 rounded-xl border border-zinc-700 w-full">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-400 shrink-0 mt-0.5">
@@ -678,8 +673,34 @@
       </div>
     </SettingsSection>
 
-    <!-- Behavior -->
-    <SettingsSection title="Behavior">
+    <SettingsSection title="Speech model">
+      {#if !serverConnected || !serverSettings}
+        <p class="text-xs text-zinc-500">Speech model choices are available when the server reports its settings.</p>
+      {:else}
+        <SpeechModelChooser
+          selected={selectedPreset}
+          availableEngines={availableEngines}
+          availabilityKnown={availableEngines.length > 0}
+          engineStatus={sharedEngineStatus}
+          modelDownload={sharedServerState?.modelDownload}
+          externalMode={externalMode}
+          onSelect={selectPreset}
+        />
+        {#if stagedPreset && !presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)}
+          <p class="mt-3 text-xs {preparationFailed ? 'text-red-300' : 'text-amber-300'}">{preparationFailed ? 'Preparation failed. Retry or revert your selected model.' : 'Selected model is pending preparation; the current engine remains active until the selected model is ready.'}</p>
+        {/if}
+        {#if stagedPreset && !externalMode}
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
+            <button type="button" onclick={revertPreset} disabled={engineApplying} class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
+          </div>
+          {#if engineApplyError}<p class="mt-2 text-xs text-red-300">{engineApplyError}</p>{/if}
+        {/if}
+      {/if}
+    </SettingsSection>
+
+    <!-- App behavior -->
+    <SettingsSection title="App behavior">
       <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically">
         <Toggle
           enabled={settings.autoCopy}
@@ -742,8 +763,7 @@
       </div>
       <div class="space-y-6">
 
-    <!-- Engine -->
-    <SettingsSection title="Engine">
+    <SettingsSection title="Model compatibility">
       {#if !serverConnected}
         <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
           <p class="text-xs text-zinc-500 text-center">
@@ -751,49 +771,8 @@
           </p>
         </div>
       {:else if serverSettings}
-        <!-- Engine selection (radio group) -->
-        <div class="w-full rounded-xl border border-zinc-700 bg-zinc-900/50 p-4">
-          <p class="text-sm text-zinc-200 mb-3">Transcription Engine</p>
-          <div class="space-y-2">
-            {#each getOptions('engine') as option}
-              <label class="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors
-                {!isEngineAvailable(option.value)
-                  ? 'opacity-50 cursor-not-allowed bg-zinc-800/30'
-                  : selectedEngine === option.value
-                    ? 'bg-zinc-800'
-                    : 'hover:bg-zinc-800/50'}">
-                <input
-                  type="radio"
-                  name="engine"
-                  value={option.value}
-                  checked={selectedEngine === option.value}
-                  disabled={!isEngineAvailable(option.value)}
-                  onchange={() => isEngineAvailable(option.value) && updateEngineSetting('engine', option.value)}
-                  class="mt-0.5 accent-emerald-500
-                    {isEngineAvailable(option.value) ? 'cursor-pointer' : 'cursor-not-allowed'}"
-                />
-                <div>
-                  <p class="text-sm text-zinc-200">{option.label}</p>
-                  {#if option.description}
-                    <p class="text-xs text-zinc-500 mt-0.5">{option.description}</p>
-                  {/if}
-                  {#if !isEngineAvailable(option.value)}
-                    <p class="text-xs text-amber-300 mt-0.5">Not available in the currently running server environment.</p>
-                  {/if}
-                </div>
-              </label>
-            {/each}
-          </div>
-          {#if getOptions('engine').some((option) => !isEngineAvailable(option.value))}
-            <p class="text-xs text-zinc-500 mt-3">
-              Install missing engine dependencies and restart the server to enable those options.
-            </p>
-          {/if}
-        </div>
-
-        <!-- Conditional settings based on selected engine -->
-        {#if serverSettings.whisper_model && isVisible(serverSettings.whisper_model)}
-          <SettingsRow label={serverSettings.whisper_model.label} description={serverSettings.whisper_model.description}>
+        {#if serverSettings.whisper_model}
+          <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
             <select
               value={getSettingValue('whisper_model') ?? serverSettings.whisper_model.value}
               onchange={(e) => updateEngineSetting('whisper_model', e.currentTarget.value)}
@@ -805,8 +784,7 @@
             </select>
           </SettingsRow>
         {/if}
-
-        {#if serverSettings.whisper_compute_type && isVisible(serverSettings.whisper_compute_type)}
+        {#if serverSettings.whisper_compute_type}
           <SettingsRow label={serverSettings.whisper_compute_type.label} description={serverSettings.whisper_compute_type.description}>
             <select
               value={getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value}
@@ -836,9 +814,19 @@
             Advanced
           </button>
 
-          {#if engineAdvancedOpen}
-            <div class="mt-2 space-y-2">
-              <!-- Device setting (show whichever is visible) -->
+           {#if engineAdvancedOpen}
+             <div class="mt-2 space-y-2">
+               {#if serverSettings.nemotron_model && isVisible(serverSettings.nemotron_model)}
+                 <SettingsRow label={serverSettings.nemotron_model.label} description="Raw Nemotron model name or path">
+                   <input value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)} oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)} class="w-56 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-zinc-100" />
+                 </SettingsRow>
+               {/if}
+               {#if serverSettings.whisper_language && isVisible(serverSettings.whisper_language)}
+                 <SettingsRow label={serverSettings.whisper_language.label} description={serverSettings.whisper_language.description}>
+                   <input value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')} oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)} class="w-28 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-zinc-100" />
+                 </SettingsRow>
+               {/if}
+               <!-- Device setting (show whichever is visible) -->
               {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
                 <SettingsRow label="Device" description="Hardware device for inference">
                   <select
@@ -881,8 +869,8 @@
           {/if}
         </div>
 
-        <!-- Apply & Reload button (shown when pending changes exist) -->
-        {#if hasPendingReloadChanges() || Object.keys(pendingEngine).length > 0}
+        <!-- Advanced compatibility changes remain explicit. -->
+        {#if Object.keys(pendingEngine).length > 0 && !stagedPreset}
           <div class="w-full rounded-xl border border-zinc-700 bg-zinc-900/50 p-4">
             <div class="flex items-center gap-2 mb-3">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400">
@@ -907,7 +895,7 @@
                   Applying...
                 </span>
               {:else}
-                Apply & Reload Engine
+                Apply advanced changes
               {/if}
             </button>
             {#if engineApplyError}

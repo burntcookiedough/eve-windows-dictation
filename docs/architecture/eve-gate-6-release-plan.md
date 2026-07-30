@@ -1,6 +1,6 @@
 # Eve Gate 6 release plan
 
-- Status: Gate 6B accepted; Gate 6C preparation PR authorized
+- Status: Gate 6 completed; Eve v0.7.0 is public. Historical Gate 6 evidence remains unchanged.
 - Repository: `burntcookiedough/eve-windows-dictation`
 - Canonical release-candidate base: `f88067ff7bb31ec7f0b5a124fefbeaff0d7829ca`
 - Tracking issue: [#21](https://github.com/burntcookiedough/eve-windows-dictation/issues/21)

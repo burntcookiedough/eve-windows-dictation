@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from types import SimpleNamespace
 
 from config import Settings
 import app as app_module
@@ -63,6 +64,36 @@ def test_is_repo_cached_rejects_empty_snapshot(tmp_path, monkeypatch) -> None:
     status = model_download.get_repo_cache_status("Systran/faster-whisper-large-v3-turbo")
     assert status.status == "partial"
     assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is False
+
+
+def test_download_disk_preflight_uses_custom_hf_cache_and_selected_partial_bytes(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "custom-hf-cache"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
+    repo_dir = cache_dir / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+    snapshot = repo_dir / "snapshots" / "partial"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_bytes(b"x" * 100)
+    monkeypatch.setattr(model_download.shutil, "disk_usage", lambda path: SimpleNamespace(free=3 * 1024**3))
+
+    result = model_download.check_download_disk_space("mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1.5)
+
+    assert result.inspected_path == str(cache_dir)
+    assert result.remaining_estimated_bytes < int(1.5 * 1024**3)
+    assert result.cushion_bytes == 512 * 1024**2
+
+
+def test_download_disk_preflight_rejects_insufficient_space_without_cache_mutation(tmp_path, monkeypatch) -> None:
+    cache_dir = tmp_path / "hub"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
+    monkeypatch.setattr(model_download.shutil, "disk_usage", lambda path: SimpleNamespace(free=1))
+
+    try:
+        model_download.check_download_disk_space("nvidia/nemotron-speech-streaming-en-0.6b", 2.3)
+    except model_download.DownloadDiskPreflightError as exc:
+        assert "Not enough free space" in str(exc)
+    else:
+        raise AssertionError("expected disk preflight failure")
+    assert not cache_dir.exists()
 
 
 def test_is_repo_cached_detects_complete_snapshot(tmp_path, monkeypatch) -> None:

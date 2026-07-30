@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted for staged implementation. Gates 1–3 are merged through PR #17 at
-`822a353d9e232a1b365b61c972db4195ac23ba48`. Gate 4 is authorized with the exact
-AppUserModelID `io.github.burntcookiedough.eve`. Visual redesign, publication, and
-merge remain separately gated.
+Accepted and implemented. Gates 1–3 are merged through PR #17 at
+`822a353d9e232a1b365b61c972db4195ac23ba48`. Gate 4 uses the exact
+AppUserModelID `io.github.burntcookiedough.eve`. The visual redesign and Gate 6
+publication stages referenced below are completed historical milestones.
 
 The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
 
