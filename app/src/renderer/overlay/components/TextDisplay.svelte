@@ -11,14 +11,20 @@
   let scrollRef = $state<HTMLDivElement | null>(null);
   let isOverflowing = $state(false);
 
-  // Auto-scroll to bottom when text changes and check overflow
+  // Keep the newest transcript line visible in the fixed two-line viewport.
   $effect(() => {
-    if (text && scrollRef) {
-      tick().then(() => {
-        scrollRef!.scrollTop = scrollRef!.scrollHeight;
-        isOverflowing = scrollRef!.scrollHeight > scrollRef!.clientHeight;
-      });
+    if (!text) {
+      isOverflowing = false;
+      return;
     }
+
+    if (!scrollRef) return;
+
+    tick().then(() => {
+      if (!scrollRef || !text) return;
+      scrollRef.scrollTop = scrollRef.scrollHeight;
+      isOverflowing = scrollRef.scrollHeight > scrollRef.clientHeight;
+    });
   });
 </script>
 
@@ -31,7 +37,7 @@
     class="h-11 overflow-hidden {isOverflowing ? '[mask-image:linear-gradient(to_bottom,transparent_0%,black_28%,black_100%)]' : ''}"
     bind:this={scrollRef}
   >
-    <p class="line-clamp-2 break-words text-center text-sm font-medium leading-[22px] text-zinc-100">
+    <p class="break-words text-center text-sm font-medium leading-[22px] text-zinc-100">
       {text}
     </p>
   </div>
