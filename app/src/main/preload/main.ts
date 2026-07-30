@@ -170,16 +170,20 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.SERVER_GET_LOGS);
   },
 
-  onServerStateChange: (callback: (state: ServerStatePayload) => void): void => {
-    ipcRenderer.on(IPC_CHANNELS.SERVER_STATE_CHANGE, (_event, state) => {
+  onServerStateChange: (callback: (state: ServerStatePayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: ServerStatePayload) => {
       callback(state);
-    });
+    };
+    ipcRenderer.on(IPC_CHANNELS.SERVER_STATE_CHANGE, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SERVER_STATE_CHANGE, handler);
   },
 
-  onServerLog: (callback: (entry: ServerLogEntry) => void): void => {
-    ipcRenderer.on(IPC_CHANNELS.SERVER_LOG, (_event, entry) => {
+  onServerLog: (callback: (entry: ServerLogEntry) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, entry: ServerLogEntry) => {
       callback(entry);
-    });
+    };
+    ipcRenderer.on(IPC_CHANNELS.SERVER_LOG, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SERVER_LOG, handler);
   },
 
   removeServerListeners: (): void => {
