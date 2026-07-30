@@ -29,8 +29,8 @@ work continues to preserve the established identity, profile, installer, and pri
 
 The completed gates established a fresh Eve profile that does not automatically import
 Murmur History, settings, hotwords, browser storage, credentials, or external-server
-configuration. They also proved the compatibility lifecycle for the accepted candidates;
-the public release still requires fresh Gate 6 evidence.
+configuration. Gate 6 completed the public v0.7.0 lifecycle without changing those
+privacy boundaries.
 
 ## Next: model-management clarity
 
