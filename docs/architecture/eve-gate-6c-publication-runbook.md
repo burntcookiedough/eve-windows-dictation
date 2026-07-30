@@ -6,11 +6,13 @@
 4. Create the exact annotated tag only after acceptance; tag pushes do not trigger a workflow.
 5. Manually create a draft release and upload exactly the manifest, SHA256/SHA512 sums,
    third-party notice, wrapper, payload, and `latest.yml`.
-6. Dispatch the verifier from `trunk` with exact tag, release commit, manifest hash,
+6. Record the draft's immutable numeric REST release ID, then dispatch the verifier from
+   `trunk` with that release ID, exact tag, release commit, manifest hash,
    `allow_unsigned=true`, and `accepted_name_risk=true`. The immutable dispatch
    `github.sha` supplies the reviewed control-plane scripts; the release tag, draft
    `targetCommitish`, and manifest must independently identify the accepted release
-   commit. The workflow downloads and verifies only; it never builds or uploads.
+   commit. The workflow fetches the draft by release ID and downloads each of the exact
+   seven assets through its authenticated asset API URL; it never builds or uploads.
 7. A configured `production-release` environment reviewer approves the promotion job.
    The job re-downloads and re-verifies, then changes `draft=false`, `prerelease=false`,
    and marks the verified release latest.

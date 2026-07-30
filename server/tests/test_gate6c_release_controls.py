@@ -172,8 +172,26 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert workflow.count("$head -ne $env:GITHUB_SHA") == 2
     assert workflow.count("$env:GITHUB_REF -ne 'refs/heads/trunk'") == 2
     assert workflow.count("Release tag commit does not match ExpectedCommit.") == 2
-    assert workflow.count("$release.tagName -ne $env:TAG") == 2
-    assert workflow.count("targetCommitish -ne $env:EXPECTED_COMMIT") == 2
+    assert "expected_release_id:" in workflow
+    assert workflow.count("$env:EXPECTED_RELEASE_ID -notmatch '^[1-9][0-9]*$'") == 2
+    assert workflow.count('gh api "repos/${{ github.repository }}/releases/$env:EXPECTED_RELEASE_ID"') == 2
+    assert workflow.count("[string]$release.id -ne $env:EXPECTED_RELEASE_ID") == 2
+    assert workflow.count("$release.tag_name -ne $env:TAG") == 2
+    assert workflow.count("$release.target_commitish -ne $env:EXPECTED_COMMIT") == 2
+    assert workflow.count("$assets.Count -ne $expectedNames.Count") == 2
+    assert workflow.count("'Accept: application/octet-stream'") == 2
+    assert workflow.count('"Authorization: Bearer $env:GH_TOKEN"') == 2
+    assert workflow.count("--output (Join-Path release-assets $asset.name)") == 2
+    assert workflow.count("$download.Length -ne [int64]$asset.size") == 2
+    assert workflow.count("$downloadDigest -ne $asset.digest") == 2
+    promote_step = workflow.split(
+        "- name: Re-download and reverify after approval", 1
+    )[1].split("- name: Publish the existing verified draft only", 1)[0]
+    assert (
+        "EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}" in promote_step
+    )
+    assert "gh release view" not in workflow
+    assert "gh release download" not in workflow
     assert "EXPECTED_MANIFEST_SHA256" in workflow
     assert "-AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')" in workflow
     assert "gh release edit $env:TAG" in workflow
