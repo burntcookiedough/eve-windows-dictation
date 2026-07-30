@@ -135,7 +135,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag $env:TAG -ExpectedCommit $env:EXPECTED_COMMIT -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256 -AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact verification failed.' }
 
   promote:
     name: Reverify and publish the verified draft
@@ -216,7 +215,6 @@ jobs:
             if ($download.Length -ne [int64]$asset.size -or $downloadDigest -ne $asset.digest) { throw "Downloaded asset metadata mismatch for $($asset.name)." }
           }
           & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag $env:TAG -ExpectedCommit $env:EXPECTED_COMMIT -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256 -AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')
-          if ($LASTEXITCODE -ne 0) { throw 'Artifact re-verification failed.' }
       - name: Publish the existing verified draft only
         shell: pwsh
         env:

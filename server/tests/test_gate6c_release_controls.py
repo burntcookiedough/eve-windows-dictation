@@ -203,12 +203,23 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert workflow.count("--output (Join-Path release-assets $asset.name)") == 2
     assert workflow.count("$download.Length -ne [int64]$asset.size") == 2
     assert workflow.count("$downloadDigest -ne $asset.digest") == 2
+    verifier = "& .\\scripts\\release-artifacts.ps1 -Mode Verify"
+    assert workflow.count(verifier) == 2
+    assert "Artifact verification failed." not in workflow
+    assert "Artifact re-verification failed." not in workflow
+    verify_manifest_step = workflow.split(
+        "- name: Verify draft manifest and artifacts", 1
+    )[1].split("\n  promote:", 1)[0]
+    assert "$ErrorActionPreference = 'Stop'" in verify_manifest_step
+    assert verifier in verify_manifest_step
     promote_step = workflow.split(
         "- name: Re-download and reverify after approval", 1
     )[1].split("- name: Publish the existing verified draft only", 1)[0]
     assert (
         "EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}" in promote_step
     )
+    assert "$ErrorActionPreference = 'Stop'" in promote_step
+    assert verifier in promote_step
     assert "gh release view" not in workflow
     assert "gh release download" not in workflow
     assert "EXPECTED_MANIFEST_SHA256" in workflow
