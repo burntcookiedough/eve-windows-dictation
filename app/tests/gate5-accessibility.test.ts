@@ -59,11 +59,12 @@ describe('Gate 5 accessibility contracts', () => {
     expect(overlayView).not.toMatch(/<button|tabindex=|on(?:click|pointer|mouse)/);
   });
 
-  test('uses fixed two-line auto-follow without an operable scrollbar or glow', () => {
-    expect(overlayText).toContain('scrollTop = scrollRef!.scrollHeight');
+  test('uses a fixed two-line auto-follow viewport without an operable scrollbar or glow', () => {
+    expect(overlayText).toContain('scrollRef.scrollTop = scrollRef.scrollHeight');
     expect(overlayText).toContain('h-16');
-    expect(overlayText).toContain('line-clamp-2');
+    expect(overlayText).toContain('h-11');
     expect(overlayText).toContain('overflow-hidden');
+    expect(overlayText).not.toContain('line-clamp-2');
     expect(overlayText).not.toContain('overflow-y-auto');
     expect(overlayPill).not.toContain('shadow-[');
   });
