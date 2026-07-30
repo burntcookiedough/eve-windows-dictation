@@ -35,6 +35,8 @@ describe('speech model presets', () => {
     expect(settings).toContain('serverStatusState');
     expect(settings).not.toContain('async function pollEngineStatus');
     expect(settings).toContain('!!sharedEngineStatus?.message');
+    expect(settings).toContain("sharedEngineStatus?.pending?.status === 'error'");
+    expect(settings).toContain('sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message');
     expect(settings).toContain("'Retry preparation'");
     expect(settings).toContain("'nemotron_model'");
     expect(settings).toContain("'whisper_language'");

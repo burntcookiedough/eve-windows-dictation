@@ -98,7 +98,7 @@
   ) ?? null);
   let stagedPreset = $derived(stagedPresetFromPending(pendingEngine));
   let preparationFailed = $derived(
-    !!sharedEngineStatus?.message || sharedEngineStatus?.status === 'error' ||
+    !!sharedEngineStatus?.message || sharedEngineStatus?.status === 'error' || sharedEngineStatus?.pending?.status === 'error' ||
     (stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
   );
 
@@ -454,7 +454,7 @@
   $effect(() => {
     if (Object.keys(pendingEngine).length === 0) return;
     if (preparationFailed) {
-      engineApplyError = sharedEngineStatus.message ?? 'Engine reload failed.';
+      engineApplyError = sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.';
       return;
     }
     if (stagedPreset && presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)) {
