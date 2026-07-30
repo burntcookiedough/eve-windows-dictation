@@ -3,7 +3,7 @@
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import { shouldShowModelProgress } from '$shared/model-progress';
   import type { ServerStatusPhase } from '../server-status';
-  import { retryManagedServer, serverStatusState } from '../server-status';
+  import { getServerManagementMode, retryManagedServer, serverStatusState } from '../server-status';
 
   interface Props {
     onNavigate: (view: 'history' | 'insights' | 'settings') => void;
@@ -13,7 +13,7 @@
   let quickHotkey = $state('Checking shortcut…');
   let longHotkey = $state('Checking shortcut…');
   let shortcutsError = $state(false);
-  let useExternalServer = $state<boolean | null>(null);
+  let retrying = $state(false);
   let snapshot = $derived($serverStatusState);
   let server = $derived(snapshot.state);
   let engine = $derived(server?.engineStatus?.info);
@@ -34,26 +34,34 @@
   };
 
   let readiness = $derived(phaseCopy[snapshot.phase]);
-  let externalMode = $derived(useExternalServer === true || (server !== null && !server.managed));
-  let managementModeUnknown = $derived(server === null && useExternalServer === null);
+  let managementMode = $derived(getServerManagementMode(snapshot));
 
-  onMount(async () => {
-    try {
-      const settings = await window.murmurMain.getSettings();
-      useExternalServer = settings.useExternalServer;
-      [quickHotkey, longHotkey] = await Promise.all([
-        window.murmurMain.getHotkeyDisplayName(settings.hotkey),
-        window.murmurMain.getHotkeyDisplayName(settings.longHotkey),
-      ]);
-    } catch {
-      shortcutsError = true;
-      quickHotkey = 'Shortcut unavailable';
-      longHotkey = 'Shortcut unavailable';
+  onMount(() => {
+    async function loadSettings(): Promise<void> {
+      try {
+        const settings = await window.murmurMain.getSettings();
+        [quickHotkey, longHotkey] = await Promise.all([
+          window.murmurMain.getHotkeyDisplayName(settings.hotkey),
+          window.murmurMain.getHotkeyDisplayName(settings.longHotkey),
+        ]);
+      } catch {
+        shortcutsError = true;
+        quickHotkey = 'Shortcut unavailable';
+        longHotkey = 'Shortcut unavailable';
+      }
     }
+
+    void loadSettings();
   });
 
-  function retry(): void {
-    void retryManagedServer();
+  async function retry(): Promise<void> {
+    if (retrying) return;
+    retrying = true;
+    try {
+      await retryManagedServer();
+    } finally {
+      retrying = false;
+    }
   }
 </script>
 
@@ -66,7 +74,7 @@
           <h1 id="home-readiness-heading" class="text-2xl font-semibold text-zinc-50">{readiness.title}</h1>
           <p class="mt-1 max-w-xl text-sm text-zinc-400">{readiness.detail}</p>
         </div>
-        {#if externalMode}
+        {#if managementMode === 'external'}
           <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
             External server — Eve cannot restart this endpoint.
           </p>
@@ -74,13 +82,13 @@
           <button
             type="button"
             onclick={retry}
-            disabled={!server?.managed}
-            class="rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]
-              {server?.managed ? 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
+            disabled={retrying}
+            class="rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]
+              {retrying ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
           >
-            Retry managed server
+            {retrying ? 'Retrying…' : 'Retry managed server'}
           </button>
-        {:else if managementModeUnknown && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
+        {:else if managementMode === 'unknown' && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
           <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
             Management mode cannot be confirmed. Open Settings &gt; Advanced.
           </p>
@@ -145,9 +153,9 @@
     </section>
 
     <nav aria-label="Home actions" class="flex flex-wrap gap-2">
-      <button type="button" onclick={() => onNavigate('history')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100">Open History</button>
-      <button type="button" onclick={() => onNavigate('insights')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100">Open Insights</button>
-      <button type="button" onclick={() => onNavigate('settings')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100">Open Settings</button>
+      <button type="button" onclick={() => onNavigate('history')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open History</button>
+      <button type="button" onclick={() => onNavigate('insights')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open Insights</button>
+      <button type="button" onclick={() => onNavigate('settings')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open Settings</button>
     </nav>
   </div>
 </div>

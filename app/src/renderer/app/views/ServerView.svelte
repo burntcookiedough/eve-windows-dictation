@@ -192,17 +192,29 @@
     });
   }
 
-  onMount(async () => {
-    logs = await window.murmurMain.getServerLogs();
+  onMount(() => {
+    let active = true;
 
-    // Load settings
-    const settings = await window.murmurMain.getSettings();
-    autoStart = settings.serverAutoStart;
-    useExternalServer = settings.useExternalServer;
+    async function load(): Promise<void> {
+      const initialLogs = await window.murmurMain.getServerLogs();
+      if (!active) return;
+      logs = initialLogs;
 
-    removeLogListener = window.murmurMain.onServerLog((entry) => {
-      queueLog(entry);
-    });
+      const settings = await window.murmurMain.getSettings();
+      if (!active) return;
+      autoStart = settings.serverAutoStart;
+      useExternalServer = settings.useExternalServer;
+
+      if (!active) return;
+      removeLogListener = window.murmurMain.onServerLog((entry) => {
+        queueLog(entry);
+      });
+    }
+
+    void load();
+    return () => {
+      active = false;
+    };
   });
 
   onDestroy(() => {

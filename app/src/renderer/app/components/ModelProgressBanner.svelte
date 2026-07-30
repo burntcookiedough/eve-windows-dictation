@@ -1,13 +1,14 @@
 <script lang="ts">
   import { shouldShowModelProgress } from '$shared/model-progress';
   import ModelProgressCard from './ModelProgressCard.svelte';
-  import { serverStatusState } from '../server-status';
+  import { getServerManagementMode, serverStatusState } from '../server-status';
 
   let { visible = true }: { visible?: boolean } = $props();
   let modelDownload = $derived($serverStatusState.state?.modelDownload);
   let showBanner = $derived(
     modelDownload?.status === 'error' || shouldShowModelProgress(modelDownload)
   );
+  let managementMode = $derived(getServerManagementMode($serverStatusState));
 </script>
 
 {#if visible && modelDownload && showBanner}
@@ -19,9 +20,9 @@
         <p class="text-sm font-medium text-red-300 text-pretty">Speech model setup failed</p>
         <p class="mt-1 text-xs text-red-300/80 text-pretty">
           {modelDownload.detail ?? 'Check your connection.'} Open Settings &gt; Advanced for details.
-          {#if $serverStatusState.state?.managed}
+          {#if managementMode === 'managed'}
             You can restart the managed server there.
-          {:else if $serverStatusState.state}
+          {:else if managementMode === 'external'}
             Eve cannot restart an external server.
           {:else}
             Management mode cannot be confirmed yet.

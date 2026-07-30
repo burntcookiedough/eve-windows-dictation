@@ -4,6 +4,7 @@ import { get } from 'svelte/store';
 import {
   disposeServerStatus,
   getDownloadMilestone,
+  getServerManagementMode,
   getServerStatusPhase,
   initializeServerStatus,
   refresh,
@@ -94,6 +95,50 @@ describe('Home and shared server status', () => {
     disposeServerStatus();
   });
 
+  test('does not let an older status snapshot overwrite an event or a new controller lifecycle', async () => {
+    let resolveFirstStatus: ((state: { status: 'running'; managed: boolean; engineStatus: { current: string; status: 'ready' } }) => void) | undefined;
+    const firstStatus = new Promise<{ status: 'running'; managed: boolean; engineStatus: { current: string; status: 'ready' } }>((resolve) => {
+      resolveFirstStatus = resolve;
+    });
+    let stateCallback: ((state: { status: 'running'; managed: boolean; engineStatus: { current: string; status: 'ready' } }) => void) | undefined;
+    const eventStatus = { status: 'running' as const, managed: false, engineStatus: { current: 'event', status: 'ready' as const } };
+    const reinitializedStatus = { status: 'running' as const, managed: true, engineStatus: { current: 'new', status: 'ready' as const } };
+
+    (globalThis as { window: unknown }).window = {
+      murmurMain: {
+        getServerStatus: async () => firstStatus,
+        onServerStateChange: (callback: typeof stateCallback) => { stateCallback = callback; return () => {}; },
+        restartServer: async () => reinitializedStatus,
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+
+    initializeServerStatus();
+    stateCallback?.(eventStatus);
+    resolveFirstStatus?.({ status: 'running', managed: true, engineStatus: { current: 'old', status: 'ready' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(get(serverStatusState).state).toEqual(eventStatus);
+
+    disposeServerStatus();
+    let resolveDisposedStatus: ((state: typeof reinitializedStatus) => void) | undefined;
+    const disposedStatus = new Promise<typeof reinitializedStatus>((resolve) => {
+      resolveDisposedStatus = resolve;
+    });
+    (globalThis as { window: { murmurMain: { getServerStatus: () => Promise<typeof reinitializedStatus> } } }).window.murmurMain.getServerStatus = async () => disposedStatus;
+    initializeServerStatus();
+    disposeServerStatus();
+    (globalThis as { window: { murmurMain: { getServerStatus: () => Promise<typeof reinitializedStatus> } } }).window.murmurMain.getServerStatus = async () => reinitializedStatus;
+    initializeServerStatus();
+    await Promise.resolve();
+    resolveDisposedStatus?.({ status: 'running', managed: false, engineStatus: { current: 'disposed', status: 'ready' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(get(serverStatusState).state).toEqual(reinitializedStatus);
+    disposeServerStatus();
+  });
+
   test('makes Home the default and keeps primary navigation in the required order', () => {
     expect(appView).toContain("let activeView = $state<View>('home')");
     expect(appView).toMatch(/\{ id: 'home', label: 'Home' \}[\s\S]*\{ id: 'history', label: 'History' \}[\s\S]*\{ id: 'insights', label: 'Insights' \}[\s\S]*\{ id: 'settings', label: 'Settings' \}/);
@@ -134,6 +179,8 @@ describe('Home and shared server status', () => {
     expect(statusController).toContain('unsubscribe?.();');
     expect(statusController).toContain("window.removeEventListener('focus', reseedOnFocus);");
     expect(statusController).not.toContain('setInterval');
+    expect(statusController).toContain('lifecycleGeneration');
+    expect(statusController).toContain('eventRevision');
     expect(banner).not.toContain('getServerStatus');
     expect(banner).not.toContain('onMount');
   });
@@ -149,15 +196,18 @@ describe('Home and shared server status', () => {
   });
 
   test('keeps Home read-only until an explicit managed retry click', () => {
-    const mount = homeView.match(/onMount\(async \(\) => \{([\s\S]*?)\n  \}\);/)?.[1] ?? '';
+    const mount = homeView.match(/async function loadSettings\(\): Promise<void> \{([\s\S]*?)\n    \}/)?.[1] ?? '';
     expect(mount).toContain('getSettings');
     expect(mount).not.toContain('restartServer');
     expect(mount).not.toContain('updateServerSettings');
     expect(homeView).toContain('onclick={retry}');
     expect(homeView).toContain('External server — Eve cannot restart this endpoint.');
     expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Advanced.');
-    expect(homeView).toContain('useExternalServer = settings.useExternalServer;');
-    expect(statusController).toContain('if (!current.state?.managed) return false;');
+    expect(statusController).toContain('const settings = await window.murmurMain.getSettings();');
+    expect(statusController).toContain('setConfiguredExternalServer(settings.useExternalServer);');
+    expect(homeView).toContain('if (retrying) return;');
+    expect(homeView).toContain('disabled={retrying}');
+    expect(statusController).toContain('if (!initialized || !current.state?.managed || retryInFlight) return false;');
     expect(statusController).toContain('await window.murmurMain.restartServer()');
   });
 
@@ -174,10 +224,21 @@ describe('Home and shared server status', () => {
     expect(card).toContain("aria-live={announce ? 'polite' : undefined}");
     expect(banner).not.toContain('aria-live="assertive"');
     expect(serverView).not.toContain('aria-live="polite"');
+    expect(appView).toContain('aria-live="polite"');
+    expect(serverView).toContain('let active = true;');
+    expect(serverView).toContain('if (!active) return;');
     expect(banner).toContain('Open Settings &gt; Advanced for details.');
     expect(banner).not.toContain('Open Server and use Restart');
     expect(homeView).toContain('By default, Eve processes speech locally.');
     expect(homeView).toContain('audio is sent to that endpoint under your control.');
+  });
+
+  test('shares external management truth and retains a forced-colors focus fallback', () => {
+    expect(getServerManagementMode({ state: null, phase: 'unavailable', announcement: '', configuredExternalServer: null })).toBe('unknown');
+    expect(getServerManagementMode({ state: null, phase: 'unavailable', announcement: '', configuredExternalServer: true })).toBe('external');
+    expect(getServerManagementMode({ state: { status: 'running', managed: true }, phase: 'stale', announcement: '', configuredExternalServer: false })).toBe('managed');
+    expect(homeView).toContain('focus-visible:outline-hidden');
+    expect(banner).toContain('getServerManagementMode($serverStatusState)');
   });
 
   test('preserves the frozen Eve identity and version baseline', () => {

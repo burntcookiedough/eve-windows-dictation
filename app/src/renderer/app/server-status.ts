@@ -18,15 +18,27 @@ export interface SharedServerStatus {
   state: ServerStatePayload | null;
   phase: ServerStatusPhase;
   announcement: string;
+  configuredExternalServer: boolean | null;
 }
 
 const initialStatus: SharedServerStatus = {
   state: null,
   phase: 'connecting',
   announcement: 'Checking Eve speech readiness.',
+  configuredExternalServer: null,
 };
 
 export const serverStatusState = writable<SharedServerStatus>(initialStatus);
+
+export type ServerManagementMode = 'managed' | 'external' | 'unknown';
+
+export function getServerManagementMode(status: SharedServerStatus): ServerManagementMode {
+  if (status.configuredExternalServer === true || (status.state !== null && !status.state.managed)) {
+    return 'external';
+  }
+  if (status.state?.managed) return 'managed';
+  return 'unknown';
+}
 
 export function getServerStatusPhase(state: ServerStatePayload | null): ServerStatusPhase {
   if (!state) return 'unavailable';
@@ -75,8 +87,13 @@ let current = initialStatus;
 let unsubscribe: (() => void) | null = null;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollInFlight = false;
+let retryInFlight = false;
 let initialized = false;
 let announcedMilestone: number | null = null;
+let lifecycleGeneration = 0;
+let eventRevision = 0;
+let pollRequestGeneration = 0;
+let retryRequestGeneration = 0;
 
 function reseedOnFocus(): void {
   void refresh();
@@ -92,9 +109,24 @@ function publish(state: ServerStatePayload | null): void {
     : current.announcement;
 
   announcedMilestone = nextMilestone;
-  current = { state, phase, announcement };
+  current = { ...current, state, phase, announcement };
   serverStatusState.set(current);
   schedulePoll();
+}
+
+function setConfiguredExternalServer(configuredExternalServer: boolean): void {
+  current = { ...current, configuredExternalServer };
+  serverStatusState.set(current);
+}
+
+async function refreshConfiguredExternalServer(): Promise<void> {
+  const requestLifecycle = lifecycleGeneration;
+  try {
+    const settings = await window.murmurMain.getSettings();
+    if (requestLifecycle === lifecycleGeneration) setConfiguredExternalServer(settings.useExternalServer);
+  } catch {
+    // Keep management mode unknown when its settings cannot be read.
+  }
 }
 
 function clearPoll(): void {
@@ -111,45 +143,66 @@ function schedulePoll(): void {
 }
 
 export async function refresh(): Promise<void> {
-  if (pollInFlight) return;
+  if (!initialized || pollInFlight) return;
   pollInFlight = true;
+  const requestLifecycle = lifecycleGeneration;
+  const requestEventRevision = eventRevision;
+  const requestGeneration = ++pollRequestGeneration;
   try {
-    publish(await window.murmurMain.getServerStatus());
+    const state = await window.murmurMain.getServerStatus();
+    if (requestLifecycle === lifecycleGeneration && requestEventRevision === eventRevision) publish(state);
   } catch {
     // A failed reseed must clear the old state rather than continuing to show Ready.
-    publish(null);
+    if (requestLifecycle === lifecycleGeneration && requestEventRevision === eventRevision) publish(null);
   } finally {
-    pollInFlight = false;
+    if (requestLifecycle === lifecycleGeneration && requestGeneration === pollRequestGeneration) pollInFlight = false;
   }
 }
 
 export function initializeServerStatus(): void {
   if (initialized) return;
+  lifecycleGeneration += 1;
+  eventRevision += 1;
   initialized = true;
   current = initialStatus;
   announcedMilestone = null;
   serverStatusState.set(current);
-  unsubscribe = window.murmurMain.onServerStateChange((state) => publish(state));
+  unsubscribe = window.murmurMain.onServerStateChange((state) => {
+    eventRevision += 1;
+    publish(state);
+  });
   window.addEventListener('focus', reseedOnFocus);
+  void refreshConfiguredExternalServer();
   void refresh();
 }
 
 export function disposeServerStatus(): void {
+  lifecycleGeneration += 1;
+  eventRevision += 1;
   initialized = false;
   clearPoll();
   unsubscribe?.();
   unsubscribe = null;
   window.removeEventListener('focus', reseedOnFocus);
   pollInFlight = false;
+  retryInFlight = false;
 }
 
 export async function retryManagedServer(): Promise<boolean> {
-  if (!current.state?.managed) return false;
+  if (!initialized || !current.state?.managed || retryInFlight) return false;
+  retryInFlight = true;
+  const requestLifecycle = lifecycleGeneration;
+  const requestEventRevision = eventRevision;
+  const requestGeneration = ++retryRequestGeneration;
   try {
-    publish(await window.murmurMain.restartServer());
+    const state = await window.murmurMain.restartServer();
+    if (requestLifecycle !== lifecycleGeneration || requestEventRevision !== eventRevision) return false;
+    publish(state);
     return true;
   } catch {
-    publish(null);
+    if (requestLifecycle === lifecycleGeneration && requestEventRevision === eventRevision) publish(null);
     return false;
+  } finally {
+    if (requestLifecycle === lifecycleGeneration && requestGeneration === retryRequestGeneration) retryInFlight = false;
   }
 }
