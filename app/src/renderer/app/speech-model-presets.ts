@@ -22,9 +22,13 @@ export function presetPatch(preset: SpeechModelPreset): Record<string, string> {
   return { engine: preset.engine, [preset.setting]: preset.model };
 }
 
-export function presetMatchesEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
-  if (status?.current !== preset.engine || status.status !== 'ready' || status.pending) return false;
+export function presetMatchesCurrentEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
+  if (status?.current !== preset.engine) return false;
   return status.info?.model === preset.model;
+}
+
+export function presetMatchesReadyEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
+  return presetMatchesCurrentEngine(preset, status) && status?.status === 'ready' && !status.pending;
 }
 
 export function presetDownloadLabel(model: ModelDownloadState | undefined, preset: SpeechModelPreset): string {

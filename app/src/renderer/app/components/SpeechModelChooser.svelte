@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { EngineStatus, ModelDownloadState } from '$shared/types';
-  import { SPEECH_MODEL_PRESETS, presetDownloadLabel, presetMatchesEngine, type SpeechModelPreset } from '../speech-model-presets';
+  import { SPEECH_MODEL_PRESETS, presetDownloadLabel, presetMatchesCurrentEngine, type SpeechModelPreset } from '../speech-model-presets';
 
   interface Props {
     selected: SpeechModelPreset | null;
@@ -29,7 +29,7 @@
         {@const disabled = unavailable(preset)}
         <label class="rounded-xl border p-3 transition-colors focus-within:outline-hidden focus-within:ring-2 focus-within:ring-zinc-100 {disabled ? 'border-zinc-800 opacity-60 cursor-not-allowed' : 'border-white/10 hover:bg-white/[0.04] cursor-pointer'}">
           <input class="sr-only" type="radio" name="speech-model-preset" checked={selected?.id === preset.id} disabled={disabled} onchange={() => onSelect(preset)} aria-describedby={`preset-${preset.id}-detail`} />
-          <span class="flex items-start justify-between gap-3"><span class="text-sm font-medium text-zinc-100">{preset.label}</span><span class="text-xs text-zinc-400">{presetMatchesEngine(preset, engineStatus) ? 'Current' : selected?.id === preset.id ? 'Selected' : presetDownloadLabel(modelDownload, preset)}</span></span>
+          <span class="flex items-start justify-between gap-3"><span class="text-sm font-medium text-zinc-100">{preset.label}</span><span class="text-xs text-zinc-400">{presetMatchesCurrentEngine(preset, engineStatus) ? 'Current' : selected?.id === preset.id ? 'Selected' : presetDownloadLabel(modelDownload, preset)}</span></span>
           <span id={`preset-${preset.id}-detail`} class="mt-1 block text-xs leading-5 text-zinc-400">{preset.language} · approx. {preset.sizeGb} GB. {preset.summary}</span>
           {#if disabled}<span class="mt-2 block text-xs text-amber-300">This server does not have the required {preset.engine} runtime.</span>{/if}
         </label>
