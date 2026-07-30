@@ -5,7 +5,7 @@ Local dictation for Windows, built as an Electron desktop client with a packaged
 <img src="https://img.shields.io/badge/v0.8.0-orange?style=flat-square" alt="v0.8.0">
 
 > [!IMPORTANT]
-> Current source builds use the visible **Eve** product, executable, installer, and shortcut names, the `io.github.burntcookiedough.eve` AppUserModelID, and a separate `%APPDATA%\Eve` profile. Eve v0.7.0 is public; the historical v0.6.3 **Murmur** download table below remains unchanged. The frozen installer GUID, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable for upgrade compatibility. Eve does not import or delete Murmur History, settings, or other personal state.
+> Current source builds use the visible **Eve** product, executable, installer, and shortcut names, the `io.github.burntcookiedough.eve` AppUserModelID, and a separate `%APPDATA%\Eve` profile. Eve v0.7.0 is public; historical v0.6.3 **Murmur** assets remain immutable. The frozen installer GUID, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable for upgrade compatibility. Eve does not import or delete Murmur History, settings, or other personal state.
 
 ## What works today
 
@@ -31,13 +31,13 @@ Models are not embedded in the installer payload. The selected engine downloads 
 
 ## Current release
 
-[Download v0.6.3](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.6.3). The release is currently unsigned and may trigger Windows reputation warnings.
+[Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0) (release ID `362027119`, tag target `d03c7eab7e3e10afc2f62662d25ccd63427c22e9`). The release is unsigned and may trigger Windows reputation warnings.
 
 | Asset | Bytes | SHA-256 |
 |---|---:|---|
-| `Murmur.Web.Setup.0.6.3.exe` | 887,561 | `366088a4266f54ea7c39e2e7fd1fc7177cac46bf8a4b3f43d58a6d025e15cd33` |
-| `murmur-0.6.3-x64.nsis.7z` | 2,034,188,308 | `0b557fde05853da1f7c0aef77cecbad1faf8c5fc9314457ea45119d3a69f4fbd` |
-| `latest.yml` | 564 | `b211cdb0322a0f6da01eee77921f6c6961735de59d4ffd8cacc31d9a3f7395a9` |
+| `Eve.Web.Setup.0.7.0.exe` | 654,555 | `e27646c15be0563c45e35b34b157105af2a61424ef1bff6cf8a9c72f8a763e4a` |
+| `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
+| `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
 The small `nsis-web` installer downloads the large application payload during installation. Internet access is also required when an engine fetches its model for the first time.
 
