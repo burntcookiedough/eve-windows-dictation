@@ -184,6 +184,12 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert workflow.count("--output (Join-Path release-assets $asset.name)") == 2
     assert workflow.count("$download.Length -ne [int64]$asset.size") == 2
     assert workflow.count("$downloadDigest -ne $asset.digest") == 2
+    promote_step = workflow.split(
+        "- name: Re-download and reverify after approval", 1
+    )[1].split("- name: Publish the existing verified draft only", 1)[0]
+    assert (
+        "EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}" in promote_step
+    )
     assert "gh release view" not in workflow
     assert "gh release download" not in workflow
     assert "EXPECTED_MANIFEST_SHA256" in workflow

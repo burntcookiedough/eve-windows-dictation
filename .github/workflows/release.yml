@@ -160,6 +160,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}
           EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
         run: |
