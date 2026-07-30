@@ -173,7 +173,15 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
         "gh release upload",
         "gh release create",
         "gh release delete",
+        "gh api --method",
+        "gh api -X",
+        "curl.exe -X",
+        "curl.exe --request",
+        "--data",
+        "--form",
         "git tag",
+        "git update-ref",
+        "git replace",
         "git push",
     ):
         assert forbidden not in verify_draft
