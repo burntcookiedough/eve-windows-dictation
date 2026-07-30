@@ -22,6 +22,12 @@ export function presetPatch(preset: SpeechModelPreset): Record<string, string> {
   return { engine: preset.engine, [preset.setting]: preset.model };
 }
 
+export function stagedPresetFromPending(pending: Record<string, unknown>): SpeechModelPreset | null {
+  return SPEECH_MODEL_PRESETS.find((preset) =>
+    pending.engine === preset.engine && pending[preset.setting] === preset.model
+  ) ?? null;
+}
+
 export function presetMatchesCurrentEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
   if (status?.current !== preset.engine) return false;
   return status.info?.model === preset.model;

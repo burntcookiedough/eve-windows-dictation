@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { SPEECH_MODEL_PRESETS, presetDownloadLabel, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch } from '../src/renderer/app/speech-model-presets';
+import { SPEECH_MODEL_PRESETS, presetDownloadLabel, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
 
 describe('speech model presets', () => {
   test('keeps the four exact supported mappings and factual established sizes', () => {
@@ -42,5 +42,15 @@ describe('speech model presets', () => {
     expect(config).toContain('"medium"');
     expect(config).toContain('"tiny"');
     expect(settings).toContain('whisper_compute_type');
+    expect(settings).toContain('Raw Whisper compatibility model, including Medium and Tiny');
+    expect(settings).toContain('!stagedPreset');
+    expect(settings).toContain('const { engine: _engine, [stagedPreset.setting]: _model, ...advancedPending }');
+  });
+
+  test('routes only an actual staged preset through model preparation and preserves advanced pending values on revert', () => {
+    expect(stagedPresetFromPending({ whisper_compute_type: 'int8' })).toBeNull();
+    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'medium' })).toBeNull();
+    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' })?.id).toBe('recommended-multilingual');
+    expect(stagedPresetFromPending({ engine: 'nemotron', nemotron_model: 'nvidia/nemotron-speech-streaming-en-0.6b', nemotron_device: 'cuda' })?.id).toBe('english-performance');
   });
 });
