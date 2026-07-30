@@ -54,8 +54,8 @@ declare global {
       stopServer: () => Promise<ServerStatePayload>;
       restartServer: () => Promise<ServerStatePayload>;
       getServerLogs: () => Promise<ServerLogEntry[]>;
-      onServerStateChange: (callback: (state: ServerStatePayload) => void) => void;
-      onServerLog: (callback: (entry: ServerLogEntry) => void) => void;
+      onServerStateChange: (callback: (state: ServerStatePayload) => void) => () => void;
+      onServerLog: (callback: (entry: ServerLogEntry) => void) => () => void;
       removeServerListeners: () => void;
       getServerSettings: () => Promise<ServerSettingsResponse>;
       updateServerSettings: (patch: Record<string, unknown>) => Promise<ServerSettingsResponse>;

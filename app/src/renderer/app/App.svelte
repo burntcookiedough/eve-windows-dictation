@@ -1,19 +1,23 @@
 <script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
   import TitleBar from './components/TitleBar.svelte';
   import Toasts from './components/Toasts.svelte';
   import HistoryView from './views/HistoryView.svelte';
   import InsightsView from './views/InsightsView.svelte';
   import SettingsView from './views/SettingsView.svelte';
+  import HomeView from './views/HomeView.svelte';
   import TestView from './views/TestView.svelte';
   import ModelProgressBanner from './components/ModelProgressBanner.svelte';
+  import { disposeServerStatus, initializeServerStatus, serverStatusState } from './server-status';
 
-  type PrimaryView = 'history' | 'insights' | 'settings';
+  type PrimaryView = 'home' | 'history' | 'insights' | 'settings';
   type View = PrimaryView | 'test';
 
-  let activeView = $state<View>('history');
+  let activeView = $state<View>('home');
   let settingsVisited = $state(false);
 
   const primaryTabs: Array<{ id: PrimaryView; label: string }> = [
+    { id: 'home', label: 'Home' },
     { id: 'history', label: 'History' },
     { id: 'insights', label: 'Insights' },
     { id: 'settings', label: 'Settings' },
@@ -24,7 +28,7 @@
 
   function resolveView(candidate: string): View {
     const match = developmentTabs.find((tab) => tab.id === candidate);
-    return match?.id ?? 'history';
+    return match?.id ?? 'home';
   }
 
   function selectView(candidate: string) {
@@ -32,6 +36,9 @@
     if (nextView === 'settings') settingsVisited = true;
     activeView = nextView;
   }
+
+  onMount(() => initializeServerStatus());
+  onDestroy(disposeServerStatus);
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden bg-[#08090a] text-zinc-100">
@@ -60,8 +67,13 @@
   </header>
 
   <ModelProgressBanner visible />
+  <p class="sr-only" aria-live="polite" aria-atomic="true">{$serverStatusState.announcement}</p>
 
   <main id="main-content" class="flex-1 overflow-hidden" tabindex="-1">
+    {#if activeView === 'home'}
+      <HomeView onNavigate={selectView} />
+    {/if}
+
     {#if activeView === 'history'}
       <HistoryView />
     {/if}

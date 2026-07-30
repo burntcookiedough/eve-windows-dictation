@@ -6,6 +6,7 @@
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import type { ServerStatePayload, ServerLogEntry, Settings } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
+  import { serverStatusState } from '../server-status';
 
   interface Props {
     embedded?: boolean;
@@ -14,10 +15,11 @@
   let { embedded = false }: Props = $props();
 
   // Server state
-  let serverState = $state<ServerStatePayload>({
+  const unavailableState: ServerStatePayload = {
     status: 'idle',
     managed: false,
-  });
+  };
+  let serverState = $derived($serverStatusState.state ?? unavailableState);
   let logs = $state<ServerLogEntry[]>([]);
   let showLogs = $state(false);
   let autoStart = $state(true);
@@ -30,6 +32,7 @@
   let pendingLogs: ServerLogEntry[] = [];
   let logFrame: number | null = null;
   let scrollAfterLogBatch = false;
+  let removeLogListener: (() => void) | null = null;
 
   // Status badge colors and labels
   const statusConfig: Record<
@@ -190,8 +193,6 @@
   }
 
   onMount(async () => {
-    // Load initial state
-    serverState = await window.murmurMain.getServerStatus();
     logs = await window.murmurMain.getServerLogs();
 
     // Load settings
@@ -199,12 +200,7 @@
     autoStart = settings.serverAutoStart;
     useExternalServer = settings.useExternalServer;
 
-    // Subscribe to state changes
-    window.murmurMain.onServerStateChange((state) => {
-      serverState = state;
-    });
-
-    window.murmurMain.onServerLog((entry) => {
+    removeLogListener = window.murmurMain.onServerLog((entry) => {
       queueLog(entry);
     });
   });
@@ -212,7 +208,8 @@
   onDestroy(() => {
     if (logFrame !== null) cancelAnimationFrame(logFrame);
     if (diagnosticsCopyTimer !== null) clearTimeout(diagnosticsCopyTimer);
-    window.murmurMain.removeServerListeners();
+    removeLogListener?.();
+    removeLogListener = null;
   });
 </script>
 
@@ -276,12 +273,7 @@
               {/if}
               <span class="relative w-3 h-3 rounded-full {statusDisplay.bgColor}"></span>
             </div>
-            <span
-              class="text-lg font-medium {statusDisplay.color}"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
+            <span class="text-lg font-medium {statusDisplay.color}">
               {statusDisplay.label}
             </span>
             {#if !serverState.managed && serverState.status === 'running'}

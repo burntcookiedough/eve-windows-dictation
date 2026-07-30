@@ -2,14 +2,14 @@
   import type { ModelDownloadState } from '$shared/types';
   import { getModelProgressView } from '$shared/model-progress';
 
-  let { state }: { state?: ModelDownloadState } = $props();
+  let { state, announce = false }: { state?: ModelDownloadState; announce?: boolean } = $props();
   let view = $derived(getModelProgressView(state));
 </script>
 
 {#if view}
   <section
-    aria-live="polite"
-    aria-atomic="true"
+    aria-live={announce ? 'polite' : undefined}
+    aria-atomic={announce ? 'true' : undefined}
     class="rounded-xl border border-amber-900/60 bg-zinc-950/95 p-4 shadow-lg"
   >
     <div class="flex items-start justify-between gap-4">
