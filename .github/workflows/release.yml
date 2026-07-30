@@ -41,6 +41,9 @@ jobs:
   verify-draft:
     name: Verify existing draft assets (no build or upload)
     runs-on: windows-latest
+    # GitHub requires write-capable contents permission to read an existing draft release.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
