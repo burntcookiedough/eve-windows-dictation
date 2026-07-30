@@ -22,6 +22,8 @@ from config import Settings
 from transcription.base import EngineInfo
 from transcription.model_download import (
     begin_model_download_progress,
+    check_download_disk_space,
+    DownloadDiskPreflightError,
     get_cached_required_bytes,
     get_repo_cache_status,
     mark_model_loading,
@@ -188,6 +190,15 @@ class WhisperEngine:
                     progress_percent=100.0,
                 )
             else:
+                try:
+                    check_download_disk_space(repo_id, model_size_gb)
+                except DownloadDiskPreflightError as exc:
+                    update_model_download_state(
+                        model=model, size_gb=model_size_gb, status="error", cached=False,
+                        detail=str(exc), repo_id=repo_id, path=cache_status.snapshot_path or cache_status.repo_path,
+                        missing_files=cache_status.missing_files, partial_files=cache_status.partial_files, phase="error",
+                    )
+                    raise
                 begin_model_download_progress(
                     model=model,
                     repo_id=repo_id,

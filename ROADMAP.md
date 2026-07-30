@@ -4,8 +4,8 @@ This roadmap separates shipped behavior from design and research. It is not a re
 
 ## Current baseline
 
-Eve v0.7.0 is the prepared source baseline; it is not yet a public release. The latest
-public download remains the historical Murmur v0.6.3 release. The prepared Eve source
+Eve v0.7.0 is public. The latest public download is Eve v0.7.0; historical Murmur
+v0.6.3 assets remain immutable. The Eve source
 retains the frozen Murmur installer chain while using the Eve product identity, an
 isolated Eve profile, the approved visual/accessibility system, and packaged cactus
 resources. Its portable Python runtime and separately downloaded models remain subject to
@@ -24,24 +24,19 @@ Gates 1–4 completed the compatibility, fresh-profile, visible-identity, and
 AppUserModelID cutover. Gates 5A and 5B completed the approved renderer/accessibility
 system and cactus Windows resources. Trademark work remains separate and incomplete.
 
-Before Eve v0.7.0 is published:
-
-- complete the binary-distribution third-party notice audit;
-- resolve or explicitly accept the Eve name/mark publication risk; and
-- run a fresh exact-head release-candidate lifecycle, then follow a separately approved
-  tag/publication procedure.
+The v0.7.0 publication gates were completed under the separate Gate 6 record. Future
+work continues to preserve the established identity, profile, installer, and privacy boundaries.
 
 The completed gates established a fresh Eve profile that does not automatically import
 Murmur History, settings, hotwords, browser storage, credentials, or external-server
 configuration. They also proved the compatibility lifecycle for the accepted candidates;
 the public release still requires fresh Gate 6 evidence.
 
-## Next: release readiness
+## Next: model-management clarity
 
-Gate 6 prepares version metadata, release notes, factual status records, NOTICE readiness,
-and publication controls. It does not publish merely because the source is prepared. The
-final package, lifecycle, merge, tag, release, and public-download checks remain separate
-approval gates.
+v0.8 work clarifies curated model choices and explicit first-use preparation while keeping
+the bundled runtime separate from downloaded model weights. It does not add engine packs,
+an updater, cache management, signing, or thin-client distribution.
 
 ## Later: component-based distribution
 

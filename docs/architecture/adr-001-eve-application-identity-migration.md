@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for staged implementation. Gates 1–3 are merged through PR #17 at
+Accepted and implemented. Gates 1–3 are merged through PR #17 at
 `822a353d9e232a1b365b61c972db4195ac23ba48`. Gate 4 is authorized with the exact
 AppUserModelID `io.github.burntcookiedough.eve`. Visual redesign, publication, and
 merge remain separately gated.

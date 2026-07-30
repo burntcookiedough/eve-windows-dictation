@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 
 from transcription.base import EngineInfo
 from transcription.errors import VramExhaustedError
-from transcription.model_download import is_repo_cached, update_model_download_state
+from transcription.model_download import DownloadDiskPreflightError, check_download_disk_space, is_repo_cached, update_model_download_state
 from transcription.types import TranscribeOptions, TranscribeResult
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,14 @@ class NemotronEngine:
                     progress_percent=100.0,
                 )
             else:
+                try:
+                    check_download_disk_space(repo_id, _MODEL_SIZE_GB)
+                except DownloadDiskPreflightError as exc:
+                    update_model_download_state(
+                        model=model_name, size_gb=_MODEL_SIZE_GB, status="error", cached=False,
+                        detail=str(exc), repo_id=repo_id, phase="error",
+                    )
+                    raise
                 update_model_download_state(
                     model=model_name,
                     size_gb=_MODEL_SIZE_GB,
