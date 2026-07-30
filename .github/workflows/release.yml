@@ -15,6 +15,10 @@ on:
         description: SHA-256 of the uploaded manifest
         required: true
         type: string
+      expected_release_id:
+        description: Immutable numeric ID of the existing draft release
+        required: true
+        type: string
       allow_unsigned:
         description: Permit an intentionally unsigned Windows wrapper
         required: true
@@ -55,11 +59,12 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
           ACCEPTED_NAME_RISK: ${{ inputs.accepted_name_risk }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Malformed release inputs.' }
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_RELEASE_ID -notmatch '^[1-9][0-9]*$') { throw 'Malformed release inputs.' }
           if ($env:ACCEPTED_NAME_RISK -ne 'true') { throw 'Name-risk acceptance must be explicit.' }
       - name: Download existing draft assets only
         shell: pwsh
@@ -67,6 +72,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}
         run: |
           $ErrorActionPreference = 'Stop'
           function Resolve-ReleaseTagCommit {
@@ -86,15 +92,41 @@ jobs:
           }
           $tagCommit = Resolve-ReleaseTagCommit
           if ($tagCommit -ne $env:EXPECTED_COMMIT) { throw 'Release tag commit does not match ExpectedCommit.' }
-          gh release view $env:TAG --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
-          $release = Get-Content release.json -Raw | ConvertFrom-Json
-          if (-not $release.isDraft -or $release.isPrerelease -or $release.tagName -ne $env:TAG -or $release.targetCommitish -ne $env:EXPECTED_COMMIT) { throw 'An exact-target non-prerelease draft release is required.' }
-          gh release download $env:TAG --repo '${{ github.repository }}' --dir release-assets
+          $releaseJson = gh api "repos/${{ github.repository }}/releases/$env:EXPECTED_RELEASE_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release ID could not be fetched.' }
+          $release = $releaseJson | ConvertFrom-Json
+          if ([string]$release.id -ne $env:EXPECTED_RELEASE_ID -or -not $release.draft -or $release.prerelease -or $release.tag_name -ne $env:TAG -or $release.target_commitish -ne $env:EXPECTED_COMMIT) { throw 'An exact-ID, exact-target non-prerelease draft release is required.' }
+          $version = $env:TAG.Substring(1)
+          $expectedNames = @(
+            "Eve.Web.Setup.$version.exe",
+            "murmur-$version-x64.nsis.7z",
+            'latest.yml',
+            "eve-$env:TAG-artifact-manifest.json",
+            'SHA256SUMS.txt',
+            'SHA512SUMS.txt',
+            'THIRD_PARTY_NOTICES.txt'
+          )
+          $assets = @($release.assets)
+          if ($assets.Count -ne $expectedNames.Count -or (@($assets.name | Sort-Object) -join "`n") -ne (@($expectedNames | Sort-Object) -join "`n")) { throw 'Draft release asset allowlist mismatch.' }
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          foreach ($asset in $assets) {
+            if ([string]$asset.id -notmatch '^[1-9][0-9]*$' -or [int64]$asset.size -le 0 -or $asset.state -ne 'uploaded' -or $asset.digest -notmatch '^sha256:[0-9a-f]{64}$' -or $asset.url -ne "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)") { throw "Malformed asset metadata for $($asset.name)." }
+            curl.exe --silent --show-error --fail --location `
+              --header "Authorization: Bearer $env:GH_TOKEN" `
+              --header 'Accept: application/octet-stream' `
+              --output (Join-Path release-assets $asset.name) `
+              $asset.url
+            if ($LASTEXITCODE -ne 0) { throw "Authenticated asset download failed for $($asset.name)." }
+            $download = Get-Item -LiteralPath (Join-Path release-assets $asset.name)
+            $downloadDigest = "sha256:$((Get-FileHash -LiteralPath $download.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+            if ($download.Length -ne [int64]$asset.size -or $downloadDigest -ne $asset.digest) { throw "Downloaded asset metadata mismatch for $($asset.name)." }
+          }
       - name: Verify draft manifest and artifacts
         shell: pwsh
         env:
           TAG: ${{ inputs.tag }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}
           EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
         run: |
@@ -132,7 +164,7 @@ jobs:
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_MANIFEST_SHA256 -notmatch '^[0-9a-fA-F]{64}$' -or $env:ALLOW_UNSIGNED -notin @('true', 'false')) { throw 'Malformed release inputs.' }
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or $env:EXPECTED_COMMIT -notmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_RELEASE_ID -notmatch '^[1-9][0-9]*$' -or $env:EXPECTED_MANIFEST_SHA256 -notmatch '^[0-9a-fA-F]{64}$' -or $env:ALLOW_UNSIGNED -notin @('true', 'false')) { throw 'Malformed release inputs.' }
           function Resolve-ReleaseTagCommit {
             $refJson = gh api "repos/${{ github.repository }}/git/ref/tags/$env:TAG"
             if ($LASTEXITCODE -ne 0) { throw 'Exact release tag does not exist.' }
@@ -150,10 +182,35 @@ jobs:
           }
           $tagCommit = Resolve-ReleaseTagCommit
           if ($tagCommit -ne $env:EXPECTED_COMMIT) { throw 'Release tag commit does not match ExpectedCommit.' }
-          gh release view $env:TAG --repo '${{ github.repository }}' --json isDraft,isPrerelease,tagName,targetCommitish,assets > release.json
-          $release = Get-Content release.json -Raw | ConvertFrom-Json
-          if (-not $release.isDraft -or $release.isPrerelease -or $release.tagName -ne $env:TAG -or $release.targetCommitish -ne $env:EXPECTED_COMMIT) { throw 'Draft target or state changed after verification.' }
-          gh release download $env:TAG --repo '${{ github.repository }}' --dir release-assets
+          $releaseJson = gh api "repos/${{ github.repository }}/releases/$env:EXPECTED_RELEASE_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release ID could not be re-fetched after approval.' }
+          $release = $releaseJson | ConvertFrom-Json
+          if ([string]$release.id -ne $env:EXPECTED_RELEASE_ID -or -not $release.draft -or $release.prerelease -or $release.tag_name -ne $env:TAG -or $release.target_commitish -ne $env:EXPECTED_COMMIT) { throw 'Draft ID, target, or state changed after verification.' }
+          $version = $env:TAG.Substring(1)
+          $expectedNames = @(
+            "Eve.Web.Setup.$version.exe",
+            "murmur-$version-x64.nsis.7z",
+            'latest.yml',
+            "eve-$env:TAG-artifact-manifest.json",
+            'SHA256SUMS.txt',
+            'SHA512SUMS.txt',
+            'THIRD_PARTY_NOTICES.txt'
+          )
+          $assets = @($release.assets)
+          if ($assets.Count -ne $expectedNames.Count -or (@($assets.name | Sort-Object) -join "`n") -ne (@($expectedNames | Sort-Object) -join "`n")) { throw 'Draft release asset allowlist changed after verification.' }
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          foreach ($asset in $assets) {
+            if ([string]$asset.id -notmatch '^[1-9][0-9]*$' -or [int64]$asset.size -le 0 -or $asset.state -ne 'uploaded' -or $asset.digest -notmatch '^sha256:[0-9a-f]{64}$' -or $asset.url -ne "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)") { throw "Malformed asset metadata for $($asset.name)." }
+            curl.exe --silent --show-error --fail --location `
+              --header "Authorization: Bearer $env:GH_TOKEN" `
+              --header 'Accept: application/octet-stream' `
+              --output (Join-Path release-assets $asset.name) `
+              $asset.url
+            if ($LASTEXITCODE -ne 0) { throw "Authenticated asset download failed for $($asset.name)." }
+            $download = Get-Item -LiteralPath (Join-Path release-assets $asset.name)
+            $downloadDigest = "sha256:$((Get-FileHash -LiteralPath $download.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+            if ($download.Length -ne [int64]$asset.size -or $downloadDigest -ne $asset.digest) { throw "Downloaded asset metadata mismatch for $($asset.name)." }
+          }
           & .\scripts\release-artifacts.ps1 -Mode Verify -ArtifactDir release-assets -ExpectedTag $env:TAG -ExpectedCommit $env:EXPECTED_COMMIT -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256 -AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')
           if ($LASTEXITCODE -ne 0) { throw 'Artifact re-verification failed.' }
       - name: Publish the existing verified draft only
