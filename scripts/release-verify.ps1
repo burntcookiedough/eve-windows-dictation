@@ -30,6 +30,36 @@ function Assert-Contains {
     }
 }
 
+function Test-PathWithin {
+    param([string]$Path, [string]$Root)
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $resolvedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    return $resolvedPath.StartsWith("$resolvedRoot$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $resolvedPath.Equals($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-SelfContainedRuntime {
+    param([string]$RuntimePath, [string]$PythonExe)
+    $probeScript = 'import json, sys; print(json.dumps({"prefix": sys.prefix, "base_prefix": sys.base_prefix, "executable": sys.executable, "path": sys.path}))'
+    $probe = & $PythonExe -I -c $probeScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bundled Python isolation probe failed with exit code $LASTEXITCODE"
+    }
+    $runtimeProbe = $probe | ConvertFrom-Json
+    foreach ($property in @("prefix", "base_prefix", "executable")) {
+        $value = [string]$runtimeProbe.$property
+        if (-not (Test-PathWithin -Path $value -Root $RuntimePath)) {
+            throw "Bundled Python $property resolves outside the runtime: $value"
+        }
+    }
+    foreach ($entry in @($runtimeProbe.path)) {
+        $value = [string]$entry
+        if (-not [System.IO.Path]::IsPathRooted($value) -or -not (Test-PathWithin -Path $value -Root $RuntimePath)) {
+            throw "Bundled Python sys.path entry resolves outside the runtime: $value"
+        }
+    }
+}
+
 function Invoke-Native {
     param(
         [Parameter(Mandatory = $true)]
@@ -101,6 +131,7 @@ Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\faster_whisper") "faster-whisper package"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\torch") "torch package"
 Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\nemo") "nemo package"
+Assert-SelfContainedRuntime -RuntimePath (Join-Path $serverRoot ".runtime") -PythonExe $pythonExe
 
 Write-Step "Checking installed server health/version"
 $outLog = Join-Path (Split-Path $InstallDir -Parent) "release-verify-server.out.log"
