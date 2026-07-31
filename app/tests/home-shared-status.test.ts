@@ -241,8 +241,8 @@ describe('Home and shared server status', () => {
     expect(banner).toContain('getServerManagementMode($serverStatusState)');
   });
 
-  test('preserves the frozen Eve identity and version baseline', () => {
-    expect(packageJson).toContain('"version": "0.7.0"');
+  test('preserves the frozen Eve identity and v0.8.0 version baseline', () => {
+    expect(packageJson).toContain('"version": "0.8.0"');
     expect(packageJson).toContain('"appId": "io.github.burntcookiedough.eve"');
     expect(packageJson).toContain('"guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204"');
   });
