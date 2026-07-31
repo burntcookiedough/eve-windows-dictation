@@ -209,13 +209,26 @@ def test_release_verify_uses_packaged_runtime_and_controlled_environment() -> No
     assert '.venv\\Lib\\site-packages' in contents
     assert "MURMUR_SETTINGS_FILE" in contents
     assert "MURMUR_WHISPER_COMPUTE_TYPE" in contents
+    assert "function Assert-SelfContainedRuntime" in contents
+    assert "ConvertFrom-Json" in contents
+    assert "sys.path entry resolves outside the runtime" in contents
+    assert "Assert-SelfContainedRuntime -RuntimePath" in contents
 
 
 def test_runtime_preparation_script_uses_uv_managed_python() -> None:
     contents = (ROOT / "scripts" / "prepare-python-runtime.ps1").read_text(encoding="utf-8")
     assert "uv python install" in contents
-    assert "uv python find --managed-python" in contents
-    assert 'Join-Path $runtimePath "python.exe"' in contents
+    assert "uv python find --managed-python --no-project --resolve-links" in contents
+    assert "Remove-Item Env:VIRTUAL_ENV" in contents
+    assert "$env:VIRTUAL_ENV = $previousVirtualEnv" in contents
+    assert "Test-PathWithin -Path $pythonPath -Root $serverPath" in contents
+    assert r"\.venv" in contents
+    assert "Scripts" in contents
+    for required in ('"python.exe"', '"python311.dll"', '"Lib"', '"DLLs"'):
+        assert required in contents
+    assert "function Assert-SelfContainedRuntime" in contents
+    assert "ConvertFrom-Json" in contents
+    assert "sys.path entry resolves outside the runtime" in contents
 
 
 def test_version_check_includes_all_release_metadata() -> None:
