@@ -83,7 +83,12 @@ if ((Test-PathWithin -Path $pythonPath -Root $serverPath) -or
 }
 
 $runtimeSource = Split-Path -Parent $pythonPath
-foreach ($required in @("python.exe", "python311.dll", "Lib", "DLLs")) {
+$pythonAbi = (& $pythonPath -I -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")').Trim()
+if ($LASTEXITCODE -ne 0 -or -not $pythonAbi) {
+    throw "Could not determine the managed Python ABI version."
+}
+
+foreach ($required in @("python.exe", "python$pythonAbi.dll", "Lib", "DLLs")) {
     if (-not (Test-Path -LiteralPath (Join-Path $runtimeSource $required))) {
         throw "Managed Python root is incomplete; missing $required at $runtimeSource"
     }

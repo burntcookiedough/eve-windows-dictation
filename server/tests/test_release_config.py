@@ -224,7 +224,9 @@ def test_runtime_preparation_script_uses_uv_managed_python() -> None:
     assert "Test-PathWithin -Path $pythonPath -Root $serverPath" in contents
     assert r"\.venv" in contents
     assert "Scripts" in contents
-    for required in ('"python.exe"', '"python311.dll"', '"Lib"', '"DLLs"'):
+    assert "$pythonAbi =" in contents
+    assert '"python$pythonAbi.dll"' in contents
+    for required in ('"python.exe"', '"Lib"', '"DLLs"'):
         assert required in contents
     assert "function Assert-SelfContainedRuntime" in contents
     assert "ConvertFrom-Json" in contents
