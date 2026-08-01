@@ -70,7 +70,7 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --extra all` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md) for release and packaging details, [docs/protocol.md](docs/protocol.md) for the WebSocket protocol, and [contributing](.github/CONTRIBUTING.md) before opening a pull request.
+Use `uv sync --extra all --frozen` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md) for release and packaging details, [docs/protocol.md](docs/protocol.md) for the WebSocket protocol, and [contributing](.github/CONTRIBUTING.md) before opening a pull request.
 
 ## Privacy and support
 

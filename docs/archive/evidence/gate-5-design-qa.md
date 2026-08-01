@@ -26,7 +26,7 @@ image before review. Overlay Resting and Long states were captured at 900 x 320.
 
 Local, untracked evidence is under:
 
-`C:\Users\anshu\.codex\visualizations\2026\07\26\019f9fce-0278-7b60-9217-45c02dc1ba76\gate5a-implementation`
+Local visualization artifacts are excluded from the repository.
 
 The comparison image is `eve-gate5a-application-comparison.png`. These generated
 captures contain synthetic data only and are intentionally excluded from Git.

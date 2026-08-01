@@ -165,7 +165,7 @@ before it is changed.
 | 3 | `docs/releases/eve-v0.7.0-release-notes.md` | Concise human-reviewed release notes; no automatic-import claim. |
 | 4 | `docs/project/roadmap.md` | Factual current-baseline and completed identity/visual-stage correction only. |
 | 5 | `docs/archive/release-gates/gate-5/eve-gate-5-master-plan.md` | Factual Gate 5A/5B final ledger correction only; historical body remains intact. |
-| 6 | `docs/architecture/eve-identity-cutover-checklist.md` | Factual merged Gate 3/4/5 and remaining-release status correction only. |
+| 6 | `docs/archive/release-gates/gate-1-4/eve-identity-cutover-checklist.md` | Factual merged Gate 3/4/5 and remaining-release status correction only. |
 | 7 | `NOTICE.md` | User-facing third-party notice-readiness facts and unresolved limitations only. |
 | 8 | `app/package.json` | Version field only, through the existing version tool. |
 | 9 | `server/pyproject.toml` | Root project version field only, through the existing version tool. |
