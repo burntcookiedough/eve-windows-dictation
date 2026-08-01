@@ -171,6 +171,14 @@ def test_packaging_includes_relocatable_runtime() -> None:
     assert "!.venv/Lib/site-packages/pip/**" in filters
     assert "!.venv/Lib/site-packages/wheel/**" in filters
     assert "!.venv/Lib/site-packages/setuptools/**" in filters
+    for test_ui_filter in (
+        "!.venv/Lib/site-packages/PySide6/**",
+        "!.venv/Lib/site-packages/PySide6-*.dist-info/**",
+        "!.venv/Lib/site-packages/pyside6_*.dist-info/**",
+        "!.venv/Lib/site-packages/shiboken6/**",
+        "!.venv/Lib/site-packages/shiboken6-*.dist-info/**",
+    ):
+        assert test_ui_filter in filters
     assert "!.venv/Lib/site-packages/**/test/**" in filters
     assert "!.venv/Lib/site-packages/**/tests/**" in filters
     assert "!.venv/Lib/site-packages/**/*.lib" in filters

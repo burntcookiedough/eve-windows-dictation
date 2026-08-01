@@ -19,6 +19,8 @@ $files=Get-ChildItem $dir -File
 $actual=@($files.Name | Sort-Object); $expected=@($names | Sort-Object)
 if((Compare-Object $actual $expected)){throw "Release asset allowlist mismatch. Expected exactly: $($names -join ', ')"}
 foreach($file in $files){if($file.Length -ge 2100000000){throw "Asset exceeds 2.10 GB safety ceiling: $($file.Name)"}}
+$payload=Get-Item (Join-Path $dir "murmur-$version-x64.nsis.7z")
+if($payload.Length -ge 2050000000){throw "NSIS-web payload exceeds 2.05 GB release target: $($payload.Name)"}
 $manifest=Join-Path $dir "eve-v$version-artifact-manifest.json"
 if($Mode -eq 'Create'){
   $entries=@(); foreach($name in $names | Where-Object {$_ -ne (Split-Path $manifest -Leaf)}){$f=Get-Item (Join-Path $dir $name);$entries += [ordered]@{name=$f.Name;bytes=$f.Length;sha256=(Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant();sha512=(Get-FileHash $f -Algorithm SHA512).Hash.ToLowerInvariant()}}

@@ -142,6 +142,8 @@ def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
     for name in ("Eve.Web.Setup.$version.exe", "murmur-$version-x64.nsis.7z", "latest.yml", "SHA256SUMS.txt", "SHA512SUMS.txt", "THIRD_PARTY_NOTICES.txt"):
         assert name in artifacts
     assert "2100000000" in artifacts
+    assert "2050000000" in artifacts
+    assert "NSIS-web payload exceeds 2.05 GB release target" in artifacts
     assert "NotSigned" in artifacts
     assert "Authenticode must be Valid when allow_unsigned=false" in artifacts
     assert "Manifest schema, format, tag, commit, or version mismatch." in artifacts
