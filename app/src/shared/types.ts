@@ -382,7 +382,7 @@ export const DEFAULT_SETTINGS: Settings = {
     metaKey: false,
   },
   longHotkey: {
-    keycode: 3675, // Ctrl+Shift+Meta toggles long dictation
+    keycode: 3675, // Ctrl+Shift+Win in the Windows UI; Meta in libuiohook storage
     ctrlKey: true,
     altKey: false,
     shiftKey: true,

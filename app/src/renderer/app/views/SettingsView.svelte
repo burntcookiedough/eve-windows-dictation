@@ -9,6 +9,7 @@
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
   import { SPEECH_MODEL_PRESETS, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
   import { getServerManagementMode, serverStatusState } from '../server-status';
+  import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -24,15 +25,15 @@
     longHotkey: { ...DEFAULT_SETTINGS.longHotkey },
   });
 
-  // Default hotkey (Ctrl+Meta)
+  // Default hotkey (Ctrl+Win on Windows; stored as the libuiohook Meta keycode)
   const DEFAULT_HOTKEY: Hotkey = DEFAULT_SETTINGS.hotkey;
 
-  // Default long dictation hotkey (Ctrl+Shift+Meta)
+  // Default long dictation hotkey (Ctrl+Shift+Win on Windows)
   const DEFAULT_LONG_HOTKEY: Hotkey = DEFAULT_SETTINGS.longHotkey;
 
   // Hotkey display name (human-readable)
-  let hotkeyDisplayName = $state('Ctrl+Meta');
-  let longHotkeyDisplayName = $state('Ctrl+Shift+Meta');
+  let hotkeyDisplayName = $state('Ctrl+Win');
+  let longHotkeyDisplayName = $state('Ctrl+Shift+Win');
   let isHotkeyModalOpen = $state(false);
   let hotkeyCaptureTarget = $state<'quick' | 'long'>('quick');
 
@@ -74,6 +75,8 @@
   let serverSettings = $state<Record<string, ServerSetting<unknown>> | null>(null);
   let engineStatus = $state<EngineStatus | null>(null);
   let serverConnected = $state(false);
+  let serverSettingsLoading = $state(false);
+  let lastServerSettingsAttemptKey = $state<string | null>(null);
   let engineAdvancedOpen = $state(false);
   let engineApplying = $state(false);
   let availableEngines = $state<string[]>([]);
@@ -83,7 +86,7 @@
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(sharedServerState?.engineStatus ?? engineStatus);
-  let externalMode = $derived(getServerManagementMode($serverStatusState) === 'external');
+  let externalMode = $derived(settings.useExternalServer || getServerManagementMode($serverStatusState) === 'external');
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -103,7 +106,7 @@
   );
 
   // Whether the current engine supports hotwords (Whisper: yes, Nemotron: no)
-  let hotwordsSupported = $derived(engineStatus?.info?.supports_hotwords ?? true);
+  let hotwordsSupported = $derived(sharedEngineStatus?.info?.supports_hotwords ?? true);
 
   // Check visibility: should a setting be shown based on visible_when?
   function isVisible(setting: ServerSetting<unknown>): boolean {
@@ -254,6 +257,8 @@
   }
 
   async function loadServerSettings() {
+    if (serverSettingsLoading) return;
+    serverSettingsLoading = true;
     try {
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
@@ -261,7 +266,12 @@
       availableEngines = serverData.available_engines ?? [];
       serverConnected = true;
     } catch {
+      serverSettings = null;
+      engineStatus = null;
+      availableEngines = [];
       serverConnected = false;
+    } finally {
+      serverSettingsLoading = false;
     }
   }
 
@@ -300,6 +310,23 @@
     void window.murmurMain.getAppVersion()
       .then((version) => (appVersion = version))
       .catch((error) => console.error('Failed to load app version:', error));
+  });
+
+  $effect(() => {
+    const state = sharedServerState;
+    if (shouldClearServerSettings(state, externalMode)) {
+      serverSettings = null;
+      engineStatus = null;
+      availableEngines = [];
+      serverConnected = false;
+      lastServerSettingsAttemptKey = null;
+      return;
+    }
+
+    if (shouldRetryServerSettings(state, serverConnected, serverSettingsLoading, lastServerSettingsAttemptKey)) {
+      lastServerSettingsAttemptKey = serverSettingsStateKey(state);
+      void loadServerSettings();
+    }
   });
 
   function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -483,7 +510,7 @@
             <button
               onclick={resetHotkey}
               class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to Ctrl+Meta"
+              title="Reset to Ctrl+Win"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -506,7 +533,7 @@
             <button
               onclick={resetLongHotkey}
               class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to Ctrl+Shift+Meta"
+              title="Reset to Ctrl+Shift+Win"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>

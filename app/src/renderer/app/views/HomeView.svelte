@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import ModelProgressCard from '../components/ModelProgressCard.svelte';
-  import { shouldShowModelProgress } from '$shared/model-progress';
   import type { ServerStatusPhase } from '../server-status';
   import { getServerManagementMode, retryManagedServer, serverStatusState } from '../server-status';
 
@@ -18,7 +16,6 @@
   let server = $derived(snapshot.state);
   let engine = $derived(server?.engineStatus?.info);
   let model = $derived(server?.modelDownload ?? null);
-  let showModelProgress = $derived(shouldShowModelProgress(model ?? undefined));
 
   const phaseCopy: Record<ServerStatusPhase, { title: string; detail: string }> = {
     connecting: { title: 'Connecting', detail: 'Checking the local speech service.' },
@@ -124,11 +121,6 @@
         </p>
       {/if}
 
-      {#if showModelProgress}
-        <div class="mt-4 max-w-2xl">
-          <ModelProgressCard state={model ?? undefined} announce={false} />
-        </div>
-      {/if}
     </section>
 
     <section class="grid gap-4 lg:grid-cols-2" aria-label="Dictation shortcuts and guidance">

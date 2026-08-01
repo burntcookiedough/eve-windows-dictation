@@ -18,6 +18,7 @@ import {
 } from '../services/server-settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
+import { resolveServerApiUrl } from '../services/server-api-url.js';
 import { createLogger } from '../lib/logger.js';
 import {
   applyLaunchOnBoot,
@@ -27,6 +28,15 @@ import {
 const log = createLogger('IpcHandlers');
 let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
+
+function getServerApiUrl(): string {
+  const configuredUrl = getSetting('serverUrl');
+  return resolveServerApiUrl(
+    configuredUrl,
+    serverManagerRef?.getState(),
+    getSetting('useExternalServer'),
+  );
+}
 
 export function setupIpcHandlers(historyService?: HistoryService, serverManager?: ServerManager): void {
   // Store references to services
@@ -231,21 +241,21 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
 
   // Server settings (REST API proxy)
   ipcMain.handle(IPC_CHANNELS.GET_SERVER_SETTINGS, async () => {
-    return getServerSettings();
+    return getServerSettings(getServerApiUrl());
   });
 
   ipcMain.handle(
     IPC_CHANNELS.UPDATE_SERVER_SETTINGS,
     async (_event, patch: Record<string, unknown>) => {
-      return updateServerSettings(patch);
+      return updateServerSettings(patch, getServerApiUrl());
     }
   );
 
   ipcMain.handle(IPC_CHANNELS.GET_ENGINE_STATUS, async () => {
-    return getEngineStatus();
+    return getEngineStatus(getServerApiUrl());
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_AVAILABLE_ENGINES, async () => {
-    return getAvailableEngines();
+    return getAvailableEngines(getServerApiUrl());
   });
 }
