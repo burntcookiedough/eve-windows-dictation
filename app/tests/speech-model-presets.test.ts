@@ -33,6 +33,9 @@ describe('speech model presets', () => {
     expect(chooser).toContain('Apply and prepare model confirms the change.');
     expect(settings).toContain('Apply and prepare model');
     expect(settings).toContain('serverStatusState');
+    expect(settings).toContain('shouldRetryServerSettings');
+    expect(settings).toContain('shouldClearServerSettings');
+    expect(settings).toContain('serverSettingsLoading');
     expect(settings).not.toContain('async function pollEngineStatus');
     expect(settings).toContain('!!sharedEngineStatus?.message');
     expect(settings).toContain("sharedEngineStatus?.pending?.status === 'error'");

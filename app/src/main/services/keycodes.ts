@@ -55,14 +55,19 @@ export function getKeyName(keycode: number): string {
  * e.g., "Ctrl+Shift+F17" or just "F17"
  */
 export function formatHotkey(hotkey: Hotkey): string {
+  return formatHotkeyForPlatform(hotkey, process.platform);
+}
+
+export function formatHotkeyForPlatform(hotkey: Hotkey, platform: NodeJS.Platform): string {
   const parts: string[] = [];
+  const metaName = platform === 'win32' ? 'Win' : 'Meta';
 
   if (hotkey.ctrlKey) parts.push('Ctrl');
   if (hotkey.altKey) parts.push('Alt');
   if (hotkey.shiftKey) parts.push('Shift');
-  if (hotkey.metaKey) parts.push('Meta');
+  if (hotkey.metaKey) parts.push(metaName);
 
-  const keyName = getKeyName(hotkey.keycode);
+  const keyName = isMetaKeycode(hotkey.keycode) ? metaName : getKeyName(hotkey.keycode);
   parts.push(keyName);
 
   return parts.join('+');

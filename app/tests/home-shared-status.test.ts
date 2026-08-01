@@ -212,7 +212,9 @@ describe('Home and shared server status', () => {
   });
 
   test('shares phase and progress UI while retaining factual shortcuts, privacy, actions, and restrained live announcements', () => {
-    expect(homeView).toContain('<ModelProgressCard state={model ?? undefined} announce={false} />');
+    expect(appView).toContain('<ModelProgressBanner visible />');
+    expect(homeView).not.toContain('ModelProgressCard');
+    expect(homeView).not.toContain('shouldShowModelProgress');
     expect(homeView).toContain('getHotkeyDisplayName(settings.hotkey)');
     expect(homeView).toContain('getHotkeyDisplayName(settings.longHotkey)');
     expect(homeView).toContain('does not automatically import personal data');
