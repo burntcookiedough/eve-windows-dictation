@@ -19,7 +19,7 @@ compatibility, and internal compatibility interfaces remain unchanged.
 
 ## Completed: application identity and visual system
 
-The technical contract is documented in [ADR-001](docs/architecture/adr-001-eve-application-identity-migration.md).
+The technical contract is documented in [ADR-001](../architecture/adr-001-eve-application-identity-migration.md).
 Gates 1–4 completed the compatibility, fresh-profile, visible-identity, and
 AppUserModelID cutover. Gates 5A and 5B completed the approved renderer/accessibility
 system and cactus Windows resources. Trademark work remains separate and incomplete.

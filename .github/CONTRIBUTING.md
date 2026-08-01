@@ -4,7 +4,7 @@ Eve targets Windows and combines an Electron/Svelte client with a Python transcr
 
 Before contributing:
 
-1. Read [AGENT.md](AGENT.md) and [BUILDING.md](BUILDING.md).
+1. Read [AGENTS.md](../AGENTS.md) and [the build guide](../docs/development/building.md).
 2. Use Windows PowerShell for Bun, uv, Python, pytest, dependency, and build commands. Do not create Linux dependencies in a Windows worktree.
 3. Preserve `%APPDATA%\murmur`, model caches, History, settings, and existing installer identity unless a migration proposal has been approved separately.
 4. Do not include transcripts, audio, clipboard contents, tokens, private paths, or raw environment dumps in logs, fixtures, screenshots, or bug reports.

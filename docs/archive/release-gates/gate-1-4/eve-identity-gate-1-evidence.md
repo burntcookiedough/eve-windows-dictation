@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record supports the compatibility-scaffolding gate in [ADR-001](adr-001-eve-application-identity-migration.md). It does not authorize the Eve data-path or visible-product cutover.
+This record supports the compatibility-scaffolding gate in [ADR-001](../../../architecture/adr-001-eve-application-identity-migration.md). It does not authorize the Eve data-path or visible-product cutover.
 
 ## Published v0.6.3 assets
 

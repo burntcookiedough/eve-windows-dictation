@@ -22,7 +22,7 @@ def test_installer_dependencies_mentions_runtime_requirements() -> None:
 
 
 def test_build_docs_match_packaging_flow() -> None:
-    building = _read("BUILDING.md")
+    building = _read("docs/development/building.md")
     readme = _read("README.md")
 
     for content in (building, readme):

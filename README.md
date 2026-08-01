@@ -52,7 +52,7 @@ This repository preserves the original commit authorship and the later work that
 - privacy-bounded diagnostics and History layout corrections;
 - repeatable release checks with exact artifact sizes and digests.
 
-The [v0.6.3 engineering case study](docs/engineering/v0.6.3-release-case-study.md) maps these claims to pull requests, commits, tests, and release artifacts. Planned component downloads and new ASR profiles are documented in the [roadmap](ROADMAP.md) as research, not shipped functionality.
+The [v0.6.3 engineering case study](docs/archive/engineering/v0.6.3-release-case-study.md) maps these claims to pull requests, commits, tests, and release artifacts. Planned component downloads and new ASR profiles are documented in the [roadmap](docs/project/roadmap.md) as research, not shipped functionality.
 
 ## Development
 
@@ -70,13 +70,13 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --extra all` when preparing a release runtime with both shipped engines. See [BUILDING.md](BUILDING.md) for release and packaging details, [docs/protocol.md](docs/protocol.md) for the WebSocket protocol, and [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Use `uv sync --extra all` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md) for release and packaging details, [docs/protocol.md](docs/protocol.md) for the WebSocket protocol, and [contributing](.github/CONTRIBUTING.md) before opening a pull request.
 
 ## Privacy and support
 
-The default packaged path keeps captured audio and transcription on the local machine. Network access is used to download the installer payload and first-use model files. External-server mode is an explicit exception to local processing. See [PRIVACY.md](PRIVACY.md) for the data boundaries and [SUPPORT.md](SUPPORT.md) for support expectations.
+The default packaged path keeps captured audio and transcription on the local machine. Network access is used to download the installer payload and first-use model files. External-server mode is an explicit exception to local processing. See [PRIVACY.md](PRIVACY.md) for the data boundaries and [support](.github/SUPPORT.md) for support expectations.
 
-Security reports should follow [SECURITY.md](SECURITY.md) and should never include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths.
+Security reports should follow [SECURITY.md](.github/SECURITY.md) and should never include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths.
 
 ## License and provenance
 
