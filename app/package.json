@@ -88,6 +88,7 @@
           "!.venv/Lib/site-packages/setuptools-*.dist-info/**",
           "!.venv/Lib/site-packages/PySide6/**",
           "!.venv/Lib/site-packages/PySide6-*.dist-info/**",
+          "!.venv/Lib/site-packages/PySide6_*.dist-info/**",
           "!.venv/Lib/site-packages/pyside6_*.dist-info/**",
           "!.venv/Lib/site-packages/shiboken6/**",
           "!.venv/Lib/site-packages/shiboken6-*.dist-info/**",

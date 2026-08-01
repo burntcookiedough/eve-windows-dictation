@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from fnmatch import fnmatchcase
 from pathlib import Path
 import subprocess
 import sys
@@ -171,14 +172,15 @@ def test_packaging_includes_relocatable_runtime() -> None:
     assert "!.venv/Lib/site-packages/pip/**" in filters
     assert "!.venv/Lib/site-packages/wheel/**" in filters
     assert "!.venv/Lib/site-packages/setuptools/**" in filters
-    for test_ui_filter in (
-        "!.venv/Lib/site-packages/PySide6/**",
-        "!.venv/Lib/site-packages/PySide6-*.dist-info/**",
-        "!.venv/Lib/site-packages/pyside6_*.dist-info/**",
-        "!.venv/Lib/site-packages/shiboken6/**",
-        "!.venv/Lib/site-packages/shiboken6-*.dist-info/**",
+    excluded_patterns = [item[1:] for item in filters if item.startswith("!")]
+    for test_ui_path in (
+        ".venv/Lib/site-packages/PySide6/QtCore.pyd",
+        ".venv/Lib/site-packages/PySide6_Addons-6.10.1.dist-info/METADATA",
+        ".venv/Lib/site-packages/PySide6_Essentials-6.10.1.dist-info/METADATA",
+        ".venv/Lib/site-packages/pyside6_addons-6.10.1.dist-info/METADATA",
+        ".venv/Lib/site-packages/shiboken6-6.10.1.dist-info/METADATA",
     ):
-        assert test_ui_filter in filters
+        assert any(fnmatchcase(test_ui_path, pattern) for pattern in excluded_patterns)
     assert "!.venv/Lib/site-packages/**/test/**" in filters
     assert "!.venv/Lib/site-packages/**/tests/**" in filters
     assert "!.venv/Lib/site-packages/**/*.lib" in filters
