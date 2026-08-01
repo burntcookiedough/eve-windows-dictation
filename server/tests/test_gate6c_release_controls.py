@@ -141,7 +141,15 @@ def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
     notices = (ROOT / "scripts/generate-third-party-notices.ps1").read_text(encoding="utf-8")
     for name in ("Eve.Web.Setup.$version.exe", "murmur-$version-x64.nsis.7z", "latest.yml", "SHA256SUMS.txt", "SHA512SUMS.txt", "THIRD_PARTY_NOTICES.txt"):
         assert name in artifacts
-    assert "2100000000" in artifacts
+    assert (
+        'foreach($file in $files){if($file.Length -ge 2100000000){throw '
+        '"Asset exceeds 2.10 GB safety ceiling: $($file.Name)"}}'
+    ) in artifacts
+    assert '$payload=Get-Item (Join-Path $dir "murmur-$version-x64.nsis.7z")' in artifacts
+    assert (
+        'if($payload.Length -ge 2050000000){throw '
+        '"NSIS-web payload exceeds 2.05 GB release target: $($payload.Name)"}'
+    ) in artifacts
     assert "NotSigned" in artifacts
     assert "Authenticode must be Valid when allow_unsigned=false" in artifacts
     assert "Manifest schema, format, tag, commit, or version mismatch." in artifacts
