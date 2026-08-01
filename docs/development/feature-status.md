@@ -9,8 +9,8 @@ When a feature is fully implemented:
 2. **Remove the red border** from the UI by removing the `notImplemented` prop from the `<SettingsRow>` (or `border-red-900` class for custom elements)
 
 ## Settings - Activation Section
-- [x] **Hotkey capture**: UI shows current hotkey but clicking doesn't open capture dialog. Needs: hotkey capture modal, IPC to update hotkey, re-register with hotkey service.
-- [x] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
+- [ ] **Hotkey capture**: UI shows current hotkey but clicking doesn't open capture dialog. Needs: hotkey capture modal, IPC to update hotkey, re-register with hotkey service.
+- [ ] **Activation Mode (hold/toggle)**: UI toggles state but doesn't persist. Needs: settings persistence + hotkey service mode change.
 
 ## Settings - Audio Section
 - [x] **Input Device dropdown**: Device enumeration API + settings persistence implemented.

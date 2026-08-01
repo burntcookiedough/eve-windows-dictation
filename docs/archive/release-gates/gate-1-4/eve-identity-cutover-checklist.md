@@ -13,7 +13,7 @@ Eve data boundary, the visible product rename, and the AppUserModelID/startup-re
 cutover are merged. Gates 5A and 5B subsequently completed the approved
 visual/accessibility system and cactus Windows resources.
 
-The controlling architecture decision is [ADR-001](adr-001-eve-application-identity-migration.md).
+The controlling architecture decision is [ADR-001](../../../architecture/adr-001-eve-application-identity-migration.md).
 
 ## Fixed decisions
 

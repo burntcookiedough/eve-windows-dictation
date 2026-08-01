@@ -3,7 +3,7 @@
 ## Scope and baseline
 
 Gate 2 is the clean Eve data-boundary change from
-[ADR-001](adr-001-eve-application-identity-migration.md). Implementation began from the
+[ADR-001](../../../architecture/adr-001-eve-application-identity-migration.md). Implementation began from the
 standalone repository's exact merged Gate 1 trunk commit
 `5e5b3a3c458d56279e8ece37c51827ce60cfa7a0` on
 `codex/eve-fresh-profile-gate-2`.

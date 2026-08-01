@@ -6,6 +6,7 @@ unsigned and name-risk inputs, environment approval, and post-public download co
 No profile, transcript, audio, settings, cache contents, or application logs belong here.
 
 | Evidence field | Value |
+| Status | template — not a release claim |
 |---|---|
 | Final commit/tag | |
 | Notice inventory SHA-256 | |

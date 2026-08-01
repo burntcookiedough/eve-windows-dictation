@@ -2,7 +2,7 @@
 
 This document is the historical, machine-specific recovery record for the published
 v0.6.3 Murmur release. Its Murmur paths are intentionally unchanged. Current source
-builds are visibly named Eve and use `%APPDATA%\Eve`; use `BUILDING.md` for current
+builds are visibly named Eve and use `%APPDATA%\Eve`; use [the build guide](development/building.md) for current
 build instructions.
 
 It captures a reproducible Windows 11 setup for running the published Murmur release

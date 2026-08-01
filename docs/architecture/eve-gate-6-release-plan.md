@@ -121,7 +121,7 @@ appear as such in release notes, support copy, or acceptance claims.
 ### Authorized scope
 
 1. Preserve this permanent Gate 6 contract.
-2. Correct only present-tense stale status in `ROADMAP.md`, the Gate 5 master ledger, and
+2. Correct only present-tense stale status in `docs/project/roadmap.md`, the archived Gate 5 master ledger, and
    the Eve identity checklist.
 3. Run the existing version tool to set its six owned files to `0.7.0`.
 4. Add concise human-reviewed `v0.7.0` release notes based on merged Gates 1–5.
@@ -163,9 +163,9 @@ before it is changed.
 | 1 | `docs/architecture/eve-gate-6-release-plan.md` | Permanent 6A/6B/6C contract, audit findings, approvals, and continuation instructions. |
 | 2 | `docs/architecture/eve-gate-6a-evidence.md` | Exact-head local/hosted validation, audit limitations, review disposition, and Ready handoff. |
 | 3 | `docs/releases/eve-v0.7.0-release-notes.md` | Concise human-reviewed release notes; no automatic-import claim. |
-| 4 | `ROADMAP.md` | Factual current-baseline and completed identity/visual-stage correction only. |
-| 5 | `docs/architecture/eve-gate-5-master-plan.md` | Factual Gate 5A/5B final ledger correction only; historical body remains intact. |
-| 6 | `docs/architecture/eve-identity-cutover-checklist.md` | Factual merged Gate 3/4/5 and remaining-release status correction only. |
+| 4 | `docs/project/roadmap.md` | Factual current-baseline and completed identity/visual-stage correction only. |
+| 5 | `docs/archive/release-gates/gate-5/eve-gate-5-master-plan.md` | Factual Gate 5A/5B final ledger correction only; historical body remains intact. |
+| 6 | `docs/archive/release-gates/gate-1-4/eve-identity-cutover-checklist.md` | Factual merged Gate 3/4/5 and remaining-release status correction only. |
 | 7 | `NOTICE.md` | User-facing third-party notice-readiness facts and unresolved limitations only. |
 | 8 | `app/package.json` | Version field only, through the existing version tool. |
 | 9 | `server/pyproject.toml` | Root project version field only, through the existing version tool. |
@@ -285,7 +285,7 @@ obtains appropriate review.
 ### Gate 6A validation commands
 
 All runtime, dependency, test, and build commands execute in Windows PowerShell, as
-required by `AGENT.md`. Gate 6A does not install or update dependencies.
+required by `AGENTS.md`. Gate 6A does not install or update dependencies.
 
 ```powershell
 # Repository and issue gate
@@ -503,7 +503,7 @@ The planning turn verified:
 - local `trunk` and `origin/trunk` were both exactly
   `0d6605d07aa783036d61fc93af7ce043a808f1a6`;
 - the tracked worktree was clean before the Gate 6A branch was created;
-- `AGENT.md`, ADR-001, the Gate 5 master/evidence, the identity checklist, roadmap,
+- `AGENTS.md`, ADR-001, the Gate 5 master/evidence, the identity checklist, roadmap,
   version tool, release verification script, manifests, NOTICE/LICENSE, release case
   study, and all GitHub workflows were read;
 - `python scripts/version.py check` passed at `0.6.3`;

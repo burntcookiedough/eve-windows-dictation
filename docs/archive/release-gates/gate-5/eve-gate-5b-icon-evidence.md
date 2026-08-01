@@ -49,8 +49,7 @@ Contrast, ICO-entry, and derivative-reproducibility behavior.
 
 ## Exact-head package evidence
 
-The accepted package workspace was
-`E:\EveGate5B\workspace-fd8de14-parent2`, clean at exact head `fd8de14f…`.
+The accepted package workspace was clean at exact head `fd8de14f…`.
 Direct main and renderer production builds passed. One accepted direct
 `electron-builder --win --publish never` package completed with zero stderr;
 no second accepted package was run.
@@ -82,21 +81,21 @@ Preflight stopped-state boundaries were:
 
 | Boundary | Aggregate |
 |---|---|
-| `%APPDATA%\murmur` | 108 files; 12,266,004 bytes; latest write `2026-07-28T08:35:45.2883301Z` |
-| `%APPDATA%\Eve` | 49 files; 2,961,447 bytes; latest write `2026-07-28T08:34:28.8438626Z` |
+| `%APPDATA%\murmur` | Aggregate metadata recorded; content was not inspected. |
+| `%APPDATA%\Eve` | Aggregate metadata recorded; content was not inspected. |
 | Scoped startup state | All ten allowlisted Run/StartupApproved values absent |
-| Shared caches | `E:\hf_cache`, `E:\AI\cache\huggingface\hub`, and `E:\AI\cache` present |
+| Shared caches | Presence recorded only; contents were not inspected. |
 | Published baseline | Official `app.asar` SHA-256 `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD` |
 
 | Lifecycle boundary | Result |
 |---|---|
 | Candidate install | Set A installed through the frozen GUID as `Eve 0.6.3`; candidate `app.asar` matched; stopped aggregates and startup state were unchanged. |
-| Runtime health | Owned server PID `16916`, port `58662`; version `0.6.3`; Faster-Whisper `large-v3-turbo` ready; CUDA and packaged CUDA DLLs available; zero warnings. |
+| Runtime health | Owned server became healthy; version `0.6.3`; Faster-Whisper `large-v3-turbo` ready; CUDA and packaged CUDA DLLs available; zero warnings. |
 | Controlled dictation | The repository WAV fixture was converted in memory only. Fast (10.0 s) and Long (47.334 s) produced non-empty finals with no errors; Long emitted `long_dictation_started` and `long_dictation_processing`. No transcript or audio was retained. |
-| Singleton | Second Eve PID `21432` exited; original main PID `2564` and server PID/port remained exact; one main process remained. |
-| Stopped preservation | Murmur stayed exact at 108 files/12,266,004 bytes. Eve became 50 files/2,969,807 bytes through owned runtime metadata only. |
+| Singleton | A second Eve launch exited; the original main process and server remained; one main process remained. |
+| Stopped preservation | Both profile aggregates were preserved; Eve metadata changes were owned runtime metadata only. |
 | Same-version repair | Untouched, hash-verified Set B repaired through the explicit local payload. Candidate `app.asar`, frozen identity, stopped aggregates, and startup state remained exact. |
-| Repaired health | Owned server PID `2212`, port `58846` became healthy and then ready immediately after the conservative 60-second poll boundary; version/CUDA/DLL checks passed with zero warnings. |
+| Repaired health | The owned server became healthy and ready after the conservative poll boundary; version/CUDA/DLL checks passed with zero warnings. |
 | Normal uninstall | Exit `0` in 0.851 s plus brief deferred cleanup; install root and frozen-GUID key were removed. Both profiles, all shared caches, and scoped startup state were preserved. |
 | Published rollback | Checksum-verified official wrapper/payload restored `Murmur 0.6.3`, the frozen GUID, and official `app.asar`; fresh owned health was ready with CUDA/DLL checks passing and zero warnings. |
 | Final restoration | All ten scoped startup values matched their pre-test absent state; official Murmur remained healthy. |
@@ -110,8 +109,7 @@ The official rollback artifacts were:
 
 Restored official `app.asar` SHA-256 was
 `98910F5CD2C3A9426ECD7850EE352E47F9C48FB00BB5EEF526220660E69FC8FD`.
-The official main PID was `19164`; its owned server PID `2844` used port `49595`
-and reported version `0.6.3`, ready `large-v3-turbo`, CUDA and CUDA DLLs
+The official main process and its owned server reported version `0.6.3`, ready `large-v3-turbo`, CUDA and CUDA DLLs
 available, and zero warnings.
 
 No personal profile content, transcript, audio output, unknown startup value, or

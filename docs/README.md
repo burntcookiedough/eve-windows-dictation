@@ -1,19 +1,23 @@
-# Documentation Index
+# Eve documentation
 
-This directory keeps only docs that still match the current codebase.
+## Start here
 
-## Active docs
+- [Windows development and release setup](development/building.md)
+- [Project roadmap](project/roadmap.md)
+- [Protocol](protocol.md)
+- [Speech-model selection](speech-model-selection.md)
+- [Windows local CUDA dictation](windows-local-cuda-dictation.md)
 
-- `architecture/adr-001-eve-application-identity-migration.md`: proposed fresh-profile, installer-compatibility, recovery, and acceptance design for the later Eve application rename.
-- `architecture/eve-identity-cutover-checklist.md`: exact file map, implementation gates, validation sequence, and remaining-work ledger for that cutover.
-- `architecture/eve-identity-gate-1-evidence.md`: published-installer hashes, frozen NSIS GUID derivation, and the outstanding clean-VM acceptance boundary.
-- `engineering/v0.6.3-release-case-study.md`: evidence-backed account of the Windows packaging and lifecycle work shipped through v0.6.3.
-- `protocol.md`: WebSocket audio/control/text frame specification used by app and server.
-- `benchmark-report.md`: Nemotron vs Whisper benchmark data that informed engine defaults.
-- `vram-aware-engine-selection.md`: VRAM sizing background for engine fallback/recording estimates.
-- `windows-local-cuda-dictation.md`: Reproducible Windows CUDA setup for local large-v3-turbo push-to-talk dictation.
+## Architecture and releases
 
-## Notes
+- [Application identity ADR](architecture/adr-001-eve-application-identity-migration.md)
+- [v0.8 release preparation](architecture/eve-v0.8-release-preparation.md)
+- [Gate 6 release plan](architecture/eve-gate-6-release-plan.md)
+- [Gate 6C publication runbook](architecture/eve-gate-6c-publication-runbook.md)
+- [v0.8 release notes](releases/eve-v0.8.0-release-notes.md)
 
-- Older implementation planning and exploratory writeups were removed once the architecture landed.
-- If you need historical context, use git history for previously tracked docs.
+## Development reference
+
+- [Agent workflow](development/agent-workflow.md)
+- [Feature status](development/feature-status.md)
+- [Archived release-gate evidence](archive/release-gates/)

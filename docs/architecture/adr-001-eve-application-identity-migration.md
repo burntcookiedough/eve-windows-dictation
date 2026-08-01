@@ -7,7 +7,7 @@ Accepted and implemented. Gates 1–3 are merged through PR #17 at
 AppUserModelID `io.github.burntcookiedough.eve`. The visual redesign and Gate 6
 publication stages referenced below are completed historical milestones.
 
-The companion [cutover checklist](eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
+The companion [cutover checklist](../archive/release-gates/gate-1-4/eve-identity-cutover-checklist.md) maps this decision to exact files, release gates, checks, and remaining work.
 
 Product decision: Eve will not import Murmur's History, settings, hotwords, external-server configuration, browser storage, credentials, or other personal state. The old Murmur data directory will be left untouched as an inactive archive.
 
@@ -279,7 +279,7 @@ visible Eve identity are complete in merged PRs #15–#17. Gate 4 activates
 `io.github.burntcookiedough.eve` in Electron Builder and the running process while
 retaining the frozen NSIS GUID, internal APIs, release identity, and legacy data
 boundary. Its implementation and acceptance are recorded in
-[Gate 4 evidence](eve-identity-gate-4-evidence.md).
+[Gate 4 evidence](../archive/release-gates/gate-1-4/eve-identity-gate-4-evidence.md).
 
 ## Consequences
 
