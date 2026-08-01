@@ -86,7 +86,7 @@
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(sharedServerState?.engineStatus ?? engineStatus);
-  let externalMode = $derived(getServerManagementMode($serverStatusState) === 'external');
+  let externalMode = $derived(settings.useExternalServer || getServerManagementMode($serverStatusState) === 'external');
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -314,7 +314,7 @@
 
   $effect(() => {
     const state = sharedServerState;
-    if (shouldClearServerSettings(state)) {
+    if (shouldClearServerSettings(state, externalMode)) {
       serverSettings = null;
       engineStatus = null;
       availableEngines = [];

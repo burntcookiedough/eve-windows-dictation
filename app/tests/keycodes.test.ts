@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { formatHotkeyForPlatform } from '../src/main/services/keycodes';
-import { DEFAULT_SETTINGS } from '../src/shared/types';
+import { DEFAULT_SETTINGS } from '$shared/types';
 
 describe('hotkey display labels', () => {
   const ctrlWin = {

@@ -1,6 +1,6 @@
 import type { ServerStatePayload } from '../../shared/types';
 
-type SettingsRecoveryState = Pick<ServerStatePayload, 'status' | 'port' | 'version' | 'engineStatus' | 'modelDownload'>;
+type SettingsRecoveryState = Pick<ServerStatePayload, 'status' | 'port' | 'wsUrl' | 'version' | 'engineStatus' | 'modelDownload'>;
 
 /**
  * Identify a meaningful server transition without using uptime or byte-level
@@ -12,6 +12,7 @@ export function serverSettingsStateKey(state: SettingsRecoveryState | null | und
   return [
     state?.status ?? 'none',
     state?.port ?? '',
+    state?.wsUrl ?? '',
     state?.version ?? '',
     engine?.current ?? '',
     engine?.status ?? '',
@@ -33,6 +34,9 @@ export function shouldRetryServerSettings(
   return serverSettingsStateKey(state) !== lastAttemptKey;
 }
 
-export function shouldClearServerSettings(state: SettingsRecoveryState | null | undefined): boolean {
-  return state !== null && state !== undefined && state.status !== 'running';
+export function shouldClearServerSettings(
+  state: SettingsRecoveryState | null | undefined,
+  externalMode: boolean,
+): boolean {
+  return !externalMode && state !== null && state !== undefined && state.status !== 'running';
 }

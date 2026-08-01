@@ -10,6 +10,7 @@ const ready = {
   status: 'running' as const,
   managed: true,
   port: 51490,
+  wsUrl: 'ws://localhost:51490/transcribe',
   version: '0.8.0',
   engineStatus: { current: 'whisper', status: 'ready' as const },
 };
@@ -29,8 +30,14 @@ describe('Settings server-state recovery', () => {
     const loading = { ...ready, engineStatus: { current: 'whisper', status: 'loading' as const } };
     expect(serverSettingsStateKey(loading)).not.toBe(readyKey);
     expect(shouldRetryServerSettings(loading, false, false, readyKey)).toBeTrue();
-    expect(shouldClearServerSettings(null)).toBeFalse();
-    expect(shouldClearServerSettings(starting)).toBeTrue();
-    expect(shouldClearServerSettings(ready)).toBeFalse();
+    expect(shouldClearServerSettings(null, false)).toBeFalse();
+    expect(shouldClearServerSettings(starting, false)).toBeTrue();
+    expect(shouldClearServerSettings(starting, true)).toBeFalse();
+    expect(shouldClearServerSettings(ready, false)).toBeFalse();
+  });
+
+  test('retries when the live endpoint changes even if its port is reused', () => {
+    const samePortDifferentEndpoint = { ...ready, wsUrl: 'ws://127.0.0.1:51490/transcribe' };
+    expect(serverSettingsStateKey(samePortDifferentEndpoint)).not.toBe(serverSettingsStateKey(ready));
   });
 });
