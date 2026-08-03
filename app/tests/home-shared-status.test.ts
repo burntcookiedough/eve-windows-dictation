@@ -243,6 +243,16 @@ describe('Home and shared server status', () => {
     expect(banner).toContain('getServerManagementMode($serverStatusState)');
   });
 
+  test('uses the expressive Home composition and tolerates sparse runtime metadata', () => {
+    expect(homeView).toContain('data-home-hero');
+    expect(homeView).toContain('data-home-voice-orb');
+    expect(homeView).toContain('data-home-modes');
+    expect(homeView).toContain('Your words, ready to move');
+    expect(homeView).toContain('Array.isArray(engine?.languages)');
+    expect(homeView).toContain("typeof engine?.model_size_gb === 'number'");
+    expect(homeView).not.toContain('engine.languages.length');
+  });
+
   test('preserves the frozen Eve identity and v0.8.0 version baseline', () => {
     expect(packageJson).toContain('"version": "0.8.0"');
     expect(packageJson).toContain('"appId": "io.github.burntcookiedough.eve"');
