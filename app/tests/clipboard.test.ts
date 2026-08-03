@@ -133,5 +133,9 @@ describe('buildSendInputScriptContent', () => {
     expect(script).toContain('Target window is not foreground before paste.');
     expect(script).toContain('if (IsIconic(target))');
     expect(script).toContain('ShowWindow(target, SW_RESTORE);');
+    expect(script).toContain('if (GetForegroundWindow() != target)');
+    expect(script).toContain('private static bool WaitForForeground(IntPtr target)');
+    expect(script).toContain('while (GetForegroundWindow() != target && waitedMs < FOREGROUND_WAIT_MS)');
+    expect(script).toContain('if (!activationRequested && GetForegroundWindow() != target)');
   });
 });
