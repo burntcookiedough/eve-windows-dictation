@@ -22,6 +22,16 @@ export function presetPatch(preset: SpeechModelPreset): Record<string, string> {
   return { engine: preset.engine, [preset.setting]: preset.model };
 }
 
+export function hasPendingCompatibilityChanges(
+  pending: Record<string, unknown>,
+  stagedPreset: SpeechModelPreset | null,
+): boolean {
+  const stagedPatch = stagedPreset ? presetPatch(stagedPreset) : {};
+  return Object.entries(pending).some(([key, value]) => {
+    return !Object.prototype.hasOwnProperty.call(stagedPatch, key) || stagedPatch[key] !== value;
+  });
+}
+
 export function stagedPresetFromPending(pending: Record<string, unknown>): SpeechModelPreset | null {
   return SPEECH_MODEL_PRESETS.find((preset) =>
     pending.engine === preset.engine && pending[preset.setting] === preset.model

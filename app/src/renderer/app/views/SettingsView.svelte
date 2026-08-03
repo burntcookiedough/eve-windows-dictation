@@ -2,12 +2,13 @@
   import { onMount } from 'svelte';
   import Toggle from '../components/Toggle.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
+  import SettingsGroup from '../components/SettingsGroup.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
-  import { SPEECH_MODEL_PRESETS, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
+  import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
   import { getServerManagementMode, serverStatusState } from '../server-status';
   import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
   import { toast } from '$lib/toast.svelte';
@@ -77,7 +78,7 @@
   let serverConnected = $state(false);
   let serverSettingsLoading = $state(false);
   let lastServerSettingsAttemptKey = $state<string | null>(null);
-  let engineAdvancedOpen = $state(false);
+  let compatibilityControlsOpen = $state(false);
   let engineApplying = $state(false);
   let availableEngines = $state<string[]>([]);
   let engineApplyError = $state('');
@@ -498,226 +499,279 @@
 
     <h1 class="sr-only">Settings</h1>
 
-    <!-- Shortcuts & activation -->
-    <SettingsSection title="Shortcuts &amp; activation">
-      <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            onclick={() => openHotkeyCapture('quick')}
-            class="max-w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+    <SettingsSection title="General" description="Shortcuts, audio, dictation, vocabulary, and app behavior." variant="content">
+      <div data-settings-general class="space-y-6">
+        <SettingsGroup title="Shortcuts &amp; activation">
+          <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick={() => openHotkeyCapture('quick')}
+                class="min-h-9 max-w-full rounded-lg bg-zinc-800 px-3 py-2 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+              >
+                {hotkeyDisplayName}
+              </button>
+              {#if isHotkeyChanged}
+                <button
+                  type="button"
+                  onclick={resetHotkey}
+                  class="min-h-8 rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                  aria-label="Reset fast dictation hotkey to Ctrl+Win"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                  </svg>
+                </button>
+              {/if}
+            </div>
+          </SettingsRow>
+
+          <SettingsRow label="Long dictation hotkey" description="Start or stop hands-free long dictation">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick={() => openHotkeyCapture('long')}
+                class="min-h-9 max-w-full rounded-lg bg-zinc-800 px-3 py-2 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+              >
+                {longHotkeyDisplayName}
+              </button>
+              {#if isLongHotkeyChanged}
+                <button
+                  type="button"
+                  onclick={resetLongHotkey}
+                  class="min-h-8 rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                  aria-label="Reset long dictation hotkey to Ctrl+Shift+Win"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                  </svg>
+                </button>
+              {/if}
+            </div>
+          </SettingsRow>
+
+          <SettingsRow label="Activation mode" description="Hold-to-talk or toggle on/off">
+            <div class="relative grid min-h-9 w-full max-w-full grid-cols-2 rounded-lg bg-zinc-800 p-1 sm:w-[120px]">
+              <div
+                class="absolute top-1 left-1 h-[calc(100%-8px)] w-[calc(50%-4px)] rounded-md bg-zinc-700 transition-all duration-150 ease-out
+                  {!settings.holdToTalk ? 'translate-x-full' : ''}"
+              ></div>
+              <button
+                type="button"
+                onclick={() => updateSetting('holdToTalk', true)}
+                aria-pressed={settings.holdToTalk}
+                class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
+                  cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                  {settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
+              >
+                Hold
+              </button>
+              <button
+                type="button"
+                onclick={() => updateSetting('holdToTalk', false)}
+                aria-pressed={!settings.holdToTalk}
+                class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
+                  cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                  {!settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
+              >
+                Toggle
+              </button>
+            </div>
+          </SettingsRow>
+        </SettingsGroup>
+
+        <SettingsGroup title="Audio">
+          <SettingsRow
+            label="Input device"
+            description={audioDeviceError || 'Select microphone for recording'}
           >
-            {hotkeyDisplayName}
-          </button>
-          {#if isHotkeyChanged}
-            <button
-              type="button"
-              onclick={resetHotkey}
-              class="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-              aria-label="Reset fast dictation hotkey to Ctrl+Win"
+            <select
+              aria-label="Input device"
+              value={settings.selectedDeviceId}
+              onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}
+              disabled={isLoadingDevices}
+              title={inputDevices.find(d => d.id === settings.selectedDeviceId)?.label ?? 'Default'}
+              class="min-h-9 w-full max-w-full truncate rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:max-w-[280px]"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                <path d="M3 3v5h5"/>
-              </svg>
-            </button>
-          {/if}
-        </div>
-      </SettingsRow>
+              {#each inputDevices as device}
+                <option value={device.id}>{device.label}</option>
+              {/each}
+            </select>
+          </SettingsRow>
+        </SettingsGroup>
 
-      <SettingsRow label="Long dictation hotkey" description="Start or stop hands-free long dictation">
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            onclick={() => openHotkeyCapture('long')}
-            class="max-w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-          >
-            {longHotkeyDisplayName}
-          </button>
-          {#if isLongHotkeyChanged}
-            <button
-              type="button"
-              onclick={resetLongHotkey}
-              class="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-              aria-label="Reset long dictation hotkey to Ctrl+Shift+Win"
+        <SettingsGroup title="Dictation/output">
+          <SettingsRow label="Append period" description="Add a period at the end of transcriptions">
+            <Toggle
+              enabled={settings.appendPeriod}
+              onchange={(v) => updateSetting('appendPeriod', v)}
+              label="Append period"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Append space" description="Add a trailing space after transcriptions">
+            <Toggle
+              enabled={settings.appendSpace}
+              onchange={(v) => updateSetting('appendSpace', v)}
+              label="Append space"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
+            <select
+              aria-label="Dictation mode"
+              value={settings.dictationMode}
+              onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
+              class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                <path d="M3 3v5h5"/>
+              <option value="raw">Raw Dictation</option>
+              <option value="clean_prompt">Clean Prompt</option>
+              <option value="codex_prompt">Codex Prompt</option>
+              <option value="message_rewrite">Message Rewrite</option>
+              <option value="command">Command Mode</option>
+            </select>
+          </SettingsRow>
+        </SettingsGroup>
+
+        <SettingsGroup title="Hotwords" description="Keep important names and terms recognizable.">
+          {#if !hotwordsSupported}
+            <div role="status" class="flex items-start gap-3 p-4 text-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0 text-zinc-400">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4"/>
+                <path d="M12 8h.01"/>
               </svg>
-            </button>
+              <div>
+                <p class="text-zinc-300">Hotwords are not supported with the Nemotron engine.</p>
+                <p class="mt-1 text-xs text-zinc-500">Switch to Faster-Whisper to use hotwords.</p>
+              </div>
+            </div>
           {/if}
-        </div>
-      </SettingsRow>
 
-      <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off">
-        <div class="relative grid w-full max-w-full grid-cols-2 rounded-lg bg-zinc-800 p-1 sm:w-[120px]">
-          <!-- Sliding indicator -->
-          <div
-            class="absolute top-1 left-1 w-[calc(50%-4px)] h-[calc(100%-8px)] bg-zinc-700 rounded-md transition-all duration-150 ease-out
-              {!settings.holdToTalk ? 'translate-x-full' : ''}"
-          ></div>
-          <!-- Buttons -->
-          <button
-            type="button"
-            onclick={() => updateSetting('holdToTalk', true)}
-            aria-pressed={settings.holdToTalk}
-            class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
-              cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-              {settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
-          >
-            Hold
-          </button>
-          <button
-            type="button"
-            onclick={() => updateSetting('holdToTalk', false)}
-            aria-pressed={!settings.holdToTalk}
-            class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
-              cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-              {!settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
-          >
-            Toggle
-          </button>
-        </div>
-      </SettingsRow>
-    </SettingsSection>
+          <SettingsRow label="Enable hotwords" description="Bias transcription toward your custom terms">
+            <Toggle
+              enabled={settings.hotwordsEnabled && hotwordsSupported}
+              onchange={(v) => updateSetting('hotwordsEnabled', v)}
+              label="Enable hotwords"
+              disabled={!hotwordsSupported}
+            />
+          </SettingsRow>
 
-    <!-- Audio -->
-    <SettingsSection title="Audio">
-      <SettingsRow
-        label="Input Device"
-        description={audioDeviceError || 'Select microphone for recording'}
-      >
-        <select
-          aria-label="Input Device"
-          value={settings.selectedDeviceId}
-          onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}
-          disabled={isLoadingDevices}
-          title={inputDevices.find(d => d.id === settings.selectedDeviceId)?.label ?? 'Default'}
-          class="w-full max-w-full truncate rounded-lg bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto sm:max-w-[280px]"
-        >
-          {#each inputDevices as device}
-            <option value={device.id}>{device.label}</option>
-          {/each}
-        </select>
-      </SettingsRow>
+          <div data-hotwords-editor class="p-4 transition-colors {!hotwordsSupported ? 'bg-zinc-900/40 opacity-60' : hasHotwordOverflowWarning ? 'bg-amber-950/10' : ''}">
+            <label for="hotwords-csl" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
+            <p id="hotwords-help" class="mt-1 text-xs leading-5 text-zinc-500">
+              Add terms that are often transcribed incorrectly, such as product names, acronyms, and proper nouns.
+              Avoid very long lists; large lists can reduce quality.
+            </p>
+            <textarea
+              id="hotwords-csl"
+              value={settings.hotwordsCsl}
+              oninput={(e) => updateHotwordsCsl(e.currentTarget.value)}
+              rows="4"
+              disabled={!hotwordsSupported}
+              aria-describedby="hotwords-help"
+              class="mt-3 min-h-24 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Svelte, IPC, Claude"
+            ></textarea>
 
-    </SettingsSection>
+            <div class="mt-3 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p id="hotwords-count" class="min-w-0 text-xs {hasHotwordOverflowWarning ? 'text-amber-300' : 'text-zinc-500'}">
+                {hotwordCount} {hotwordCount === 1 ? 'term' : 'terms'}
+                {#if hasHotwordOverflowWarning}
+                  - You have a lot of entries. Recognition quality may degrade.
+                {/if}
+              </p>
+              <div class="flex min-w-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onclick={importHotwords}
+                  disabled={!hotwordsSupported}
+                  class="min-h-9 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                    {hotwordsSupported ? 'cursor-pointer hover:bg-zinc-700' : 'cursor-not-allowed opacity-50'}"
+                >
+                  Import
+                </button>
+                <button
+                  type="button"
+                  onclick={exportHotwords}
+                  disabled={!hotwordsSupported}
+                  class="min-h-9 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                    {hotwordsSupported ? 'cursor-pointer hover:bg-zinc-700' : 'cursor-not-allowed opacity-50'}"
+                >
+                  Export
+                </button>
+              </div>
+            </div>
 
-    <!-- Dictation/output -->
-    <SettingsSection title="Dictation/output">
-      <SettingsRow label="Append period" description="Add a period at the end of transcriptions">
-        <Toggle
-          enabled={settings.appendPeriod}
-          onchange={(v) => updateSetting('appendPeriod', v)}
-          label="Append period"
-        />
-      </SettingsRow>
-
-      <SettingsRow label="Append space" description="Add a trailing space after transcriptions">
-        <Toggle
-          enabled={settings.appendSpace}
-          onchange={(v) => updateSetting('appendSpace', v)}
-          label="Append space"
-        />
-      </SettingsRow>
-
-      <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
-        <select
-          aria-label="Dictation mode"
-          value={settings.dictationMode}
-          onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
-          class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-        >
-          <option value="raw">Raw Dictation</option>
-          <option value="clean_prompt">Clean Prompt</option>
-          <option value="codex_prompt">Codex Prompt</option>
-          <option value="message_rewrite">Message Rewrite</option>
-          <option value="command">Command Mode</option>
-        </select>
-      </SettingsRow>
-    </SettingsSection>
-
-    <SettingsSection title="Hotwords" variant="panel">
-      {#if !hotwordsSupported}
-        <div role="status" class="mb-4 flex items-start gap-3 rounded-lg bg-zinc-900/70 p-3">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-400 shrink-0 mt-0.5">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4"/>
-            <path d="M12 8h.01"/>
-          </svg>
-          <div>
-            <p class="text-sm text-zinc-300">Hotwords are not supported with the Nemotron engine.</p>
-            <p class="text-xs text-zinc-500 mt-1">Switch to Faster-Whisper to use hotwords.</p>
-          </div>
-        </div>
-      {/if}
-
-      <SettingsRow label="Enable hotwords" description="Bias transcription toward your custom terms">
-        <Toggle
-          enabled={settings.hotwordsEnabled && hotwordsSupported}
-          onchange={(v) => updateSetting('hotwordsEnabled', v)}
-          label="Enable hotwords"
-          disabled={!hotwordsSupported}
-        />
-      </SettingsRow>
-
-      <div class="mt-4 w-full min-w-0 border transition-colors
-        {!hotwordsSupported ? 'border-zinc-700 bg-zinc-900/50 opacity-50' : hasHotwordOverflowWarning ? 'border-amber-500/70 bg-amber-950/10' : 'border-zinc-700 bg-zinc-900/50'}">
-        <label for="hotwords-csl" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
-        <p id="hotwords-help" class="mt-1 text-xs text-zinc-500">
-          Add terms that are often transcribed incorrectly, such as product names, acronyms, and proper nouns.
-          Avoid very long lists; large lists can reduce quality.
-        </p>
-        <textarea
-          id="hotwords-csl"
-          value={settings.hotwordsCsl}
-          oninput={(e) => updateHotwordsCsl(e.currentTarget.value)}
-          rows="4"
-          disabled={!hotwordsSupported}
-          aria-describedby="hotwords-help"
-          class="mt-3 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          placeholder="Svelte, IPC, Claude"
-        ></textarea>
-
-        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <p id="hotwords-count" class="text-xs {hasHotwordOverflowWarning ? 'text-amber-300' : 'text-zinc-500'}">
-            {hotwordCount} {hotwordCount === 1 ? 'term' : 'terms'}
-            {#if hasHotwordOverflowWarning}
-              - You have a lot of entries. Recognition quality may degrade.
+            {#if hotwordsFileMessage}
+              <p class="mt-2 text-xs text-zinc-500" role="status">{hotwordsFileMessage}</p>
             {/if}
-          </p>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              onclick={importHotwords}
-              disabled={!hotwordsSupported}
-              class="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-                {hotwordsSupported ? 'hover:bg-zinc-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
-            >
-              Import
-            </button>
-            <button
-              type="button"
-              onclick={exportHotwords}
-              disabled={!hotwordsSupported}
-              class="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-                {hotwordsSupported ? 'hover:bg-zinc-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
-            >
-              Export
-            </button>
           </div>
-        </div>
+        </SettingsGroup>
 
-        {#if hotwordsFileMessage}
-          <p class="mt-2 text-xs text-zinc-500" role="status">{hotwordsFileMessage}</p>
-        {/if}
+        <SettingsGroup title="App behavior">
+          <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically">
+            <Toggle
+              enabled={settings.autoCopy}
+              onchange={(v) => updateSetting('autoCopy', v)}
+              label="Auto-copy"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Auto-paste" description="Paste transcription into active window">
+            <Toggle
+              enabled={settings.autoPaste}
+              onchange={(v) => updateSetting('autoPaste', v)}
+              label="Auto-paste"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Restore clipboard" description="Put your previous clipboard text back after auto-paste">
+            <Toggle
+              enabled={settings.restoreClipboardAfterPaste}
+              onchange={(v) => updateSetting('restoreClipboardAfterPaste', v)}
+              label="Restore clipboard"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Paste method" description="Use native SendInput first, or force VBScript fallback">
+            <select
+              aria-label="Paste method"
+              value={settings.pasteMethod}
+              onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
+              class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
+            >
+              <option value="sendinput">SendInput</option>
+              <option value="vbscript">VBScript</option>
+            </select>
+          </SettingsRow>
+
+          <SettingsRow label="Launch on boot" description="Start application when system starts">
+            <Toggle
+              enabled={settings.launchOnBoot}
+              onchange={(v) => void updateLaunchOnBoot(v)}
+              label="Launch on boot"
+            />
+          </SettingsRow>
+
+          <SettingsRow label="Start minimized" description="Hide main window on application launch">
+            <Toggle
+              enabled={settings.startMinimized}
+              onchange={(v) => updateSetting('startMinimized', v)}
+              label="Start minimized"
+            />
+          </SettingsRow>
+        </SettingsGroup>
       </div>
     </SettingsSection>
 
     <SettingsSection title="Speech model" variant="content">
       {#if !serverConnected || !serverSettings}
-        <p class="text-xs text-zinc-500">Speech model choices are available when the server reports its settings.</p>
+        <div data-speech-model-panel class="min-w-0 w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
+          <p class="text-xs leading-5 text-zinc-500">Speech model choices are available when the server reports its settings.</p>
+        </div>
       {:else}
         <SpeechModelChooser
           selected={selectedPreset}
@@ -726,100 +780,84 @@
           engineStatus={sharedEngineStatus}
           modelDownload={sharedServerState?.modelDownload}
           externalMode={externalMode}
+          preparationFailed={preparationFailed}
           onSelect={selectPreset}
-        />
-        {#if stagedPreset && !presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)}
-          <p class="mt-3 text-xs {preparationFailed ? 'text-red-300' : 'text-amber-300'}">{preparationFailed ? 'Preparation failed. Retry or revert your selected model.' : 'Selected model is pending preparation; the current engine remains active until the selected model is ready.'}</p>
-        {/if}
-        {#if stagedPreset && !externalMode}
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
-            <button type="button" onclick={revertPreset} disabled={engineApplying} class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
-          </div>
-          {#if engineApplyError}<p class="mt-2 text-xs text-red-300">{engineApplyError}</p>{/if}
-        {/if}
+        >
+          {#snippet children()}
+            {#if stagedPreset && !presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)}
+              <p data-model-preparation-status class="text-xs leading-5 {preparationFailed ? 'text-red-300' : 'text-amber-300'}">
+                {preparationFailed ? 'Preparation failed. Retry or revert your selected model.' : 'Selected model is pending preparation; the current engine remains active until the selected model is ready.'}
+              </p>
+            {/if}
+            {#if stagedPreset && !externalMode}
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
+                <button type="button" onclick={revertPreset} disabled={engineApplying} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
+              </div>
+              {#if engineApplyError}<p class="mt-2 text-xs text-red-300">{engineApplyError}</p>{/if}
+            {/if}
+          {/snippet}
+        </SpeechModelChooser>
       {/if}
     </SettingsSection>
 
-    <!-- App behavior -->
-    <SettingsSection title="App behavior">
-      <SettingsRow label="Auto-copy" description="Copy transcription to clipboard automatically">
-        <Toggle
-          enabled={settings.autoCopy}
-          onchange={(v) => updateSetting('autoCopy', v)}
-          label="Auto-copy"
-        />
-      </SettingsRow>
+    <SettingsSection
+      title="Advanced"
+      id="advanced-settings-heading"
+      description="Engine, connection, diagnostics, and local server controls."
+      variant="content"
+    >
+      <div data-advanced-settings class="min-w-0">
+        <div data-compatibility-panel class="min-w-0 w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="text-sm font-medium text-zinc-100">Compatibility controls</h3>
+              <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Raw model, precision, language, device, and unload-before-swap settings.</p>
+            </div>
+            {#if serverConnected && serverSettings}
+              <button
+                type="button"
+                aria-expanded={compatibilityControlsOpen}
+                aria-controls="compatibility-controls"
+                onclick={() => compatibilityControlsOpen = !compatibilityControlsOpen}
+                class="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  class="transition-transform duration-150 {compatibilityControlsOpen ? 'rotate-90' : ''}"
+                  aria-hidden="true"
+                >
+                  <path d="m9 18 6-6-6-6"/>
+                </svg>
+                {compatibilityControlsOpen ? 'Hide controls' : 'Show controls'}
+              </button>
+            {/if}
+          </div>
 
-      <SettingsRow label="Auto-paste" description="Paste transcription into active window">
-        <Toggle
-          enabled={settings.autoPaste}
-          onchange={(v) => updateSetting('autoPaste', v)}
-          label="Auto-paste"
-        />
-      </SettingsRow>
+          {#if externalMode}
+            <div data-compatibility-external class="mt-4 flex items-start gap-3 border-t border-white/[0.08] pt-4 text-xs leading-5 text-zinc-400">
+              <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-300"></span>
+              <p>Compatibility controls are read-only while an external server is active. Configure the external server through its own endpoint.</p>
+            </div>
+          {/if}
 
-      <SettingsRow label="Restore clipboard" description="Put your previous clipboard text back after auto-paste">
-        <Toggle
-          enabled={settings.restoreClipboardAfterPaste}
-          onchange={(v) => updateSetting('restoreClipboardAfterPaste', v)}
-          label="Restore clipboard"
-        />
-      </SettingsRow>
-
-      <SettingsRow label="Paste method" description="Use native SendInput first, or force VBScript fallback">
-        <select
-          aria-label="Paste method"
-          value={settings.pasteMethod}
-          onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
-          class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-        >
-          <option value="sendinput">SendInput</option>
-          <option value="vbscript">VBScript</option>
-        </select>
-      </SettingsRow>
-
-      <SettingsRow label="Launch on boot" description="Start application when system starts">
-        <Toggle
-          enabled={settings.launchOnBoot}
-          onchange={(v) => void updateLaunchOnBoot(v)}
-          label="Launch on boot"
-        />
-      </SettingsRow>
-
-      <SettingsRow label="Start minimized" description="Hide main window on application launch">
-        <Toggle
-          enabled={settings.startMinimized}
-          onchange={(v) => updateSetting('startMinimized', v)}
-          label="Start minimized"
-        />
-      </SettingsRow>
-    </SettingsSection>
-
-    <section aria-labelledby="advanced-settings-heading" class="min-w-0 space-y-4">
-      <div>
-        <h2 id="advanced-settings-heading" class="text-base font-semibold text-zinc-100">Advanced</h2>
-        <p class="mt-1 text-xs text-zinc-400">
-          Engine, connection, diagnostics, and local server controls.
-        </p>
-      </div>
-      <div class="min-w-0 space-y-6">
-
-    <SettingsSection title="Model compatibility">
       {#if !serverConnected}
-        <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
-          <p class="text-xs text-zinc-500 text-center">
+        <div class="mt-4 border-t border-white/[0.08] pt-4">
+          <p class="text-xs leading-5 text-zinc-500">
             Server not connected. Start the server to configure engine settings.
           </p>
         </div>
       {:else if serverSettings}
+        <div id="compatibility-controls" hidden={!compatibilityControlsOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2 {externalMode ? 'opacity-60' : ''}">
         {#if serverSettings.whisper_model}
           <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
             <select
               aria-label={serverSettings.whisper_model.label}
               value={getSettingValue('whisper_model') ?? serverSettings.whisper_model.value}
               onchange={(e) => updateEngineSetting('whisper_model', e.currentTarget.value)}
-              class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {#each getOptions('whisper_model') as option}
                 <option value={option.value}>{option.label}</option>
@@ -833,7 +871,8 @@
               aria-label={serverSettings.whisper_compute_type.label}
               value={getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value}
               onchange={(e) => updateEngineSetting('whisper_compute_type', e.currentTarget.value)}
-              class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {#each getOptions('whisper_compute_type') as option}
                 <option value={option.value}>{option.label}</option>
@@ -842,153 +881,133 @@
           </SettingsRow>
         {/if}
 
-        <!-- Advanced (collapsible) -->
-        <div class="w-full">
-          <button
-            type="button"
-            aria-expanded={engineAdvancedOpen}
-            aria-controls="engine-advanced-options"
-            onclick={() => engineAdvancedOpen = !engineAdvancedOpen}
-            class="flex items-center gap-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-              class="transition-transform duration-150 {engineAdvancedOpen ? 'rotate-90' : ''}"
+        {#if serverSettings.nemotron_model && isVisible(serverSettings.nemotron_model)}
+          <SettingsRow label={serverSettings.nemotron_model.label} description="Raw Nemotron model name or path">
+            <input
+              aria-label={serverSettings.nemotron_model.label}
+              value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)}
+              oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)}
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-56"
+            />
+          </SettingsRow>
+        {/if}
+        {#if serverSettings.whisper_language && isVisible(serverSettings.whisper_language)}
+          <SettingsRow label={serverSettings.whisper_language.label} description={serverSettings.whisper_language.description}>
+            <input
+              aria-label={serverSettings.whisper_language.label}
+              value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')}
+              oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)}
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-28"
+            />
+          </SettingsRow>
+        {/if}
+        {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
+          <SettingsRow label="Device" description="Hardware device for inference">
+            <select
+              aria-label="Nemotron device"
+              value={getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value}
+              onchange={(e) => updateEngineSetting('nemotron_device', e.currentTarget.value)}
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
-              <path d="m9 18 6-6-6-6"/>
-            </svg>
-            Advanced
-          </button>
-
-           {#if engineAdvancedOpen}
-             <div id="engine-advanced-options" class="mt-2 space-y-2">
-               {#if serverSettings.nemotron_model && isVisible(serverSettings.nemotron_model)}
-                 <SettingsRow label={serverSettings.nemotron_model.label} description="Raw Nemotron model name or path">
-                   <input aria-label={serverSettings.nemotron_model.label} value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)} oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)} class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-56" />
-                 </SettingsRow>
-               {/if}
-               {#if serverSettings.whisper_language && isVisible(serverSettings.whisper_language)}
-                 <SettingsRow label={serverSettings.whisper_language.label} description={serverSettings.whisper_language.description}>
-                   <input aria-label={serverSettings.whisper_language.label} value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')} oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)} class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-28" />
-                 </SettingsRow>
-               {/if}
-               <!-- Device setting (show whichever is visible) -->
-              {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
-                <SettingsRow label="Device" description="Hardware device for inference">
-                  <select
-                    aria-label="Nemotron device"
-                    value={getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value}
-                    onchange={(e) => updateEngineSetting('nemotron_device', e.currentTarget.value)}
-                    class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-                  >
-                    {#each getOptions('nemotron_device') as option}
-                      <option value={option.value}>{option.label}</option>
-                    {/each}
-                  </select>
-                </SettingsRow>
-              {/if}
-
-              {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}
-                <SettingsRow label="Device" description="Hardware device for inference">
-                  <select
-                    aria-label="Whisper device"
-                    value={getSettingValue('whisper_device') ?? serverSettings.whisper_device.value}
-                    onchange={(e) => updateEngineSetting('whisper_device', e.currentTarget.value)}
-                    class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-                  >
-                    {#each getOptions('whisper_device') as option}
-                      <option value={option.value}>{option.label}</option>
-                    {/each}
-                  </select>
-                </SettingsRow>
-              {/if}
-
-              <!-- Unload before swap toggle -->
-              {#if serverSettings.unload_before_swap}
-                <SettingsRow label="Unload before swap" description="Free VRAM before loading new engine (for low-VRAM GPUs)">
-                  <Toggle
-                    enabled={!!getSettingValue('unload_before_swap')}
-                    onchange={(v) => updateEngineSetting('unload_before_swap', v)}
-                    label="Unload before swap"
-                  />
-                </SettingsRow>
-              {/if}
-            </div>
-          {/if}
+              {#each getOptions('nemotron_device') as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </SettingsRow>
+        {/if}
+        {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}
+          <SettingsRow label="Device" description="Hardware device for inference">
+            <select
+              aria-label="Whisper device"
+              value={getSettingValue('whisper_device') ?? serverSettings.whisper_device.value}
+              onchange={(e) => updateEngineSetting('whisper_device', e.currentTarget.value)}
+              disabled={externalMode}
+              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            >
+              {#each getOptions('whisper_device') as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </SettingsRow>
+        {/if}
+        {#if serverSettings.unload_before_swap}
+          <SettingsRow label="Unload before swap" description="Free VRAM before loading a new engine on low-VRAM GPUs">
+            <Toggle
+              enabled={!!getSettingValue('unload_before_swap')}
+              onchange={(v) => updateEngineSetting('unload_before_swap', v)}
+              label="Unload before swap"
+              disabled={externalMode}
+            />
+          </SettingsRow>
+        {/if}
         </div>
 
-        <!-- Advanced compatibility changes remain explicit. -->
-        {#if Object.keys(pendingEngine).length > 0 && !stagedPreset}
-          <div class="w-full rounded-xl border border-zinc-700 bg-zinc-900/50 p-4">
-            <div class="flex items-center gap-2 mb-3">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-400">
-                <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-              <p class="text-xs text-amber-300">Changes require engine reload</p>
-            </div>
-            <button
-              onclick={applyEngineSettings}
-              disabled={engineApplying}
-              class="px-4 py-2 rounded-lg text-xs font-medium transition-colors
-                {engineApplying
-                  ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'}"
-            >
-              {#if engineApplying}
-                <span class="flex items-center gap-2">
-                  <svg class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Applying...
-                </span>
-              {:else}
-                Apply advanced changes
+        {#if hasPendingCompatibilityChanges(pendingEngine, stagedPreset)}
+          <div data-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>
+              {#if !stagedPreset}
+                <button
+                  type="button"
+                  onclick={applyEngineSettings}
+                  disabled={engineApplying || externalMode}
+                  class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                    {engineApplying || externalMode
+                      ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
+                >
+                  {#if engineApplying}
+                    Preparing…
+                  {:else}
+                    Apply compatibility changes
+                  {/if}
+                </button>
               {/if}
-            </button>
+            </div>
             {#if engineApplyError}
-              <p class="mt-2 text-xs text-red-400">{engineApplyError}</p>
+              <p class="mt-2 text-xs text-red-300">{engineApplyError}</p>
             {/if}
           </div>
         {/if}
 
-        <!-- Engine status -->
-        {#if engineStatus}
-          <div class="flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl w-full">
+        {#if sharedEngineStatus}
+          <div data-engine-status class="mt-4 flex flex-wrap items-start justify-between gap-3 border-t border-white/[0.08] pt-4">
             <div class="flex items-center gap-2">
-              <span class="text-xs text-zinc-500">Status:</span>
-              {#if engineStatus.status === 'ready' && !engineStatus.pending}
-                <span class="flex items-center gap-1.5 text-xs text-emerald-400">
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span class="text-xs text-zinc-500">Engine status:</span>
+              {#if sharedEngineStatus.status === 'ready' && !sharedEngineStatus.pending}
+                <span class="flex items-center gap-1.5 text-xs text-emerald-300">
+                  <span class="h-1.5 w-1.5 rounded-full bg-emerald-300"></span>
                   Ready
                 </span>
-              {:else if engineStatus.status === 'loading' || engineStatus.pending}
-                <span class="flex items-center gap-1.5 text-xs text-amber-400">
-                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                  Loading{engineStatus.pending?.message ? `: ${engineStatus.pending.message}` : '...'}
+              {:else if sharedEngineStatus.status === 'loading' || sharedEngineStatus.pending}
+                <span class="flex items-center gap-1.5 text-xs text-amber-300">
+                  <span class="h-1.5 w-1.5 rounded-full bg-amber-300"></span>
+                  Preparing{sharedEngineStatus.pending?.message ? `: ${sharedEngineStatus.pending.message}` : '...'}
                 </span>
-              {:else if engineStatus.status === 'error'}
-                <span class="flex items-center gap-1.5 text-xs text-red-400">
-                  <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-                  Error{engineStatus.message ? `: ${engineStatus.message}` : ''}
+              {:else if sharedEngineStatus.status === 'error'}
+                <span class="flex items-center gap-1.5 text-xs text-red-300">
+                  <span class="h-1.5 w-1.5 rounded-full bg-red-300"></span>
+                  Error{sharedEngineStatus.message ? `: ${sharedEngineStatus.message}` : ''}
                 </span>
               {/if}
             </div>
-            {#if engineStatus.info}
-              <div class="flex flex-col items-end gap-0.5">
-                <span class="text-xs text-zinc-500">~{engineStatus.info.model_size_gb} GB model</span>
-                {#if engineStatus.info.gpu_vram_gb != null}
-                  <span class="max-w-[260px] truncate text-xs text-zinc-500" title={engineStatus.info.gpu_name ?? 'GPU'}>
-                    {engineStatus.info.gpu_name ?? 'GPU'} • {engineStatus.info.gpu_vram_gb.toFixed(1)} GB VRAM
+            {#if sharedEngineStatus.info}
+              <div class="flex min-w-0 flex-col items-start gap-0.5 sm:items-end">
+                <span class="text-xs text-zinc-500">~{sharedEngineStatus.info.model_size_gb} GB model</span>
+                {#if sharedEngineStatus.info.gpu_vram_gb != null}
+                  <span class="max-w-full truncate text-xs text-zinc-500" title={sharedEngineStatus.info.gpu_name ?? 'GPU'}>
+                    {sharedEngineStatus.info.gpu_name ?? 'GPU'} • {sharedEngineStatus.info.gpu_vram_gb.toFixed(1)} GB VRAM
                   </span>
                 {/if}
-                {#if engineStatus.info.estimated_max_duration_s != null}
+                {#if sharedEngineStatus.info.estimated_max_duration_s != null}
                   <span
                     class="text-xs text-zinc-400 cursor-help border-b border-dotted border-zinc-600"
-                    title={estimatedDurationTooltip(engineStatus.info)}
+                    title={estimatedDurationTooltip(sharedEngineStatus.info)}
                   >
-                    Est. max per recording: {formatEstimatedDuration(engineStatus.info.estimated_max_duration_s)}
+                    Est. max per recording: {formatEstimatedDuration(sharedEngineStatus.info.estimated_max_duration_s)}
                   </span>
                 {/if}
               </div>
@@ -996,8 +1015,8 @@
           </div>
         {/if}
       {/if}
-    </SettingsSection>
-
+        </div>
+      </div>
     <SettingsSection title="Server">
       <SettingsRow
         label="Use external server"
@@ -1083,8 +1102,7 @@
 
     <ServerView embedded />
 
-      </div>
-    </section>
+    </SettingsSection>
 
     <SettingsSection title="About">
       <SettingsRow label="Version" description="Installed Eve build version">
