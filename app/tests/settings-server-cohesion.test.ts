@@ -44,6 +44,8 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
 
   test('keeps factual status and diagnostics readable without creating another live announcer', () => {
     expect(serverView).toContain('data-server-health-status');
+    expect(serverView).toContain('data-server-health-details');
+    expect(serverView).toContain('md:grid-cols-[auto_minmax(0,1fr)_auto]');
     expect(serverView).toContain('data-server-status');
     expect(serverView).toContain('data-server-diagnostic-warnings');
     expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
@@ -66,10 +68,11 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('data-server-logs-privacy');
     expect(serverView).toContain('data-server-log-output');
     expect(serverView).toContain('tabindex="0"');
-    expect(serverView).toContain('role="group"');
+    expect(serverView).toContain('role="log"');
     expect(serverView).toContain('aria-label="Server log output"');
     expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
-    expect(serverView).toContain('focus-within:ring-2');
+    expect(serverView).not.toContain('data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 focus-within');
+    expect(serverView).toContain('focus:outline-offset-[-2px]');
     expect(serverView).not.toContain('opacity-45 pointer-events-none select-none');
   });
 

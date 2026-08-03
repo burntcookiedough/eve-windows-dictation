@@ -111,7 +111,7 @@
           {@const label = stateLabel(preset)}
           <label
             data-speech-model-option
-            class="flex min-w-0 items-start gap-3 py-3 first:pt-0 last:pb-0 focus-within:rounded-lg focus-within:outline-none focus-within:ring-2 focus-within:ring-zinc-100 focus-within:ring-offset-2 focus-within:ring-offset-[#08090a]
+            class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100
               {disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}"
           >
             <input

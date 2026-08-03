@@ -124,7 +124,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('preserves external restrictions and the compatibility disclosure association', () => {
-    const external = measurements.find((measurement) => measurement.view === 'speech' && measurement.state === 'external' && measurement.zoom === 1 && measurement.viewport.width === 960);
+    const external = measurements.find((measurement) => measurement.view === 'speech' && measurement.state === 'external' && measurement.zoom === 1);
     expect(external.external).toBeTrue();
     expect(external.optionCount).toBe(0);
     expect(external.focus.focusWithin).toBeFalse();
@@ -132,6 +132,21 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     const expanded = measurements.find((measurement) => measurement.compatibility);
     expect(expanded.compatibilityExpanded).toBeTrue();
     expect(expanded.compatibilityAssociation).toBeTrue();
+  });
+
+  test('keeps the renderer mounted while selecting every curated model', () => {
+    expect(result.interactions).toHaveLength(4);
+    expect(result.interactions.map((interaction) => interaction.label)).toEqual([
+      'English Performance, Selected',
+      'Recommended Multilingual, Current',
+      'Maximum Multilingual Accuracy, Selected',
+      'Lightweight, Selected',
+    ]);
+    for (const interaction of result.interactions) {
+      expect(interaction.checked).toBeTrue();
+      expect(interaction.panelPresent).toBeTrue();
+      expect(interaction.optionCount).toBe(4);
+    }
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {

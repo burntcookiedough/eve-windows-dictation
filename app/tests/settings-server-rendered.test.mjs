@@ -137,7 +137,7 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     expect(expanded.logsScroller.overscrollBehaviorY).toBe('contain');
     expect(expanded.logsScroller.scrollHeight).toBeGreaterThan(expanded.logsScroller.clientHeight);
     expect(expanded.logsScroller.tabIndex).toBe(0);
-    expect(expanded.logsScroller.role).toBe('group');
+    expect(expanded.logsScroller.role).toBe('log');
     expect(expanded.logsScroller.ariaLabel).toBe('Server log output');
   });
 
