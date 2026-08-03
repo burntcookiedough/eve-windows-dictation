@@ -561,8 +561,9 @@
           <button
             type="button"
             onclick={() => updateSetting('holdToTalk', true)}
+            aria-pressed={settings.holdToTalk}
             class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+              cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
               {settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Hold
@@ -570,8 +571,9 @@
           <button
             type="button"
             onclick={() => updateSetting('holdToTalk', false)}
+            aria-pressed={!settings.holdToTalk}
             class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+              cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
               {!settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Toggle
@@ -625,7 +627,7 @@
           aria-label="Dictation mode"
           value={settings.dictationMode}
           onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
-          class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
+          class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
         >
           <option value="raw">Raw Dictation</option>
           <option value="clean_prompt">Clean Prompt</option>
@@ -660,7 +662,7 @@
         />
       </SettingsRow>
 
-      <div class="mt-4 w-full min-w-0 transition-colors
+      <div class="mt-4 w-full min-w-0 border transition-colors
         {!hotwordsSupported ? 'border-zinc-700 bg-zinc-900/50 opacity-50' : hasHotwordOverflowWarning ? 'border-amber-500/70 bg-amber-950/10' : 'border-zinc-700 bg-zinc-900/50'}">
         <label for="hotwords-csl" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
         <p id="hotwords-help" class="mt-1 text-xs text-zinc-500">
@@ -770,7 +772,7 @@
           aria-label="Paste method"
           value={settings.pasteMethod}
           onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
-          class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
+          class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
         >
           <option value="sendinput">SendInput</option>
           <option value="vbscript">VBScript</option>

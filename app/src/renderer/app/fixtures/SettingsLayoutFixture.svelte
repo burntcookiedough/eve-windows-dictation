@@ -41,7 +41,7 @@
             <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
               <button
                 type="button"
-                class="max-w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                class="max-w-full cursor-pointer rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
               >
                 Ctrl+Win
               </button>
@@ -53,7 +53,7 @@
 
           <SettingsSection title="Dictation/output">
             <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
-              <select aria-label="Dictation mode" class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 sm:w-auto">
+              <select aria-label="Dictation mode" class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 sm:w-auto">
                 <option>Clean Prompt</option>
               </select>
             </SettingsRow>
@@ -74,6 +74,22 @@
                 <Toggle enabled label={label} />
               </SettingsRow>
             {/each}
+          </SettingsSection>
+
+          <SettingsSection title="Duplicate">
+            <p data-id-regression="duplicate-one" class="p-4 text-xs text-zinc-500">Generated heading ID regression fixture.</p>
+          </SettingsSection>
+
+          <SettingsSection title="Duplicate">
+            <p data-id-regression="duplicate-two" class="p-4 text-xs text-zinc-500">Generated heading ID regression fixture.</p>
+          </SettingsSection>
+
+          <SettingsSection title="日本語">
+            <p data-id-regression="non-ascii" class="p-4 text-xs text-zinc-500">Generated heading ID regression fixture.</p>
+          </SettingsSection>
+
+          <SettingsSection id="fixture-explicit-section" title="Explicit ID">
+            <p data-id-regression="explicit" class="p-4 text-xs text-zinc-500">Explicit heading ID regression fixture.</p>
           </SettingsSection>
         </div>
       </div>

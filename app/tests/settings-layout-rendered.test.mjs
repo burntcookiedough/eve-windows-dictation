@@ -1,7 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { resolve } from 'node:path';
+import { existsSync, promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
+const fixtureTempRoot = resolve(tmpdir());
 const vitePort = 51900 + (process.pid % 100);
 const viteProcess = Bun.spawn([
   'node',
@@ -18,6 +21,21 @@ const viteProcess = Bun.spawn([
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/settings-layout-fixture.html`;
 const electronPath = resolve(appRoot, 'node_modules/electron/dist/electron.exe');
 const runnerPath = resolve(appRoot, 'tests/fixtures/settings-layout-electron.cjs');
+
+function assertSafeUserDataPath(target) {
+  const resolvedTarget = resolve(target);
+  const relativeTarget = relative(fixtureTempRoot, resolvedTarget);
+  if (!relativeTarget || relativeTarget.startsWith('..') || isAbsolute(relativeTarget) || !basename(resolvedTarget).startsWith('eve-settings-layout-')) {
+    throw new Error(`Refusing to remove unexpected fixture path: ${resolvedTarget}`);
+  }
+  return resolvedTarget;
+}
+
+async function cleanupUserData(target) {
+  const resolvedTarget = assertSafeUserDataPath(target);
+  await fs.rm(resolvedTarget, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  return existsSync(resolvedTarget);
+}
 
 async function waitForFixtureServer() {
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -46,13 +64,25 @@ function runElectron() {
     new Response(child.stderr).text(),
     child.exited,
   ]).then(([stdout, stderr, code]) => {
-    if (code !== 0) throw new Error(`Electron layout fixture exited with ${code}: ${stderr || stdout}`);
+    let result = null;
+    let parseError = null;
     try {
-      return JSON.parse(stdout);
+      result = JSON.parse(stdout);
     } catch (error) {
-      throw new Error(`Electron layout fixture returned invalid JSON: ${error}\n${stderr}\n${stdout}`);
+      // The child can fail before it emits its path; use its process ID for safe cleanup.
+      parseError = error;
     }
+    const userDataPath = result?.userDataPath ?? resolve(fixtureTempRoot, `eve-settings-layout-${child.pid}`);
+    return cleanupUserData(userDataPath).then((userDataExists) => {
+      if (code !== 0) throw new Error(`Electron layout fixture exited with ${code}: ${stderr || stdout}`);
+      if (!result) throw new Error(`Electron layout fixture returned invalid JSON: ${errorMessage(parseError, stderr, stdout)}`);
+      return { ...result, userDataExists };
+    });
   });
+}
+
+function errorMessage(error, stderr, stdout) {
+  return `${error instanceof Error ? error : new Error(String(error))}\n${stderr}\n${stdout}`;
 }
 
 afterAll(async () => {
@@ -61,7 +91,8 @@ afterAll(async () => {
 });
 
 await waitForFixtureServer();
-const measurements = await runElectron();
+const result = await runElectron();
+const { measurements } = result;
 
 describe('rendered Settings layout fixture', () => {
   test('keeps the status strip in flow and preserves one page scroll owner', () => {
@@ -88,6 +119,12 @@ describe('rendered Settings layout fixture', () => {
   test('keeps section heading associations in the rendered DOM', () => {
     for (const measurement of measurements) {
       expect(measurement.headingAssociation).toBeTrue();
+      expect(measurement.headingIdsUnique).toBeTrue();
+      expect(measurement.explicitHeadingId).toBeTrue();
     }
+  });
+
+  test('cleans the isolated Electron userData directory after the fixture run', () => {
+    expect(result.userDataExists).toBeFalse();
   });
 });

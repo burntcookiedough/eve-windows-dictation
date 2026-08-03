@@ -12,6 +12,7 @@
   }
 
   let { title, description, id, variant = 'rows', children }: Props = $props();
+  const componentId = $props.id();
 
   function slugify(value: string): string {
     return value
@@ -21,7 +22,7 @@
       .replace(/^-|-$/g, '');
   }
 
-  let headingId = $derived(id ?? `settings-section-${slugify(title)}`);
+  let headingId = $derived(id ?? `settings-section-${slugify(title) || 'section'}-${componentId}`);
 </script>
 
 <section class="w-full min-w-0" aria-labelledby={headingId}>

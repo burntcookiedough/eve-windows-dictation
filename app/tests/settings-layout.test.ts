@@ -70,6 +70,20 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsView).toContain('aria-controls="engine-advanced-options"');
   });
 
+  test('keeps generated section heading IDs unique and non-empty while preserving explicit IDs', () => {
+    expect(settingsSection).toContain('const componentId = $props.id();');
+    expect(settingsSection).toContain("slugify(title) || 'section'");
+    expect(settingsSection).toContain('id ?? `settings-section-${slugify(title) || \'section\'}-${componentId}`');
+  });
+
+  test('keeps status ownership and interactive control semantics explicit', () => {
+    expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={embedded} />');
+    expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
+    expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
+    expect(settingsView).toContain('mt-4 w-full min-w-0 border transition-colors');
+    expect(settingsView.match(/<select[\s\S]*?cursor-pointer/g)?.length).toBe(7);
+  });
+
   test('keeps shared focus, forced-colors, and reduced-motion fallbacks intact', () => {
     expect(appCss).toContain('@media (forced-colors: active)');
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
