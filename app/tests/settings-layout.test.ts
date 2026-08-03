@@ -76,8 +76,10 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsSection).toContain('id ?? `settings-section-${slugify(title) || \'section\'}-${componentId}`');
   });
 
-  test('keeps status ownership and interactive control semantics explicit', () => {
-    expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={embedded} />');
+  test('keeps app-level announcements as the sole status announcer', () => {
+    expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
+    expect(serverView).not.toContain('announce={embedded}');
+    expect(appView).toContain('<p class="sr-only" aria-live="polite" aria-atomic="true">{$serverStatusState.announcement}</p>');
     expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
     expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
     expect(settingsView).toContain('mt-4 w-full min-w-0 border transition-colors');

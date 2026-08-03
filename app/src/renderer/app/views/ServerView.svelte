@@ -351,7 +351,7 @@
 
         {#if modelDownload && showModelProgress}
           <div class="mx-auto mb-4 max-w-2xl">
-            <ModelProgressCard state={modelDownload} announce={embedded} />
+            <ModelProgressCard state={modelDownload} announce={false} />
           </div>
         {/if}
 
