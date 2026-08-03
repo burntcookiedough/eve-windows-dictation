@@ -9,6 +9,7 @@ const appView = source('../src/renderer/app/App.svelte');
 const appCss = source('../src/renderer/app/app.css');
 const appHtml = source('../src/renderer/app/index.html');
 const settingsView = source('../src/renderer/app/views/SettingsView.svelte');
+const settingsGroup = source('../src/renderer/app/components/SettingsGroup.svelte');
 const settingsSection = source('../src/renderer/app/components/SettingsSection.svelte');
 const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
 const statusBanner = source('../src/renderer/app/components/ModelProgressBanner.svelte');
@@ -62,12 +63,12 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsSection).toContain('aria-labelledby={headingId}');
     expect(settingsSection).toContain('<h2 id={headingId}');
     expect(settingsView).toContain('<h1 class="sr-only">Settings</h1>');
-    expect(settingsView).toContain('aria-label="Input Device"');
+    expect(settingsView).toContain('aria-label="Input device"');
     expect(settingsView).toContain('aria-label="Dictation mode"');
     expect(settingsView).toContain('aria-label="Paste method"');
     expect(settingsView).toContain('aria-describedby="hotwords-help"');
-    expect(settingsView).toContain('aria-expanded={engineAdvancedOpen}');
-    expect(settingsView).toContain('aria-controls="engine-advanced-options"');
+    expect(settingsView).toContain('aria-expanded={compatibilityControlsOpen}');
+    expect(settingsView).toContain('aria-controls="compatibility-controls"');
   });
 
   test('keeps generated section heading IDs unique and non-empty while preserving explicit IDs', () => {
@@ -82,8 +83,21 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(appView).toContain('<p class="sr-only" aria-live="polite" aria-atomic="true">{$serverStatusState.announcement}</p>');
     expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
     expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
-    expect(settingsView).toContain('mt-4 w-full min-w-0 border transition-colors');
+    expect(settingsView).toContain('data-hotwords-editor');
     expect(settingsView.match(/<select[\s\S]*?cursor-pointer/g)?.length).toBe(7);
+  });
+
+  test('keeps the Phase 2 General subgroup foundation aligned with the row primitive', () => {
+    expect(settingsGroup).toContain('<h3 id={headingId}');
+    expect(settingsGroup).toContain('data-settings-group-surface');
+    expect(settingsView).toContain('<SettingsSection title="General"');
+    expect(settingsView).toContain('<SettingsGroup title="Shortcuts &amp; activation">');
+    expect(settingsView).toContain('<SettingsGroup title="Audio">');
+    expect(settingsView).toContain('<SettingsGroup title="Dictation/output">');
+    expect(settingsView).toContain('<SettingsGroup title="Hotwords"');
+    expect(settingsView).toContain('<SettingsGroup title="App behavior">');
+    expect(settingsView).not.toContain('<SettingsSection title="Shortcuts &amp; activation">');
+    expect(settingsView).not.toContain('<SettingsSection title="Model compatibility">');
   });
 
   test('keeps shared focus, forced-colors, and reduced-motion fallbacks intact', () => {
