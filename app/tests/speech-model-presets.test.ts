@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { SPEECH_MODEL_PRESETS, presetDownloadLabel, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
+import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetDownloadLabel, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
 
 describe('speech model presets', () => {
   test('keeps the four exact supported mappings and factual established sizes', () => {
@@ -12,6 +12,19 @@ describe('speech model presets', () => {
     ]);
     expect(presetPatch(SPEECH_MODEL_PRESETS[0])).toEqual({ engine: 'nemotron', nemotron_model: 'nvidia/nemotron-speech-streaming-en-0.6b' });
     expect(presetPatch(SPEECH_MODEL_PRESETS[1])).toEqual({ engine: 'whisper', whisper_model: 'large-v3-turbo' });
+  });
+
+  test('does not warn for a pure staged preset patch but warns for an additional pending model', () => {
+    const preset = SPEECH_MODEL_PRESETS[0];
+    const patch = presetPatch(preset);
+    expect(hasPendingCompatibilityChanges(patch, preset)).toBeFalse();
+    expect(hasPendingCompatibilityChanges({ ...patch, whisper_model: 'medium' }, preset)).toBeTrue();
+  });
+
+  test('warns when a staged preset model has a different pending value', () => {
+    const preset = SPEECH_MODEL_PRESETS[1];
+    expect(hasPendingCompatibilityChanges(presetPatch(preset), preset)).toBeFalse();
+    expect(hasPendingCompatibilityChanges({ ...presetPatch(preset), whisper_model: 'medium' }, preset)).toBeTrue();
   });
 
   test('promotes a selected preset only when its actual engine status is ready', () => {
@@ -30,6 +43,7 @@ describe('speech model presets', () => {
     const settings = readFileSync(new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url), 'utf8');
     const chooser = readFileSync(new URL('../src/renderer/app/components/SpeechModelChooser.svelte', import.meta.url), 'utf8');
     expect(chooser).toContain('type="radio"');
+    expect(chooser).toContain('name={`speech-model-preset-${componentId}`}');
     expect(chooser).toContain('Apply and prepare model confirms the change.');
     expect(settings).toContain('Apply and prepare model');
     expect(settings).toContain('serverStatusState');

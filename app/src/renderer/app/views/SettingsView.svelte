@@ -8,7 +8,7 @@
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
-  import { SPEECH_MODEL_PRESETS, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
+  import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
   import { getServerManagementMode, serverStatusState } from '../server-status';
   import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
   import { toast } from '$lib/toast.svelte';
@@ -124,12 +124,6 @@
       const setting = serverSettings![key];
       return setting?.requires_reload && setting.value !== value;
     });
-  }
-
-  function hasPendingCompatibilityChanges(): boolean {
-    return Object.keys(pendingEngine).some((key) =>
-      key !== 'engine' && !SPEECH_MODEL_PRESETS.some((preset) => preset.setting === key)
-    );
   }
 
   // Convenience: get options for a select setting
@@ -951,7 +945,7 @@
         {/if}
         </div>
 
-        {#if hasPendingCompatibilityChanges()}
+        {#if hasPendingCompatibilityChanges(pendingEngine, stagedPreset)}
           <div data-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>

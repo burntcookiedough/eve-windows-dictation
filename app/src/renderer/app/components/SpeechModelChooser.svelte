@@ -117,7 +117,7 @@
             <input
               class="sr-only"
               type="radio"
-              name="speech-model-preset"
+              name={`speech-model-preset-${componentId}`}
               checked={checked}
               disabled={disabled}
               onchange={() => onSelect(preset)}

@@ -28,6 +28,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).toContain('data-speech-model-list role="radiogroup"');
     expect(chooser).toContain('type="radio"');
     expect(chooser).toContain('data-speech-model-option');
+    expect(chooser).toContain('name={`speech-model-preset-${componentId}`}');
     expect(chooser).toContain('focus-within:ring-2');
     expect(chooser).not.toContain('sm:grid-cols-2');
     expect(chooser).not.toContain('rounded-xl border p-3 transition-colors');
@@ -64,7 +65,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('aria-controls="compatibility-controls"');
     expect(settingsView).toContain('id="compatibility-controls"');
     expect(settingsView).toContain('hidden={!compatibilityControlsOpen}');
-    expect(settingsView).toContain('hasPendingCompatibilityChanges()');
+    expect(settingsView).toContain('hasPendingCompatibilityChanges(pendingEngine, stagedPreset)');
     expect(chooser).toContain('externalMode || unavailable(preset)');
     expect(settingsView).toContain("'whisper_compute_type'");
     expect(settingsView).toContain("'whisper_language'");
