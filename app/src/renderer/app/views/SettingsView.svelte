@@ -804,7 +804,7 @@
     <SettingsSection
       title="Advanced"
       id="advanced-settings-heading"
-      description="Engine, connection, diagnostics, and local server controls."
+      description="Raw engine compatibility controls for advanced setups."
       variant="content"
     >
       <div data-advanced-settings class="min-w-0">
@@ -1017,91 +1017,102 @@
       {/if}
         </div>
       </div>
-    <SettingsSection title="Server">
-      <SettingsRow
-        label="Use external server"
-        description="Connect to your own server and disable built-in server management"
-      >
-        <Toggle
-          enabled={settings.useExternalServer}
-          onchange={updateUseExternalServer}
-          label="Use external server"
-        />
-      </SettingsRow>
-
-      <div class="overflow-hidden [view-transition-name:external-server-panel]">
-        {#if settings.useExternalServer}
-          <div bind:this={externalServerCard} class="mt-2 p-4 bg-zinc-900/50 rounded-xl border border-zinc-800 w-full">
-            <p class="text-sm text-zinc-200 mb-1">Custom server endpoint</p>
-            <p class="text-xs text-zinc-500 mb-3">
-              Set the host and port for your transcription server. Eve connects to <span class="font-mono">/transcribe</span>.
-            </p>
-
-            {#if externalServerError}
-              <p class="mb-3 text-xs text-red-300">{externalServerError}</p>
-            {:else}
-              <p class="mb-3 text-xs text-zinc-500">
-                Using endpoint <span class="font-mono text-zinc-300">{settings.serverUrl}</span>
-              </p>
-            {/if}
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label for="external-server-host" class="text-xs text-zinc-500 block mb-1">Host</label>
-                <input
-                  id="external-server-host"
-                  type="text"
-                  value={externalServerHost}
-                  onpaste={(e) => {
-                    const pasted = e.clipboardData?.getData('text') ?? '';
-                    if (!pasted) {
-                      return;
-                    }
-                    const parsed = parseHostPaste(pasted);
-                    if (parsed.host) {
-                      e.preventDefault();
-                      externalServerHost = parsed.host;
-                      if (parsed.port) {
-                        externalServerPort = parsed.port;
-                      }
-                      updateExternalServerUrl();
-                    }
-                  }}
-                  oninput={(e) => {
-                    externalServerHost = e.currentTarget.value;
-                    updateExternalServerUrl();
-                  }}
-                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
-                    px-3 py-2 text-sm text-zinc-300 font-mono
-                    focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-                  placeholder="localhost"
-                />
-              </div>
-
-              <div>
-                <label for="external-server-port" class="text-xs text-zinc-500 block mb-1">Port</label>
-                <input
-                  id="external-server-port"
-                  type="text"
-                  value={externalServerPort}
-                  oninput={(e) => {
-                    externalServerPort = e.currentTarget.value;
-                    updateExternalServerUrl();
-                  }}
-                  class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
-                    px-3 py-2 text-sm text-zinc-300 font-mono
-                    focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
-                  placeholder="51717"
-                />
-              </div>
-            </div>
-          </div>
-        {/if}
-      </div>
     </SettingsSection>
 
-    <ServerView embedded />
+    <SettingsSection
+      title="Server &amp; diagnostics"
+      description="Management mode, endpoint, health, diagnostics, and recent logs."
+      variant="content"
+    >
+      <div data-server-diagnostics class="min-w-0 space-y-6">
+        <section data-server-management class="min-w-0 space-y-2" aria-labelledby="settings-server-management-heading">
+          <div class="min-w-0 px-1">
+            <h3 id="settings-server-management-heading" class="text-sm font-semibold text-zinc-200">Management mode &amp; endpoint</h3>
+            <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Choose Eve-managed processing or connect to an external endpoint.</p>
+          </div>
 
+          <div data-server-mode-surface class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+            <SettingsRow
+              label="Use external server"
+              description="Connect to your own server and disable built-in server management"
+            >
+              <Toggle
+                enabled={settings.useExternalServer}
+                onchange={updateUseExternalServer}
+                label="Use external server"
+              />
+            </SettingsRow>
+
+            <div class="overflow-hidden border-t border-white/[0.08] [view-transition-name:external-server-panel]">
+              {#if settings.useExternalServer}
+                <div bind:this={externalServerCard} data-external-server-panel class="min-w-0 p-4">
+                  <p class="text-sm text-zinc-200">Custom server endpoint</p>
+                  <p class="mt-1 text-xs leading-5 text-zinc-500">
+                    Set the host and port for your transcription server. Eve connects to <span class="font-mono">/transcribe</span>.
+                  </p>
+
+                  {#if externalServerError}
+                    <p class="mt-3 text-xs leading-5 text-red-300 [overflow-wrap:anywhere]">{externalServerError}</p>
+                  {:else}
+                    <p class="mt-3 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]">
+                      Using endpoint <span class="font-mono text-zinc-300">{settings.serverUrl}</span>
+                    </p>
+                  {/if}
+
+                  <div class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div class="min-w-0">
+                      <label for="external-server-host" class="mb-1 block text-xs text-zinc-500">Host</label>
+                      <input
+                        id="external-server-host"
+                        type="text"
+                        value={externalServerHost}
+                        onpaste={(e) => {
+                          const pasted = e.clipboardData?.getData('text') ?? '';
+                          if (!pasted) {
+                            return;
+                          }
+                          const parsed = parseHostPaste(pasted);
+                          if (parsed.host) {
+                            e.preventDefault();
+                            externalServerHost = parsed.host;
+                            if (parsed.port) {
+                              externalServerPort = parsed.port;
+                            }
+                            updateExternalServerUrl();
+                          }
+                        }}
+                        oninput={(e) => {
+                          externalServerHost = e.currentTarget.value;
+                          updateExternalServerUrl();
+                        }}
+                        class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                        placeholder="localhost"
+                      />
+                    </div>
+
+                    <div class="min-w-0">
+                      <label for="external-server-port" class="mb-1 block text-xs text-zinc-500">Port</label>
+                      <input
+                        id="external-server-port"
+                        type="text"
+                        value={externalServerPort}
+                        oninput={(e) => {
+                          externalServerPort = e.currentTarget.value;
+                          updateExternalServerUrl();
+                        }}
+                        class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                        placeholder="51717"
+                      />
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        </section>
+
+        <ServerView embedded externalMode={externalMode} />
+      </div>
     </SettingsSection>
 
     <SettingsSection title="About">
@@ -1110,7 +1121,7 @@
           type="button"
           onclick={copyVersionToClipboard}
           title="Click to copy version"
-          class="rounded-lg bg-zinc-800 px-3 py-1.5 font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+          class="inline-flex min-h-9 items-center justify-center rounded-lg bg-zinc-800 px-3 py-2 font-mono text-xs text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
         >
           v{appVersion}
         </button>

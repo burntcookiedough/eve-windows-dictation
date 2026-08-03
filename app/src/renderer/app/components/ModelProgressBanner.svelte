@@ -21,7 +21,7 @@
       <div class="rounded-lg border border-red-500/30 bg-red-950/25 p-3" role="status" aria-live="off">
         <p class="text-sm font-medium text-red-200 text-pretty">Speech model setup failed</p>
         <p class="mt-1 text-xs text-red-200/80 text-pretty [overflow-wrap:anywhere]">
-          {modelDownload.detail ?? 'Check your connection.'} Open Settings &gt; Advanced for details.
+          {modelDownload.detail ?? 'Check your connection.'} Open Settings &gt; Server &amp; diagnostics for details.
           {#if managementMode === 'managed'}
             You can restart the managed server there.
           {:else if managementMode === 'external'}

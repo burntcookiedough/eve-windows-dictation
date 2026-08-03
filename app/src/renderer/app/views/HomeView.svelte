@@ -87,7 +87,7 @@
           </button>
         {:else if managementMode === 'unknown' && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
           <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
-            Management mode cannot be confirmed. Open Settings &gt; Advanced.
+            Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.
           </p>
         {/if}
       </div>

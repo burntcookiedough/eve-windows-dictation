@@ -30,10 +30,10 @@ describe('Gate 5 information architecture', () => {
     expect(appView).toContain("return match?.id ?? 'home'");
   });
 
-  test('embeds every existing server surface under Settings Advanced', () => {
+  test('embeds every existing server surface under Settings Server & diagnostics', () => {
     expect(settingsView).toContain("import ServerView");
-    expect(settingsView).toContain('id="advanced-settings-heading"');
-    expect(settingsView).toContain("<ServerView embedded />");
+    expect(settingsView).toContain('title="Server &amp; diagnostics"');
+    expect(settingsView).toContain('<ServerView embedded externalMode={externalMode} />');
 
     for (const operation of [
       'startServer',

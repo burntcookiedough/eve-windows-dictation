@@ -202,7 +202,7 @@ describe('Home and shared server status', () => {
     expect(mount).not.toContain('updateServerSettings');
     expect(homeView).toContain('onclick={retry}');
     expect(homeView).toContain('External server — Eve cannot restart this endpoint.');
-    expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Advanced.');
+    expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.');
     expect(statusController).toContain('const settings = await window.murmurMain.getSettings();');
     expect(statusController).toContain('setConfiguredExternalServer(settings.useExternalServer);');
     expect(homeView).toContain('if (retrying) return;');
@@ -229,7 +229,7 @@ describe('Home and shared server status', () => {
     expect(appView).toContain('aria-live="polite"');
     expect(serverView).toContain('let active = true;');
     expect(serverView).toContain('if (!active) return;');
-    expect(banner).toContain('Open Settings &gt; Advanced for details.');
+    expect(banner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
     expect(banner).not.toContain('Open Server and use Restart');
     expect(homeView).toContain('By default, Eve processes speech locally.');
     expect(homeView).toContain('audio is sent to that endpoint under your control.');

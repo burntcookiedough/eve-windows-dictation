@@ -23,15 +23,16 @@
   }
 
   let headingId = $derived(id ?? `settings-section-${slugify(title) || 'section'}-${componentId}`);
+  let descriptionId = $derived(description ? `${headingId}-description` : undefined);
 </script>
 
-<section class="w-full min-w-0" aria-labelledby={headingId}>
+<section class="w-full min-w-0" aria-labelledby={headingId} aria-describedby={descriptionId}>
   <div class="mb-3 min-w-0">
     <h2 id={headingId} class="text-sm font-semibold text-zinc-400">
       {title}
     </h2>
     {#if description}
-      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">{description}</p>
+      <p id={descriptionId} class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">{description}</p>
     {/if}
   </div>
 
