@@ -93,6 +93,8 @@ public class NativePaste {
   public const ushort VK_MENU = 0x12;
   public const ushort VK_V = 0x56;
   public const int SW_RESTORE = 9;
+  private const int FOREGROUND_WAIT_MS = 750;
+  private const int FOREGROUND_POLL_MS = 25;
 
   private static void SendKey(ushort virtualKey, bool keyUp) {
     INPUT[] inputs = new INPUT[1];
@@ -110,21 +112,35 @@ public class NativePaste {
     SendKey(VK_MENU, true);
   }
 
+  private static bool WaitForForeground(IntPtr target) {
+    int waitedMs = 0;
+    while (GetForegroundWindow() != target && waitedMs < FOREGROUND_WAIT_MS) {
+      System.Threading.Thread.Sleep(FOREGROUND_POLL_MS);
+      waitedMs += FOREGROUND_POLL_MS;
+    }
+    return GetForegroundWindow() == target;
+  }
+
   public static void Paste(long targetWindowHandle) {
     if (targetWindowHandle != 0) {
       IntPtr target = new IntPtr(targetWindowHandle);
       if (IsWindow(target)) {
-        AllowForegroundSwitch();
-        if (IsIconic(target)) {
-          ShowWindow(target, SW_RESTORE);
-          System.Threading.Thread.Sleep(80);
-        }
-        if (!SetForegroundWindow(target)) {
-          throw new InvalidOperationException("Could not focus target window before paste.");
-        }
-        System.Threading.Thread.Sleep(120);
+        // The overlay is non-focusable, so the original editor normally remains
+        // foreground. Do not reactivate an already-active top-level window: some
+        // Chromium editors lose their focused child control when that happens.
         if (GetForegroundWindow() != target) {
-          throw new InvalidOperationException("Target window is not foreground before paste.");
+          AllowForegroundSwitch();
+          if (IsIconic(target)) {
+            ShowWindow(target, SW_RESTORE);
+            System.Threading.Thread.Sleep(80);
+          }
+          bool activationRequested = SetForegroundWindow(target);
+          if (!activationRequested && GetForegroundWindow() != target) {
+            throw new InvalidOperationException("Could not focus target window before paste.");
+          }
+          if (!WaitForForeground(target)) {
+            throw new InvalidOperationException("Target window is not foreground before paste.");
+          }
         }
       } else {
         throw new InvalidOperationException("Target window no longer exists before paste.");
