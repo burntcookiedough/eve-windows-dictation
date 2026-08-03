@@ -1,6 +1,6 @@
 import './app.css';
 import App from './App.svelte';
-import { mount } from 'svelte';
+import { mount, unmount } from 'svelte';
 
 declare global {
   interface Window {
@@ -14,6 +14,10 @@ function showRendererRecovery(error: unknown): void {
 
   const target = document.getElementById('app');
   if (!target || target.querySelector('[data-renderer-recovery]')) return;
+  if (app) {
+    void unmount(app);
+    app = undefined;
+  }
   target.replaceChildren();
 
   const recovery = document.createElement('main');
@@ -33,7 +37,7 @@ function showRendererRecovery(error: unknown): void {
 window.addEventListener('error', (event) => showRendererRecovery(event.error ?? event.message));
 window.addEventListener('unhandledrejection', (event) => showRendererRecovery(event.reason));
 
-let app;
+let app: ReturnType<typeof mount> | undefined;
 try {
   app = mount(App, {
     target: document.getElementById('app')!,

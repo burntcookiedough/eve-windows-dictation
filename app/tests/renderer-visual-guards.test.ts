@@ -81,6 +81,7 @@ describe('renderer visual regression guards', () => {
   test('provides a renderer recovery surface instead of leaving a blank window', () => {
     expect(rendererMain).toContain("window.addEventListener('error'");
     expect(rendererMain).toContain("window.addEventListener('unhandledrejection'");
+    expect(rendererMain).toContain('void unmount(app);');
     expect(rendererMain).toContain('data-renderer-recovery');
     expect(rendererMain).toContain('Reload interface');
     expect(rendererMain).not.toContain('normalized.message');

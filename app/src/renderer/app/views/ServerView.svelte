@@ -338,7 +338,7 @@
             {/if}
           </dl>
         {:else}
-          <div></div>
+          <div class="hidden md:block"></div>
         {/if}
 
         <div class="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
@@ -464,7 +464,7 @@
             type="button"
             onclick={copyLogs}
             disabled={logs.length === 0}
-            class="inline-flex min-h-9 items-center justify-center gap-1 rounded-lg border border-zinc-700 px-3 py-2 text-xs transition-colors
+            class="inline-flex min-h-9 items-center justify-center gap-1 rounded-lg border border-zinc-700 px-3 py-2 text-xs transition-colors focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100
               {logs.length === 0
                 ? 'cursor-not-allowed text-zinc-600'
                 : logsCopied
