@@ -53,7 +53,7 @@ async function measure(window, state, logsExpanded, zoom) {
     const logPanel = logPanelId ? document.getElementById(logPanelId) : null;
     const logOutput = document.querySelector('[data-server-log-output]');
     const controls = [...document.querySelectorAll('[data-server-mode-surface] button, [data-server-mode-surface] input, [data-server-health-surface] button, [data-server-diagnostics-surface] button, [data-server-logs-surface] button')].filter((control) => control.offsetParent !== null);
-    const focusTarget = logsToggle ?? controls[0];
+    const focusTarget = meta.logsExpanded ? (logOutput ?? logsToggle ?? controls[0]) : (logsToggle ?? controls[0]);
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     focusTarget?.focus({ preventScroll: true, focusVisible: true });
     const focusStyle = focusTarget ? getComputedStyle(focusTarget) : null;
@@ -92,7 +92,7 @@ async function measure(window, state, logsExpanded, zoom) {
       autoStartDisabled: document.querySelector('[data-server-management-surface] [role="switch"]')?.disabled ?? false,
       logsAssociation: !!logsToggle && !!logPanel && logsToggle.getAttribute('aria-controls') === logPanel.id,
       logsExpanded: logPanel ? !logPanel.hidden : false,
-      logsScroller: logOutput ? { overflowY: getComputedStyle(logOutput).overflowY, overscrollBehaviorY: getComputedStyle(logOutput).overscrollBehaviorY, clientHeight: logOutput.clientHeight, scrollHeight: logOutput.scrollHeight } : null,
+      logsScroller: logOutput ? { overflowY: getComputedStyle(logOutput).overflowY, overscrollBehaviorY: getComputedStyle(logOutput).overscrollBehaviorY, clientHeight: logOutput.clientHeight, scrollHeight: logOutput.scrollHeight, tabIndex: logOutput.tabIndex, role: logOutput.getAttribute('role'), ariaLabel: logOutput.getAttribute('aria-label') } : null,
       privacyWarning: !!document.querySelector('[data-server-logs-privacy]'),
       scrollersOutsideLogs: scrollersOutsideLogs.length,
     };
@@ -108,7 +108,7 @@ async function capture(window, state, logsExpanded, filename) {
     await wait(120);
   }
   fs.mkdirSync(screenshotDir, { recursive: true });
-  const image = await window.webContents.capturePage();
+  const image = await window.webContents.capturePage(undefined, { stayHidden: true });
   const target = path.resolve(screenshotDir, filename);
   fs.writeFileSync(target, image.toPNG());
   return target;

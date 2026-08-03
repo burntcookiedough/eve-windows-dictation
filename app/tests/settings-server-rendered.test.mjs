@@ -136,6 +136,9 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     expect(expanded.logsScroller.overflowY).toBe('auto');
     expect(expanded.logsScroller.overscrollBehaviorY).toBe('contain');
     expect(expanded.logsScroller.scrollHeight).toBeGreaterThan(expanded.logsScroller.clientHeight);
+    expect(expanded.logsScroller.tabIndex).toBe(0);
+    expect(expanded.logsScroller.role).toBe('group');
+    expect(expanded.logsScroller.ariaLabel).toBe('Server log output');
   });
 
   test('keeps heading associations, visible focus, and long strings contained', () => {

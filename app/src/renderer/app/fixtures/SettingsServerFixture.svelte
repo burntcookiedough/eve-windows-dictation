@@ -43,11 +43,15 @@
                   <SettingsRow label="Use external server" description="Connect to your own server and disable built-in server management">
                     <Toggle enabled={externalEnabled} label="Use external server" onchange={(enabled) => externalEnabled = enabled} />
                   </SettingsRow>
-                  <div data-external-server-panel class="min-w-0 border-t border-white/[0.08] p-4">
-                    <p class="text-sm text-zinc-200">Custom server endpoint</p>
-                    <p class="mt-1 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]">Eve connects to <span class="font-mono">/transcribe</span> at the configured endpoint.</p>
-                    <label for="fixture-server-url" class="mt-3 block text-xs text-zinc-500">Endpoint</label>
-                    <input id="fixture-server-url" aria-label="External server endpoint" value={endpoint} readonly class="mt-1 min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" />
+                  <div class="overflow-hidden border-t border-white/[0.08]">
+                    {#if externalEnabled}
+                      <div data-external-server-panel class="min-w-0 p-4">
+                        <p class="text-sm text-zinc-200">Custom server endpoint</p>
+                        <p class="mt-1 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]">Eve connects to <span class="font-mono">/transcribe</span> at the configured endpoint.</p>
+                        <label for="fixture-server-url" class="mt-3 block text-xs text-zinc-500">Endpoint</label>
+                        <input id="fixture-server-url" aria-label="External server endpoint" value={endpoint} readonly class="mt-1 min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" />
+                      </div>
+                    {/if}
                   </div>
                 </div>
               </section>

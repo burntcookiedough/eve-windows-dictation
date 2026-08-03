@@ -5,7 +5,7 @@
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import type { ServerStatePayload, ServerLogEntry } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
-  import { serverStatusState } from '../server-status';
+  import { getServerManagementMode, serverStatusState } from '../server-status';
 
   interface Props {
     embedded?: boolean;
@@ -40,9 +40,12 @@
   let scrollAfterLogBatch = false;
   let removeLogListener: (() => void) | null = null;
 
-  let externalMode = $derived(externalModeProp ?? configuredExternalServer);
+  let externalMode = $derived(
+    externalModeProp ?? getServerManagementMode({ ...$serverStatusState, configuredExternalServer }) === 'external'
+  );
   const logOutputId = `server-log-output-${componentId}`;
   const privacyWarningId = `server-logs-privacy-${componentId}`;
+  const diagnosticsStatusId = `server-diagnostics-status-${componentId}`;
 
   const statusConfig: Record<
     ServerStatePayload['status'],
@@ -235,7 +238,12 @@
       <div class="min-w-0">
         <p class="text-sm text-amber-200">External server mode is enabled</p>
         <p class="mt-1 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">
-          Built-in server controls are disabled. Configure the external endpoint in Settings &gt; Server &amp; diagnostics.
+          Built-in server controls are disabled.
+          {#if embedded}
+            Configure the external endpoint in the Management mode &amp; endpoint section above.
+          {:else}
+            Configure the external endpoint in Settings &gt; Server &amp; diagnostics.
+          {/if}
         </p>
       </div>
       {#if serverState.managed && serverState.status === 'running'}
@@ -262,14 +270,18 @@
       <button
         type="button"
         onclick={copyDiagnostics}
+        aria-describedby={diagnosticsStatusId}
         class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
       >
-        {diagnosticsCopyState === 'copied'
-          ? 'Copied diagnostics'
-          : diagnosticsCopyState === 'error'
-            ? 'Copy failed'
-            : 'Copy diagnostics'}
+        Copy diagnostics
       </button>
+      <span id={diagnosticsStatusId} class="sr-only">
+        {diagnosticsCopyState === 'copied'
+          ? 'Diagnostics copied.'
+          : diagnosticsCopyState === 'error'
+            ? 'Diagnostics copy failed.'
+            : ''}
+      </span>
     </div>
   </section>
 
@@ -297,7 +309,7 @@
     </div>
     <div data-server-health-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
       <div data-server-health-status class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex min-w-0 items-center gap-3" aria-label={`Server status: ${statusDisplay.label}`}>
+        <div class="flex min-w-0 items-center gap-3">
           <span class="relative flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
             {#if serverState.status === 'running' && engineReady}
               <span class="absolute h-3 w-3 motion-safe:animate-ping rounded-full bg-emerald-400 opacity-75"></span>
@@ -401,7 +413,7 @@
         </div>
       {/if}
 
-      {#if serverState.status === 'running' && (serverState.pid || serverState.port || serverState.uptime)}
+      {#if serverState.status === 'running' && (serverState.pid !== undefined || serverState.port !== undefined || serverState.version !== undefined || serverState.uptime !== undefined)}
         <div class="mt-4 grid grid-cols-1 gap-3 border-t border-white/[0.08] pt-4 sm:grid-cols-2">
           {#if serverState.port}
             <div class="min-w-0"><p class="text-xs text-zinc-500">Port</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{serverState.port}</p></div>
@@ -463,7 +475,10 @@
           data-server-log-output
           id={`${logOutputId}-scroll`}
           bind:this={logsContainer}
-          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs"
+          tabindex="0"
+          role="group"
+          aria-label="Server log output"
+          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
         >
           {#if logs.length === 0}
             <p class="py-8 text-center text-zinc-500">No logs yet</p>

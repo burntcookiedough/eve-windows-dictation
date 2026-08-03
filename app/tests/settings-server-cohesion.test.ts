@@ -7,6 +7,7 @@ function source(path: string): string {
 
 const settingsView = source('../src/renderer/app/views/SettingsView.svelte');
 const serverView = source('../src/renderer/app/views/ServerView.svelte');
+const serverFixture = source('../src/renderer/app/fixtures/SettingsServerFixture.svelte');
 const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
 const appCss = source('../src/renderer/app/app.css');
 
@@ -27,11 +28,15 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(settingsView).toContain('data-server-mode-surface');
     expect(settingsView).toContain('label="Use external server"');
     expect(settingsView).toContain('data-external-server-panel');
+    expect(serverFixture).toContain('{#if externalEnabled}');
     expect(serverView).toContain('data-server-section="management"');
     expect(serverView).toContain('label="Auto-start server"');
     expect(serverView).toContain('disabled={externalMode}');
     expect(serverView).toContain('data-server-action-restriction');
-    expect(serverView).toContain('!externalMode &&');
+    expect(serverView.match(/!externalMode &&/g)?.length).toBe(3);
+    expect(serverView).toContain('getServerManagementMode');
+    expect(serverView).toContain('Management mode &amp; endpoint section above.');
+    expect(serverView).toContain('Settings &gt; Server &amp; diagnostics.');
     expect(serverView).toContain('window.murmurMain.startServer()');
     expect(serverView).toContain('window.murmurMain.stopServer()');
     expect(serverView).toContain('window.murmurMain.restartServer()');
@@ -42,7 +47,10 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('data-server-status');
     expect(serverView).toContain('data-server-diagnostic-warnings');
     expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
+    expect(serverView).toContain('aria-describedby={diagnosticsStatusId}');
+    expect(serverView).toContain('id={diagnosticsStatusId}');
     expect(serverView).not.toContain('aria-live="polite"');
+    expect(serverView).not.toContain('aria-label={`Server status: ${statusDisplay.label}`}');
     expect(serverView).toContain('motion-safe:animate-ping');
     expect(settingsRow).toContain('focus-visible:ring-2');
     expect(appCss).toContain('@media (forced-colors: active)');
@@ -57,9 +65,12 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('id={logOutputId} hidden={!showLogs}');
     expect(serverView).toContain('data-server-logs-privacy');
     expect(serverView).toContain('data-server-log-output');
+    expect(serverView).toContain('tabindex="0"');
+    expect(serverView).toContain('role="group"');
+    expect(serverView).toContain('aria-label="Server log output"');
     expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
     expect(serverView).toContain('focus-within:ring-2');
-    expect(serverView).not.toContain('pointer-events-none');
+    expect(serverView).not.toContain('opacity-45 pointer-events-none select-none');
   });
 
   test('keeps the Settings page as the only page-level scroll owner and wraps long controls', () => {
@@ -68,5 +79,7 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(settingsView).toContain('min-h-9 w-full max-w-full rounded-lg border border-zinc-700');
     expect(settingsView).toContain('[overflow-wrap:anywhere]');
     expect(serverView).toContain('[overflow-wrap:anywhere]');
+    expect(serverView).toContain('serverState.version !== undefined');
+    expect(serverView).toContain('serverState.uptime !== undefined');
   });
 });
