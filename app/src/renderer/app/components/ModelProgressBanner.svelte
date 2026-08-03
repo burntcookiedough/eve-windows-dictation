@@ -12,13 +12,15 @@
 </script>
 
 {#if visible && modelDownload && showBanner}
-  <div
-    class="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+7rem)] z-20 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2"
+  <section
+    data-status-region="model-progress"
+    aria-label="Speech model status"
+    class="mx-auto w-full max-w-4xl shrink-0 px-4 pb-3 pt-2 sm:px-6"
   >
     {#if modelDownload.status === 'error'}
-      <section class="rounded-xl border border-red-900/60 bg-zinc-950/95 p-4 shadow-lg">
-        <p class="text-sm font-medium text-red-300 text-pretty">Speech model setup failed</p>
-        <p class="mt-1 text-xs text-red-300/80 text-pretty">
+      <div class="rounded-lg border border-red-500/30 bg-red-950/25 p-3" role="status" aria-live="off">
+        <p class="text-sm font-medium text-red-200 text-pretty">Speech model setup failed</p>
+        <p class="mt-1 text-xs text-red-200/80 text-pretty [overflow-wrap:anywhere]">
           {modelDownload.detail ?? 'Check your connection.'} Open Settings &gt; Advanced for details.
           {#if managementMode === 'managed'}
             You can restart the managed server there.
@@ -28,9 +30,9 @@
             Management mode cannot be confirmed yet.
           {/if}
         </p>
-      </section>
+      </div>
     {:else}
       <ModelProgressCard state={modelDownload} announce={false} />
     {/if}
-  </div>
+  </section>
 {/if}

@@ -68,7 +68,9 @@ describe('renderer visual regression guards', () => {
 
   test('uses compact contiguous settings rows instead of isolated cards', () => {
     expect(settingsSection).toContain('divide-y');
-    expect(settingsSection).toContain('rounded-[10px]');
-    expect(settingsSection).not.toContain('space-y-2');
+    expect(settingsSection).toContain("variant === 'rows'");
+    expect(settingsSection).toContain("variant === 'panel'");
+    expect(settingsSection).toContain('aria-labelledby={headingId}');
+    expect(settingsSection).not.toContain('overflow-hidden');
   });
 });

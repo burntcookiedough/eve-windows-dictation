@@ -12,17 +12,27 @@
 </script>
 
 <div
-  class="flex min-h-12 w-full items-center justify-between px-3 py-2.5 transition-colors hover:bg-white/[0.035] {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
+  data-settings-row
+  class="grid min-h-12 min-w-0 w-full grid-cols-1 gap-x-6 gap-y-2 px-4 py-3 transition-colors hover:bg-white/[0.035] sm:grid-cols-[minmax(0,1fr)_minmax(0,auto)] sm:items-center {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
   role="group"
   aria-label={description ? `${label}. ${description}` : label}
 >
-  <div class="flex-1 min-w-0 mr-4">
-    <p class="text-[13px] leading-5 text-zinc-100">{label}</p>
+  <div class="min-w-0">
+    <p class="text-[13px] leading-5 text-zinc-100 [overflow-wrap:anywhere]">{label}</p>
     {#if description}
-      <p class="mt-0.5 text-[11px] leading-4 text-zinc-500">{description}</p>
+      <p class="mt-0.5 text-[11px] leading-4 text-zinc-500 [overflow-wrap:anywhere]">{description}</p>
     {/if}
   </div>
-  <div class="shrink-0">
+  <div
+    data-settings-control
+    class="min-w-0 w-full max-w-full sm:w-auto sm:justify-self-end
+      [&>button]:max-w-full [&>div]:max-w-full [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full
+      [&>div]:min-w-0
+      [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-zinc-100
+      [&_input]:focus-visible:outline-none [&_input]:focus-visible:ring-2 [&_input]:focus-visible:ring-zinc-100
+      [&_select]:focus-visible:outline-none [&_select]:focus-visible:ring-2 [&_select]:focus-visible:ring-zinc-100
+      [&_textarea]:focus-visible:outline-none [&_textarea]:focus-visible:ring-2 [&_textarea]:focus-visible:ring-zinc-100"
+  >
     {@render children()}
   </div>
 </div>

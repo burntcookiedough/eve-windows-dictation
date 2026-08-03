@@ -41,7 +41,7 @@
   onDestroy(disposeServerStatus);
 </script>
 
-<div class="flex h-screen flex-col overflow-hidden bg-[#08090a] text-zinc-100">
+<div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#08090a] text-zinc-100">
   <TitleBar />
 
   <header class="mt-2 flex h-12 shrink-0 items-center justify-center px-6">
@@ -69,7 +69,7 @@
   <ModelProgressBanner visible />
   <p class="sr-only" aria-live="polite" aria-atomic="true">{$serverStatusState.announcement}</p>
 
-  <main id="main-content" class="flex-1 overflow-hidden" tabindex="-1">
+  <main id="main-content" class="min-h-0 min-w-0 flex-1 overflow-hidden" tabindex="-1">
     {#if activeView === 'home'}
       <HomeView onNavigate={selectView} />
     {/if}
@@ -83,7 +83,7 @@
     {/if}
 
     {#if settingsVisited || activeView === 'settings'}
-      <div class="h-full" class:hidden={activeView !== 'settings'}>
+      <div class="h-full min-h-0 min-w-0" hidden={activeView !== 'settings'}>
         <SettingsView />
       </div>
     {/if}
