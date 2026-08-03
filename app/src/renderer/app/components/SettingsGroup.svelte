@@ -23,13 +23,14 @@
   }
 
   let headingId = $derived(id ?? `settings-group-${slugify(title) || 'group'}-${componentId}`);
+  let descriptionId = $derived(description ? `${headingId}-description` : undefined);
 </script>
 
-<section data-settings-group class="min-w-0 space-y-2" aria-labelledby={headingId}>
+<section data-settings-group class="min-w-0 space-y-2" aria-labelledby={headingId} aria-describedby={descriptionId}>
   <div class="min-w-0 px-1">
     <h3 id={headingId} class="text-xs font-medium text-zinc-300">{title}</h3>
     {#if description}
-      <p class="mt-1 max-w-prose text-[11px] leading-4 text-zinc-500">{description}</p>
+      <p id={descriptionId} class="mt-1 max-w-prose text-[11px] leading-4 text-zinc-500">{description}</p>
     {/if}
   </div>
 

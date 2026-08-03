@@ -1,29 +1,35 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import Toggle from '../components/Toggle.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
-  import SettingsSection from '../components/SettingsSection.svelte';
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
-  import type { ServerStatePayload, ServerLogEntry, Settings } from '$shared/types';
+  import type { ServerStatePayload, ServerLogEntry } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
   import { serverStatusState } from '../server-status';
 
   interface Props {
     embedded?: boolean;
+    externalMode?: boolean;
   }
 
-  let { embedded = false }: Props = $props();
+  let { embedded = false, externalMode: externalModeProp }: Props = $props();
+  const componentId = $props.id();
+  const headingTag = $derived(embedded ? 'h3' : 'h2');
 
-  // Server state
+  function headingId(slug: string): string {
+    return `server-${slug}-${componentId}`;
+  }
+
   const unavailableState: ServerStatePayload = {
     status: 'idle',
     managed: false,
   };
+
   let serverState = $derived($serverStatusState.state ?? unavailableState);
   let logs = $state<ServerLogEntry[]>([]);
   let showLogs = $state(false);
   let autoStart = $state(true);
-  let useExternalServer = $state(false);
+  let configuredExternalServer = $state(false);
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
@@ -34,7 +40,10 @@
   let scrollAfterLogBatch = false;
   let removeLogListener: (() => void) | null = null;
 
-  // Status badge colors and labels
+  let externalMode = $derived(externalModeProp ?? configuredExternalServer);
+  const logOutputId = `server-log-output-${componentId}`;
+  const privacyWarningId = `server-logs-privacy-${componentId}`;
+
   const statusConfig: Record<
     ServerStatePayload['status'],
     { color: string; bgColor: string; label: string }
@@ -60,7 +69,6 @@
   let showModelProgress = $derived(shouldShowModelProgress(modelDownload));
   let modelDownloadError = $derived(modelDownload?.status === 'error');
 
-  // Format uptime as human-readable string
   function formatUptime(ms: number): string {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -73,24 +81,22 @@
     return `${seconds}s`;
   }
 
-  // Format timestamp for logs
   function formatLogTime(timestamp: number): string {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', { hour12: false });
   }
 
-  // Can start/stop based on status and management mode
   let canStart = $derived(
-    !useExternalServer &&
+    !externalMode &&
     !isLoading &&
     (serverState.status === 'stopped' || serverState.status === 'idle' || serverState.status === 'error')
   );
   let canStop = $derived(
-    !useExternalServer &&
+    !externalMode &&
     !isLoading && serverState.managed && serverState.status === 'running'
   );
   let canRestart = $derived(
-    !useExternalServer &&
+    !externalMode &&
     !isLoading && serverState.managed && serverState.status === 'running'
   );
   let canShutdownManaged = $derived(
@@ -140,19 +146,17 @@
 
   function isScrolledToBottom(): boolean {
     if (!logsContainer) return true;
-    const threshold = 40; // px from bottom to consider "at bottom"
+    const threshold = 40;
     return logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < threshold;
   }
 
   function scrollLogsToBottom() {
-    if (logsContainer) {
-      logsContainer.scrollTop = logsContainer.scrollHeight;
-    }
+    if (logsContainer) logsContainer.scrollTop = logsContainer.scrollHeight;
   }
 
   function copyLogs() {
     const text = logs
-      .map((l) => `${formatLogTime(l.timestamp)} ${l.message}`)
+      .map((log) => `${formatLogTime(log.timestamp)} ${log.message}`)
       .join('\n');
     window.murmurMain.copyToClipboard(text);
     logsCopied = true;
@@ -203,7 +207,7 @@
       const settings = await window.murmurMain.getSettings();
       if (!active) return;
       autoStart = settings.serverAutoStart;
-      useExternalServer = settings.useExternalServer;
+      configuredExternalServer = settings.useExternalServer;
 
       if (!active) return;
       removeLogListener = window.murmurMain.onServerLog((entry) => {
@@ -225,301 +229,254 @@
   });
 </script>
 
-<div class={embedded ? 'min-w-0 space-y-4' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
-
-    {#if useExternalServer}
-      <div class="rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <p class="text-sm text-amber-200">External server mode is enabled</p>
-            <p class="mt-1 text-xs text-amber-300/80">
-              Managed server controls are disabled. Configure host and port in Settings > Advanced.
-            </p>
-          </div>
-          {#if serverState.managed && serverState.status === 'running'}
-            <button
-              onclick={handleStop}
-              disabled={!canShutdownManaged}
-              class="shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
-                {canShutdownManaged
-                  ? 'bg-red-900/60 hover:bg-red-900 text-red-100 cursor-pointer'
-                  : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
-            >
-              Shut down server
-            </button>
-          {/if}
-        </div>
-      </div>
-    {/if}
-
-    <SettingsSection title="Diagnostics">
-      <div class="flex w-full items-center justify-between gap-4 rounded-xl bg-zinc-900/50 p-4">
-        <p class="text-xs text-zinc-500">
-          Copies an allowlisted system summary without logs, paths, history, or transcription text.
+<div data-server-view class={embedded ? 'min-w-0 space-y-6' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
+  {#if externalMode}
+    <div data-server-external-notice class="flex min-w-0 flex-col gap-3 rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        <p class="text-sm text-amber-200">External server mode is enabled</p>
+        <p class="mt-1 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">
+          Built-in server controls are disabled. Configure the external endpoint in Settings &gt; Server &amp; diagnostics.
         </p>
+      </div>
+      {#if serverState.managed && serverState.status === 'running'}
         <button
-          onclick={copyDiagnostics}
-          class="shrink-0 rounded-lg bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-600 cursor-pointer"
+          type="button"
+          onclick={handleStop}
+          disabled={!canShutdownManaged}
+          class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-red-800/70 bg-red-900/60 px-3 py-2 text-xs font-medium text-red-100 transition-colors
+            {canShutdownManaged ? 'cursor-pointer hover:bg-red-900' : 'cursor-not-allowed opacity-60'}"
         >
-          {diagnosticsCopyState === 'copied'
-            ? 'Copied diagnostics'
-            : diagnosticsCopyState === 'error'
-              ? 'Copy failed'
-              : 'Copy diagnostics'}
+          Shut down built-in server
         </button>
-      </div>
-    </SettingsSection>
+      {/if}
+    </div>
+  {/if}
 
-    <div class="space-y-5 {useExternalServer ? 'opacity-45 pointer-events-none select-none' : ''}">
+  <section data-server-section="diagnostics" class="min-w-0 space-y-2" aria-labelledby={headingId('diagnostics')}>
+    <div class="min-w-0 px-1">
+      <svelte:element this={headingTag} id={headingId('diagnostics')} class="text-sm font-semibold text-zinc-200">Diagnostics</svelte:element>
+      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Copy an allowlisted system summary without logs, paths, history, or transcription text.</p>
+    </div>
+    <div data-server-diagnostics-surface class="flex min-w-0 flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <p class="min-w-0 text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">Diagnostics include only the information Eve needs to explain server readiness and compatibility.</p>
+      <button
+        type="button"
+        onclick={copyDiagnostics}
+        class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+      >
+        {diagnosticsCopyState === 'copied'
+          ? 'Copied diagnostics'
+          : diagnosticsCopyState === 'error'
+            ? 'Copy failed'
+            : 'Copy diagnostics'}
+      </button>
+    </div>
+  </section>
 
-    <!-- Status Card -->
-    <SettingsSection title="Status">
-      <div class="p-4 bg-zinc-900/50 rounded-xl w-full">
-        <div class="flex items-center justify-between mb-4">
-          <!-- Status Badge -->
-          <div class="flex items-center gap-3">
-            <div class="relative flex items-center justify-center">
-              {#if serverState.status === 'running' && engineReady}
-                <!-- Pulse animation for running state -->
-                <span class="absolute w-3 h-3 rounded-full bg-emerald-400 animate-ping opacity-75"></span>
-              {/if}
-              <span class="relative w-3 h-3 rounded-full {statusDisplay.bgColor}"></span>
-            </div>
-            <span class="text-lg font-medium {statusDisplay.color}">
-              {statusDisplay.label}
-            </span>
-            {#if !serverState.managed && serverState.status === 'running'}
-              <span class="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
-                External
-              </span>
-            {/if}
-          </div>
-
-          <!-- Control Buttons -->
-          <div class="flex items-center gap-2">
-            {#if serverState.status === 'running'}
-              <button
-                onclick={handleRestart}
-                disabled={!canRestart}
-                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
-                  {canRestart
-                    ? 'bg-zinc-700 hover:bg-zinc-600 text-zinc-200 cursor-pointer'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
-              >
-                Restart
-              </button>
-              <button
-                onclick={handleStop}
-                disabled={!canStop}
-                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
-                  {canStop
-                    ? 'bg-red-900/50 hover:bg-red-900 text-red-200 cursor-pointer'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
-              >
-                Stop
-              </button>
-            {:else}
-              <button
-                onclick={handleStart}
-                disabled={!canStart}
-                class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
-                  {canStart
-                    ? 'bg-emerald-900/50 hover:bg-emerald-900 text-emerald-200 cursor-pointer'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}"
-              >
-                {isLoading ? 'Starting...' : 'Start'}
-              </button>
-            {/if}
-          </div>
-        </div>
-
-        <!-- Error Message -->
-        {#if serverState.error}
-          <div class="mb-4 p-3 bg-red-950/50 border border-red-900/50 rounded-lg">
-            <p class="text-sm text-red-300">{serverState.error}</p>
-          </div>
-        {/if}
-
-        {#if serverState.engineStatus?.status === 'error'}
-          <div class="mb-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
-            <p class="text-sm text-red-300">Transcription engine failed to load</p>
-            <p class="mt-1 text-xs text-red-300/80">
-              {serverState.engineStatus.message ?? 'Restart the server or select a CPU-compatible engine configuration.'}
-            </p>
-          </div>
-        {/if}
-
-        {#if modelDownload && showModelProgress}
-          <div class="mx-auto mb-4 max-w-2xl">
-            <ModelProgressCard state={modelDownload} announce={false} />
-          </div>
-        {/if}
-
-        {#if modelDownloadError}
-          <div class="mb-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
-            <p class="text-sm text-red-300">
-              Model download failed
-              {#if modelDownload?.model}
-                <span class="text-red-300/80">({modelDownload.model})</span>
-              {/if}
-            </p>
-            <p class="mt-1 text-xs text-red-300/80">
-              {modelDownload?.detail ?? 'Check your connection and restart the server to retry.'}
-            </p>
-          </div>
-        {/if}
-
-        {#if diagnosticWarnings.length > 0}
-          <div class="mb-4 space-y-2">
-            {#each diagnosticWarnings as warning}
-              <div class="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
-                <p class="text-sm text-amber-200">{warning.message}</p>
-                {#if warning.action || warning.url}
-                  <div class="mt-2 text-xs text-amber-300/80 flex flex-wrap items-center gap-2">
-                    {#if warning.action}
-                      <span>{warning.action}</span>
-                    {/if}
-                    {#if warning.url}
-                      <a
-                        href={warning.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        class="underline underline-offset-2 hover:text-amber-200 cursor-pointer"
-                      >
-                        Open link
-                      </a>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-
-        <!-- Details Grid (when running) -->
-        {#if serverState.status === 'running' && (serverState.pid || serverState.port || serverState.uptime)}
-          <div class="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
-            {#if serverState.port}
-              <div>
-                <p class="text-xs text-zinc-500 mb-1">Port</p>
-                <p class="text-sm font-mono text-zinc-300">{serverState.port}</p>
-              </div>
-            {/if}
-            {#if serverState.version}
-              <div>
-                <p class="text-xs text-zinc-500 mb-1">Version</p>
-                <p class="text-sm font-mono text-zinc-300">v{serverState.version}</p>
-              </div>
-            {/if}
-            {#if serverState.pid}
-              <div>
-                <p class="text-xs text-zinc-500 mb-1">PID</p>
-                <p class="text-sm font-mono text-zinc-300">{serverState.pid}</p>
-              </div>
-            {/if}
-            {#if serverState.uptime !== undefined}
-              <div>
-                <p class="text-xs text-zinc-500 mb-1">Uptime</p>
-                <p class="text-sm font-mono text-zinc-300">{formatUptime(serverState.uptime)}</p>
-              </div>
-            {/if}
-          </div>
-        {/if}
-
-      </div>
-    </SettingsSection>
-
-    <!-- Settings -->
-    <SettingsSection title="Settings">
-      <SettingsRow label="Auto-start server" description="Automatically start the server when the app launches">
+  <section data-server-section="management" class="min-w-0 space-y-2" aria-labelledby={headingId('management')}>
+    <div class="min-w-0 px-1">
+      <svelte:element this={headingTag} id={headingId('management')} class="text-sm font-semibold text-zinc-200">Server management</svelte:element>
+      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Control the built-in server lifecycle and startup behavior.</p>
+    </div>
+    <div data-server-management-surface class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+      <SettingsRow label="Auto-start server" description="Automatically start the built-in server when Eve launches">
         <Toggle
           enabled={autoStart}
           onchange={updateAutoStart}
           label="Auto-start server"
+          disabled={externalMode}
         />
       </SettingsRow>
-    </SettingsSection>
+    </div>
+  </section>
 
-    <!-- Logs -->
-    <SettingsSection title="Logs">
-      <div class="w-full">
-        <button
-          type="button"
-          onclick={() => {
-            showLogs = !showLogs;
-            if (showLogs) {
-              setTimeout(scrollLogsToBottom, 0);
-            }
-          }}
-          aria-expanded={showLogs}
-          aria-controls="server-log-output"
-          class="w-full flex items-center justify-between p-4 bg-zinc-900/50 rounded-xl hover:bg-zinc-900 transition-colors cursor-pointer"
-        >
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-zinc-200">Server Logs</span>
-            <span class="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
-              {logs.length}
-            </span>
-          </div>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="text-zinc-400 transition-transform duration-200 {showLogs ? 'rotate-180' : ''}"
-          >
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </button>
-
-        {#if showLogs}
-          <div class="mt-2 flex items-center justify-between gap-3 px-1">
-            <p class="text-xs text-amber-300/70">Raw logs may contain local paths. Review before sharing.</p>
-            <button
-              onclick={(e: MouseEvent) => { e.stopPropagation(); copyLogs(); }}
-              disabled={logs.length === 0}
-              class="flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors
-                {logs.length === 0
-                  ? 'text-zinc-600 cursor-not-allowed'
-                  : logsCopied
-                    ? 'text-emerald-400 cursor-default'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 cursor-pointer'}"
-            >
-              {#if logsCopied}
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                Copied
-              {:else}
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                Copy raw logs
-              {/if}
-            </button>
-          </div>
-          <div
-            id="server-log-output"
-            bind:this={logsContainer}
-            class="mt-1 h-64 overflow-y-auto overscroll-contain bg-zinc-950 rounded-lg border border-zinc-800 p-3 font-mono text-xs"
-          >
-            {#if logs.length === 0}
-              <p class="text-zinc-500 text-center py-8">No logs yet</p>
-            {:else}
-              {#each logs as log}
-                <div class="flex gap-2 py-0.5 hover:bg-zinc-900/50">
-                  <span class="text-zinc-600 shrink-0">{formatLogTime(log.timestamp)}</span>
-                  <span class="{log.level === 'stderr' ? 'text-red-400' : 'text-zinc-300'} break-all">
-                    {log.message}
-                  </span>
-                </div>
-              {/each}
+  <section data-server-section="health" class="min-w-0 space-y-2" aria-labelledby={headingId('health')}>
+    <div class="min-w-0 px-1">
+      <svelte:element this={headingTag} id={headingId('health')} class="text-sm font-semibold text-zinc-200">Health &amp; actions</svelte:element>
+      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Live status from the shared server controller; lifecycle actions apply only to the managed server.</p>
+    </div>
+    <div data-server-health-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
+      <div data-server-health-status class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex min-w-0 items-center gap-3" aria-label={`Server status: ${statusDisplay.label}`}>
+          <span class="relative flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
+            {#if serverState.status === 'running' && engineReady}
+              <span class="absolute h-3 w-3 motion-safe:animate-ping rounded-full bg-emerald-400 opacity-75"></span>
             {/if}
-          </div>
-        {/if}
-      </div>
-    </SettingsSection>
+            <span class="relative h-3 w-3 rounded-full {statusDisplay.bgColor}"></span>
+          </span>
+          <span data-server-status class="min-w-0 text-lg font-medium {statusDisplay.color} [overflow-wrap:anywhere]">{statusDisplay.label}</span>
+          {#if !serverState.managed && serverState.status === 'running'}
+            <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">External</span>
+          {/if}
+        </div>
 
-</div>
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          {#if serverState.status === 'running'}
+            <button
+              type="button"
+              onclick={handleRestart}
+              disabled={!canRestart}
+              class="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors
+                {canRestart ? 'cursor-pointer hover:bg-zinc-700' : 'cursor-not-allowed opacity-60'}"
+            >
+              Restart
+            </button>
+            <button
+              type="button"
+              onclick={handleStop}
+              disabled={!canStop}
+              class="inline-flex min-h-9 items-center justify-center rounded-lg border border-red-800/70 bg-red-900/50 px-3 py-2 text-xs font-medium text-red-200 transition-colors
+                {canStop ? 'cursor-pointer hover:bg-red-900' : 'cursor-not-allowed opacity-60'}"
+            >
+              Stop
+            </button>
+          {:else}
+            <button
+              type="button"
+              onclick={handleStart}
+              disabled={!canStart}
+              class="inline-flex min-h-9 items-center justify-center rounded-lg border border-emerald-800/70 bg-emerald-900/50 px-3 py-2 text-xs font-medium text-emerald-200 transition-colors
+                {canStart ? 'cursor-pointer hover:bg-emerald-900' : 'cursor-not-allowed opacity-60'}"
+            >
+              {isLoading ? 'Starting…' : 'Start'}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      {#if externalMode}
+        <p data-server-action-restriction class="mt-3 border-t border-white/[0.08] pt-3 text-xs leading-5 text-zinc-500">Start, restart, and stop are unavailable while an external endpoint is active.</p>
+      {/if}
+
+      {#if serverState.error}
+        <div class="mt-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
+          <p class="text-sm text-red-300 [overflow-wrap:anywhere]">{serverState.error}</p>
+        </div>
+      {/if}
+
+      {#if serverState.engineStatus?.status === 'error'}
+        <div class="mt-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
+          <p class="text-sm text-red-300">Transcription engine failed to load</p>
+          <p class="mt-1 text-xs leading-5 text-red-300/80 [overflow-wrap:anywhere]">
+            {serverState.engineStatus.message ?? 'Restart the server or select a CPU-compatible engine configuration.'}
+          </p>
+        </div>
+      {/if}
+
+      {#if modelDownload && showModelProgress}
+        <div class="mx-auto mt-4 max-w-2xl">
+          <ModelProgressCard state={modelDownload} announce={false} />
+        </div>
+      {/if}
+
+      {#if modelDownloadError}
+        <div class="mt-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">
+          <p class="text-sm text-red-300">
+            Model download failed
+            {#if modelDownload?.model}
+              <span class="text-red-300/80 [overflow-wrap:anywhere]">({modelDownload.model})</span>
+            {/if}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-red-300/80 [overflow-wrap:anywhere]">
+            {modelDownload?.detail ?? 'Check your connection and restart the server to retry.'}
+          </p>
+        </div>
+      {/if}
+
+      {#if diagnosticWarnings.length > 0}
+        <div data-server-diagnostic-warnings class="mt-4 space-y-2">
+          {#each diagnosticWarnings as warning}
+            <div class="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
+              <p class="text-sm text-amber-200 [overflow-wrap:anywhere]">{warning.message}</p>
+              {#if warning.action || warning.url}
+                <div class="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-amber-300/80">
+                  {#if warning.action}<span class="[overflow-wrap:anywhere]">{warning.action}</span>{/if}
+                  {#if warning.url}
+                    <a href={warning.url} target="_blank" rel="noreferrer" class="cursor-pointer break-all underline underline-offset-2 hover:text-amber-200">Open link</a>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if serverState.status === 'running' && (serverState.pid || serverState.port || serverState.uptime)}
+        <div class="mt-4 grid grid-cols-1 gap-3 border-t border-white/[0.08] pt-4 sm:grid-cols-2">
+          {#if serverState.port}
+            <div class="min-w-0"><p class="text-xs text-zinc-500">Port</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{serverState.port}</p></div>
+          {/if}
+          {#if serverState.version}
+            <div class="min-w-0"><p class="text-xs text-zinc-500">Version</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">v{serverState.version}</p></div>
+          {/if}
+          {#if serverState.pid}
+            <div class="min-w-0"><p class="text-xs text-zinc-500">PID</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{serverState.pid}</p></div>
+          {/if}
+          {#if serverState.uptime !== undefined}
+            <div class="min-w-0"><p class="text-xs text-zinc-500">Uptime</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{formatUptime(serverState.uptime)}</p></div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </section>
+
+  <section data-server-section="logs" class="min-w-0 space-y-2" aria-labelledby={headingId('logs')}>
+    <div class="min-w-0 px-1">
+      <svelte:element this={headingTag} id={headingId('logs')} class="text-sm font-semibold text-zinc-200">Logs</svelte:element>
+      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Inspect recent server output only when needed for troubleshooting.</p>
+    </div>
+    <div data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 focus-within:ring-2 focus-within:ring-zinc-100 focus-within:ring-offset-2 focus-within:ring-offset-[#08090a]">
+      <button
+        type="button"
+        data-server-logs-toggle
+        onclick={() => {
+          showLogs = !showLogs;
+          if (showLogs) setTimeout(scrollLogsToBottom, 0);
+        }}
+        aria-expanded={showLogs}
+        aria-controls={logOutputId}
+        aria-describedby={privacyWarningId}
+        class="flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-left transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+      >
+        <span class="min-w-0 text-sm text-zinc-200 [overflow-wrap:anywhere]">Server logs</span>
+        <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs tabular-nums text-zinc-400">{logs.length}</span>
+      </button>
+      <p id={privacyWarningId} data-server-logs-privacy class="mt-3 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">Raw logs may contain local paths. Review them before sharing.</p>
+
+      <div id={logOutputId} hidden={!showLogs} class="mt-3 min-w-0">
+        <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onclick={copyLogs}
+            disabled={logs.length === 0}
+            class="inline-flex min-h-9 items-center justify-center gap-1 rounded-lg border border-zinc-700 px-3 py-2 text-xs transition-colors
+              {logs.length === 0
+                ? 'cursor-not-allowed text-zinc-600'
+                : logsCopied
+                  ? 'cursor-default text-emerald-400'
+                  : 'cursor-pointer text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}"
+          >
+            {#if logsCopied}Copied{:else}Copy raw logs{/if}
+          </button>
+        </div>
+        <div
+          data-server-log-output
+          id={`${logOutputId}-scroll`}
+          bind:this={logsContainer}
+          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs"
+        >
+          {#if logs.length === 0}
+            <p class="py-8 text-center text-zinc-500">No logs yet</p>
+          {:else}
+            {#each logs as log}
+              <div class="flex min-w-0 gap-2 py-0.5">
+                <span class="shrink-0 text-zinc-500">{formatLogTime(log.timestamp)}</span>
+                <span class="min-w-0 break-all {log.level === 'stderr' ? 'text-red-300' : 'text-zinc-300'}">{log.message}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+    </div>
+  </section>
 </div>

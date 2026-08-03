@@ -33,7 +33,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(statusBanner).not.toContain('fixed');
     expect(statusBanner).not.toContain('pointer-events-none');
     expect(statusBanner).not.toContain('z-20');
-    expect(statusBanner).toContain('Open Settings &gt; Advanced for details.');
+    expect(statusBanner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
     expect(statusBanner).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
     expect(statusCard).toContain('aria-live={announce ? \'polite\' : undefined}');
     expect(appView).toMatch(/<\/header>[\s\S]*?<ModelProgressBanner visible \/>[\s\S]*?<main id="main-content"/);
@@ -44,8 +44,8 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsView).toContain('data-scroll-owner="settings-page"');
     expect(settingsView).toContain('min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain');
     expect(settingsView).not.toContain('h-screen');
-    expect(serverView).toContain("embedded ? 'min-w-0 space-y-4'");
-    expect(serverView).toContain('overflow-y-auto overscroll-contain');
+    expect(serverView).toContain("embedded ? 'min-w-0 space-y-6'");
+    expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
   });
 
   test('stacks labels and controls at narrow widths and contains control content', () => {
@@ -61,6 +61,8 @@ describe('Phase 1 Settings layout contracts', () => {
 
   test('associates section headings and form controls with accessible names', () => {
     expect(settingsSection).toContain('aria-labelledby={headingId}');
+    expect(settingsSection).toContain('aria-describedby={descriptionId}');
+    expect(settingsSection).toContain('id={descriptionId}');
     expect(settingsSection).toContain('<h2 id={headingId}');
     expect(settingsView).toContain('<h1 class="sr-only">Settings</h1>');
     expect(settingsView).toContain('aria-label="Input device"');
