@@ -32,6 +32,21 @@
 
   let readiness = $derived(phaseCopy[snapshot.phase]);
   let managementMode = $derived(getServerManagementMode(snapshot));
+  let phaseAccent = $derived(
+    snapshot.phase === 'ready'
+      ? 'emerald'
+      : snapshot.phase === 'error' || snapshot.phase === 'unavailable'
+        ? 'red'
+        : snapshot.phase === 'downloading' || snapshot.phase === 'loading' || snapshot.phase === 'checking'
+          ? 'amber'
+          : 'zinc'
+  );
+  let reportedLanguages = $derived(Array.isArray(engine?.languages) ? engine.languages : []);
+  let reportedModelSize = $derived(
+    typeof engine?.model_size_gb === 'number' && Number.isFinite(engine.model_size_gb) && engine.model_size_gb > 0
+      ? engine.model_size_gb
+      : null
+  );
 
   onMount(() => {
     async function loadSettings(): Promise<void> {
@@ -62,57 +77,84 @@
   }
 </script>
 
-<div class="h-full overflow-y-auto p-4 sm:p-6">
-  <div class="mx-auto flex max-w-4xl flex-col gap-5">
-    <section class="rounded-2xl border border-white/10 bg-white/[0.03] p-5 sm:p-6" aria-labelledby="home-readiness-heading">
-      <p class="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">Eve</p>
-      <div class="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 id="home-readiness-heading" class="text-2xl font-semibold text-zinc-50">{readiness.title}</h1>
-          <p class="mt-1 max-w-xl text-sm text-zinc-400">{readiness.detail}</p>
+<div data-home-scroll-owner class="h-full overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 sm:py-7">
+  <div class="mx-auto flex max-w-4xl flex-col gap-4 pb-5">
+    <section
+      data-home-hero
+      class="relative min-w-0 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_82%_18%,rgba(56,189,248,0.14),transparent_34%),radial-gradient(circle_at_22%_90%,rgba(16,185,129,0.10),transparent_38%),linear-gradient(145deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] px-5 py-6 sm:px-7 sm:py-7"
+      aria-labelledby="home-readiness-heading"
+    >
+      <div aria-hidden="true" class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full border border-sky-300/10"></div>
+      <div aria-hidden="true" class="pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full border border-sky-300/10"></div>
+
+      <div class="relative grid min-w-0 gap-7 md:grid-cols-[minmax(0,1fr)_220px] md:items-center">
+        <div class="min-w-0">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <span class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-zinc-300">
+              <span class="relative flex h-2 w-2" aria-hidden="true">
+                {#if snapshot.phase === 'ready'}<span class="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-emerald-300 opacity-60"></span>{/if}
+                <span class="relative inline-flex h-2 w-2 rounded-full {phaseAccent === 'emerald' ? 'bg-emerald-300' : phaseAccent === 'red' ? 'bg-red-300' : phaseAccent === 'amber' ? 'bg-amber-300' : 'bg-zinc-500'}"></span>
+              </span>
+              {snapshot.phase === 'ready' ? 'Listening when you are' : readiness.title}
+            </span>
+            {#if managementMode === 'external'}
+              <span class="rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-400">External processing</span>
+            {/if}
+          </div>
+
+          <p class="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Your words, ready to move</p>
+          <h1 id="home-readiness-heading" class="mt-2 max-w-xl text-3xl font-semibold tracking-[-0.035em] text-zinc-50 sm:text-4xl">
+            {readiness.title}
+          </h1>
+          <p class="mt-3 max-w-xl text-sm leading-6 text-zinc-400">{readiness.detail}</p>
+
+          <dl data-home-engine-summary class="mt-6 flex min-w-0 flex-wrap gap-x-5 gap-y-3 border-t border-white/[0.08] pt-4">
+            <div class="min-w-0">
+              <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Engine</dt>
+              <dd class="mt-1 max-w-[220px] truncate text-sm text-zinc-200">{engine?.name ?? server?.engineStatus?.current ?? 'Checking…'}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Model</dt>
+              <dd class="mt-1 max-w-[260px] truncate text-sm text-zinc-200">{model?.model ?? engine?.model ?? 'Checking…'}</dd>
+            </div>
+            {#if reportedModelSize !== null}
+              <div>
+                <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Size</dt>
+                <dd class="mt-1 text-sm text-zinc-200">~{reportedModelSize.toFixed(1)} GB</dd>
+              </div>
+            {/if}
+          </dl>
         </div>
-        {#if managementMode === 'external'}
-          <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
-            External server — Eve cannot restart this endpoint.
-          </p>
-        {:else if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
-          <button
-            type="button"
-            onclick={retry}
-            disabled={retrying}
-            class="rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]
-              {retrying ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
-          >
-            {retrying ? 'Retrying…' : 'Retry managed server'}
-          </button>
-        {:else if managementMode === 'unknown' && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
-          <p class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">
-            Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.
-          </p>
-        {/if}
+
+        <div data-home-voice-orb class="relative mx-auto flex h-44 w-44 items-center justify-center md:h-48 md:w-48" aria-hidden="true">
+          <div class="absolute inset-0 rounded-full border border-white/10 bg-white/[0.025] shadow-[0_20px_80px_rgba(14,165,233,0.10)]"></div>
+          <div class="absolute inset-5 rounded-full border border-sky-300/15 bg-gradient-to-br from-sky-300/10 via-transparent to-emerald-300/10 {snapshot.phase === 'ready' ? 'motion-safe:animate-pulse' : ''}"></div>
+          <div class="relative flex h-20 w-24 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/25 shadow-inner">
+            {#each ['h-1.5', 'h-2.5', 'h-4', 'h-6', 'h-4', 'h-2.5', 'h-1.5'] as heightClass}
+              <span class="w-1 rounded-full {heightClass} {phaseAccent === 'emerald' ? 'bg-emerald-300/80' : phaseAccent === 'red' ? 'bg-red-300/70' : phaseAccent === 'amber' ? 'bg-amber-300/75' : 'bg-zinc-500'} {snapshot.phase === 'ready' ? 'motion-safe:animate-pulse' : ''}"></span>
+            {/each}
+          </div>
+        </div>
       </div>
 
-      <dl class="mt-5 grid gap-3 sm:grid-cols-2">
-        <div class="rounded-xl border border-white/10 bg-black/20 p-3">
-          <dt class="text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">Current engine</dt>
-          <dd class="mt-1 text-sm text-zinc-100">{engine?.name ?? server?.engineStatus?.current ?? 'Checking current engine…'}</dd>
-        </div>
-        <div class="rounded-xl border border-white/10 bg-black/20 p-3">
-          <dt class="text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">Selected model</dt>
-          <dd class="mt-1 text-sm text-zinc-100">{model?.model ?? engine?.model ?? 'Checking selected model…'}</dd>
-        </div>
-      </dl>
-
-      {#if engine}
-        <p class="mt-4 text-xs leading-5 text-zinc-400">
-          {engine.languages.length > 0 ? `Languages: ${engine.languages.join(', ')}.` : 'Language coverage is not reported by the current engine.'}
-          {#if engine.model_size_gb > 0} Approx. {engine.model_size_gb.toFixed(1)} GB.{/if}
-          {#if engine.device} Running on {engine.device}.{/if}
-        </p>
+      {#if managementMode === 'external'}
+        <p class="relative mt-5 text-xs leading-5 text-zinc-500">External server — Eve cannot restart this endpoint.</p>
+      {:else if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
+        <button
+          type="button"
+          onclick={retry}
+          disabled={retrying}
+          class="relative mt-5 min-h-10 rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]
+            {retrying ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
+        >
+          {retrying ? 'Retrying…' : 'Retry managed server'}
+        </button>
+      {:else if managementMode === 'unknown' && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
+        <p class="relative mt-5 text-xs leading-5 text-zinc-500">Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.</p>
       {/if}
 
       {#if model && snapshot.phase === 'downloading'}
-        <p class="mt-4 text-sm text-zinc-300">
+        <p class="relative mt-4 text-xs text-zinc-400">
           {#if typeof model.downloaded_bytes === 'number' && typeof model.total_bytes === 'number' && model.total_bytes > 0}
             Download progress is available in the preparation banner.
           {:else}
@@ -120,34 +162,51 @@
           {/if}
         </p>
       {/if}
-
     </section>
 
-    <section class="grid gap-4 lg:grid-cols-2" aria-label="Dictation shortcuts and guidance">
-      <article class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-        <h2 class="text-base font-semibold text-zinc-100">Quick dictation</h2>
-        <p class="mt-1 text-sm text-zinc-400">Use for short, immediate speech-to-text input.</p>
-        <p class="mt-4 font-mono text-sm text-zinc-200">{quickHotkey}</p>
+    <section data-home-modes class="grid gap-3 sm:grid-cols-2" aria-label="Dictation shortcuts and guidance">
+      <article class="group min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition-colors hover:border-sky-300/20 hover:bg-sky-300/[0.035]">
+        <div class="flex min-w-0 items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-sky-300">Quick</p>
+            <h2 class="mt-1 text-base font-semibold text-zinc-100">Say it. Send it.</h2>
+            <p class="mt-1 text-xs leading-5 text-zinc-500">Short, immediate speech-to-text input.</p>
+          </div>
+          <span aria-hidden="true" class="text-lg text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-sky-300">→</span>
+        </div>
+        <p class="mt-4 inline-flex max-w-full rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">{quickHotkey}</p>
       </article>
-      <article class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-        <h2 class="text-base font-semibold text-zinc-100">Long dictation</h2>
-        <p class="mt-1 text-sm text-zinc-400">Use for longer recordings that Eve processes after capture.</p>
-        <p class="mt-4 font-mono text-sm text-zinc-200">{longHotkey}</p>
+      <article class="group min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition-colors hover:border-violet-300/20 hover:bg-violet-300/[0.035]">
+        <div class="flex min-w-0 items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-violet-300">Long</p>
+            <h2 class="mt-1 text-base font-semibold text-zinc-100">Keep the thought flowing.</h2>
+            <p class="mt-1 text-xs leading-5 text-zinc-500">Longer recordings are processed after capture.</p>
+          </div>
+          <span aria-hidden="true" class="text-lg text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-violet-300">→</span>
+        </div>
+        <p class="mt-4 inline-flex max-w-full rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">{longHotkey}</p>
       </article>
     </section>
 
-    <section class="rounded-2xl border border-white/10 bg-white/[0.03] p-5" aria-labelledby="home-privacy-heading">
-      <h2 id="home-privacy-heading" class="text-base font-semibold text-zinc-100">Processing and privacy</h2>
-      <p class="mt-1 text-sm leading-6 text-zinc-400">By default, Eve processes speech locally. If you configure an external endpoint, audio is sent to that endpoint under your control. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
-      {#if shortcutsError}
-        <p class="mt-3 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>
-      {/if}
-    </section>
+    <div class="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        <h2 id="home-privacy-heading" class="text-sm font-medium text-zinc-200">Private by default</h2>
+        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">By default, Eve processes speech locally. If you configure an external endpoint, audio is sent to that endpoint under your control. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
+        {#if shortcutsError}<p class="mt-2 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>{/if}
+      </div>
+      <span class="shrink-0 rounded-full border border-emerald-300/15 bg-emerald-300/[0.05] px-3 py-1.5 text-xs text-emerald-300">Local-first</span>
+    </div>
 
-    <nav aria-label="Home actions" class="flex flex-wrap gap-2">
-      <button type="button" onclick={() => onNavigate('history')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open History</button>
-      <button type="button" onclick={() => onNavigate('insights')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open Insights</button>
-      <button type="button" onclick={() => onNavigate('settings')} class="rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:bg-white/[0.06] cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100">Open Settings</button>
+    <nav aria-label="Home actions" class="flex min-w-0 flex-wrap items-center gap-1 text-xs">
+      <span class="mr-2 text-zinc-600">Explore</span>
+      <button type="button" onclick={() => onNavigate('history')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">History</button>
+      <button type="button" onclick={() => onNavigate('insights')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">Insights</button>
+      <button type="button" onclick={() => onNavigate('settings')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">Settings</button>
     </nav>
+
+    {#if engine && reportedLanguages.length > 0}
+      <p class="sr-only">Languages reported by the current engine: {reportedLanguages.join(', ')}.</p>
+    {/if}
   </div>
 </div>
