@@ -491,26 +491,30 @@
   });
 </script>
 
-<div class="mx-auto h-full w-full max-w-[560px] px-4 py-4 pr-2">
-  <div class="h-full overflow-y-auto pr-4">
+<div class="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[640px] flex-col px-4 py-4 sm:px-6">
+  <div data-scroll-owner="settings-page" class="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pr-2">
     {#if settingsLoaded}
-    <div class="space-y-6">
+    <div class="space-y-7 pb-6">
+
+    <h1 class="sr-only">Settings</h1>
 
     <!-- Shortcuts & activation -->
     <SettingsSection title="Shortcuts &amp; activation">
       <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
         <div class="flex items-center gap-2">
           <button
+            type="button"
             onclick={() => openHotkeyCapture('quick')}
-            class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
+            class="max-w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
           >
             {hotkeyDisplayName}
           </button>
           {#if isHotkeyChanged}
             <button
+              type="button"
               onclick={resetHotkey}
-              class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to Ctrl+Win"
+              class="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+              aria-label="Reset fast dictation hotkey to Ctrl+Win"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -524,16 +528,18 @@
       <SettingsRow label="Long dictation hotkey" description="Start or stop hands-free long dictation">
         <div class="flex items-center gap-2">
           <button
+            type="button"
             onclick={() => openHotkeyCapture('long')}
-            class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-mono text-zinc-300 transition-colors cursor-pointer"
+            class="max-w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
           >
             {longHotkeyDisplayName}
           </button>
           {#if isLongHotkeyChanged}
             <button
+              type="button"
               onclick={resetLongHotkey}
-              class="p-1.5 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
-              title="Reset to Ctrl+Shift+Win"
+              class="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+              aria-label="Reset long dictation hotkey to Ctrl+Shift+Win"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -545,7 +551,7 @@
       </SettingsRow>
 
       <SettingsRow label="Activation Mode" description="Hold-to-talk or toggle on/off">
-        <div class="relative grid grid-cols-2 p-1 bg-zinc-800 rounded-lg w-[120px]">
+        <div class="relative grid w-full max-w-full grid-cols-2 rounded-lg bg-zinc-800 p-1 sm:w-[120px]">
           <!-- Sliding indicator -->
           <div
             class="absolute top-1 left-1 w-[calc(50%-4px)] h-[calc(100%-8px)] bg-zinc-700 rounded-md transition-all duration-150 ease-out
@@ -553,15 +559,19 @@
           ></div>
           <!-- Buttons -->
           <button
+            type="button"
             onclick={() => updateSetting('holdToTalk', true)}
-            class="relative z-10 py-1 text-xs text-center rounded-md cursor-pointer transition-colors duration-150
+            class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
               {settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Hold
           </button>
           <button
+            type="button"
             onclick={() => updateSetting('holdToTalk', false)}
-            class="relative z-10 py-1 text-xs text-center rounded-md cursor-pointer transition-colors duration-150
+            class="relative z-10 rounded-md py-1 text-center text-xs transition-colors duration-150
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
               {!settings.holdToTalk ? 'text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}"
           >
             Toggle
@@ -577,11 +587,12 @@
         description={audioDeviceError || 'Select microphone for recording'}
       >
         <select
+          aria-label="Input Device"
           value={settings.selectedDeviceId}
           onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}
           disabled={isLoadingDevices}
           title={inputDevices.find(d => d.id === settings.selectedDeviceId)?.label ?? 'Default'}
-          class="max-w-[280px] truncate pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="w-full max-w-full truncate rounded-lg bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 border border-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto sm:max-w-[280px]"
         >
           {#each inputDevices as device}
             <option value={device.id}>{device.label}</option>
@@ -611,10 +622,10 @@
 
       <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
         <select
+          aria-label="Dictation mode"
           value={settings.dictationMode}
           onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
-          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200
-            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+          class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
         >
           <option value="raw">Raw Dictation</option>
           <option value="clean_prompt">Clean Prompt</option>
@@ -623,9 +634,11 @@
           <option value="command">Command Mode</option>
         </select>
       </SettingsRow>
-    <!-- Recognition/output controls remain in Dictation/output. -->
+    </SettingsSection>
+
+    <SettingsSection title="Hotwords" variant="panel">
       {#if !hotwordsSupported}
-        <div class="flex items-start gap-3 p-4 bg-zinc-900/50 rounded-xl border border-zinc-700 w-full">
+        <div role="status" class="mb-4 flex items-start gap-3 rounded-lg bg-zinc-900/70 p-3">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-400 shrink-0 mt-0.5">
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4"/>
@@ -647,10 +660,10 @@
         />
       </SettingsRow>
 
-      <div class="w-full rounded-xl border p-4 transition-colors
+      <div class="mt-4 w-full min-w-0 transition-colors
         {!hotwordsSupported ? 'border-zinc-700 bg-zinc-900/50 opacity-50' : hasHotwordOverflowWarning ? 'border-amber-500/70 bg-amber-950/10' : 'border-zinc-700 bg-zinc-900/50'}">
-        <label for="hotwords-csl" class="text-sm text-zinc-200 block mb-1">Custom hotwords (comma-separated)</label>
-        <p class="text-xs text-zinc-500 mb-3">
+        <label for="hotwords-csl" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
+        <p id="hotwords-help" class="mt-1 text-xs text-zinc-500">
           Add terms that are often transcribed incorrectly, such as product names, acronyms, and proper nouns.
           Avoid very long lists; large lists can reduce quality.
         </p>
@@ -660,15 +673,13 @@
           oninput={(e) => updateHotwordsCsl(e.currentTarget.value)}
           rows="4"
           disabled={!hotwordsSupported}
-          class="w-full bg-zinc-800 border border-zinc-700 rounded-lg
-            px-3 py-2.5 text-sm text-zinc-300
-            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600
-            disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-describedby="hotwords-help"
+          class="mt-3 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
           placeholder="Svelte, IPC, Claude"
         ></textarea>
 
-        <div class="mt-3 flex items-center justify-between gap-3 flex-wrap">
-          <p class="text-xs {hasHotwordOverflowWarning ? 'text-amber-300' : 'text-zinc-500'}">
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p id="hotwords-count" class="text-xs {hasHotwordOverflowWarning ? 'text-amber-300' : 'text-zinc-500'}">
             {hotwordCount} {hotwordCount === 1 ? 'term' : 'terms'}
             {#if hasHotwordOverflowWarning}
               - You have a lot of entries. Recognition quality may degrade.
@@ -676,17 +687,19 @@
           </p>
           <div class="flex items-center gap-2">
             <button
+              type="button"
               onclick={importHotwords}
               disabled={!hotwordsSupported}
-              class="px-3 py-1.5 bg-zinc-800 rounded-lg text-xs text-zinc-300 transition-colors
+              class="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
                 {hotwordsSupported ? 'hover:bg-zinc-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
             >
               Import
             </button>
             <button
+              type="button"
               onclick={exportHotwords}
               disabled={!hotwordsSupported}
-              class="px-3 py-1.5 bg-zinc-800 rounded-lg text-xs text-zinc-300 transition-colors
+              class="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
                 {hotwordsSupported ? 'hover:bg-zinc-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}"
             >
               Export
@@ -695,12 +708,12 @@
         </div>
 
         {#if hotwordsFileMessage}
-          <p class="mt-2 text-xs text-zinc-500">{hotwordsFileMessage}</p>
+          <p class="mt-2 text-xs text-zinc-500" role="status">{hotwordsFileMessage}</p>
         {/if}
       </div>
     </SettingsSection>
 
-    <SettingsSection title="Speech model">
+    <SettingsSection title="Speech model" variant="content">
       {#if !serverConnected || !serverSettings}
         <p class="text-xs text-zinc-500">Speech model choices are available when the server reports its settings.</p>
       {:else}
@@ -754,10 +767,10 @@
 
       <SettingsRow label="Paste method" description="Use native SendInput first, or force VBScript fallback">
         <select
+          aria-label="Paste method"
           value={settings.pasteMethod}
           onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
-          class="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200
-            focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+          class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
         >
           <option value="sendinput">SendInput</option>
           <option value="vbscript">VBScript</option>
@@ -781,14 +794,14 @@
       </SettingsRow>
     </SettingsSection>
 
-    <section aria-labelledby="advanced-settings-heading" class="space-y-4">
+    <section aria-labelledby="advanced-settings-heading" class="min-w-0 space-y-4">
       <div>
         <h2 id="advanced-settings-heading" class="text-base font-semibold text-zinc-100">Advanced</h2>
         <p class="mt-1 text-xs text-zinc-400">
           Engine, connection, diagnostics, and local server controls.
         </p>
       </div>
-      <div class="space-y-6">
+      <div class="min-w-0 space-y-6">
 
     <SettingsSection title="Model compatibility">
       {#if !serverConnected}
@@ -801,9 +814,10 @@
         {#if serverSettings.whisper_model}
           <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
             <select
+              aria-label={serverSettings.whisper_model.label}
               value={getSettingValue('whisper_model') ?? serverSettings.whisper_model.value}
               onchange={(e) => updateEngineSetting('whisper_model', e.currentTarget.value)}
-              class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+              class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
             >
               {#each getOptions('whisper_model') as option}
                 <option value={option.value}>{option.label}</option>
@@ -814,9 +828,10 @@
         {#if serverSettings.whisper_compute_type}
           <SettingsRow label={serverSettings.whisper_compute_type.label} description={serverSettings.whisper_compute_type.description}>
             <select
+              aria-label={serverSettings.whisper_compute_type.label}
               value={getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value}
               onchange={(e) => updateEngineSetting('whisper_compute_type', e.currentTarget.value)}
-              class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+              class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
             >
               {#each getOptions('whisper_compute_type') as option}
                 <option value={option.value}>{option.label}</option>
@@ -828,8 +843,11 @@
         <!-- Advanced (collapsible) -->
         <div class="w-full">
           <button
+            type="button"
+            aria-expanded={engineAdvancedOpen}
+            aria-controls="engine-advanced-options"
             onclick={() => engineAdvancedOpen = !engineAdvancedOpen}
-            class="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer py-1"
+            class="flex items-center gap-2 py-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
@@ -842,24 +860,25 @@
           </button>
 
            {#if engineAdvancedOpen}
-             <div class="mt-2 space-y-2">
+             <div id="engine-advanced-options" class="mt-2 space-y-2">
                {#if serverSettings.nemotron_model && isVisible(serverSettings.nemotron_model)}
                  <SettingsRow label={serverSettings.nemotron_model.label} description="Raw Nemotron model name or path">
-                   <input value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)} oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)} class="w-56 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-zinc-100" />
+                   <input aria-label={serverSettings.nemotron_model.label} value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)} oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)} class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-56" />
                  </SettingsRow>
                {/if}
                {#if serverSettings.whisper_language && isVisible(serverSettings.whisper_language)}
                  <SettingsRow label={serverSettings.whisper_language.label} description={serverSettings.whisper_language.description}>
-                   <input value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')} oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)} class="w-28 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-zinc-100" />
+                   <input aria-label={serverSettings.whisper_language.label} value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')} oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)} class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-28" />
                  </SettingsRow>
                {/if}
                <!-- Device setting (show whichever is visible) -->
               {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
                 <SettingsRow label="Device" description="Hardware device for inference">
                   <select
+                    aria-label="Nemotron device"
                     value={getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value}
                     onchange={(e) => updateEngineSetting('nemotron_device', e.currentTarget.value)}
-                    class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+                    class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
                   >
                     {#each getOptions('nemotron_device') as option}
                       <option value={option.value}>{option.label}</option>
@@ -871,9 +890,10 @@
               {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}
                 <SettingsRow label="Device" description="Hardware device for inference">
                   <select
+                    aria-label="Whisper device"
                     value={getSettingValue('whisper_device') ?? serverSettings.whisper_device.value}
                     onchange={(e) => updateEngineSetting('whisper_device', e.currentTarget.value)}
-                    class="pl-3 pr-8 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs text-zinc-300 border-none cursor-pointer focus:ring-1 focus:ring-zinc-600"
+                    class="w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
                   >
                     {#each getOptions('whisper_device') as option}
                       <option value={option.value}>{option.label}</option>

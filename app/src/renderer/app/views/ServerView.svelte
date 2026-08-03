@@ -225,7 +225,7 @@
   });
 </script>
 
-<div class={embedded ? 'space-y-4' : 'h-full space-y-6 overflow-y-auto p-4 pr-3'}>
+<div class={embedded ? 'min-w-0 space-y-4' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
 
     {#if useExternalServer}
       <div class="rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3">
@@ -502,7 +502,7 @@
           <div
             id="server-log-output"
             bind:this={logsContainer}
-            class="mt-1 h-64 overflow-y-auto bg-zinc-950 rounded-xl border border-zinc-800 p-3 font-mono text-xs"
+            class="mt-1 h-64 overflow-y-auto overscroll-contain bg-zinc-950 rounded-lg border border-zinc-800 p-3 font-mono text-xs"
           >
             {#if logs.length === 0}
               <p class="text-zinc-500 text-center py-8">No logs yet</p>
