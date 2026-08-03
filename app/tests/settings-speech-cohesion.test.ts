@@ -63,6 +63,9 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('aria-expanded={compatibilityControlsOpen}');
     expect(settingsView).toContain('aria-controls="compatibility-controls"');
     expect(settingsView).toContain('id="compatibility-controls"');
+    expect(settingsView).toContain('hidden={!compatibilityControlsOpen}');
+    expect(settingsView).toContain('hasPendingCompatibilityChanges()');
+    expect(chooser).toContain('externalMode || unavailable(preset)');
     expect(settingsView).toContain("'whisper_compute_type'");
     expect(settingsView).toContain("'whisper_language'");
     expect(settingsView).toContain("'nemotron_device'");

@@ -126,6 +126,12 @@
     });
   }
 
+  function hasPendingCompatibilityChanges(): boolean {
+    return Object.keys(pendingEngine).some((key) =>
+      key !== 'engine' && !SPEECH_MODEL_PRESETS.some((preset) => preset.setting === key)
+    );
+  }
+
   // Convenience: get options for a select setting
   function getOptions(key: string): Array<{ value: unknown; label: string; description?: string }> {
     return (serverSettings?.[key]?.options as Array<{ value: unknown; label: string; description?: string }>) ?? [];
@@ -849,8 +855,7 @@
           </p>
         </div>
       {:else if serverSettings}
-        {#if compatibilityControlsOpen}
-          <div id="compatibility-controls" class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2 {externalMode ? 'opacity-60' : ''}">
+        <div id="compatibility-controls" hidden={!compatibilityControlsOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2 {externalMode ? 'opacity-60' : ''}">
         {#if serverSettings.whisper_model}
           <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
             <select
@@ -944,28 +949,29 @@
             />
           </SettingsRow>
         {/if}
-          </div>
-        {/if}
+        </div>
 
-        {#if Object.keys(pendingEngine).length > 0 && !stagedPreset}
+        {#if hasPendingCompatibilityChanges()}
           <div data-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>
-              <button
-                type="button"
-                onclick={applyEngineSettings}
-                disabled={engineApplying || externalMode}
-                class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-                  {engineApplying || externalMode
-                    ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                    : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
-              >
-                {#if engineApplying}
-                  Preparing…
-                {:else}
-                  Apply compatibility changes
-                {/if}
-              </button>
+              {#if !stagedPreset}
+                <button
+                  type="button"
+                  onclick={applyEngineSettings}
+                  disabled={engineApplying || externalMode}
+                  class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                    {engineApplying || externalMode
+                      ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
+                >
+                  {#if engineApplying}
+                    Preparing…
+                  {:else}
+                    Apply compatibility changes
+                  {/if}
+                </button>
+              {/if}
             </div>
             {#if engineApplyError}
               <p class="mt-2 text-xs text-red-300">{engineApplyError}</p>

@@ -201,15 +201,13 @@
                     {compatibilityOpen ? 'Hide controls' : 'Show controls'}
                   </button>
                 </div>
-                {#if compatibilityOpen}
-                  <div id="fixture-compatibility-controls" data-fixture-compatibility-controls class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
+                <div id="fixture-compatibility-controls" data-fixture-compatibility-controls hidden={!compatibilityOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
                     <SettingsRow label="Whisper model" description="Raw compatibility model"><select aria-label="Whisper model" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>large-v3-turbo</option><option>large-v3</option></select></SettingsRow>
                     <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><select aria-label="Compute type" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>int8</option><option>float16</option></select></SettingsRow>
                     <SettingsRow label="Language" description="Language hint for compatibility"><input aria-label="Whisper language" value="auto" class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-28" /></SettingsRow>
                     <SettingsRow label="Device" description="Hardware device for inference"><select aria-label="Whisper device" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>cuda</option><option>cpu</option></select></SettingsRow>
                     <SettingsRow label="Unload before swap" description="Free VRAM before loading a new engine"><Toggle enabled label="Unload before swap" /></SettingsRow>
-                  </div>
-                {/if}
+                </div>
                 <div data-fixture-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>
