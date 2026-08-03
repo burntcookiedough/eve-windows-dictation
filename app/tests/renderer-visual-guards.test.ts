@@ -17,6 +17,10 @@ const settingsSection = readFileSync(
   new URL('../src/renderer/app/components/SettingsSection.svelte', import.meta.url),
   'utf8'
 );
+const rendererMain = readFileSync(
+  new URL('../src/renderer/app/main.ts', import.meta.url),
+  'utf8'
+);
 
 describe('renderer visual regression guards', () => {
   test('contains long unbroken history text inside its card', () => {
@@ -72,5 +76,13 @@ describe('renderer visual regression guards', () => {
     expect(settingsSection).toContain("variant === 'panel'");
     expect(settingsSection).toContain('aria-labelledby={headingId}');
     expect(settingsSection).not.toContain('overflow-hidden');
+  });
+
+  test('provides a renderer recovery surface instead of leaving a blank window', () => {
+    expect(rendererMain).toContain("window.addEventListener('error'");
+    expect(rendererMain).toContain("window.addEventListener('unhandledrejection'");
+    expect(rendererMain).toContain('data-renderer-recovery');
+    expect(rendererMain).toContain('Reload interface');
+    expect(rendererMain).not.toContain('normalized.message');
   });
 });

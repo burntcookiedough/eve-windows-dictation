@@ -308,7 +308,7 @@
       <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Live status from the shared server controller; lifecycle actions apply only to the managed server.</p>
     </div>
     <div data-server-health-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
-      <div data-server-health-status class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div data-server-health-status class="grid min-w-0 gap-4 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
         <div class="flex min-w-0 items-center gap-3">
           <span class="relative flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
             {#if serverState.status === 'running' && engineReady}
@@ -322,7 +322,26 @@
           {/if}
         </div>
 
-        <div class="flex min-w-0 flex-wrap items-center gap-2">
+        {#if serverState.status === 'running' && (serverState.pid !== undefined || serverState.port !== undefined || serverState.version !== undefined || serverState.uptime !== undefined)}
+          <dl data-server-health-details class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 md:justify-center">
+            {#if serverState.port}
+              <div class="flex min-w-0 items-baseline gap-1.5"><dt class="text-[11px] text-zinc-500">Port</dt><dd class="break-all font-mono text-xs text-zinc-300">{serverState.port}</dd></div>
+            {/if}
+            {#if serverState.version}
+              <div class="flex min-w-0 items-baseline gap-1.5"><dt class="text-[11px] text-zinc-500">Version</dt><dd class="break-all font-mono text-xs text-zinc-300">v{serverState.version}</dd></div>
+            {/if}
+            {#if serverState.pid}
+              <div class="flex min-w-0 items-baseline gap-1.5"><dt class="text-[11px] text-zinc-500">PID</dt><dd class="break-all font-mono text-xs text-zinc-300">{serverState.pid}</dd></div>
+            {/if}
+            {#if serverState.uptime !== undefined}
+              <div class="flex min-w-0 items-baseline gap-1.5"><dt class="text-[11px] text-zinc-500">Uptime</dt><dd class="break-all font-mono text-xs text-zinc-300">{formatUptime(serverState.uptime)}</dd></div>
+            {/if}
+          </dl>
+        {:else}
+          <div></div>
+        {/if}
+
+        <div class="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
           {#if serverState.status === 'running'}
             <button
               type="button"
@@ -413,22 +432,6 @@
         </div>
       {/if}
 
-      {#if serverState.status === 'running' && (serverState.pid !== undefined || serverState.port !== undefined || serverState.version !== undefined || serverState.uptime !== undefined)}
-        <div class="mt-4 grid grid-cols-1 gap-3 border-t border-white/[0.08] pt-4 sm:grid-cols-2">
-          {#if serverState.port}
-            <div class="min-w-0"><p class="text-xs text-zinc-500">Port</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{serverState.port}</p></div>
-          {/if}
-          {#if serverState.version}
-            <div class="min-w-0"><p class="text-xs text-zinc-500">Version</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">v{serverState.version}</p></div>
-          {/if}
-          {#if serverState.pid}
-            <div class="min-w-0"><p class="text-xs text-zinc-500">PID</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{serverState.pid}</p></div>
-          {/if}
-          {#if serverState.uptime !== undefined}
-            <div class="min-w-0"><p class="text-xs text-zinc-500">Uptime</p><p class="mt-1 break-all font-mono text-sm text-zinc-300">{formatUptime(serverState.uptime)}</p></div>
-          {/if}
-        </div>
-      {/if}
     </div>
   </section>
 
@@ -437,7 +440,7 @@
       <svelte:element this={headingTag} id={headingId('logs')} class="text-sm font-semibold text-zinc-200">Logs</svelte:element>
       <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Inspect recent server output only when needed for troubleshooting.</p>
     </div>
-    <div data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 focus-within:ring-2 focus-within:ring-zinc-100 focus-within:ring-offset-2 focus-within:ring-offset-[#08090a]">
+    <div data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
       <button
         type="button"
         data-server-logs-toggle
@@ -448,7 +451,7 @@
         aria-expanded={showLogs}
         aria-controls={logOutputId}
         aria-describedby={privacyWarningId}
-        class="flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-left transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+        class="flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-left transition-colors hover:bg-zinc-800 cursor-pointer focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100"
       >
         <span class="min-w-0 text-sm text-zinc-200 [overflow-wrap:anywhere]">Server logs</span>
         <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs tabular-nums text-zinc-400">{logs.length}</span>
@@ -471,14 +474,15 @@
             {#if logsCopied}Copied{:else}Copy raw logs{/if}
           </button>
         </div>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard focus is required to scroll the bounded log region) -->
         <div
           data-server-log-output
           id={`${logOutputId}-scroll`}
           bind:this={logsContainer}
           tabindex="0"
-          role="group"
+          role="log"
           aria-label="Server log output"
-          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100"
         >
           {#if logs.length === 0}
             <p class="py-8 text-center text-zinc-500">No logs yet</p>

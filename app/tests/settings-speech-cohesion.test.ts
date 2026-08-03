@@ -29,7 +29,8 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).toContain('type="radio"');
     expect(chooser).toContain('data-speech-model-option');
     expect(chooser).toContain('name={`speech-model-preset-${componentId}`}');
-    expect(chooser).toContain('focus-within:ring-2');
+    expect(chooser).toContain('focus-within:outline');
+    expect(chooser).toContain('outline-offset-[-2px]');
     expect(chooser).not.toContain('sm:grid-cols-2');
     expect(chooser).not.toContain('rounded-xl border p-3 transition-colors');
   });

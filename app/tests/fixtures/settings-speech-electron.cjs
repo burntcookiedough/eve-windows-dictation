@@ -86,10 +86,30 @@ async function capture(window, view, state, compatibility, filename) {
   return target;
 }
 
+async function exerciseModelSelection(window) {
+  await loadFixture(window, 'speech', 'ready', false);
+  return window.webContents.executeJavaScript(`(async () => {
+    const radios = [...document.querySelectorAll('input[type="radio"]')];
+    const results = [];
+    for (const radio of radios) {
+      radio.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      results.push({
+        label: radio.getAttribute('aria-label'),
+        checked: radio.checked,
+        panelPresent: !!document.querySelector('[data-speech-model-panel]'),
+        optionCount: document.querySelectorAll('[data-speech-model-option]').length,
+      });
+    }
+    return results;
+  })()`);
+}
+
 async function main() {
   let window = null;
   const measurements = [];
   const screenshots = [];
+  let interactions = [];
   await app.whenReady();
   try {
     window = new BrowserWindow({
@@ -124,11 +144,12 @@ async function main() {
         }
       }
     }
+    interactions = await exerciseModelSelection(window);
   } finally {
     if (window && !window.isDestroyed()) await window.close();
   }
 
-  process.stdout.write(JSON.stringify({ measurements, screenshots, userDataPath: userData }));
+  process.stdout.write(JSON.stringify({ measurements, screenshots, interactions, userDataPath: userData }));
   app.quit();
 }
 
