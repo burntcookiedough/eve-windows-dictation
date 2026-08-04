@@ -5,3 +5,15 @@ export function disabledOptionReasons(options: Array<ServerSettingOption<unknown
     option.disabled && option.reason ? [`${option.label}: ${option.reason}`] : [],
   );
 }
+
+export function optionsForDraftWhisperDevice(
+  options: Array<ServerSettingOption<unknown>>,
+  whisperDevice: string,
+): Array<ServerSettingOption<unknown>> {
+  return options.map((option) => {
+    const state = option.device_compatibility?.[whisperDevice];
+    return state
+      ? { ...option, disabled: state.disabled, reason: state.reason ?? undefined }
+      : option;
+  });
+}

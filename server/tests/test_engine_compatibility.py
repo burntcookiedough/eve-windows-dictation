@@ -138,6 +138,15 @@ def test_whisper_language_normalizes_blank_and_rejects_unknown(
         compatibility.normalize_whisper_language("english")
 
 
+def test_whisper_language_rejects_non_string_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "get_runtime_capabilities", lambda: _capabilities())
+
+    with pytest.raises(ValidationError, match="Whisper language must be a string or null"):
+        config.Settings(whisper_language=123)
+
+
 def test_legacy_int16_is_narrowly_migrated_without_resetting_other_settings(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -206,6 +215,20 @@ def test_metadata_marks_the_same_cpu_precision_as_disabled(
         "label": "Float16",
         "disabled": True,
         "reason": "Not supported by CTranslate2 on cpu.",
+        "device_compatibility": {
+            "auto": {
+                "disabled": True,
+                "reason": "Not supported by CTranslate2 on cpu.",
+            },
+            "cpu": {
+                "disabled": True,
+                "reason": "Not supported by CTranslate2 on cpu.",
+            },
+            "cuda": {
+                "disabled": True,
+                "reason": "CTranslate2 did not find a usable CUDA device.",
+            },
+        },
     }
 
 

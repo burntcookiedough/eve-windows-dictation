@@ -155,7 +155,12 @@ def validate_engine_compatibility(
 
 
 def option_compatibility(
-    key: str, value: str, capabilities: RuntimeCapabilities, settings: Any
+    key: str,
+    value: str,
+    capabilities: RuntimeCapabilities,
+    settings: Any,
+    *,
+    whisper_device: str | None = None,
 ) -> tuple[bool, str | None]:
     """Return UI option state using the same facts as server-side validation."""
     if key == "whisper_device" and value == "cuda":
@@ -171,7 +176,9 @@ def option_compatibility(
     if key != "whisper_compute_type" or value == "auto":
         return False, None
 
-    effective_device = capabilities.whisper_device_for(settings.whisper_device)
+    effective_device = capabilities.whisper_device_for(
+        whisper_device or settings.whisper_device
+    )
     capability = (
         capabilities.whisper_cuda
         if effective_device == "cuda"

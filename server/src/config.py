@@ -122,7 +122,9 @@ class Settings(BaseSettings):
 
     @field_validator("whisper_language", mode="before")
     @classmethod
-    def normalize_language(cls, value: str | None) -> str | None:
+    def normalize_language(cls, value: Any) -> str | None:
+        if value is not None and not isinstance(value, str):
+            raise ValueError("Whisper language must be a string or null.")
         return normalize_whisper_language(value)
 
     @model_validator(mode="after")
@@ -379,6 +381,20 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
             if disabled:
                 option_data["disabled"] = True
                 option_data["reason"] = reason
+            if key == "whisper_compute_type":
+                option_data["device_compatibility"] = {}
+                for device in ("auto", "cpu", "cuda"):
+                    device_disabled, device_reason = option_compatibility(
+                        key,
+                        str(option["value"]),
+                        capabilities,
+                        settings,
+                        whisper_device=device,
+                    )
+                    option_data["device_compatibility"][device] = {
+                        "disabled": device_disabled,
+                        "reason": device_reason,
+                    }
             options.append(option_data)
         result[key] = {
             "value": values[key],

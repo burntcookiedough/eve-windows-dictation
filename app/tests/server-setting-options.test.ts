@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { disabledOptionReasons } from '../src/renderer/app/server-setting-options.js';
+import {
+  disabledOptionReasons,
+  optionsForDraftWhisperDevice,
+} from '../src/renderer/app/server-setting-options.js';
 
 describe('Server setting option compatibility metadata', () => {
   test('returns visible reasons for disabled options', () => {
@@ -16,6 +19,37 @@ describe('Server setting option compatibility metadata', () => {
     ])).toEqual([]);
   });
 
+  test.each([
+    ['cpu', true, true],
+    ['cuda', false, false],
+  ])('uses the draft %s device for precision availability', (device, float16Disabled, mixedDisabled) => {
+    const options = optionsForDraftWhisperDevice([
+      {
+        value: 'float16',
+        label: 'Float16',
+        disabled: true,
+        reason: 'Not supported by CTranslate2 on cpu.',
+        device_compatibility: {
+          cpu: { disabled: true, reason: 'Not supported by CTranslate2 on cpu.' },
+          cuda: { disabled: false },
+        },
+      },
+      {
+        value: 'int8_float16',
+        label: 'Int8+Float16',
+        disabled: true,
+        reason: 'Not supported by CTranslate2 on cpu.',
+        device_compatibility: {
+          cpu: { disabled: true, reason: 'Not supported by CTranslate2 on cpu.' },
+          cuda: { disabled: false },
+        },
+      },
+    ], device);
+
+    expect(options[0].disabled).toBe(float16Disabled);
+    expect(options[1].disabled).toBe(mixedDisabled);
+  });
+
   test('renders disabled options and their reasons in compatibility selects', () => {
     const settingsView = readFileSync(
       new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url),
@@ -24,7 +58,8 @@ describe('Server setting option compatibility metadata', () => {
 
     expect(settingsView).toContain('disabled={option.disabled}');
     expect(settingsView).toContain('data-setting-option-reason');
-    expect(settingsView).toContain("disabledOptionReasons(getOptions('whisper_compute_type'))");
+    expect(settingsView).toContain('getWhisperComputeOptions()');
+    expect(settingsView).toContain("disabledOptionReasons(getWhisperComputeOptions())");
     expect(settingsView).toContain("disabledOptionReasons(getOptions('whisper_device'))");
     expect(settingsView).toContain("disabledOptionReasons(getOptions('nemotron_device'))");
   });

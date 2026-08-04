@@ -304,6 +304,7 @@ export interface ServerSettingOption<T> {
   description?: string;
   disabled?: boolean;
   reason?: string;
+  device_compatibility?: Record<string, { disabled: boolean; reason?: string | null }>;
 }
 
 export interface ServerSetting<T> {
