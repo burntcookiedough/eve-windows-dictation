@@ -25,6 +25,7 @@ const serverView = source('../src/renderer/app/views/ServerView.svelte');
 const preload = source('../src/main/preload/main.ts');
 const declarations = source('../src/renderer/global.d.ts');
 const packageJson = source('../package.json');
+const serverVersion = source('../../server/src/version.py');
 
 describe('Home and shared server status', () => {
   test('initializes one subscription, reseeds on focus, and tears down only its own listener', async () => {
@@ -253,8 +254,11 @@ describe('Home and shared server status', () => {
     expect(homeView).not.toContain('engine.languages.length');
   });
 
-  test('preserves the frozen Eve identity and v0.8.0 version baseline', () => {
-    expect(packageJson).toContain('"version": "0.8.0"');
+  test('preserves the frozen Eve identity and cross-runtime version baseline', () => {
+    const appVersion = (JSON.parse(packageJson) as { version: string }).version;
+    const backendVersion = serverVersion.match(/^SERVER_VERSION = "([^"]+)"$/m)?.[1];
+    expect(appVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(appVersion).toBe(backendVersion);
     expect(packageJson).toContain('"appId": "io.github.burntcookiedough.eve"');
     expect(packageJson).toContain('"guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204"');
   });
