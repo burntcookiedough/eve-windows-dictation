@@ -66,7 +66,6 @@
   let externalServerHost = $state(DEFAULT_SERVER_HOST);
   let externalServerPort = $state(String(DEFAULT_SERVER_PORT));
   let externalServerError = $state('');
-  let externalServerCard: HTMLDivElement | null = $state(null);
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
   let hotwordCount = $derived(hotwordEntries.length);
@@ -352,36 +351,10 @@
     hotwordsFileMessage = '';
   }
 
-  function runWithViewTransition(update: () => void): void {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      update();
-      return;
-    }
-
-    const docWithTransitions = document as Document & {
-      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
-    };
-
-    if (!docWithTransitions.startViewTransition) {
-      update();
-      return;
-    }
-
-    docWithTransitions.startViewTransition(() => {
-      update();
-    });
-  }
-
   function updateUseExternalServer(enabled: boolean) {
-    runWithViewTransition(() => {
-      updateSetting('useExternalServer', enabled);
-    });
+    updateSetting('useExternalServer', enabled);
     if (enabled) {
       updateExternalServerUrl();
-      setTimeout(() => {
-        const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-        externalServerCard?.scrollIntoView({ behavior, block: 'center' });
-      }, 50);
     }
   }
 
@@ -493,7 +466,7 @@
 </script>
 
 <div class="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[640px] flex-col px-4 py-4 sm:px-6">
-  <div data-scroll-owner="settings-page" class="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain pr-2">
+  <div data-scroll-owner="settings-page" class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-2 [overflow-anchor:none] [scroll-behavior:auto]">
     {#if settingsLoaded}
     <div class="space-y-7 pb-6">
 
@@ -1043,9 +1016,9 @@
               />
             </SettingsRow>
 
-            <div class="overflow-hidden border-t border-white/[0.08] [view-transition-name:external-server-panel]">
+            <div class="overflow-hidden border-t border-white/[0.08]">
               {#if settings.useExternalServer}
-                <div bind:this={externalServerCard} data-external-server-panel class="min-w-0 p-4">
+                <div data-external-server-panel class="min-w-0 p-4">
                   <p class="text-sm text-zinc-200">Custom server endpoint</p>
                   <p class="mt-1 text-xs leading-5 text-zinc-500">
                     Set the host and port for your transcription server. Eve connects to <span class="font-mono">/transcribe</span>.

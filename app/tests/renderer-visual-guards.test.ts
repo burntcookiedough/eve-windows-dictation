@@ -81,8 +81,12 @@ describe('renderer visual regression guards', () => {
   test('provides a renderer recovery surface instead of leaving a blank window', () => {
     expect(rendererMain).toContain("window.addEventListener('error'");
     expect(rendererMain).toContain("window.addEventListener('unhandledrejection'");
-    expect(rendererMain).toContain('void unmount(app);');
+    expect(rendererMain).toContain('await unmount(mountedApp);');
+    expect(rendererMain).toContain('if (!rendererMounted)');
+    expect(rendererMain).toContain('Eve renderer async operation rejected');
+    expect(rendererMain).not.toMatch(/unhandledrejection[\s\S]{0,180}showRendererRecovery/);
     expect(rendererMain).toContain('data-renderer-recovery');
+    expect(rendererMain).toContain("recovery.style.cssText = 'display:flex;height:100%");
     expect(rendererMain).toContain('Reload interface');
     expect(rendererMain).not.toContain('normalized.message');
   });

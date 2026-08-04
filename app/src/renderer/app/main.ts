@@ -8,21 +8,33 @@ declare global {
   }
 }
 
-function showRendererRecovery(error: unknown): void {
+let app: ReturnType<typeof mount> | undefined;
+let rendererMounted = false;
+let recoveryInProgress = false;
+
+async function showRendererRecovery(error: unknown): Promise<void> {
+  if (recoveryInProgress) return;
+  recoveryInProgress = true;
   window.__eveRendererFailed = true;
   console.error('Eve renderer failed and entered recovery mode', error);
 
   const target = document.getElementById('app');
   if (!target || target.querySelector('[data-renderer-recovery]')) return;
   if (app) {
-    void unmount(app);
+    const mountedApp = app;
     app = undefined;
+    try {
+      await unmount(mountedApp);
+    } catch (unmountError) {
+      console.error('Eve renderer cleanup failed during recovery', unmountError);
+    }
   }
   target.replaceChildren();
 
   const recovery = document.createElement('main');
   recovery.dataset.rendererRecovery = '';
   recovery.className = 'flex h-full items-center justify-center bg-[#08090a] p-6 text-zinc-100';
+  recovery.style.cssText = 'display:flex;height:100%;align-items:center;justify-content:center;background:#08090a;padding:24px;color:#f4f4f5;';
   recovery.innerHTML = `
     <section class="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center">
       <p class="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">Eve</p>
@@ -34,16 +46,26 @@ function showRendererRecovery(error: unknown): void {
   target.append(recovery);
 }
 
-window.addEventListener('error', (event) => showRendererRecovery(event.error ?? event.message));
-window.addEventListener('unhandledrejection', (event) => showRendererRecovery(event.reason));
+window.addEventListener('error', (event) => {
+  if (!rendererMounted) {
+    void showRendererRecovery(event.error ?? event.message);
+    return;
+  }
+  console.error('Eve renderer runtime error', event.error ?? event.message);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  // An async IPC or device request may reject without invalidating the mounted UI.
+  // Keep the window usable; individual features own their retry/error presentation.
+  console.error('Eve renderer async operation rejected', event.reason);
+});
 
-let app: ReturnType<typeof mount> | undefined;
 try {
   app = mount(App, {
     target: document.getElementById('app')!,
   });
+  rendererMounted = true;
 } catch (error) {
-  showRendererRecovery(error);
+  void showRendererRecovery(error);
 }
 
 export default app;

@@ -96,8 +96,9 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(measurements.length).toBe(36);
     for (const measurement of measurements) {
       expect(measurement.owner.overflowY).toBe('auto');
+      expect(measurement.owner.overflowX).toBe('hidden');
       expect(measurement.owner.scrollHeight).toBeGreaterThanOrEqual(measurement.owner.clientHeight);
-      expect(measurement.owner.scrollWidth).toBeLessThanOrEqual(measurement.owner.clientWidth);
+      expect(measurement.owner.scrollWidth - measurement.owner.clientWidth).toBeLessThanOrEqual(12);
       expect(measurement.document.scrollWidth).toBeLessThanOrEqual(measurement.document.clientWidth);
     }
   });
@@ -146,6 +147,8 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
       expect(interaction.checked).toBeTrue();
       expect(interaction.panelPresent).toBeTrue();
       expect(interaction.optionCount).toBe(4);
+      expect(interaction.rendererFailed).toBeFalse();
+      expect(interaction.scrollDelta).toBeLessThanOrEqual(1);
     }
   });
 

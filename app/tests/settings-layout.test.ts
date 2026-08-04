@@ -42,21 +42,29 @@ describe('Phase 1 Settings layout contracts', () => {
   test('keeps Settings as the single page scroll owner while logs remain bounded', () => {
     expect(settingsView.match(/overflow-y-auto/g)?.length).toBe(1);
     expect(settingsView).toContain('data-scroll-owner="settings-page"');
-    expect(settingsView).toContain('min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain');
+    expect(settingsView).toContain('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain');
     expect(settingsView).not.toContain('h-screen');
     expect(serverView).toContain("embedded ? 'min-w-0 space-y-6'");
     expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
   });
 
-  test('stacks labels and controls at narrow widths and contains control content', () => {
-    expect(settingsRow).toContain('grid-cols-1');
-    expect(settingsRow).toContain('sm:grid-cols-[minmax(0,1fr)_minmax(0,auto)]');
-    expect(settingsRow).toContain('min-w-0 w-full max-w-full sm:w-auto');
+  test('keeps controls trailing at every width and contains control content', () => {
+    expect(settingsRow).toContain('grid-cols-[minmax(0,1fr)_minmax(5rem,45%)]');
+    expect(settingsRow).toContain('items-center');
+    expect(settingsRow).toContain('items-center justify-end justify-self-end');
+    expect(settingsRow).toContain('min-w-0 w-full max-w-full items-center justify-end justify-self-end');
     expect(settingsRow).toContain('[&>input]:max-w-full');
     expect(settingsRow).toContain('[&>select]:max-w-full');
     expect(settingsRow).toContain('[&_textarea]:focus-visible:ring-2');
     expect(settingsView).toContain('w-full max-w-full');
     expect(settingsView).toContain('sm:w-auto');
+  });
+
+  test('disables page scroll anchoring and avoids programmatic scroll jumps', () => {
+    expect(settingsView).toContain('[overflow-anchor:none]');
+    expect(settingsView).toContain('[scroll-behavior:auto]');
+    expect(settingsView).not.toContain('scrollIntoView');
+    expect(settingsView).not.toContain('startViewTransition');
   });
 
   test('associates section headings and form controls with accessible names', () => {
@@ -107,7 +115,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
     expect(appCss).toContain(':focus-visible');
     expect(settingsRow).toContain('focus-visible:ring-2');
-    expect(settingsView).toContain('prefers-reduced-motion');
+    expect(settingsView).toContain('[scroll-behavior:auto]');
     expect(statusCard).not.toContain('animate-');
   });
 });

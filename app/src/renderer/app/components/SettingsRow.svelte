@@ -13,7 +13,7 @@
 
 <div
   data-settings-row
-  class="grid min-h-12 min-w-0 w-full grid-cols-1 gap-x-6 gap-y-2 px-4 py-3 transition-colors hover:bg-white/[0.035] sm:grid-cols-[minmax(0,1fr)_minmax(0,auto)] sm:items-center {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
+  class="grid min-h-12 min-w-0 w-full grid-cols-[minmax(0,1fr)_minmax(5rem,45%)] items-center gap-x-4 px-4 py-3 transition-colors hover:bg-white/[0.035] sm:gap-x-6 {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
   role="group"
   aria-label={description ? `${label}. ${description}` : label}
 >
@@ -25,7 +25,7 @@
   </div>
   <div
     data-settings-control
-    class="min-w-0 w-full max-w-full sm:w-auto sm:justify-self-end
+    class="flex min-w-0 w-full max-w-full items-center justify-end justify-self-end
       [&>button]:max-w-full [&>div]:max-w-full [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full
       [&>div]:min-w-0
       [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-zinc-100
