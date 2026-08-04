@@ -115,7 +115,7 @@
               {disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}"
           >
             <input
-              class="sr-only"
+              class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100 disabled:cursor-not-allowed"
               type="radio"
               name={`speech-model-preset-${componentId}`}
               checked={checked}
@@ -124,14 +124,6 @@
               aria-label={`${preset.label}, ${label}`}
               aria-describedby={detailId(preset.id)}
             />
-            <span
-              aria-hidden="true"
-              class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border {checked ? 'border-sky-300' : 'border-zinc-600'}"
-            >
-              {#if checked}
-                <span class="h-2 w-2 rounded-full bg-sky-300"></span>
-              {/if}
-            </span>
             <span class="min-w-0 flex-1">
               <span class="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-x-3 sm:gap-y-1">
                 <span class="min-w-0 text-sm font-medium text-zinc-100 [overflow-wrap:anywhere]">{preset.label}</span>

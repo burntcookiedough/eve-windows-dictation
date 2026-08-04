@@ -84,7 +84,7 @@
 
   <main data-fixture-main class="min-h-0 min-w-0 flex-1 overflow-hidden">
     <div class="flex h-full min-h-0 min-w-0 w-full justify-center px-4 sm:px-6">
-      <div data-fixture-scroll-owner class="min-h-0 min-w-0 w-full max-w-[640px] overflow-y-auto overscroll-contain pr-2">
+      <div data-fixture-scroll-owner class="min-h-0 min-w-0 w-full max-w-[640px] overflow-x-hidden overflow-y-auto overscroll-contain pr-2 [overflow-anchor:none] [scroll-behavior:auto]">
         <div class="space-y-7 pb-8">
           {#if fixtureView === 'general' || fixtureView === 'all'}
             <SettingsSection title="General" description="Shortcuts, audio, dictation, vocabulary, and app behavior." variant="content">

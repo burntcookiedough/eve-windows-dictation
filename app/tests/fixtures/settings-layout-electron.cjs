@@ -24,6 +24,9 @@ async function measure(window, zoom) {
     const status = document.querySelector('[data-status-region="model-progress"]');
     const row = document.querySelector('[data-settings-row]');
     const control = row?.querySelector('[data-settings-control]');
+    const toggleRows = [...document.querySelectorAll('[data-settings-row]')]
+      .map((toggleRow) => ({ row: toggleRow, toggle: toggleRow.querySelector('[role="switch"]') }))
+      .filter(({ toggle }) => !!toggle);
     const sections = [...document.querySelectorAll('section[aria-labelledby]')];
     const headingIds = sections.map((section) => section.getAttribute('aria-labelledby'));
     const headings = headingIds.map((headingId) => headingId ? document.getElementById(headingId) : null);
@@ -39,6 +42,7 @@ async function measure(window, zoom) {
       main: rect(main),
       status: status ? { position: getComputedStyle(status).position, rect: rect(status) } : null,
       row: { rect: rect(row), control: rect(control) },
+      toggles: toggleRows.map(({ row: toggleRow, toggle }) => ({ row: rect(toggleRow), toggle: rect(toggle) })),
       document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
       focus: focusStyle ? { focusVisible: focusTarget.matches(':focus-visible'), outlineStyle: focusStyle.outlineStyle, outlineWidth: focusStyle.outlineWidth, boxShadow: focusStyle.boxShadow } : null,
       headingAssociation: sections.length > 0 && headings.every((heading, index) => !!heading && heading.id === headingIds[index]),

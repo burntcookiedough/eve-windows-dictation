@@ -59,7 +59,7 @@ async function measure(window, view, state, compatibility, zoom) {
     return {
       ...meta,
       viewport: { width: innerWidth, height: innerHeight },
-      owner: owner ? { overflowY: getComputedStyle(owner).overflowY, clientHeight: owner.clientHeight, scrollHeight: owner.scrollHeight, scrollWidth: owner.scrollWidth, clientWidth: owner.clientWidth, rect: ownerRect } : null,
+      owner: owner ? { overflowX: getComputedStyle(owner).overflowX, overflowY: getComputedStyle(owner).overflowY, clientHeight: owner.clientHeight, scrollHeight: owner.scrollHeight, scrollWidth: owner.scrollWidth, clientWidth: owner.clientWidth, rect: ownerRect } : null,
       main: rect(main),
       panel: rect(panel),
       optionCount: options.length,
@@ -90,15 +90,21 @@ async function exerciseModelSelection(window) {
   await loadFixture(window, 'speech', 'ready', false);
   return window.webContents.executeJavaScript(`(async () => {
     const radios = [...document.querySelectorAll('input[type="radio"]')];
+    const owner = document.querySelector('[data-fixture-scroll-owner]');
     const results = [];
     for (const radio of radios) {
-      radio.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      radio.scrollIntoView({ block: 'center' });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const scrollTopBefore = owner.scrollTop;
+      radio.closest('label').click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       results.push({
         label: radio.getAttribute('aria-label'),
         checked: radio.checked,
         panelPresent: !!document.querySelector('[data-speech-model-panel]'),
         optionCount: document.querySelectorAll('[data-speech-model-option]').length,
+        rendererFailed: window.__eveRendererFailed === true,
+        scrollDelta: Math.abs(owner.scrollTop - scrollTopBefore),
       });
     }
     return results;
