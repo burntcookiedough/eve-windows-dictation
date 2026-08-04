@@ -116,7 +116,7 @@ describe('rendered Settings layout fixture', () => {
       expect(measurement.toggles.length).toBeGreaterThan(0);
       for (const { row, toggle } of measurement.toggles) {
         expect(toggle.left).toBeGreaterThan(row.left + row.width / 2);
-        expect(row.right - toggle.right).toBeLessThanOrEqual(20);
+        expect(Math.abs(row.right - toggle.right)).toBeLessThanOrEqual(20);
       }
     }
   });
