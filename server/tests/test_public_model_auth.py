@@ -9,7 +9,9 @@ from transcription.errors import safe_engine_preparation_message
 
 
 def test_curated_public_model_forces_anonymous_access_and_restores_token_resolver() -> None:
-    original = lambda: "stale-saved-token"
+    def original() -> str:
+        return "stale-saved-token"
+
     hf_common = SimpleNamespace(get_hf_token=original)
 
     with _public_model_anonymous_access(
@@ -21,7 +23,9 @@ def test_curated_public_model_forces_anonymous_access_and_restores_token_resolve
 
 
 def test_custom_model_preserves_existing_hugging_face_authentication() -> None:
-    original = lambda: "private-model-token"
+    def original() -> str:
+        return "private-model-token"
+
     hf_common = SimpleNamespace(get_hf_token=original)
 
     with _public_model_anonymous_access("private-org/custom-asr", hf_common):
@@ -31,7 +35,9 @@ def test_custom_model_preserves_existing_hugging_face_authentication() -> None:
 
 
 def test_public_model_token_override_is_restored_after_failure() -> None:
-    original = lambda: "stale-saved-token"
+    def original() -> str:
+        return "stale-saved-token"
+
     hf_common = SimpleNamespace(get_hf_token=original)
 
     with pytest.raises(RuntimeError, match="download failed"):
