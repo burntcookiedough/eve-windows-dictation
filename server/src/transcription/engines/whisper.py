@@ -37,8 +37,14 @@ logger = logging.getLogger(__name__)
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
 _CUDA_DLL_ERROR_MARKERS = ("cublas", "cudart", "cufft", "cudnn", "cuda")
 _MODEL_REPO_PREFIX = "Systran/faster-whisper-"
-_MODEL_ALIASES = {
+# This is the authoritative catalog for every built-in Whisper choice exposed
+# through Settings. The values are Eve's known-public upstream repositories.
+_PUBLIC_BUILTIN_MODELS = {
     "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "medium": "Systran/faster-whisper-medium",
+    "small": "Systran/faster-whisper-small",
+    "tiny": "Systran/faster-whisper-tiny",
 }
 
 
@@ -95,9 +101,22 @@ def _resolve_repo_id(model: str) -> str | None:
         return None
     if "/" in model:
         return model
-    if model in _MODEL_ALIASES:
-        return _MODEL_ALIASES[model]
+    if model in _PUBLIC_BUILTIN_MODELS:
+        return _PUBLIC_BUILTIN_MODELS[model]
     return f"{_MODEL_REPO_PREFIX}{model}"
+
+
+def _download_repo(repo_id: str) -> str:
+    """Download curated public models anonymously and preserve custom auth.
+
+    ``huggingface_hub`` otherwise sends a saved token implicitly. A stale token
+    can make a public repository return 401, so Eve's fixed curated catalog uses
+    explicit anonymous access. Advanced/custom identifiers retain the library's
+    existing authentication behavior.
+    """
+    if repo_id in _PUBLIC_BUILTIN_MODELS.values():
+        return download_model(repo_id, use_auth_token=False)
+    return download_model(repo_id)
 
 
 def _get_cuda_active(device: str) -> bool:
@@ -243,7 +262,7 @@ class WhisperEngine:
         try:
             if repo_id and preflight_cached is False:
                 with track_huggingface_download_progress():
-                    model_source = download_model(repo_id)
+                    model_source = _download_repo(repo_id)
                 mark_model_loading()
             self._model = WhisperModel(
                 model_source,
