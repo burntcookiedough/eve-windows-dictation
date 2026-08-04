@@ -143,7 +143,10 @@ async def test_swap_engine_restores_on_failure(monkeypatch: pytest.MonkeyPatch) 
     assert manager._engine is not None
     assert manager._engine._engine_id == "whisper"
     assert manager.get_status().status == "ready"
-    assert manager.get_status().message == "Nemotron import failed"
+    assert manager.get_status().message == (
+        "The selected speech model could not be prepared. "
+        "Retry or revert and review diagnostics if it continues."
+    )
     # Should have tried nemotron, then restored whisper
     assert create_calls == ["nemotron", "whisper"]
 
