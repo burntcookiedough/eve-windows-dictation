@@ -7,6 +7,8 @@ import sys
 import tempfile
 import threading
 import warnings
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 import numpy as np
 import soundfile as sf
@@ -21,6 +23,31 @@ logger = logging.getLogger(__name__)
 
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
 _MODEL_SIZE_GB = 2.3
+_CURATED_PUBLIC_MODELS = frozenset({"nvidia/nemotron-speech-streaming-en-0.6b"})
+_HF_TOKEN_OVERRIDE_LOCK = threading.RLock()
+
+
+@contextmanager
+def _public_model_anonymous_access(model_name: str, hf_common: Any) -> Iterator[None]:
+    """Force anonymous Hub reads only for Eve's known-public curated models.
+
+    NeMo explicitly calls ``get_token()`` and forwards the result to every Hub
+    request. A stale saved credential can therefore break an otherwise public
+    download. Returning ``False`` uses huggingface_hub's explicit anonymous
+    mode; the original token resolver is restored before leaving this scope.
+    Advanced/custom model identifiers keep NeMo's existing authentication.
+    """
+    if model_name not in _CURATED_PUBLIC_MODELS:
+        yield
+        return
+
+    with _HF_TOKEN_OVERRIDE_LOCK:
+        original_get_token = hf_common.get_hf_token
+        hf_common.get_hf_token = lambda: False
+        try:
+            yield
+        finally:
+            hf_common.get_hf_token = original_get_token
 
 
 def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
@@ -170,6 +197,7 @@ class NemotronEngine:
         logging.getLogger("nv_one_logger").setLevel(logging.ERROR)
 
         import nemo.collections.asr as nemo_asr
+        from nemo.core.classes import common as nemo_common
 
         # Now that NeMo's Logger singleton exists with its handlers,
         # add blocking filters that persist across transcribe() calls.
@@ -182,7 +210,8 @@ class NemotronEngine:
         logger.info("Loading Nemotron model: %s (device=%s)", model_name, resolved_device)
 
         try:
-            self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+            with _public_model_anonymous_access(model_name, nemo_common):
+                self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
         except Exception as exc:
             if _is_network_error(exc):
                 logger.warning(
@@ -191,7 +220,8 @@ class NemotronEngine:
                 old_val = os.environ.get("HF_HUB_OFFLINE")
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 try:
-                    self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+                    with _public_model_anonymous_access(model_name, nemo_common):
+                        self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
                 except Exception as offline_exc:
                     if preflight_cached is False:
                         update_model_download_state(

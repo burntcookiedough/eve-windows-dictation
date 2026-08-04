@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from transcription.base import EngineInfo, EngineSession, TranscriptionEngine
+from transcription.errors import safe_engine_preparation_message
 from transcription.vram import (
     detect_gpu_capabilities,
     estimate_max_duration_s,
@@ -438,7 +439,7 @@ class EngineManager:
 
         except Exception as e:
             logger.error("Engine swap failed: %s", e)
-            self._swap_error = str(e)
+            self._swap_error = safe_engine_preparation_message(e)
             self._pending_status = None
             self._pending_engine_id = None
             self._pending_message = None
