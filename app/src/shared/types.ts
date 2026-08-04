@@ -298,12 +298,20 @@ export interface Settings {
 }
 
 // Server settings types (fetched from server REST API)
+export interface ServerSettingOption<T> {
+  value: T;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  reason?: string;
+}
+
 export interface ServerSetting<T> {
   value: T;
   label: string;
   description: string;
   type: 'select' | 'number' | 'bool' | 'text';
-  options?: Array<{ value: T; label: string; description?: string }>;
+  options?: Array<ServerSettingOption<T>>;
   range?: [number, number];
   requires_reload: boolean;
   category: string;
