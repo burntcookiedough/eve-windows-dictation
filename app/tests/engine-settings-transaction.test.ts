@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../src/renderer/app/engine-settings-transaction.js';
+import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../src/renderer/app/engine-settings-transaction.js';
 import { readFileSync } from 'node:fs';
 
 describe('Engine settings transaction UI', () => {
@@ -29,6 +29,13 @@ describe('Engine settings transaction UI', () => {
     })).toBeFalse();
   });
 
+  test('treats a refreshed terminal failure as complete when loading was missed', () => {
+    expect(enginePreparationPhase({
+      current: 'whisper', status: 'ready', message: 'Preparation failed.',
+    })).toBe('failed');
+    expect(shouldDisableEngineRevert(false)).toBeFalse();
+  });
+
   test('keeps Retry/Revert transactional in the settings surface', () => {
     const settingsView = readFileSync(
       new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url),
@@ -36,6 +43,7 @@ describe('Engine settings transaction UI', () => {
     );
 
     expect(settingsView).toContain('enginePreparationRequested = true');
+    expect(settingsView).toContain('await confirmEnginePreparationStatus()');
     expect(settingsView).toContain('void refreshCommittedSettings()');
     expect(settingsView).toContain('if (await loadServerSettings())');
     expect(settingsView).toContain('function revertEngineSettings()');

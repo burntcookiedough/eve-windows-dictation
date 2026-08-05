@@ -12,7 +12,7 @@
   import { getServerManagementMode, serverStatusState } from '../server-status';
   import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
-  import { shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
+  import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -91,7 +91,7 @@
   // Local engine settings (track pending changes before apply)
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
-  let sharedEngineStatus = $derived(sharedServerState?.engineStatus ?? engineStatus);
+  let sharedEngineStatus = $derived(engineStatus ?? sharedServerState?.engineStatus ?? null);
   let externalMode = $derived(settings.useExternalServer || getServerManagementMode($serverStatusState) === 'external');
 
   // Derive current values (server value overridden by pending)
@@ -108,8 +108,8 @@
   ) ?? null);
   let stagedPreset = $derived(stagedPresetFromPending(pendingEngine));
   let preparationFailed = $derived(
-    !!sharedEngineStatus?.message || sharedEngineStatus?.status === 'error' || sharedEngineStatus?.pending?.status === 'error' ||
-    (stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
+    enginePreparationPhase(sharedEngineStatus) === 'failed' ||
+    (!enginePreparationActive && stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
   );
   let engineRevertDisabled = $derived(shouldDisableEngineRevert(enginePreparationActive));
 
@@ -340,6 +340,10 @@
       return;
     }
 
+    if (state?.engineStatus) {
+      engineStatus = state.engineStatus;
+    }
+
     if (shouldRetryServerSettings(state, serverConnected, serverSettingsLoading, lastServerSettingsAttemptKey)) {
       lastServerSettingsAttemptKey = serverSettingsStateKey(state);
       void loadServerSettings();
@@ -467,6 +471,9 @@
         enginePreparationRequested = true;
         enginePreparationActive = true;
         enginePreparationObserved = response.engine_status.status === 'loading' || !!response.engine_status.pending;
+        if (!enginePreparationObserved) {
+          await confirmEnginePreparationStatus();
+        }
       } else if (response.engine_status.status === 'ready' && !response.engine_status.pending) {
         pendingEngine = {};
       }
@@ -475,6 +482,32 @@
       engineApplyError = error instanceof Error ? error.message : 'Failed to apply engine settings.';
     } finally {
       engineApplying = false;
+    }
+  }
+
+  async function confirmEnginePreparationStatus(): Promise<void> {
+    if (!(await loadServerSettings())) return;
+
+    const phase = enginePreparationPhase(engineStatus);
+    if (phase === 'preparing') {
+      enginePreparationObserved = true;
+      return;
+    }
+    if (phase === 'failed') {
+      enginePreparationActive = false;
+      engineApplyError = engineStatus?.pending?.message ?? engineStatus?.message ?? 'Engine reload failed.';
+      return;
+    }
+    if (phase === 'ready') {
+      const candidateCommitted = Object.entries(pendingEngine).every(
+        ([key, value]) => serverSettings?.[key]?.value === value,
+      );
+      if (!candidateCommitted) return;
+      pendingEngine = {};
+      enginePreparationRequested = false;
+      enginePreparationActive = false;
+      enginePreparationObserved = false;
+      engineApplyError = '';
     }
   }
 

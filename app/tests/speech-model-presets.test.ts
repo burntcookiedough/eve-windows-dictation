@@ -42,6 +42,7 @@ describe('speech model presets', () => {
   test('keeps selection and preparation explicit in the Settings surface', () => {
     const settings = readFileSync(new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url), 'utf8');
     const chooser = readFileSync(new URL('../src/renderer/app/components/SpeechModelChooser.svelte', import.meta.url), 'utf8');
+    const transaction = readFileSync(new URL('../src/renderer/app/engine-settings-transaction.ts', import.meta.url), 'utf8');
     expect(chooser).toContain('type="radio"');
     expect(chooser).toContain('name={`speech-model-preset-${componentId}`}');
     expect(chooser).toContain('Apply and prepare model confirms the change.');
@@ -51,8 +52,8 @@ describe('speech model presets', () => {
     expect(settings).toContain('shouldClearServerSettings');
     expect(settings).toContain('serverSettingsLoading');
     expect(settings).not.toContain('async function pollEngineStatus');
-    expect(settings).toContain('!!sharedEngineStatus?.message');
-    expect(settings).toContain("sharedEngineStatus?.pending?.status === 'error'");
+    expect(settings).toContain("enginePreparationPhase(sharedEngineStatus) === 'failed'");
+    expect(transaction).toContain("status.pending?.status === 'error'");
     expect(settings).toContain('sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message');
     expect(settings).toContain("'Retry preparation'");
     expect(settings).toContain("'nemotron_model'");

@@ -1,5 +1,17 @@
 import type { EngineStatus } from '../../shared/types.js';
 
+export type EnginePreparationPhase = 'preparing' | 'failed' | 'ready' | 'unknown';
+
+export function enginePreparationPhase(
+  status: EngineStatus | null,
+): EnginePreparationPhase {
+  if (!status) return 'unknown';
+  if (status.status === 'error' || status.pending?.status === 'error' || status.message) return 'failed';
+  if (status.status === 'loading' || status.pending) return 'preparing';
+  if (status.status === 'ready') return 'ready';
+  return 'unknown';
+}
+
 export function shouldDisableEngineRevert(
   preparationActive: boolean,
 ): boolean {
