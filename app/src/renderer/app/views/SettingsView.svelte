@@ -11,8 +11,9 @@
   import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
   import { getServerManagementMode, serverStatusState } from '../server-status';
   import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
+  import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
   import { toast } from '$lib/toast.svelte';
-  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DEFAULT_SERVER_HOST = 'localhost';
@@ -96,6 +97,7 @@
   }
 
   let selectedEngine = $derived(getSettingValue<string>('engine') ?? 'nemotron');
+  let draftWhisperDevice = $derived(getSettingValue<string>('whisper_device') ?? 'auto');
   let selectedPreset = $derived(SPEECH_MODEL_PRESETS.find((preset) =>
     getSettingValue<string>('engine') === preset.engine && getSettingValue<string>(preset.setting) === preset.model
   ) ?? null);
@@ -126,8 +128,15 @@
   }
 
   // Convenience: get options for a select setting
-  function getOptions(key: string): Array<{ value: unknown; label: string; description?: string }> {
-    return (serverSettings?.[key]?.options as Array<{ value: unknown; label: string; description?: string }>) ?? [];
+  function getOptions(key: string): Array<ServerSettingOption<unknown>> {
+    return (serverSettings?.[key]?.options as Array<ServerSettingOption<unknown>>) ?? [];
+  }
+
+  function getWhisperComputeOptions(): Array<ServerSettingOption<unknown>> {
+    return optionsForDraftWhisperDevice(
+      getOptions('whisper_compute_type'),
+      draftWhisperDevice,
+    );
   }
 
   function isEngineAvailable(engineId: unknown): boolean {
@@ -833,7 +842,7 @@
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {#each getOptions('whisper_model') as option}
-                <option value={option.value}>{option.label}</option>
+                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
               {/each}
             </select>
           </SettingsRow>
@@ -847,10 +856,13 @@
               disabled={externalMode}
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
-              {#each getOptions('whisper_compute_type') as option}
-                <option value={option.value}>{option.label}</option>
+              {#each getWhisperComputeOptions() as option}
+                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
               {/each}
             </select>
+            {#each disabledOptionReasons(getWhisperComputeOptions()) as reason}
+              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
+            {/each}
           </SettingsRow>
         {/if}
 
@@ -886,9 +898,12 @@
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {#each getOptions('nemotron_device') as option}
-                <option value={option.value}>{option.label}</option>
+                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
               {/each}
             </select>
+            {#each disabledOptionReasons(getOptions('nemotron_device')) as reason}
+              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
+            {/each}
           </SettingsRow>
         {/if}
         {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}
@@ -901,9 +916,12 @@
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
               {#each getOptions('whisper_device') as option}
-                <option value={option.value}>{option.label}</option>
+                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
               {/each}
             </select>
+            {#each disabledOptionReasons(getOptions('whisper_device')) as reason}
+              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
+            {/each}
           </SettingsRow>
         {/if}
         {#if serverSettings.unload_before_swap}

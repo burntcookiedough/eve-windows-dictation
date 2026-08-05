@@ -9,8 +9,15 @@ from pathlib import Path
 import tempfile
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from engine_compatibility import (
+    get_runtime_capabilities,
+    normalize_whisper_language,
+    option_compatibility,
+    validate_engine_compatibility,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +34,14 @@ def _load_settings_json() -> dict[str, Any]:
     settings_file = get_settings_file_path()
     if settings_file.exists():
         try:
-            return json.loads(settings_file.read_text(encoding="utf-8"))
+            values = json.loads(settings_file.read_text(encoding="utf-8"))
+            if not isinstance(values, dict):
+                logger.warning("Settings file must contain a JSON object")
+                return {}
+            if values.get("whisper_compute_type") == "int16":
+                values["whisper_compute_type"] = "auto"
+                logger.warning("Migrated legacy Whisper int16 precision setting to auto")
+            return values
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read settings.json: %s", e)
     return {}
@@ -74,7 +88,7 @@ class Settings(BaseSettings):
     whisper_model: str = "large-v3-turbo"
     whisper_device: Literal["auto", "cpu", "cuda"] = "auto"
     whisper_compute_type: Literal[
-        "auto", "int8", "int8_float16", "int16", "float16", "float32"
+        "auto", "int8", "int8_float16", "float16", "float32"
     ] = "auto"
     whisper_language: str | None = "en"
     whisper_beam_size: int = Field(default=1, ge=1, le=10)
@@ -105,6 +119,23 @@ class Settings(BaseSettings):
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_binary: bool = False
+
+    @field_validator("whisper_language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: Any) -> str | None:
+        if value is not None and not isinstance(value, str):
+            raise ValueError("Whisper language must be a string or null.")
+        return normalize_whisper_language(value)
+
+    @model_validator(mode="after")
+    def validate_runtime_compatibility(self) -> Settings:
+        validate_engine_compatibility(
+            whisper_device=self.whisper_device,
+            whisper_compute_type=self.whisper_compute_type,
+            nemotron_device=self.nemotron_device,
+            capabilities=get_runtime_capabilities(),
+        )
+        return self
 
 
 # Settings metadata for dynamic UI rendering
@@ -339,10 +370,36 @@ PERSISTED_INTERNAL_KEYS: set[str] = set()
 def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
     values = settings.model_dump()
     result = {}
+    capabilities = get_runtime_capabilities()
     for key, meta in SETTINGS_METADATA.items():
+        options = []
+        for option in meta.get("options", []):
+            option_data = dict(option)
+            disabled, reason = option_compatibility(
+                key, str(option["value"]), capabilities, settings
+            )
+            if disabled:
+                option_data["disabled"] = True
+                option_data["reason"] = reason
+            if key == "whisper_compute_type":
+                option_data["device_compatibility"] = {}
+                for device in ("auto", "cpu", "cuda"):
+                    device_disabled, device_reason = option_compatibility(
+                        key,
+                        str(option["value"]),
+                        capabilities,
+                        settings,
+                        whisper_device=device,
+                    )
+                    option_data["device_compatibility"][device] = {
+                        "disabled": device_disabled,
+                        "reason": device_reason,
+                    }
+            options.append(option_data)
         result[key] = {
             "value": values[key],
             **meta,
+            **({"options": options} if "options" in meta else {}),
         }
     return result
 

@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 _engine_tasks: set[asyncio.Task[None]] = set()
 
 
+def _safe_settings_validation_detail(error: ValidationError) -> str:
+    """Return a concise validation message without echoing submitted values."""
+    errors = error.errors()
+    if not errors:
+        return "Invalid settings."
+    message = str(errors[0].get("msg", "Invalid settings."))
+    return message.removeprefix("Value error, ")
+
+
 def _schedule_engine_swap(engine_mgr: Any, settings: Settings) -> asyncio.Task[None]:
     """Keep background engine loads alive and observe their completion."""
     task = asyncio.create_task(_swap_engine_background(engine_mgr, settings))
@@ -173,7 +182,9 @@ def create_app() -> FastAPI:
         try:
             new_settings = update_settings(patch)
         except ValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            raise HTTPException(
+                status_code=400, detail=_safe_settings_validation_detail(e)
+            ) from e
         engine_mgr = get_engine_manager()
 
         reload_started = False
