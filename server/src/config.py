@@ -439,8 +439,8 @@ def build_settings_candidate(patch: dict[str, Any]) -> Settings:
 def commit_settings(candidate: Settings) -> Settings:
     """Commit one validated settings candidate to memory and disk."""
     global _settings
-    _settings = candidate
     _persist_settings(candidate)
+    _settings = candidate
     return candidate
 
 
@@ -483,3 +483,4 @@ def _persist_settings(settings: Settings) -> None:
                 temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
+        raise

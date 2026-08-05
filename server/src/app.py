@@ -208,7 +208,13 @@ def create_app() -> FastAPI:
             _schedule_engine_swap(engine_mgr, candidate, commit_on_success=True)
             committed_settings = get_settings()
         else:
-            committed_settings = commit_settings(candidate)
+            try:
+                committed_settings = commit_settings(candidate)
+            except OSError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not save settings. Please try again.",
+                )
 
         status = engine_mgr.get_status()
         session_mgr = get_session_manager()
@@ -265,9 +271,11 @@ async def _swap_engine_background(
 ) -> None:
     global _settings_preparation_pending
     try:
-        await engine_mgr.swap_engine(settings)
-        if commit_on_success:
+        def persist_candidate() -> None:
             commit_settings(settings)
+
+        before_activate = persist_candidate if commit_on_success else None
+        await engine_mgr.swap_engine(settings, before_activate=before_activate)
     except Exception as e:
         logger.error("Background engine swap failed: %s", e)
     finally:

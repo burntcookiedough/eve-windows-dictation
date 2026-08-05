@@ -19,10 +19,12 @@ class _EngineManager:
         self.failure = failure
         self.calls: list[Settings] = []
 
-    async def swap_engine(self, settings: Settings) -> None:
+    async def swap_engine(self, settings: Settings, *, before_activate=None) -> None:
         self.calls.append(settings)
         if self.failure:
             raise self.failure
+        if before_activate is not None:
+            before_activate()
         self.current = settings.engine
 
     def get_status(self) -> SimpleNamespace:
@@ -82,6 +84,24 @@ def test_candidate_validation_does_not_mutate_committed_memory_or_file() -> None
     assert candidate.whisper_model == "medium"
     assert config.get_settings() is committed
     assert settings_file.read_text(encoding="utf-8") == before
+
+
+def test_commit_persists_before_replacing_committed_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    committed = _committed_settings()
+    candidate = config.build_settings_candidate({"whisper_model": "medium"})
+    observed_committed: list[Settings] = []
+
+    def persist(_settings: Settings) -> None:
+        observed_committed.append(config.get_settings())
+
+    monkeypatch.setattr(config, "_persist_settings", persist)
+
+    config.commit_settings(candidate)
+
+    assert observed_committed == [committed]
+    assert config.get_settings() is candidate
 
 
 @pytest.mark.asyncio
@@ -177,6 +197,28 @@ async def test_failed_mixed_reload_commits_nothing_and_keeps_live_engine(
 
 
 @pytest.mark.asyncio
+async def test_reload_persistence_failure_keeps_engine_and_committed_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    committed = _committed_settings()
+    settings_file = config.get_settings_file_path()
+    before = settings_file.read_text(encoding="utf-8")
+    candidate = config.build_settings_candidate({"whisper_model": "medium"})
+    manager = _EngineManager()
+    monkeypatch.setattr(config, "_persist_settings", lambda _settings: (_ for _ in ()).throw(OSError("disk unavailable")))
+    server_app._settings_preparation_pending = True
+
+    await server_app._swap_engine_background(
+        manager, candidate, commit_on_success=True
+    )
+
+    assert manager.current == "whisper"
+    assert config.get_settings() is committed
+    assert settings_file.read_text(encoding="utf-8") == before
+    assert server_app._settings_preparation_pending is False
+
+
+@pytest.mark.asyncio
 async def test_pending_reload_rejects_new_updates_without_overwriting_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,3 +250,25 @@ async def test_non_reload_patch_commits_immediately(monkeypatch: pytest.MonkeyPa
     assert response["reload_started"] is False
     assert response["settings"]["partial_emission_interval"]["value"] == 0.5
     assert config.get_settings().partial_emission_interval == 0.5
+
+
+@pytest.mark.asyncio
+async def test_non_reload_persistence_failure_keeps_committed_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    committed = _committed_settings()
+    settings_file = config.get_settings_file_path()
+    before = settings_file.read_text(encoding="utf-8")
+    monkeypatch.setattr(
+        server_app, "discover_engines", lambda: [{"id": "whisper", "available": True}]
+    )
+    monkeypatch.setattr(server_app, "get_engine_manager", lambda: _EngineManager())
+    monkeypatch.setattr(config, "_persist_settings", lambda _settings: (_ for _ in ()).throw(OSError("disk unavailable")))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _settings_handler()({"partial_emission_interval": 0.5})
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Could not save settings. Please try again."
+    assert config.get_settings() is committed
+    assert settings_file.read_text(encoding="utf-8") == before

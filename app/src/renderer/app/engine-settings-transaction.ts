@@ -1,5 +1,11 @@
 import type { EngineStatus } from '../../shared/types.js';
 
+export function shouldDisableEngineRevert(
+  preparationActive: boolean,
+): boolean {
+  return preparationActive;
+}
+
 export function shouldRefreshCommittedSettings(
   pending: Record<string, unknown>,
   preparationRequested: boolean,

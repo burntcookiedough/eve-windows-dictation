@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldRefreshCommittedSettings } from '../src/renderer/app/engine-settings-transaction.js';
+import { shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../src/renderer/app/engine-settings-transaction.js';
 import { readFileSync } from 'node:fs';
 
 describe('Engine settings transaction UI', () => {
@@ -8,6 +8,8 @@ describe('Engine settings transaction UI', () => {
     expect(shouldRefreshCommittedSettings(pending, true, true, true, {
       current: 'nemotron', status: 'error', message: 'Preparation failed.',
     })).toBeFalse();
+    expect(shouldDisableEngineRevert(true)).toBeTrue();
+    expect(shouldDisableEngineRevert(false)).toBeFalse();
   });
 
   test('refreshes committed settings before clearing a ready advanced candidate', () => {
@@ -38,5 +40,6 @@ describe('Engine settings transaction UI', () => {
     expect(settingsView).toContain('if (await loadServerSettings())');
     expect(settingsView).toContain('function revertEngineSettings()');
     expect(settingsView).toContain('pendingEngine = {};');
+    expect(settingsView).toContain('disabled={engineApplying || engineRevertDisabled}');
   });
 });
