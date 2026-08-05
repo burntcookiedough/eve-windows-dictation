@@ -63,10 +63,11 @@ describe('speech model presets', () => {
     expect(settings).toContain('whisper_compute_type');
     expect(settings).toContain('Raw Whisper compatibility model, including Medium and Tiny');
     expect(settings).toContain('!stagedPreset');
-    expect(settings).toContain('const { engine: _engine, [stagedPreset.setting]: _model, ...advancedPending }');
+    expect(settings).toContain('function revertEngineSettings()');
+    expect(settings).toContain('pendingEngine = {};');
   });
 
-  test('routes only an actual staged preset through model preparation and preserves advanced pending values on revert', () => {
+  test('routes only an actual staged preset through model preparation and clears the full candidate on revert', () => {
     expect(stagedPresetFromPending({ whisper_compute_type: 'int8' })).toBeNull();
     expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'medium' })).toBeNull();
     expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' })?.id).toBe('recommended-multilingual');

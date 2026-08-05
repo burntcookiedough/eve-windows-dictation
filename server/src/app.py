@@ -14,9 +14,10 @@ from config import (
     API_KEYS,
     RELOAD_KEYS,
     Settings,
+    build_settings_candidate,
+    commit_settings,
     get_settings,
     get_settings_with_metadata,
-    update_settings,
 )
 from diagnostics import collect_diagnostics
 from session.manager import get_session_manager
@@ -33,6 +34,7 @@ from websocket.handler import websocket_handler
 
 logger = logging.getLogger(__name__)
 _engine_tasks: set[asyncio.Task[None]] = set()
+_settings_preparation_pending = False
 
 
 def _safe_settings_validation_detail(error: ValidationError) -> str:
@@ -44,9 +46,15 @@ def _safe_settings_validation_detail(error: ValidationError) -> str:
     return message.removeprefix("Value error, ")
 
 
-def _schedule_engine_swap(engine_mgr: Any, settings: Settings) -> asyncio.Task[None]:
+def _schedule_engine_swap(
+    engine_mgr: Any, settings: Settings, *, commit_on_success: bool = False
+) -> asyncio.Task[None]:
     """Keep background engine loads alive and observe their completion."""
-    task = asyncio.create_task(_swap_engine_background(engine_mgr, settings))
+    task = asyncio.create_task(
+        _swap_engine_background(
+            engine_mgr, settings, commit_on_success=commit_on_success
+        )
+    )
     _engine_tasks.add(task)
     task.add_done_callback(_engine_tasks.discard)
     return task
@@ -155,10 +163,16 @@ def create_app() -> FastAPI:
 
     @app.patch("/settings")
     async def update_server_settings(body: dict[str, Any]) -> dict:
+        global _settings_preparation_pending
         # Filter to only API-managed keys
         patch = {k: v for k, v in body.items() if k in API_KEYS}
         if not patch:
             raise HTTPException(status_code=400, detail="No valid settings provided")
+        if _settings_preparation_pending:
+            raise HTTPException(
+                status_code=409,
+                detail="A settings change is already being prepared.",
+            )
 
         discovered_engines = discover_engines()
         available_engines = [e["id"] for e in discovered_engines if e["available"]]
@@ -180,7 +194,7 @@ def create_app() -> FastAPI:
         needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)
 
         try:
-            new_settings = update_settings(patch)
+            candidate = build_settings_candidate(patch)
         except ValidationError as e:
             raise HTTPException(
                 status_code=400, detail=_safe_settings_validation_detail(e)
@@ -190,13 +204,17 @@ def create_app() -> FastAPI:
         reload_started = False
         if needs_reload:
             reload_started = True
-            _schedule_engine_swap(engine_mgr, new_settings)
+            _settings_preparation_pending = True
+            _schedule_engine_swap(engine_mgr, candidate, commit_on_success=True)
+            committed_settings = get_settings()
+        else:
+            committed_settings = commit_settings(candidate)
 
         status = engine_mgr.get_status()
         session_mgr = get_session_manager()
 
         response: dict[str, Any] = {
-            "settings": get_settings_with_metadata(new_settings),
+            "settings": get_settings_with_metadata(committed_settings),
             "engine_status": serialize_engine_status(status),
             "available_engines": available_engines,
             "reload_required": needs_reload,
@@ -242,8 +260,16 @@ def create_app() -> FastAPI:
     return app
 
 
-async def _swap_engine_background(engine_mgr: Any, settings: Settings) -> None:
+async def _swap_engine_background(
+    engine_mgr: Any, settings: Settings, *, commit_on_success: bool = False
+) -> None:
+    global _settings_preparation_pending
     try:
         await engine_mgr.swap_engine(settings)
+        if commit_on_success:
+            commit_settings(settings)
     except Exception as e:
         logger.error("Background engine swap failed: %s", e)
+    finally:
+        if commit_on_success:
+            _settings_preparation_pending = False

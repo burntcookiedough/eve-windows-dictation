@@ -12,6 +12,7 @@
   import { getServerManagementMode, serverStatusState } from '../server-status';
   import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
+  import { shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -80,6 +81,9 @@
   let lastServerSettingsAttemptKey = $state<string | null>(null);
   let compatibilityControlsOpen = $state(false);
   let engineApplying = $state(false);
+  let enginePreparationRequested = $state(false);
+  let enginePreparationObserved = $state(false);
+  let refreshingCommittedSettings = $state(false);
   let availableEngines = $state<string[]>([]);
   let engineApplyError = $state('');
 
@@ -265,8 +269,8 @@
     }
   }
 
-  async function loadServerSettings() {
-    if (serverSettingsLoading) return;
+  async function loadServerSettings(): Promise<boolean> {
+    if (serverSettingsLoading) return false;
     serverSettingsLoading = true;
     try {
       const serverData = await window.murmurMain.getServerSettings();
@@ -274,11 +278,13 @@
       engineStatus = serverData.engine_status;
       availableEngines = serverData.available_engines ?? [];
       serverConnected = true;
+      return true;
     } catch {
       serverSettings = null;
       engineStatus = null;
       availableEngines = [];
       serverConnected = false;
+      return false;
     } finally {
       serverSettingsLoading = false;
     }
@@ -433,11 +439,12 @@
     engineApplyError = '';
   }
 
-  function revertPreset(): void {
-    if (!stagedPreset) return;
-    const { engine: _engine, [stagedPreset.setting]: _model, ...advancedPending } = pendingEngine;
-    pendingEngine = advancedPending;
+  function revertEngineSettings(): void {
+    pendingEngine = {};
+    enginePreparationRequested = false;
+    enginePreparationObserved = false;
     engineApplyError = '';
+    void loadServerSettings();
   }
 
   async function applyEngineSettings() {
@@ -452,7 +459,12 @@
       serverSettings = response.settings;
       engineStatus = response.engine_status;
       availableEngines = response.available_engines ?? availableEngines;
-      if (!response.reload_started && response.engine_status.status === 'ready' && !response.engine_status.pending) pendingEngine = {};
+      if (response.reload_started) {
+        enginePreparationRequested = true;
+        enginePreparationObserved = response.engine_status.status === 'loading' || !!response.engine_status.pending;
+      } else if (response.engine_status.status === 'ready' && !response.engine_status.pending) {
+        pendingEngine = {};
+      }
     } catch (error) {
       // Keep pending changes on failure so user can retry
       engineApplyError = error instanceof Error ? error.message : 'Failed to apply engine settings.';
@@ -462,16 +474,39 @@
   }
 
   $effect(() => {
+    if (enginePreparationRequested && (sharedEngineStatus?.status === 'loading' || !!sharedEngineStatus?.pending)) {
+      enginePreparationObserved = true;
+    }
     if (Object.keys(pendingEngine).length === 0) return;
     if (preparationFailed) {
       engineApplyError = sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.';
       return;
     }
-    if (stagedPreset && presetMatchesReadyEngine(stagedPreset, sharedEngineStatus)) {
-      pendingEngine = {};
-      engineApplyError = '';
+    if (shouldRefreshCommittedSettings(
+      pendingEngine,
+      enginePreparationRequested,
+      enginePreparationObserved,
+      preparationFailed,
+      sharedEngineStatus,
+    )) {
+      void refreshCommittedSettings();
     }
   });
+
+  async function refreshCommittedSettings(): Promise<void> {
+    if (refreshingCommittedSettings) return;
+    refreshingCommittedSettings = true;
+    try {
+      if (await loadServerSettings()) {
+        pendingEngine = {};
+        enginePreparationRequested = false;
+        enginePreparationObserved = false;
+        engineApplyError = '';
+      }
+    } finally {
+      refreshingCommittedSettings = false;
+    }
+  }
 </script>
 
 <div class="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[640px] flex-col px-4 py-4 sm:px-6">
@@ -774,7 +809,7 @@
             {#if stagedPreset && !externalMode}
               <div class="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
-                <button type="button" onclick={revertPreset} disabled={engineApplying} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
+                <button type="button" onclick={revertEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
               </div>
               {#if engineApplyError}<p class="mt-2 text-xs text-red-300">{engineApplyError}</p>{/if}
             {/if}
@@ -941,21 +976,26 @@
             <div class="flex flex-wrap items-center justify-between gap-3">
               <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>
               {#if !stagedPreset}
-                <button
-                  type="button"
-                  onclick={applyEngineSettings}
-                  disabled={engineApplying || externalMode}
-                  class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-                    {engineApplying || externalMode
-                      ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                      : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
-                >
-                  {#if engineApplying}
-                    Preparing…
-                  {:else}
-                    Apply compatibility changes
-                  {/if}
-                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onclick={applyEngineSettings}
+                    disabled={engineApplying || externalMode}
+                    class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                      {engineApplying || externalMode
+                        ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
+                  >
+                    {#if engineApplying}
+                      Preparing…
+                    {:else if preparationFailed}
+                      Retry compatibility changes
+                    {:else}
+                      Apply compatibility changes
+                    {/if}
+                  </button>
+                  <button type="button" onclick={revertEngineSettings} disabled={engineApplying || externalMode} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying || externalMode ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
+                </div>
               {/if}
             </div>
             {#if engineApplyError}

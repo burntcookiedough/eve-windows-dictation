@@ -424,20 +424,29 @@ def get_settings() -> Settings:
     return _settings
 
 
-def update_settings(patch: dict[str, Any]) -> Settings:
-    global _settings
+def build_settings_candidate(patch: dict[str, Any]) -> Settings:
+    """Validate a complete settings candidate without committing it."""
     current = get_settings()
     current_dict = current.model_dump()
     current_dict.update(patch)
     try:
-        updated = Settings(**current_dict)
+        return Settings(**current_dict)
     except ValidationError as e:
         logger.warning("Rejected invalid settings update: %s", e)
         raise
-    _settings = updated
-    # Persist non-default values
-    _persist_settings(_settings)
-    return _settings
+
+
+def commit_settings(candidate: Settings) -> Settings:
+    """Commit one validated settings candidate to memory and disk."""
+    global _settings
+    _settings = candidate
+    _persist_settings(candidate)
+    return candidate
+
+
+def update_settings(patch: dict[str, Any]) -> Settings:
+    """Immediately commit a validated settings patch for non-reload callers."""
+    return commit_settings(build_settings_candidate(patch))
 
 
 def _persist_settings(settings: Settings) -> None:

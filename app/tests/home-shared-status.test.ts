@@ -201,6 +201,7 @@ describe('Home and shared server status', () => {
     expect(mount).toContain('getSettings');
     expect(mount).not.toContain('restartServer');
     expect(mount).not.toContain('updateServerSettings');
+    expect(mount).not.toContain('prepare');
     expect(homeView).toContain('onclick={retry}');
     expect(homeView).toContain('External server — Eve cannot restart this endpoint.');
     expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.');
