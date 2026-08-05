@@ -214,7 +214,7 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=500,
                     detail="Could not save settings. Please try again.",
-                )
+                ) from None
 
         status = engine_mgr.get_status()
         session_mgr = get_session_manager()
