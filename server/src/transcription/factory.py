@@ -7,6 +7,7 @@ import gc
 import importlib.util
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -332,15 +333,30 @@ class EngineManager:
         with self._lock:
             return len(self._active_sessions)
 
-    async def swap_engine(self, new_settings: Settings) -> None:
+    async def swap_engine(
+        self,
+        new_settings: Settings,
+        *,
+        before_activate: Callable[[], None] | None = None,
+    ) -> None:
         # Lazily create the asyncio lock (must be created in an event loop context)
         if self._swap_lock is None:
             self._swap_lock = asyncio.Lock()
 
         async with self._swap_lock:
-            await self._swap_engine_inner(new_settings)
+            if before_activate is None:
+                await self._swap_engine_inner(new_settings)
+            else:
+                await self._swap_engine_inner(
+                    new_settings, before_activate=before_activate
+                )
 
-    async def _swap_engine_inner(self, new_settings: Settings) -> None:
+    async def _swap_engine_inner(
+        self,
+        new_settings: Settings,
+        *,
+        before_activate: Callable[[], None] | None = None,
+    ) -> None:
         try:
             with self._lock:
                 if self._shutting_down:
@@ -374,48 +390,59 @@ class EngineManager:
                 await loop.run_in_executor(None, old_engine.shutdown)
                 _force_free_vram()
 
+            async def restore_previous_engine() -> None:
+                if not should_unload_old or self._shutting_down:
+                    return
+                logger.warning(
+                    "Engine activation failed; attempting to restore previous engine"
+                )
+                try:
+                    restored = await loop.run_in_executor(
+                        None, lambda: _create_engine(self._settings)
+                    )
+                    discard_restored = False
+                    with self._lock:
+                        if self._shutting_down:
+                            discard_restored = True
+                        else:
+                            self._engine = restored
+                    if discard_restored:
+                        await loop.run_in_executor(None, restored.shutdown)
+                    else:
+                        logger.info("Previous engine restored successfully")
+                except Exception as restore_error:
+                    logger.error("Failed to restore previous engine: %s", restore_error)
+
             try:
                 new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
             except Exception as create_error:
-                if should_unload_old and not self._shutting_down:
-                    # Old engine was unloaded; attempt to restore it
-                    logger.warning(
-                        "New engine creation failed; attempting to restore previous engine"
-                    )
-                    try:
-                        restored = await loop.run_in_executor(
-                            None, lambda: _create_engine(self._settings)
-                        )
-                        discard_restored = False
-                        with self._lock:
-                            if self._shutting_down:
-                                discard_restored = True
-                            else:
-                                self._engine = restored
-                        if discard_restored:
-                            await loop.run_in_executor(None, restored.shutdown)
-                        else:
-                            logger.info("Previous engine restored successfully")
-                    except Exception as restore_error:
-                        logger.error(
-                            "Failed to restore previous engine: %s", restore_error
-                        )
+                await restore_previous_engine()
                 raise create_error
 
-            discard_new_engine = False
-            with self._lock:
-                if self._shutting_down:
-                    discard_new_engine = True
-                    old_engine = None
-                    has_active = False
-                else:
-                    old_engine = self._engine
-                    self._engine = new_engine
-                    self._settings = new_settings
-                    has_active = (
-                        old_engine is not None
-                        and old_engine in self._active_sessions.values()
-                    )
+            try:
+                discard_new_engine = False
+                with self._lock:
+                    if self._shutting_down:
+                        discard_new_engine = True
+                        old_engine = None
+                        has_active = False
+                    else:
+                        if before_activate is not None:
+                            before_activate()
+                        old_engine = self._engine
+                        self._engine = new_engine
+                        self._settings = new_settings
+                        has_active = (
+                            old_engine is not None
+                            and old_engine in self._active_sessions.values()
+                        )
+            except Exception:
+                try:
+                    await loop.run_in_executor(None, new_engine.shutdown)
+                except Exception as shutdown_error:
+                    logger.error("Failed to discard unactivated engine: %s", shutdown_error)
+                await restore_previous_engine()
+                raise
 
             if discard_new_engine:
                 logger.info("Discarding engine that finished loading during shutdown")

@@ -152,6 +152,45 @@ async def test_swap_engine_restores_on_failure(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_swap_engine_restores_old_engine_when_activation_callback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(engine="whisper", unload_before_swap=True)
+    monkeypatch.setattr(factory_module, "_get_available_engine_ids", lambda: ["whisper"])
+    _stub_gpu(monkeypatch)
+
+    created: list[_DummyEngine] = []
+
+    def _fake_create(s: Settings) -> _DummyEngine:
+        engine = _DummyEngine(s.engine)
+        created.append(engine)
+        return engine
+
+    shutdown_calls: list[str] = []
+    monkeypatch.setattr(factory_module, "_create_engine", _fake_create)
+    monkeypatch.setattr(_DummyEngine, "shutdown", lambda self: shutdown_calls.append(self._engine_id))
+
+    manager = factory_module.EngineManager(settings)
+    manager._engine = _DummyEngine("whisper")
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        await manager.swap_engine(
+            Settings(
+                engine="whisper",
+                whisper_model="medium",
+                unload_before_swap=True,
+            ),
+            before_activate=lambda: (_ for _ in ()).throw(OSError("disk unavailable")),
+        )
+
+    assert manager._engine is created[1]
+    assert manager._engine._engine_id == "whisper"
+    assert manager._settings is settings
+    assert len(created) == 2
+    assert shutdown_calls == ["whisper", "whisper"]
+
+
+@pytest.mark.asyncio
 async def test_swap_engine_restore_also_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """When both new engine and restore fail, _engine is None and original error propagates."""
     settings = Settings(engine="whisper", unload_before_swap=True)
