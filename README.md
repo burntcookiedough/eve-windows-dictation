@@ -47,17 +47,19 @@ The default packaged path keeps captured audio and transcription on the local ma
 
 Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
 
-## Install the current public release
+## Installation and release status
 
-[Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0). This is the current public release. The small `nsis-web` installer downloads the application payload during installation, and internet access is required again if an engine needs its model. The release is unsigned and may trigger Windows reputation warnings.
+The current source tree is **Eve v0.8.1 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact; use the [development setup](#development) below to run it locally.
+
+### Historical v0.7.0 artifact record
+
+GitHub exposes the [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0) and these uploaded asset details, but the release is not marked immutable and its own notes describe it as prepared rather than published. The table is retained as historical evidence only, not as a current installation instruction.
 
 | Asset | Bytes | SHA-256 |
 | --- | ---: | --- |
 | `Eve.Web.Setup.0.7.0.exe` | 654,555 | `e27646c15be0563c45e35b34b157105af2a61424ef1bff6cf8a9c72f8a763e4a` |
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
-
-The current source tree also contains **Eve v0.8.1 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact.
 
 ## Development
 
