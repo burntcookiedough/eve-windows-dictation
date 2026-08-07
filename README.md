@@ -1,62 +1,67 @@
 # Eve for Windows
 
-Local dictation for Windows, built as an Electron desktop client with a packaged Python transcription service.
+<p><img src="https://img.shields.io/badge/v0.8.1-orange?style=flat-square" alt="v0.8.1"> <strong>Source status: v0.8.1 pre-alpha · unreleased</strong></p>
 
-<img src="https://img.shields.io/badge/v0.8.1-orange?style=flat-square" alt="v0.8.1">
+## Local-first dictation that stays in your flow
 
-> [!IMPORTANT]
-> Current source builds use the visible **Eve** product, executable, installer, and shortcut names, the `io.github.burntcookiedough.eve` AppUserModelID, and a separate `%APPDATA%\Eve` profile. Eve v0.7.0 is public; historical v0.6.3 **Murmur** assets remain immutable. The frozen installer GUID, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable for upgrade compatibility. Eve does not import or delete Murmur History, settings, or other personal state.
+Eve is a Windows desktop dictation app for turning speech into usable text quickly. Hold a global hotkey, speak into a calm click-through overlay, then keep working: your text can go to the clipboard, local History, or Insights without leaving the app.
 
-## What works today
+![Eve workspace showing History, Insights, and Settings](docs/architecture/assets/eve-gate-5-application-reference.png)
 
-- Global hotkeys for Fast and Long Dictation
-- A click-through recording overlay with microphone levels and partial text
-- Local transcription through faster-whisper or Nemotron
-- Automatic clipboard copy and paste, with optional clipboard restoration
-- Searchable local History and aggregate Insights
-- Packaged server lifecycle controls and privacy-bounded diagnostics
-- CPU fallback and CUDA diagnostics for supported NVIDIA systems
+![Eve recording overlay states](docs/architecture/assets/eve-gate-5-overlay-reference.png)
 
-The desktop client sends 16 kHz mono PCM audio through its main process to the packaged Python service over a WebSocket on the same machine. The service returns partial and final text, and History is stored in a local SQLite database.
+### The everyday workflow
 
-```mermaid
-flowchart LR
-    Mic["Microphone"] --> Capture["Electron audio capture"]
-    Capture --> Socket["Local WebSocket protocol"]
-    Socket --> ASR["Packaged Python ASR service"]
-    ASR --> Result["Overlay, clipboard, and local History"]
-```
+1. Press the dictation hotkey and speak.
+2. Watch the overlay show microphone levels, partial text, and long-dictation state.
+3. Stop when you are done. Eve can copy the result, paste it into the active app, and keep a searchable local record.
 
-Models are not embedded in the installer payload. The selected engine downloads its model from Hugging Face on first use. The optional external-server mode changes the data boundary: audio is sent to the server URL configured by the user rather than the packaged local service.
+## Built for real work
 
-## Current release
+- Fast Dictation and Long Dictation modes with a global hotkey.
+- A click-through overlay that keeps recording state visible without taking focus.
+- Automatic clipboard copy and paste, with optional clipboard restoration.
+- Searchable local History and aggregate Insights.
+- A packaged Python transcription service with CPU fallback and CUDA diagnostics for supported NVIDIA systems.
+- Privacy-bounded diagnostics and explicit server controls.
 
-[Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0) (release ID `362027119`, tag target `d03c7eab7e3e10afc2f62662d25ccd63427c22e9`). The release is unsigned and may trigger Windows reputation warnings.
+The desktop client captures 16 kHz mono audio and sends it over a local WebSocket to the packaged Python service. The service returns partial and final text for the overlay, clipboard, and local History.
+
+## Choose your model
+
+Models are downloaded from their public Hugging Face repositories the first time you use them; they are not embedded in the installer. The catalog below reflects the built-in choices exposed by Eve.
+
+| Choice | Best for | Engine and model |
+| --- | --- | --- |
+| **Nemotron English Performance** | Focused English dictation on capable hardware | [NVIDIA Nemotron Speech Streaming](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
+| **Large V3 Turbo — Recommended Multilingual** | A balanced everyday multilingual option | [faster-whisper-large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) |
+| **Large V3 — Maximum Multilingual Accuracy** | Quality-first multilingual work | [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) |
+| **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
+| **Medium / Tiny — Advanced** | Raw engine choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
+
+Eve derives device and precision availability from the installed PyTorch and CTranslate2 runtimes. `auto` is the safest starting point; a particular device/precision/model combination still depends on the local driver, VRAM, and runtime capabilities. The catalog is not a promise of every device-by-precision combination.
+
+## Local-first, with clear network boundaries
+
+The default packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. External-server mode is an explicit choice: when enabled, audio is sent to the server URL configured by the user rather than the packaged local service.
+
+Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
+
+## Install the current public release
+
+[Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0). This is the current public release. The small `nsis-web` installer downloads the application payload during installation, and internet access is required again if an engine needs its model. The release is unsigned and may trigger Windows reputation warnings.
 
 | Asset | Bytes | SHA-256 |
-|---|---:|---|
+| --- | ---: | --- |
 | `Eve.Web.Setup.0.7.0.exe` | 654,555 | `e27646c15be0563c45e35b34b157105af2a61424ef1bff6cf8a9c72f8a763e4a` |
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-The small `nsis-web` installer downloads the large application payload during installation. Internet access is also required when an engine fetches its model for the first time.
-
-## Engineering record
-
-This repository preserves the original commit authorship and the later work that made the Windows release path dependable. The work added through v0.6.3 includes:
-
-- portable Python discovery and packaged-runtime validation;
-- constrained release publication and corrected NSIS-web download targeting;
-- visible model-download progress and estimated time remaining;
-- broken-pipe containment, protocol-readiness gating, and stale microphone-start cancellation;
-- privacy-bounded diagnostics and History layout corrections;
-- repeatable release checks with exact artifact sizes and digests.
-
-The [v0.6.3 engineering case study](docs/archive/engineering/v0.6.3-release-case-study.md) maps these claims to pull requests, commits, tests, and release artifacts. Planned component downloads and new ASR profiles are documented in the [roadmap](docs/project/roadmap.md) as research, not shipped functionality.
+The current source tree also contains **Eve v0.8.1 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact.
 
 ## Development
 
-Development and packaging target Windows. If the repository is opened from WSL, run Bun, uv, Python, pytest, and packaging commands through Windows PowerShell so platform-specific environments are not replaced with Linux binaries.
+Development and packaging target Windows. If you open the repository from WSL, run Bun, uv, Python, pytest, and packaging commands through Windows PowerShell so platform-specific environments are not replaced with Linux binaries.
 
 ```powershell
 # Server
@@ -70,14 +75,14 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --extra all --frozen` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md) for release and packaging details, [docs/protocol.md](docs/protocol.md) for the WebSocket protocol, and [contributing](.github/CONTRIBUTING.md) before opening a pull request.
+Use `uv sync --extra all --frozen` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
 
-## Privacy and support
+## Compatibility and provenance
 
-The default packaged path keeps captured audio and transcription on the local machine. Network access is used to download the installer payload and first-use model files. External-server mode is an explicit exception to local processing. See [PRIVACY.md](PRIVACY.md) for the data boundaries and [support](.github/SUPPORT.md) for support expectations.
+Eve preserves the upgrade boundaries established by its Windows history: the visible Eve product and profile, frozen installer identity, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable. Eve uses a separate `%APPDATA%\Eve` profile and does not automatically import or delete Murmur History, settings, or other personal state. Historical Murmur v0.6.3 assets remain immutable.
 
-Security reports should follow [SECURITY.md](.github/SECURITY.md) and should never include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths.
+The [v0.6.3 engineering case study](docs/archive/engineering/v0.6.3-release-case-study.md) records the release-hardening work behind the current Windows path. The [roadmap](docs/project/roadmap.md) separates research and planned component downloads from shipped functionality.
 
-## License and provenance
+## License
 
-The source is available under the [MIT License](LICENSE). Eve contains software derived from the MIT-licensed Murmur project. Original copyright notices and commit authorship are preserved; later implementation and release-hardening work is identified separately. See [NOTICE.md](NOTICE.md).
+The source is available under the [MIT License](LICENSE). Eve contains software derived from the MIT-licensed Murmur project; original copyright notices and commit authorship are preserved. See [NOTICE.md](NOTICE.md).
