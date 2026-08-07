@@ -14,7 +14,8 @@ try:
 except ImportError:
     pass
 
-from faster_whisper import WhisperModel, download_model
+from faster_whisper import WhisperModel
+from huggingface_hub import snapshot_download
 from numpy.typing import NDArray
 import numpy as np
 
@@ -46,6 +47,13 @@ _PUBLIC_BUILTIN_MODELS = {
     "small": "Systran/faster-whisper-small",
     "tiny": "Systran/faster-whisper-tiny",
 }
+_WHISPER_MODEL_ALLOW_PATTERNS = (
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+)
 
 
 @dataclass(frozen=True)
@@ -107,16 +115,22 @@ def _resolve_repo_id(model: str) -> str | None:
 
 
 def _download_repo(repo_id: str) -> str:
-    """Download curated public models anonymously and preserve custom auth.
+    """Download a Whisper repository with deterministic Windows cache fallback.
 
     ``huggingface_hub`` otherwise sends a saved token implicitly. A stale token
     can make a public repository return 401, so Eve's fixed curated catalog uses
-    explicit anonymous access. Advanced/custom identifiers retain the library's
-    existing authentication behavior.
+    explicit anonymous access. Its symlink-capability probe is process-global;
+    serializing this small snapshot prevents a Windows privilege race from
+    attempting a symlink after fallback was selected. Advanced/custom
+    identifiers retain the library's existing authentication behavior.
     """
+    kwargs: dict[str, object] = {
+        "allow_patterns": list(_WHISPER_MODEL_ALLOW_PATTERNS),
+        "max_workers": 1,
+    }
     if repo_id in _PUBLIC_BUILTIN_MODELS.values():
-        return download_model(repo_id, use_auth_token=False)
-    return download_model(repo_id)
+        kwargs["token"] = False
+    return snapshot_download(repo_id, **kwargs)
 
 
 def _get_cuda_active(device: str) -> bool:

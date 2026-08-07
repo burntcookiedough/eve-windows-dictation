@@ -81,16 +81,31 @@ def test_public_whisper_builtin_models_resolve_to_registered_upstreams(
 def test_curated_whisper_presets_force_anonymous_download(
     repo_id: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    def fake_download(requested_repo: str, **kwargs: object) -> str:
-        calls.append((requested_repo, kwargs.get("use_auth_token")))
+    def fake_snapshot_download(requested_repo: str, **kwargs: object) -> str:
+        calls.append((requested_repo, kwargs))
         return "cache/snapshot"
 
-    monkeypatch.setattr(whisper, "download_model", fake_download)
+    monkeypatch.setattr(whisper, "snapshot_download", fake_snapshot_download)
 
     assert whisper._download_repo(repo_id) == "cache/snapshot"
-    assert calls == [(repo_id, False)]
+    assert calls == [
+        (
+            repo_id,
+            {
+                "allow_patterns": [
+                    "config.json",
+                    "preprocessor_config.json",
+                    "model.bin",
+                    "tokenizer.json",
+                    "vocabulary.*",
+                ],
+                "max_workers": 1,
+                "token": False,
+            },
+        )
+    ]
 
 
 def test_custom_whisper_model_preserves_existing_authentication(
@@ -98,16 +113,47 @@ def test_custom_whisper_model_preserves_existing_authentication(
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 
-    def fake_download(requested_repo: str, **kwargs: object) -> str:
+    def fake_snapshot_download(requested_repo: str, **kwargs: object) -> str:
         calls.append((requested_repo, kwargs))
         return "cache/private-snapshot"
 
-    monkeypatch.setattr(whisper, "download_model", fake_download)
+    monkeypatch.setattr(whisper, "snapshot_download", fake_snapshot_download)
 
     assert whisper._download_repo("private-org/custom-whisper") == (
         "cache/private-snapshot"
     )
-    assert calls == [("private-org/custom-whisper", {})]
+    assert calls == [
+        (
+            "private-org/custom-whisper",
+            {
+                "allow_patterns": [
+                    "config.json",
+                    "preprocessor_config.json",
+                    "model.bin",
+                    "tokenizer.json",
+                    "vocabulary.*",
+                ],
+                "max_workers": 1,
+            },
+        )
+    ]
+
+
+def test_whisper_snapshot_download_serializes_windows_symlink_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public download boundary avoids concurrent Windows link creation."""
+
+    def fake_snapshot_download(_repo_id: str, **kwargs: object) -> str:
+        if kwargs.get("max_workers") != 1:
+            raise OSError(1314, "A required privilege is not held by the client")
+        return "cache/serialized-snapshot"
+
+    monkeypatch.setattr(whisper, "snapshot_download", fake_snapshot_download)
+
+    assert whisper._download_repo("Systran/faster-whisper-large-v3") == (
+        "cache/serialized-snapshot"
+    )
 
 
 def test_local_whisper_path_skips_hub_resolution_and_download(
@@ -125,7 +171,7 @@ def test_local_whisper_path_skips_hub_resolution_and_download(
         raise AssertionError("local paths must not access the Hub")
 
     monkeypatch.setattr(whisper, "get_repo_cache_status", unexpected_hub_access)
-    monkeypatch.setattr(whisper, "download_model", unexpected_hub_access)
+    monkeypatch.setattr(whisper, "snapshot_download", unexpected_hub_access)
     monkeypatch.setattr(whisper, "WhisperModel", FakeWhisperModel)
     monkeypatch.setattr(whisper, "_get_cuda_active", lambda _device: False)
 
