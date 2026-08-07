@@ -133,7 +133,7 @@ def test_whisper_uncached_model_reports_downloading(
     monkeypatch.setattr(whisper, "get_repo_cache_status", lambda _repo: cache_status)
     monkeypatch.setattr(whisper, "WhisperModel", FakeWhisperModel)
     monkeypatch.setattr(
-        whisper, "download_model", lambda _repo, **_kwargs: "cache/snapshot"
+        whisper, "snapshot_download", lambda _repo, **_kwargs: "cache/snapshot"
     )
     monkeypatch.setattr(whisper, "_get_cuda_active", lambda _device: False)
 
