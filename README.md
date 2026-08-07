@@ -65,6 +65,8 @@ GitHub exposes the [v0.7.0 release record](https://github.com/burntcookiedough/e
 
 Development and packaging target Windows. If you open the repository from WSL, run Bun, uv, Python, pytest, and packaging commands through Windows PowerShell so platform-specific environments are not replaced with Linux binaries.
 
+The supported Windows installer packaging target is `nsis-web`; packaging remains a release-authorized step.
+
 ```powershell
 # Server
 cd server
