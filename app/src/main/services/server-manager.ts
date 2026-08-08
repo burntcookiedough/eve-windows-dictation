@@ -21,13 +21,16 @@ import {
   type HealthState,
   type ServerProcessSnapshot,
 } from './server-health.js';
+import {
+  START_HEALTH_TIMEOUT_MS,
+  START_PID_TIMEOUT_MS,
+  waitForPidFile,
+} from './server-startup.js';
 
 const log = createLogger('ServerManager');
 
 const MAX_LOG_ENTRIES = 500;
 const HEALTH_POLL_INTERVAL_MS = 3000;
-const START_PID_TIMEOUT_MS = 30000;
-const START_HEALTH_TIMEOUT_MS = 180000;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
@@ -584,9 +587,17 @@ export class ServerManager {
       });
 
       // Wait for PID file to appear (indicates server is ready)
-      const pidData = await this.waitForPidFile(START_PID_TIMEOUT_MS, spawnStartedAt);
+      const pidData = await waitForPidFile(
+        () => this.readPidFile(false),
+        START_PID_TIMEOUT_MS,
+        spawnStartedAt,
+      );
       if (!pidData) {
         throw new Error('Server did not write PID file within timeout');
+      }
+
+      if (!(await this.isOwnedServerProcess(pidData.pid, pidData.startedAt))) {
+        throw new Error('Server process ownership could not be verified');
       }
 
       // Wait for health check to pass
@@ -615,27 +626,6 @@ export class ServerManager {
         this.childProcess = null;
       }
     }
-  }
-
-  /**
-   * Wait for the PID file to appear.
-   */
-  private async waitForPidFile(
-    timeoutMs: number,
-    expectedStartedAfterMs?: number
-  ): Promise<ServerPidFile | null> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      const pidData = this.readPidFile(false);
-      if (
-        pidData &&
-        (expectedStartedAfterMs === undefined || pidData.startedAt >= expectedStartedAfterMs)
-      ) {
-        return pidData;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    return null;
   }
 
   /**
