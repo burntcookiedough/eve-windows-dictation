@@ -25,7 +25,10 @@ export async function waitForPidFile(
   }));
   const startedAt = now();
 
-  while (now() - startedAt < timeoutMs) {
+  while (true) {
+    const remaining = timeoutMs - (now() - startedAt);
+    if (remaining <= 0) break;
+
     const pidData = readPidFile();
     if (
       pidData &&
@@ -33,7 +36,7 @@ export async function waitForPidFile(
     ) {
       return pidData;
     }
-    await sleep(200);
+    await sleep(Math.min(200, remaining));
   }
 
   return null;

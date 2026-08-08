@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   START_HEALTH_TIMEOUT_MS,
   START_PID_TIMEOUT_MS,
@@ -37,12 +38,32 @@ describe('packaged server startup timing', () => {
     expect(clock.elapsed()).toBeLessThanOrEqual(START_PID_TIMEOUT_MS);
   });
 
-  test('remains bounded at the cold-start PID allowance while health stays separate', async () => {
+  test('caps a non-aligned timeout without extending the bounded wait', async () => {
     const clock = fakeClock();
-    const result = await waitForPidFile(() => null, START_PID_TIMEOUT_MS, undefined, clock);
+    const result = await waitForPidFile(() => null, 30_001, undefined, clock);
 
     expect(result).toBeNull();
-    expect(clock.elapsed()).toBe(START_PID_TIMEOUT_MS);
+    expect(clock.elapsed()).toBe(30_001);
     expect(START_HEALTH_TIMEOUT_MS).toBe(180_000);
+  });
+
+  test('checks PID ownership before health readiness in ServerManager startup', () => {
+    const source = readFileSync(
+      new URL('../src/main/services/server-manager.ts', import.meta.url),
+      'utf8',
+    );
+    const pidWait = source.indexOf('const pidData = await waitForPidFile');
+    const ownership = source.indexOf(
+      'await this.isOwnedServerProcess(pidData.pid, pidData.startedAt)',
+      pidWait,
+    );
+    const health = source.indexOf('const health = await this.waitForHealth', ownership);
+
+    expect(pidWait).toBeGreaterThanOrEqual(0);
+    expect(ownership).toBeGreaterThan(pidWait);
+    expect(health).toBeGreaterThan(ownership);
+    expect(source.slice(ownership, health)).toContain(
+      "throw new Error('Server process ownership could not be verified')",
+    );
   });
 });

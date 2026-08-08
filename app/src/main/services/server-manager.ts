@@ -596,6 +596,10 @@ export class ServerManager {
         throw new Error('Server did not write PID file within timeout');
       }
 
+      if (!(await this.isOwnedServerProcess(pidData.pid, pidData.startedAt))) {
+        throw new Error('Server process ownership could not be verified');
+      }
+
       // Wait for health check to pass
       const health = await this.waitForHealth(pidData.port, START_HEALTH_TIMEOUT_MS);
       if (!health) {
