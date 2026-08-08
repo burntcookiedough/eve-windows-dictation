@@ -44,6 +44,7 @@ describe('packaged server startup timing', () => {
 
     expect(result).toBeNull();
     expect(clock.elapsed()).toBe(30_001);
+    expect(START_PID_TIMEOUT_MS).toBe(180_000);
     expect(START_HEALTH_TIMEOUT_MS).toBe(180_000);
   });
 
