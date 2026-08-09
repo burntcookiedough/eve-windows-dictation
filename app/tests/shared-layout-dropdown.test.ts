@@ -79,6 +79,12 @@ describe('shared primary-page and dropdown foundation', () => {
     expect(dropdown).toContain('button?.focus({ preventScroll: true })');
   });
 
+  test('visibly marks the keyboard-active option without replacing selected or hover styling', () => {
+    expect(dropdown).toContain("option.value === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'");
+    expect(dropdown).toContain("index === activeIndex ? 'ring-1 ring-inset ring-zinc-300/70' : ''");
+    expect(dropdown).toContain('aria-activedescendant={open ? activeOptionId : undefined}');
+  });
+
   test('moves through enabled options and wraps typeahead deterministically', () => {
     expect(findFirstEnabledIndex(options)).toBe(0);
     expect(findLastEnabledIndex(options)).toBe(3);

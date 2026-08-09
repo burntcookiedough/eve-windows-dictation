@@ -248,7 +248,7 @@
           aria-disabled={option.disabled || undefined}
           aria-describedby={option.description ? `${listboxId}-option-${index}-description` : undefined}
           disabled={option.disabled}
-          class="flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 {option.value === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'}"
+          class="flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 {option.value === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'} {index === activeIndex ? 'ring-1 ring-inset ring-zinc-300/70' : ''}"
           onclick={() => handleOptionClick(index)}
         >
           <span class="min-w-0 truncate">{option.label}</span>
