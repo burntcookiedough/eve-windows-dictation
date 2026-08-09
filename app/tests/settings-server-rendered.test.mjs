@@ -1,42 +1,71 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, promises as fs } from 'node:fs';
-import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
 const fixtureTempRoot = resolve(tmpdir());
 const screenshotDir = resolve(fixtureTempRoot, 'eve-phase3-settings-server-screenshots');
+const viteStartPort = 5173;
+const maxViteStartAttempts = 32;
 
-function isLoopbackPortFree(port) {
-  return new Promise((resolvePort) => {
-    const server = net.createServer();
-    server.once('error', () => resolvePort(false));
-    server.once('listening', () => server.close(() => resolvePort(true)));
-    server.listen(port, '127.0.0.1');
+function isAddressInUseError(message) {
+  return /EADDRINUSE|address already in use|address-in-use|port \d+ is already in use/i.test(message);
+}
+
+function spawnVite(port) {
+  return Bun.spawn([
+    'node',
+    resolve(appRoot, 'node_modules/vite/bin/vite.js'),
+    '--host',
+    '127.0.0.1',
+  ], {
+    cwd: appRoot,
+    env: { ...process.env, MURMUR_DEV_PORT: String(port) },
+    stdout: 'ignore',
+    stderr: 'pipe',
+    windowsHide: true,
   });
 }
 
-async function findOpenLoopbackPort(startPort = 5173) {
-  for (let port = startPort; port <= 65535; port += 1) {
-    if (await isLoopbackPortFree(port)) return port;
-  }
-  throw new Error('No available loopback port found for the Vite fixture server');
+async function stopOwnedVite(viteProcess) {
+  if (viteProcess.exitCode === null) viteProcess.kill();
+  await viteProcess.exited;
 }
 
-const vitePort = await findOpenLoopbackPort();
-const viteProcess = Bun.spawn([
-  'node',
-  resolve(appRoot, 'node_modules/vite/bin/vite.js'),
-  '--host',
-  '127.0.0.1',
-], {
-  cwd: appRoot,
-  env: { ...process.env, MURMUR_DEV_PORT: String(vitePort) },
-  stdout: 'ignore',
-  stderr: 'pipe',
-  windowsHide: true,
-});
+async function readViteStderr(viteProcess) {
+  await viteProcess.exited;
+  return new Response(viteProcess.stderr).text();
+}
+
+async function startViteFixture() {
+  let lastAddressError = '';
+
+  for (let attempt = 0; attempt < maxViteStartAttempts; attempt += 1) {
+    const port = viteStartPort + attempt;
+    const viteProcess = spawnVite(port);
+
+    try {
+      await waitForFixtureServer(port, viteProcess);
+      return { port, viteProcess };
+    } catch (error) {
+      const processExited = viteProcess.exitCode !== null;
+      const stderr = processExited ? await readViteStderr(viteProcess) : '';
+      await stopOwnedVite(viteProcess);
+
+      if (!processExited || !isAddressInUseError(stderr)) {
+        const detail = stderr || (error instanceof Error ? error.message : String(error));
+        throw new Error(`Vite fixture server failed on port ${port}: ${detail}`);
+      }
+
+      lastAddressError = stderr;
+    }
+  }
+
+  throw new Error(`Vite fixture server exhausted ${maxViteStartAttempts} startup attempts: ${lastAddressError}`);
+}
+
+const { port: vitePort, viteProcess } = await startViteFixture();
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/settings-server-fixture.html`;
 const electronPath = resolve(appRoot, 'node_modules/electron/dist/electron.exe');
 const runnerPath = resolve(appRoot, 'tests/fixtures/settings-server-electron.cjs');
@@ -56,19 +85,22 @@ async function cleanupUserData(target) {
   return existsSync(resolvedTarget);
 }
 
-async function waitForFixtureServer() {
+async function waitForFixtureServer(port, process) {
+  const url = `http://127.0.0.1:${port}/app/fixtures/settings-server-fixture.html`;
+
   for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (process.exitCode !== null) {
+      throw new Error(`Vite fixture server exited with code ${process.exitCode}`);
+    }
     try {
-      const response = await fetch(fixtureUrl);
+      const response = await fetch(url);
       if (response.ok) return;
     } catch {
       // Vite is still starting.
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  viteProcess.kill();
-  const stderr = await new Response(viteProcess.stderr).text();
-  throw new Error(`Vite fixture server did not start on port ${vitePort}: ${stderr}`);
+  throw new Error(`Vite fixture server did not start on port ${port}`);
 }
 
 function runElectron() {
@@ -100,11 +132,9 @@ function runElectron() {
 }
 
 afterAll(async () => {
-  viteProcess.kill();
-  await viteProcess.exited;
+  await stopOwnedVite(viteProcess);
 });
 
-await waitForFixtureServer();
 const result = await runElectron();
 const { measurements } = result;
 
