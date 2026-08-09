@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 
 import runtime_paths
 from transcription.errors import NemotronCudaPreflightError
+from transcription.engines.nemotron import NemotronEngine
 from transcription.nemotron_runtime import preflight_nemotron_cuda
 
 
@@ -100,6 +102,14 @@ def test_cuda_preflight_converts_native_failure_to_recoverable_error(tmp_path: P
     assert "torch_cuda=12.4" in str(error.value)
 
 
+def test_nemotron_preflight_precedes_model_download() -> None:
+    source = inspect.getsource(NemotronEngine.__init__)
+
+    assert source.index("resolved_device = device") < source.index("preflight_nemotron_cuda")
+    assert source.index("preflight_nemotron_cuda") < source.index("begin_model_download_progress")
+    assert source.index("preflight_nemotron_cuda") < source.index("ASRModel.from_pretrained")
+
+
 def test_packaged_cuda_directory_is_registered_and_first_in_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -118,6 +128,7 @@ def test_packaged_cuda_directory_is_registered_and_first_in_path(
         runtime_paths.os,
         "add_dll_directory",
         lambda path: handles.append(path) or object(),
+        raising=False,
     )
     monkeypatch.setattr(runtime_paths, "_REGISTERED_DLL_DIRS", set())
     monkeypatch.setattr(runtime_paths, "_DLL_DIRECTORY_HANDLES", [])

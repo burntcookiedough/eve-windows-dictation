@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from runtime_paths import packaged_torch_lib
 from transcription.errors import NemotronCudaPreflightError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _runtime_detail(torch_module: Any, cuda_lib_dir: Path) -> str:
@@ -16,8 +20,8 @@ def _runtime_detail(torch_module: Any, cuda_lib_dir: Path) -> str:
     cudnn_version = "unknown"
     try:
         cudnn_version = str(torch_module.backends.cudnn.version())
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001,S110 - diagnostics must never fail
+        logger.debug("Could not read cuDNN version for preflight diagnostics", exc_info=True)
     return (
         f"torch={torch_version}; torch_cuda={cuda_version}; "
         f"cudnn={cudnn_version}; torch_lib={cuda_lib_dir}"
@@ -74,5 +78,5 @@ def preflight_nemotron_cuda(
         tensors.clear()
         try:
             torch_module.cuda.empty_cache()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001,S110 - cleanup must not mask the preflight error
+            logger.debug("CUDA cache cleanup after preflight failed", exc_info=True)

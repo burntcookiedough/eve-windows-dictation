@@ -21,6 +21,10 @@ const rendererMain = readFileSync(
   new URL('../src/renderer/app/main.ts', import.meta.url),
   'utf8'
 );
+const modelProgressCard = readFileSync(
+  new URL('../src/renderer/app/components/ModelProgressCard.svelte', import.meta.url),
+  'utf8'
+);
 
 describe('renderer visual regression guards', () => {
   test('contains long unbroken history text inside its card', () => {
@@ -89,5 +93,12 @@ describe('renderer visual regression guards', () => {
     expect(rendererMain).toContain("recovery.style.cssText = 'display:flex;height:100%");
     expect(rendererMain).toContain('Reload interface');
     expect(rendererMain).not.toContain('normalized.message');
+  });
+
+  test('gives indeterminate model progress a direct accessible continuing label', () => {
+    expect(modelProgressCard).toContain(
+      'aria-label={`${view.title}: progress unavailable; transfer is continuing`}',
+    );
+    expect(modelProgressCard).not.toContain('aria-valuetext');
   });
 });

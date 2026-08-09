@@ -545,7 +545,7 @@ def report_model_download_bytes(
     *,
     description: str | None = None,
 ) -> None:
-    """Add a byte delta from a Hugging Face HTTP or Xet transfer callback."""
+    """Add a delta from a registered Hugging Face byte-transfer callback."""
     global _PROGRESS_CURRENT_FILE
     global _PROGRESS_NEW_BYTES
 
@@ -687,6 +687,7 @@ def track_huggingface_download_progress() -> Iterator[None]:
                     "byte",
                     "bytes",
                 }
+                self._murmur_last_n = int(kwargs.get("initial", 0) or 0)
                 super().__init__(*args, **kwargs)
                 register_model_download_transfer(
                     self._murmur_transfer_id,

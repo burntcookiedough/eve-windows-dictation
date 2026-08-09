@@ -155,6 +155,27 @@ class NemotronEngine:
         preflight_cached: bool | None = None
         if repo_id:
             preflight_cached = is_repo_cached(repo_id)
+
+        resolved_device = device
+        if device == "auto":
+            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if resolved_device != "cpu":
+            try:
+                preflight_nemotron_cuda(torch)
+            except NemotronCudaPreflightError:
+                update_model_download_state(
+                    model=model_name,
+                    size_gb=_MODEL_SIZE_GB,
+                    status="error",
+                    cached=preflight_cached,
+                    detail="CUDA runtime preflight failed",
+                    repo_id=repo_id,
+                    phase="error",
+                )
+                raise
+
+        if repo_id:
             if preflight_cached:
                 update_model_download_state(
                     model=model_name,
@@ -222,10 +243,6 @@ class NemotronEngine:
         # add blocking filters that persist across transcribe() calls.
         _suppress_nemo_logging()
 
-        resolved_device = device
-        if device == "auto":
-            resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
-
         logger.info("Loading Nemotron model: %s (device=%s)", model_name, resolved_device)
 
         try:
@@ -274,21 +291,6 @@ class NemotronEngine:
                 raise
         if preflight_cached is False:
             mark_model_loading()
-
-        if resolved_device != "cpu":
-            try:
-                preflight_nemotron_cuda(torch)
-            except NemotronCudaPreflightError:
-                update_model_download_state(
-                    model=model_name,
-                    size_gb=_MODEL_SIZE_GB,
-                    status="error",
-                    cached=preflight_cached,
-                    detail="CUDA runtime preflight failed",
-                    repo_id=repo_id,
-                    phase="error",
-                )
-                raise
 
         self._model.eval()
         self._model = self._model.to(resolved_device)

@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+import threading
 from typing import Any
 
 
 _REGISTERED_DLL_DIRS: set[str] = set()
 _DLL_DIRECTORY_HANDLES: list[Any] = []
+_REGISTRATION_LOCK = threading.Lock()
 
 
 def packaged_torch_lib(server_dir: Path | None = None) -> Path:
@@ -36,22 +38,18 @@ def configure_windows_cuda_dll_search(
         return None
 
     normalized = os.path.normcase(os.path.normpath(str(torch_lib)))
-    if normalized not in _REGISTERED_DLL_DIRS:
-        add_dll_directory = getattr(os, "add_dll_directory", None)
-        if add_dll_directory is not None:
-            _DLL_DIRECTORY_HANDLES.append(add_dll_directory(str(torch_lib)))
-        _REGISTERED_DLL_DIRS.add(normalized)
+    with _REGISTRATION_LOCK:
+        if normalized not in _REGISTERED_DLL_DIRS:
+            add_dll_directory = getattr(os, "add_dll_directory", None)
+            if add_dll_directory is not None:
+                _DLL_DIRECTORY_HANDLES.append(add_dll_directory(str(torch_lib)))
+            _REGISTERED_DLL_DIRS.add(normalized)
 
-    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
-    normalized_entries = {
-        os.path.normcase(os.path.normpath(entry)) for entry in path_entries
-    }
-    if normalized in normalized_entries:
         path_entries = [
             entry
-            for entry in path_entries
-            if os.path.normcase(os.path.normpath(entry)) != normalized
+            for entry in os.environ.get("PATH", "").split(os.pathsep)
+            if entry and os.path.normcase(os.path.normpath(entry)) != normalized
         ]
-    os.environ["PATH"] = os.pathsep.join([str(torch_lib), *path_entries])
+        os.environ["PATH"] = os.pathsep.join([str(torch_lib), *path_entries])
 
     return torch_lib

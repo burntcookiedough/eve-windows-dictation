@@ -91,12 +91,15 @@ def _exception_text(exc: BaseException) -> str:
 def safe_engine_preparation_message(exc: BaseException) -> str:
     """Return a stable user-facing engine error while logs retain the raw exception."""
     text = _exception_text(exc)
-    if isinstance(exc, NemotronCudaPreflightError) or any(
-        marker in text for marker in _CUDA_PREPARATION_MARKERS
-    ):
+    if isinstance(exc, NemotronCudaPreflightError):
         return (
             "Nemotron could not initialize the packaged CUDA runtime. "
             "Switch Nemotron to CPU or check GPU/driver support, then retry or revert."
+        )
+    if any(marker in text for marker in _CUDA_PREPARATION_MARKERS):
+        return (
+            "The selected model could not initialize the packaged CUDA runtime. "
+            "Switch the engine to CPU or check GPU/driver support, then retry or revert."
         )
     if any(marker in text for marker in _AUTH_ERROR_MARKERS):
         return (

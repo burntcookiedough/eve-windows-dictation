@@ -209,3 +209,20 @@ def test_engine_preparation_errors_are_classified_without_leaking_provider_detai
     assert "http" not in message.lower()
     assert "request id" not in message.lower()
     assert "c:/" not in message.lower()
+
+
+def test_whisper_cuda_marker_does_not_receive_nemotron_wording() -> None:
+    message = safe_engine_preparation_message(
+        RuntimeError("CUDA runtime DLLs are missing while loading Whisper")
+    )
+
+    assert "selected model could not initialize the packaged CUDA runtime" in message
+    assert "Nemotron" not in message
+
+
+def test_nemotron_cuda_preflight_error_keeps_engine_specific_wording() -> None:
+    from transcription.errors import NemotronCudaPreflightError
+
+    message = safe_engine_preparation_message(NemotronCudaPreflightError("cudnn failure"))
+
+    assert "Nemotron could not initialize" in message

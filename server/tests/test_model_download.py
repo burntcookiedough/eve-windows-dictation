@@ -360,6 +360,27 @@ def test_byte_progress_is_indeterminate_without_a_transfer_total(monkeypatch) ->
     assert state["progress_percent"] is None
 
 
+def test_unregistered_byte_callback_is_ignored(monkeypatch) -> None:
+    model_download.begin_model_download_progress(
+        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3,
+        expected_bytes=100,
+    )
+    model_download.update_model_download_state(
+        model="tiny",
+        size_gb=10 / 1024**3,
+        status="downloading",
+        phase="downloading",
+        repo_id="example/tiny",
+    )
+
+    model_download.report_model_download_bytes(999, 50)
+
+    state = model_download.get_model_download_state()
+    assert state is not None
+    assert state["downloaded_bytes"] == 0
+    assert state["total_bytes"] == 100
+
+
 def test_required_file_progress_stays_indeterminate_until_all_files_are_known(
     tmp_path, monkeypatch
 ) -> None:

@@ -26,6 +26,7 @@ import {
   START_PID_TIMEOUT_MS,
   waitForPidFile,
 } from './server-startup.js';
+import { buildChildEnvironment } from './server-environment.js';
 
 const log = createLogger('ServerManager');
 
@@ -434,9 +435,12 @@ export class ServerManager {
         return null;
       }
 
+      const systemPath = Object.entries(process.env).find(
+        ([key]) => key.toLowerCase() === 'path',
+      )?.[1];
       const bundledRuntimePath = fs.existsSync(torchLib)
-        ? [torchLib, process.env.PATH].filter(Boolean).join(path.delimiter)
-        : process.env.PATH;
+        ? [torchLib, systemPath].filter(Boolean).join(path.delimiter)
+        : systemPath;
 
       return {
         command: pythonExe,
@@ -526,13 +530,11 @@ export class ServerManager {
 
     try {
       const spawnStartedAt = Date.now();
-      const childEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        ...serverCmd.env,
+      const childEnv = buildChildEnvironment(process.env, serverCmd.env, {
         MURMUR_PID_FILE: this.getPidFilePath(),
         MURMUR_SETTINGS_FILE: path.join(app.getPath('userData'), 'server-settings.json'),
         MURMUR_PORT: '0',
-      };
+      });
       // Transformers v5 removes this deprecated variable. HF_HOME and the
       // standard Hugging Face cache discovery continue to work normally.
       delete childEnv.TRANSFORMERS_CACHE;

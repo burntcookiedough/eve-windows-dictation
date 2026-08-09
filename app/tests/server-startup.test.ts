@@ -5,6 +5,7 @@ import {
   START_PID_TIMEOUT_MS,
   waitForPidFile,
 } from '../src/main/services/server-startup.js';
+import { buildChildEnvironment } from '../src/main/services/server-environment.js';
 
 const PID_FILE = {
   pid: 19736,
@@ -66,5 +67,29 @@ describe('packaged server startup timing', () => {
     expect(source.slice(ownership, health)).toContain(
       "throw new Error('Server process ownership could not be verified')",
     );
+  });
+
+  test('keeps one definitive PATH when merging packaged server environment', () => {
+    const childEnvironment = buildChildEnvironment(
+      {
+        Path: 'system-path',
+        KEEP_ME: 'base-value',
+      },
+      {
+        PATH: 'torch-path;system-path',
+        path: 'stale-case-variant',
+        SERVER_ONLY: 'server-value',
+      },
+      { MURMUR_PORT: '0' },
+    );
+
+    const pathKeys = Object.keys(childEnvironment).filter(
+      (key) => key.toLowerCase() === 'path',
+    );
+    expect(pathKeys).toEqual(['PATH']);
+    expect(childEnvironment.PATH).toBe('torch-path;system-path');
+    expect(childEnvironment.KEEP_ME).toBe('base-value');
+    expect(childEnvironment.SERVER_ONLY).toBe('server-value');
+    expect(childEnvironment.MURMUR_PORT).toBe('0');
   });
 });
