@@ -257,7 +257,8 @@ def test_byte_progress_reports_percentage_speed_and_eta(monkeypatch) -> None:
     monkeypatch.setattr(model_download.time, "monotonic", lambda: clock[0])
 
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3,
+        expected_bytes=100,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -289,7 +290,8 @@ def test_byte_progress_uses_recent_rate_for_eta(monkeypatch) -> None:
     monkeypatch.setattr(model_download.time, "monotonic", lambda: clock[0])
 
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3,
+        expected_bytes=10_000_000,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -313,7 +315,8 @@ def test_byte_progress_hides_eta_after_stall(monkeypatch) -> None:
     monkeypatch.setattr(model_download.time, "monotonic", lambda: clock[0])
 
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3,
+        expected_bytes=10_000_000,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -336,7 +339,7 @@ def test_byte_progress_hides_eta_after_stall(monkeypatch) -> None:
 def test_byte_progress_is_indeterminate_without_a_transfer_total(monkeypatch) -> None:
     monkeypatch.setattr(model_download.time, "monotonic", lambda: 1.0)
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=10_000_000 / 1024**3,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -357,6 +360,56 @@ def test_byte_progress_is_indeterminate_without_a_transfer_total(monkeypatch) ->
     assert state["progress_percent"] is None
 
 
+def test_required_file_progress_stays_indeterminate_until_all_files_are_known(
+    tmp_path, monkeypatch
+) -> None:
+    cache_dir = tmp_path / "hub"
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
+    snapshot_dir = (
+        cache_dir
+        / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+        / "snapshots"
+        / "abc123"
+    )
+    snapshot_dir.mkdir(parents=True)
+    (snapshot_dir / "config.json").write_bytes(b"x" * 2)
+
+    repo_id = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+    model_download.begin_model_download_progress(
+        model="tiny", repo_id=repo_id, size_gb=10 / 1024**3,
+        initial_bytes=2,
+    )
+    model_download.update_model_download_state(
+        model="tiny",
+        size_gb=10 / 1024**3,
+        status="downloading",
+        phase="downloading",
+        repo_id=repo_id,
+    )
+    model_download.register_model_download_transfer(
+        48, total=10, description="model.bin"
+    )
+    model_download.report_model_download_bytes(48, 5)
+
+    partial = model_download.get_model_download_state()
+    assert partial is not None
+    assert partial["total_bytes"] is None
+    assert partial["progress_percent"] is None
+
+    for transfer_id, filename in enumerate(
+        ("preprocessor_config.json", "tokenizer.json", "vocabulary.json"),
+        start=49,
+    ):
+        model_download.register_model_download_transfer(
+            transfer_id, total=1, description=filename
+        )
+
+    complete = model_download.get_model_download_state()
+    assert complete is not None
+    assert complete["downloaded_bytes"] == 7
+    assert complete["total_bytes"] == 15
+
+
 def test_partial_blob_resume_is_counted_once_and_finishes_at_total(
     tmp_path, monkeypatch
 ) -> None:
@@ -367,12 +420,17 @@ def test_partial_blob_resume_is_counted_once_and_finishes_at_total(
     )
     repo_dir.mkdir(parents=True)
     (repo_dir / "model.incomplete").write_bytes(b"x" * 4)
+    snapshot_dir = cache_dir / "models--example--tiny" / "snapshots" / "abc123"
+    snapshot_dir.mkdir(parents=True)
+    (snapshot_dir / "config.json").write_bytes(b"x" * 2)
 
     # The incomplete blob is not a completed snapshot baseline.  The same
     # four bytes arrive later as tqdm.initial for the active file.
-    assert model_download.get_cached_required_bytes("example/tiny") == 0
+    assert model_download.get_cached_required_bytes("example/tiny") == 2
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3,
+        initial_bytes=2,
+        expected_bytes=12,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -388,20 +446,21 @@ def test_partial_blob_resume_is_counted_once_and_finishes_at_total(
 
     state = model_download.get_model_download_state()
     assert state is not None
-    assert state["downloaded_bytes"] == 10
-    assert state["total_bytes"] == 10
+    assert state["downloaded_bytes"] == 12
+    assert state["total_bytes"] == 12
     assert state["progress_percent"] == 99.0
 
     model_download.mark_model_loading()
     loading = model_download.get_model_download_state()
     assert loading is not None
-    assert loading["downloaded_bytes"] == 10
-    assert loading["total_bytes"] == 10
+    assert loading["downloaded_bytes"] == 12
+    assert loading["total_bytes"] == 12
 
 
 def test_repeated_transfer_registration_is_idempotent(monkeypatch) -> None:
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3,
+        expected_bytes=10,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -423,10 +482,42 @@ def test_repeated_transfer_registration_is_idempotent(monkeypatch) -> None:
     assert state["downloaded_bytes"] == state["total_bytes"] == 10
 
 
+def test_recreated_transfer_for_same_file_replaces_prior_attempt(monkeypatch) -> None:
+    model_download.begin_model_download_progress(
+        model="tiny", repo_id="example/tiny", size_gb=10 / 1024**3,
+        expected_bytes=10,
+    )
+    model_download.update_model_download_state(
+        model="tiny",
+        size_gb=10 / 1024**3,
+        status="downloading",
+        phase="downloading",
+        repo_id="example/tiny",
+    )
+    model_download.register_model_download_transfer(
+        46, total=10, initial=4, description="model.bin"
+    )
+    model_download.report_model_download_bytes(46, 3)
+    model_download.register_model_download_transfer(
+        47, total=10, initial=4, description="model.bin"
+    )
+
+    state = model_download.get_model_download_state()
+    assert state is not None
+    assert state["downloaded_bytes"] == 4
+
+    model_download.report_model_download_bytes(46, 3)
+    model_download.report_model_download_bytes(47, 6)
+    state = model_download.get_model_download_state()
+    assert state is not None
+    assert state["downloaded_bytes"] == state["total_bytes"] == 10
+
+
 def test_multiple_file_transfers_keep_absolute_totals_separate(monkeypatch) -> None:
     model_download.begin_model_download_progress(
         model="tiny", repo_id="example/tiny", size_gb=20 / 1024**3,
         initial_bytes=2,
+        expected_bytes=17,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -435,8 +526,12 @@ def test_multiple_file_transfers_keep_absolute_totals_separate(monkeypatch) -> N
         phase="downloading",
         repo_id="example/tiny",
     )
-    model_download.register_model_download_transfer(44, total=10, initial=3)
-    model_download.register_model_download_transfer(45, total=5, initial=1)
+    model_download.register_model_download_transfer(
+        44, total=10, initial=3, description="model.bin"
+    )
+    model_download.register_model_download_transfer(
+        45, total=5, initial=1, description="config.json"
+    )
     model_download.report_model_download_bytes(44, 7)
     model_download.report_model_download_bytes(45, 4)
 
@@ -454,6 +549,7 @@ def test_resumed_bytes_do_not_inflate_transfer_rate(monkeypatch) -> None:
         repo_id="example/tiny",
         size_gb=10_000_000 / 1024**3,
         initial_bytes=4_000_000,
+        expected_bytes=10_000_000,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -523,7 +619,8 @@ def test_huggingface_progress_bridge_observes_byte_callbacks(monkeypatch) -> Non
     clock = [0.0]
     monkeypatch.setattr(model_download.time, "monotonic", lambda: clock[0])
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3,
+        expected_bytes=100,
     )
     model_download.update_model_download_state(
         model="tiny",
@@ -554,7 +651,7 @@ def test_huggingface_progress_bridge_observes_byte_callbacks(monkeypatch) -> Non
 def test_huggingface_progress_bridge_ignores_snapshot_item_bar(monkeypatch) -> None:
     monkeypatch.setattr(model_download.time, "monotonic", lambda: 0.0)
     model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3
+        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3,
     )
     model_download.update_model_download_state(
         model="tiny",

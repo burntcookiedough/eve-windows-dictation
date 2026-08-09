@@ -1,13 +1,30 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, promises as fs } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
 const fixtureTempRoot = resolve(tmpdir());
 const screenshotDir = resolve(fixtureTempRoot, 'eve-phase3-settings-server-screenshots');
-// Keep this PID-derived range outside Windows' excluded 52125-52224 range.
-const vitePort = 52300 + (process.pid % 100);
+
+function isLoopbackPortFree(port) {
+  return new Promise((resolvePort) => {
+    const server = net.createServer();
+    server.once('error', () => resolvePort(false));
+    server.once('listening', () => server.close(() => resolvePort(true)));
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+async function findOpenLoopbackPort(startPort = 5173) {
+  for (let port = startPort; port <= 65535; port += 1) {
+    if (await isLoopbackPortFree(port)) return port;
+  }
+  throw new Error('No available loopback port found for the Vite fixture server');
+}
+
+const vitePort = await findOpenLoopbackPort();
 const viteProcess = Bun.spawn([
   'node',
   resolve(appRoot, 'node_modules/vite/bin/vite.js'),
