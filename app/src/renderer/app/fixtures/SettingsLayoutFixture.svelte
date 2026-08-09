@@ -3,6 +3,7 @@
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
   import Toggle from '../components/Toggle.svelte';
+  import EveDropdown from '../components/EveDropdown.svelte';
 
   const modelDownload = {
     model: 'large-v3-turbo',
@@ -53,9 +54,12 @@
 
           <SettingsSection title="Dictation/output">
             <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
-              <select aria-label="Dictation mode" class="w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 sm:w-auto">
-                <option>Clean Prompt</option>
-              </select>
+              <EveDropdown
+                label="Dictation mode"
+                value="clean_prompt"
+                options={[{ value: 'clean_prompt', label: 'Clean Prompt' }]}
+                onchange={() => undefined}
+              />
             </SettingsRow>
             <SettingsRow label="Append space" description="Add a trailing space after transcriptions">
               <Toggle enabled={false} label="Append space" />

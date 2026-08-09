@@ -4,6 +4,8 @@
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsGroup from '../components/SettingsGroup.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
+  import PrimaryPage from '../components/PrimaryPage.svelte';
+  import EveDropdown, { type EveDropdownOption } from '../components/EveDropdown.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
@@ -20,6 +22,18 @@
   const DEFAULT_SERVER_HOST = 'localhost';
   const DEFAULT_SERVER_PORT = 51717;
   const TRANSCRIBE_PATH = '/transcribe';
+
+  const DICTATION_MODE_OPTIONS: EveDropdownOption[] = [
+    { value: 'raw', label: 'Raw Dictation' },
+    { value: 'clean_prompt', label: 'Clean Prompt' },
+    { value: 'codex_prompt', label: 'Codex Prompt' },
+    { value: 'message_rewrite', label: 'Message Rewrite' },
+    { value: 'command', label: 'Command Mode' },
+  ];
+  const PASTE_METHOD_OPTIONS: EveDropdownOption[] = [
+    { value: 'sendinput', label: 'SendInput' },
+    { value: 'vbscript', label: 'VBScript' },
+  ];
 
   // Local settings state - loaded from main process on mount
   let settings = $state<Settings>({
@@ -143,6 +157,15 @@
       getOptions('whisper_compute_type'),
       draftWhisperDevice,
     );
+  }
+
+  function toDropdownOptions(options: Array<ServerSettingOption<unknown>>): EveDropdownOption[] {
+    return options.map((option) => ({
+      value: String(option.value),
+      label: option.label,
+      disabled: option.disabled,
+      description: option.reason,
+    }));
   }
 
   function isEngineAvailable(engineId: unknown): boolean {
@@ -550,8 +573,8 @@
   }
 </script>
 
-<div class="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[640px] flex-col px-4 py-4 sm:px-6">
-  <div data-scroll-owner="settings-page" class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-2 [overflow-anchor:none] [scroll-behavior:auto]">
+<PrimaryPage page="settings" scrollOwner="settings-page" contentClass="pb-6">
+  <div class="mx-auto min-h-full min-w-0 w-full max-w-[640px] space-y-7">
     {#if settingsLoaded}
     <div class="space-y-7 pb-6">
 
@@ -645,18 +668,14 @@
             label="Input device"
             description={audioDeviceError || 'Select microphone for recording'}
           >
-            <select
-              aria-label="Input device"
+            <EveDropdown
+              label="Input device"
               value={settings.selectedDeviceId}
-              onchange={(e) => updateSetting('selectedDeviceId', e.currentTarget.value)}
+              options={inputDevices.map((device) => ({ value: device.id, label: device.label }))}
+              onchange={(value) => updateSetting('selectedDeviceId', value)}
               disabled={isLoadingDevices}
-              title={inputDevices.find(d => d.id === settings.selectedDeviceId)?.label ?? 'Default'}
-              class="min-h-9 w-full max-w-full truncate rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:max-w-[280px]"
-            >
-              {#each inputDevices as device}
-                <option value={device.id}>{device.label}</option>
-              {/each}
-            </select>
+              class="sm:max-w-[280px]"
+            />
           </SettingsRow>
         </SettingsGroup>
 
@@ -678,18 +697,12 @@
           </SettingsRow>
 
           <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
-            <select
-              aria-label="Dictation mode"
+            <EveDropdown
+              label="Dictation mode"
               value={settings.dictationMode}
-              onchange={(e) => updateSetting('dictationMode', e.currentTarget.value as Settings['dictationMode'])}
-              class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-            >
-              <option value="raw">Raw Dictation</option>
-              <option value="clean_prompt">Clean Prompt</option>
-              <option value="codex_prompt">Codex Prompt</option>
-              <option value="message_rewrite">Message Rewrite</option>
-              <option value="command">Command Mode</option>
-            </select>
+              options={DICTATION_MODE_OPTIONS}
+              onchange={(value) => updateSetting('dictationMode', value as Settings['dictationMode'])}
+            />
           </SettingsRow>
         </SettingsGroup>
 
@@ -795,15 +808,12 @@
           </SettingsRow>
 
           <SettingsRow label="Paste method" description="Use native SendInput first, or force VBScript fallback">
-            <select
-              aria-label="Paste method"
+            <EveDropdown
+              label="Paste method"
               value={settings.pasteMethod}
-              onchange={(e) => updateSetting('pasteMethod', e.currentTarget.value as Settings['pasteMethod'])}
-              class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 sm:w-auto"
-            >
-              <option value="sendinput">SendInput</option>
-              <option value="vbscript">VBScript</option>
-            </select>
+              options={PASTE_METHOD_OPTIONS}
+              onchange={(value) => updateSetting('pasteMethod', value as Settings['pasteMethod'])}
+            />
           </SettingsRow>
 
           <SettingsRow label="Launch on boot" description="Start application when system starts">
@@ -849,7 +859,7 @@
             {/if}
             {#if stagedPreset && !externalMode}
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
+                <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
                 <button type="button" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying || engineRevertDisabled ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
               </div>
               {#if engineApplyError}<p class="mt-2 text-xs text-red-300">{engineApplyError}</p>{/if}
@@ -910,32 +920,24 @@
         <div id="compatibility-controls" hidden={!compatibilityControlsOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2 {externalMode ? 'opacity-60' : ''}">
         {#if serverSettings.whisper_model}
           <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
-            <select
-              aria-label={serverSettings.whisper_model.label}
-              value={getSettingValue('whisper_model') ?? serverSettings.whisper_model.value}
-              onchange={(e) => updateEngineSetting('whisper_model', e.currentTarget.value)}
+            <EveDropdown
+              label={serverSettings.whisper_model.label}
+              value={String(getSettingValue('whisper_model') ?? serverSettings.whisper_model.value)}
+              options={toDropdownOptions(getOptions('whisper_model'))}
+              onchange={(value) => updateEngineSetting('whisper_model', value)}
               disabled={externalMode}
-              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {#each getOptions('whisper_model') as option}
-                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
-              {/each}
-            </select>
+            />
           </SettingsRow>
         {/if}
         {#if serverSettings.whisper_compute_type}
           <SettingsRow label={serverSettings.whisper_compute_type.label} description={serverSettings.whisper_compute_type.description}>
-            <select
-              aria-label={serverSettings.whisper_compute_type.label}
-              value={getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value}
-              onchange={(e) => updateEngineSetting('whisper_compute_type', e.currentTarget.value)}
+            <EveDropdown
+              label={serverSettings.whisper_compute_type.label}
+              value={String(getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value)}
+              options={toDropdownOptions(getWhisperComputeOptions())}
+              onchange={(value) => updateEngineSetting('whisper_compute_type', value)}
               disabled={externalMode}
-              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {#each getWhisperComputeOptions() as option}
-                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
-              {/each}
-            </select>
+            />
             {#each disabledOptionReasons(getWhisperComputeOptions()) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
             {/each}
@@ -966,17 +968,13 @@
         {/if}
         {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
           <SettingsRow label="Device" description="Hardware device for inference">
-            <select
-              aria-label="Nemotron device"
-              value={getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value}
-              onchange={(e) => updateEngineSetting('nemotron_device', e.currentTarget.value)}
+            <EveDropdown
+              label="Nemotron device"
+              value={String(getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value)}
+              options={toDropdownOptions(getOptions('nemotron_device'))}
+              onchange={(value) => updateEngineSetting('nemotron_device', value)}
               disabled={externalMode}
-              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {#each getOptions('nemotron_device') as option}
-                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
-              {/each}
-            </select>
+            />
             {#each disabledOptionReasons(getOptions('nemotron_device')) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
             {/each}
@@ -984,17 +982,13 @@
         {/if}
         {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}
           <SettingsRow label="Device" description="Hardware device for inference">
-            <select
-              aria-label="Whisper device"
-              value={getSettingValue('whisper_device') ?? serverSettings.whisper_device.value}
-              onchange={(e) => updateEngineSetting('whisper_device', e.currentTarget.value)}
+            <EveDropdown
+              label="Whisper device"
+              value={String(getSettingValue('whisper_device') ?? serverSettings.whisper_device.value)}
+              options={toDropdownOptions(getOptions('whisper_device'))}
+              onchange={(value) => updateEngineSetting('whisper_device', value)}
               disabled={externalMode}
-              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-            >
-              {#each getOptions('whisper_device') as option}
-                <option value={option.value} disabled={option.disabled} title={option.reason}>{option.label}</option>
-              {/each}
-            </select>
+            />
             {#each disabledOptionReasons(getOptions('whisper_device')) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
             {/each}
@@ -1025,7 +1019,7 @@
                     class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
                       {engineApplying || externalMode
                         ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                        : 'bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer'}"
+                        : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
                   >
                     {#if engineApplying}
                       Preparing…
@@ -1205,7 +1199,7 @@
       <SettingsSkeleton />
     {/if}
   </div>
-</div>
+</PrimaryPage>
 
 <HotkeyCaptureModal
   isOpen={isHotkeyModalOpen}

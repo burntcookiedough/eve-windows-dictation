@@ -6,6 +6,7 @@
   import SettingsSection from '../components/SettingsSection.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
   import Toggle from '../components/Toggle.svelte';
+  import EveDropdown from '../components/EveDropdown.svelte';
 
   type FixtureState = 'ready' | 'preparing' | 'error' | 'external';
 
@@ -103,9 +104,7 @@
 
                 <SettingsGroup title="Audio">
                   <SettingsRow label="Input device" description="Select microphone for recording">
-                    <select aria-label="Input device" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto">
-                      <option>Default</option>
-                    </select>
+                    <EveDropdown label="Input device" value="default" options={[{ value: 'default', label: 'Default' }]} onchange={() => undefined} />
                   </SettingsRow>
                 </SettingsGroup>
 
@@ -114,9 +113,7 @@
                     <Toggle enabled={false} label="Append period" />
                   </SettingsRow>
                   <SettingsRow label="Dictation mode" description="Local rule-based cleanup before copy or paste">
-                    <select aria-label="Dictation mode" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 sm:w-auto">
-                      <option>Clean Prompt</option>
-                    </select>
+                    <EveDropdown label="Dictation mode" value="clean_prompt" options={[{ value: 'clean_prompt', label: 'Clean Prompt' }]} onchange={() => undefined} />
                   </SettingsRow>
                 </SettingsGroup>
 
@@ -202,10 +199,10 @@
                   </button>
                 </div>
                 <div id="fixture-compatibility-controls" data-fixture-compatibility-controls hidden={!compatibilityOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
-                    <SettingsRow label="Whisper model" description="Raw compatibility model"><select aria-label="Whisper model" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>large-v3-turbo</option><option>large-v3</option></select></SettingsRow>
-                    <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><select aria-label="Compute type" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>int8</option><option>float16</option></select></SettingsRow>
+                    <SettingsRow label="Whisper model" description="Raw compatibility model"><EveDropdown label="Whisper model" value="large-v3-turbo" options={[{ value: 'large-v3-turbo', label: 'large-v3-turbo' }, { value: 'large-v3', label: 'large-v3' }]} onchange={() => undefined} /></SettingsRow>
+                    <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><EveDropdown label="Compute type" value="int8" options={[{ value: 'int8', label: 'int8' }, { value: 'float16', label: 'float16' }]} onchange={() => undefined} /></SettingsRow>
                     <SettingsRow label="Language" description="Language hint for compatibility"><input aria-label="Whisper language" value="auto" class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-28" /></SettingsRow>
-                    <SettingsRow label="Device" description="Hardware device for inference"><select aria-label="Whisper device" class="min-h-9 w-full max-w-full cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-auto"><option>cuda</option><option>cpu</option></select></SettingsRow>
+                    <SettingsRow label="Device" description="Hardware device for inference"><EveDropdown label="Whisper device" value="cuda" options={[{ value: 'cuda', label: 'cuda' }, { value: 'cpu', label: 'cpu' }]} onchange={() => undefined} /></SettingsRow>
                     <SettingsRow label="Unload before swap" description="Free VRAM before loading a new engine"><Toggle enabled label="Unload before swap" /></SettingsRow>
                 </div>
                 <div data-fixture-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">

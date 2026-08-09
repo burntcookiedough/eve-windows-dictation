@@ -10,6 +10,7 @@ const serverView = source('../src/renderer/app/views/ServerView.svelte');
 const serverFixture = source('../src/renderer/app/fixtures/SettingsServerFixture.svelte');
 const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
 const appCss = source('../src/renderer/app/app.css');
+const primaryPage = source('../src/renderer/app/components/PrimaryPage.svelte');
 
 describe('Phase 3 Server and diagnostics cohesion contracts', () => {
   test('uses one cohesive Server & diagnostics section without nested SettingsSection composition', () => {
@@ -77,8 +78,10 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
   });
 
   test('keeps the Settings page as the only page-level scroll owner and wraps long controls', () => {
-    expect(settingsView.match(/overflow-y-auto/g)?.length).toBe(1);
-    expect(settingsView).toContain('data-scroll-owner="settings-page"');
+    expect(settingsView).not.toContain('overflow-y-auto');
+    expect(settingsView).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
+    expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
+    expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
     expect(settingsView).toContain('min-h-9 w-full max-w-full rounded-lg border border-zinc-700');
     expect(settingsView).toContain('[overflow-wrap:anywhere]');
     expect(serverView).toContain('[overflow-wrap:anywhere]');

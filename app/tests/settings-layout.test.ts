@@ -12,6 +12,8 @@ const settingsView = source('../src/renderer/app/views/SettingsView.svelte');
 const settingsGroup = source('../src/renderer/app/components/SettingsGroup.svelte');
 const settingsSection = source('../src/renderer/app/components/SettingsSection.svelte');
 const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
+const primaryPage = source('../src/renderer/app/components/PrimaryPage.svelte');
+const eveDropdown = source('../src/renderer/app/components/EveDropdown.svelte');
 const statusBanner = source('../src/renderer/app/components/ModelProgressBanner.svelte');
 const statusCard = source('../src/renderer/app/components/ModelProgressCard.svelte');
 const serverView = source('../src/renderer/app/views/ServerView.svelte');
@@ -40,9 +42,10 @@ describe('Phase 1 Settings layout contracts', () => {
   });
 
   test('keeps Settings as the single page scroll owner while logs remain bounded', () => {
-    expect(settingsView.match(/overflow-y-auto/g)?.length).toBe(1);
-    expect(settingsView).toContain('data-scroll-owner="settings-page"');
-    expect(settingsView).toContain('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain');
+    expect(settingsView).not.toContain('overflow-y-auto');
+    expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
+    expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
+    expect(settingsView).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
     expect(settingsView).not.toContain('h-screen');
     expect(serverView).toContain("embedded ? 'min-w-0 space-y-6'");
     expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
@@ -54,15 +57,16 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsRow).toContain('items-center justify-end justify-self-end');
     expect(settingsRow).toContain('min-w-0 w-full max-w-full items-center justify-end justify-self-end');
     expect(settingsRow).toContain('[&>input]:max-w-full');
-    expect(settingsRow).toContain('[&>select]:max-w-full');
+    expect(settingsRow).toContain('[&>[data-eve-dropdown]]:max-w-full');
+    expect(eveDropdown).toContain('data-eve-dropdown');
     expect(settingsRow).toContain('[&_textarea]:focus-visible:ring-2');
     expect(settingsView).toContain('w-full max-w-full');
-    expect(settingsView).toContain('sm:w-auto');
+    expect(eveDropdown).toContain('sm:w-auto');
   });
 
   test('disables page scroll anchoring and avoids programmatic scroll jumps', () => {
-    expect(settingsView).toContain('[overflow-anchor:none]');
-    expect(settingsView).toContain('[scroll-behavior:auto]');
+    expect(primaryPage).toContain('[overflow-anchor:none]');
+    expect(primaryPage).toContain('[scroll-behavior:auto]');
     expect(settingsView).not.toContain('scrollIntoView');
     expect(settingsView).not.toContain('startViewTransition');
   });
@@ -73,9 +77,9 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsSection).toContain('id={descriptionId}');
     expect(settingsSection).toContain('<h2 id={headingId}');
     expect(settingsView).toContain('<h1 class="sr-only">Settings</h1>');
-    expect(settingsView).toContain('aria-label="Input device"');
-    expect(settingsView).toContain('aria-label="Dictation mode"');
-    expect(settingsView).toContain('aria-label="Paste method"');
+    expect(settingsView).toContain('label="Input device"');
+    expect(settingsView).toContain('label="Dictation mode"');
+    expect(settingsView).toContain('label="Paste method"');
     expect(settingsView).toContain('aria-describedby="hotwords-help"');
     expect(settingsView).toContain('aria-expanded={compatibilityControlsOpen}');
     expect(settingsView).toContain('aria-controls="compatibility-controls"');
@@ -94,7 +98,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
     expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
     expect(settingsView).toContain('data-hotwords-editor');
-    expect(settingsView.match(/<select[\s\S]*?cursor-pointer/g)?.length).toBe(7);
+    expect(settingsView.match(/<EveDropdown\b/g)?.length).toBe(7);
   });
 
   test('keeps the Phase 2 General subgroup foundation aligned with the row primitive', () => {
@@ -115,7 +119,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
     expect(appCss).toContain(':focus-visible');
     expect(settingsRow).toContain('focus-visible:ring-2');
-    expect(settingsView).toContain('[scroll-behavior:auto]');
+    expect(primaryPage).toContain('[scroll-behavior:auto]');
     expect(statusCard).not.toContain('animate-');
   });
 });
