@@ -26,11 +26,12 @@
   <div
     data-settings-control
     class="flex min-w-0 w-full max-w-full items-center justify-end justify-self-end
-      [&>button]:max-w-full [&>div]:max-w-full [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full
+      [&>button]:max-w-full [&>div]:max-w-full [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full [&>[data-eve-dropdown]]:max-w-full
       [&>div]:min-w-0
       [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-zinc-100
       [&_input]:focus-visible:outline-none [&_input]:focus-visible:ring-2 [&_input]:focus-visible:ring-zinc-100
       [&_select]:focus-visible:outline-none [&_select]:focus-visible:ring-2 [&_select]:focus-visible:ring-zinc-100
+      [&_[data-eve-dropdown] button]:focus-visible:outline-none [&_[data-eve-dropdown] button]:focus-visible:ring-2 [&_[data-eve-dropdown] button]:focus-visible:ring-zinc-100
       [&_textarea]:focus-visible:outline-none [&_textarea]:focus-visible:ring-2 [&_textarea]:focus-visible:ring-zinc-100"
   >
     {@render children()}

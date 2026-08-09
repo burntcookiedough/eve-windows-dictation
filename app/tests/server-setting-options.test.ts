@@ -55,8 +55,17 @@ describe('Server setting option compatibility metadata', () => {
       new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url),
       'utf8',
     );
+    const dropdown = readFileSync(
+      new URL('../src/renderer/app/components/EveDropdown.svelte', import.meta.url),
+      'utf8',
+    );
 
-    expect(settingsView).toContain('disabled={option.disabled}');
+    expect(settingsView).toContain('<EveDropdown');
+    expect(settingsView).toContain('toDropdownOptions');
+    expect(dropdown).toContain('disabled={option.disabled}');
+    expect(dropdown).toContain('aria-disabled={option.disabled || undefined}');
+    expect(dropdown).toContain('aria-describedby={option.description ?');
+    expect(dropdown).toContain('if (!option || option.disabled) return;');
     expect(settingsView).toContain('data-setting-option-reason');
     expect(settingsView).toContain('getWhisperComputeOptions()');
     expect(settingsView).toContain("disabledOptionReasons(getWhisperComputeOptions())");

@@ -4,6 +4,7 @@
   import { quintOut } from 'svelte/easing';
   import { toast } from '$lib/toast.svelte';
   import type { HistoryEntryWithGroup, HistoryFilters } from '$shared/types';
+  import PrimaryPage from '../components/PrimaryPage.svelte';
 
   const BATCH_SIZE = 30;
 
@@ -368,7 +369,8 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class="mx-auto flex h-full w-full max-w-[560px] flex-col px-4 py-4 pr-2">
+<PrimaryPage page="history" scrollOwner="history" contentClass="pb-4">
+<div class="mx-auto flex min-h-full w-full max-w-[560px] flex-col">
   <!-- Search Bar -->
   <div class="pb-3 pr-3">
     <div class="relative">
@@ -398,7 +400,7 @@
         aria-label="Toggle history filters"
         aria-expanded={showFilters}
         class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-colors cursor-pointer
-          {showFilters || hasActiveFilters ? 'text-blue-400 bg-blue-950/50' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
+          {showFilters || hasActiveFilters ? 'text-zinc-200 bg-white/[0.08]' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
         title="Filters"
       >
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -484,8 +486,8 @@
                 type="checkbox"
                 bind:checked={editedOnly}
                 onchange={handleFilterChange}
-                class="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-blue-500
-                  focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                class="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-zinc-200
+                  focus:ring-zinc-200 focus:ring-offset-0 cursor-pointer"
               />
               <span class="text-sm text-zinc-300">Edited only</span>
             </label>
@@ -508,7 +510,7 @@
   </div>
 
   <!-- History List -->
-  <div class="flex-1 overflow-y-auto pr-3">
+  <div class="flex-1 pr-3">
     {#if loadError}
       <div class="rounded-[10px] border border-red-400/40 bg-red-950/30 p-4" role="alert">
         <p class="text-sm text-red-200">{loadError}</p>
@@ -567,7 +569,7 @@
                   <p class="mt-1 text-[11px] text-zinc-500">
                     {formatTime(item.timestamp)}
                     {#if item.editedAt}
-                      <span class="ml-2 text-blue-400/70">edited</span>
+                      <span class="ml-2 text-zinc-500">edited</span>
                     {/if}
                   </p>
                 </button>
@@ -678,6 +680,7 @@
     {/if}
   </div>
 </div>
+</PrimaryPage>
 
 <!-- Delete Confirmation Dialog -->
 {#if deleteConfirmId}
