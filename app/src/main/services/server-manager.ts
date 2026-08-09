@@ -413,6 +413,7 @@ export class ServerManager {
       const runtimePython = path.join(serverDir, '.runtime', 'python.exe');
       const legacyPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
       const sitePackages = path.join(serverDir, '.venv', 'Lib', 'site-packages');
+      const torchLib = path.join(sitePackages, 'torch', 'lib');
       const mainPy = path.join(serverDir, 'src', 'main.py');
 
       let pythonExe = runtimePython;
@@ -433,6 +434,10 @@ export class ServerManager {
         return null;
       }
 
+      const bundledRuntimePath = fs.existsSync(torchLib)
+        ? [torchLib, process.env.PATH].filter(Boolean).join(path.delimiter)
+        : process.env.PATH;
+
       return {
         command: pythonExe,
         args: [mainPy],
@@ -443,6 +448,7 @@ export class ServerManager {
           PYTHONPATH: fs.existsSync(sitePackages)
             ? [sitePackages, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
             : process.env.PYTHONPATH,
+          PATH: bundledRuntimePath,
         },
       };
     } else {

@@ -249,7 +249,7 @@ class WhisperEngine:
                     missing_files=cache_status.missing_files,
                     partial_files=cache_status.partial_files,
                     phase="downloading",
-                    progress_percent=0.0,
+                    progress_percent=None,
                 )
                 logger.info(
                     "Whisper model cache status is %s; loading may download (~%.1f GB).",

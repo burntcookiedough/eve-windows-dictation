@@ -6,7 +6,8 @@ import { basename, isAbsolute, relative, resolve } from 'node:path';
 const appRoot = resolve(import.meta.dir, '..');
 const fixtureTempRoot = resolve(tmpdir());
 const screenshotDir = resolve(fixtureTempRoot, 'eve-phase3-settings-server-screenshots');
-const vitePort = 52100 + (process.pid % 100);
+// Keep this PID-derived range outside Windows' excluded 52125-52224 range.
+const vitePort = 52300 + (process.pid % 100);
 const viteProcess = Bun.spawn([
   'node',
   resolve(appRoot, 'node_modules/vite/bin/vite.js'),

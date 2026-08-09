@@ -19,6 +19,9 @@ ModelDownloadPhase = Literal["checking", "downloading", "loading", "ready", "err
 
 _TEMP_FILE_MARKERS = (".incomplete", ".lock", ".tmp", ".temp", ".partial")
 _REQUIRED_FILES_BY_REPO: dict[str, tuple[str, ...]] = {
+    "nvidia/nemotron-speech-streaming-en-0.6b": (
+        "nemotron-speech-streaming-en-0.6b.nemo",
+    ),
     "mobiuslabsgmbh/faster-whisper-large-v3-turbo": (
         "config.json",
         "model.bin",
@@ -91,17 +94,27 @@ class DownloadDiskPreflightError(RuntimeError):
     """The selected model cannot safely begin its existing cache download."""
 
 
+@dataclass(frozen=True)
+class _TransferProgress:
+    """Absolute byte state for one active/completed file transfer."""
+
+    initial_bytes: int
+    current_bytes: int
+    total_bytes: int | None
+    label: str
+
+
 _MODEL_DOWNLOAD_STATE: ModelDownloadState | None = None
 _PROGRESS_LOCK = threading.RLock()
 _PROGRESS_STARTED_AT: str | None = None
-_PROGRESS_DOWNLOADED_BYTES = 0
-_PROGRESS_EXPECTED_BYTES = 0
-_PROGRESS_TRANSFER_TOTALS: dict[int, int] = {}
-_PROGRESS_TRANSFER_LABELS: dict[int, str] = {}
+_PROGRESS_BASELINE_BYTES = 0
+_PROGRESS_EXPECTED_BYTES: int | None = None
+_PROGRESS_TRANSFERS: dict[int, _TransferProgress] = {}
 _PROGRESS_SAMPLES: deque[tuple[float, int]] = deque(maxlen=256)
 _PROGRESS_CURRENT_FILE: str | None = None
 _PROGRESS_ACTIVE_MODEL: str | None = None
 _PROGRESS_ACTIVE_REPO: str | None = None
+_NEXT_TRANSFER_ID = 0
 _TQDM_PATCH_LOCK = threading.RLock()
 
 
@@ -259,7 +272,13 @@ def is_repo_cached(repo_id: str) -> bool:
 
 
 def get_cached_required_bytes(repo_id: str) -> int:
-    """Return bytes already present in the most complete cached snapshot."""
+    """Return completed required-file bytes from the most complete snapshot.
+
+    Hugging Face stores resumable transfers in ``blobs/*.incomplete`` until
+    they are promoted into a snapshot.  Those partial bytes are intentionally
+    excluded here and are added once from the transfer's absolute ``initial``
+    value by the progress bridge.
+    """
     repo_dir = _repo_cache_dir(repo_id)
     if repo_dir is None or not repo_dir.exists():
         return 0
@@ -359,10 +378,16 @@ def begin_model_download_progress(
     repo_id: str,
     size_gb: float,
     initial_bytes: int = 0,
+    expected_bytes: int | None = None,
 ) -> None:
-    """Reset byte-level progress before Hugging Face starts a download."""
+    """Reset byte-level progress before Hugging Face starts a download.
+
+    ``size_gb`` is an end-user estimate and is deliberately not used as a
+    determinate byte total.  The total becomes determinate only after a
+    transfer exposes a byte total (or the caller supplies one explicitly).
+    """
     global _PROGRESS_STARTED_AT
-    global _PROGRESS_DOWNLOADED_BYTES
+    global _PROGRESS_BASELINE_BYTES
     global _PROGRESS_EXPECTED_BYTES
     global _PROGRESS_CURRENT_FILE
     global _PROGRESS_ACTIVE_MODEL
@@ -371,12 +396,12 @@ def begin_model_download_progress(
     now = time.monotonic()
     with _PROGRESS_LOCK:
         _PROGRESS_STARTED_AT = _now_iso()
-        _PROGRESS_DOWNLOADED_BYTES = max(0, int(initial_bytes))
-        _PROGRESS_EXPECTED_BYTES = max(1, int(size_gb * 1024**3))
-        _PROGRESS_TRANSFER_TOTALS.clear()
-        _PROGRESS_TRANSFER_LABELS.clear()
+        _PROGRESS_BASELINE_BYTES = max(0, int(initial_bytes))
+        known_total = int(expected_bytes) if expected_bytes is not None else 0
+        _PROGRESS_EXPECTED_BYTES = known_total or None
+        _PROGRESS_TRANSFERS.clear()
         _PROGRESS_SAMPLES.clear()
-        _PROGRESS_SAMPLES.append((now, _PROGRESS_DOWNLOADED_BYTES))
+        _PROGRESS_SAMPLES.append((now, _downloaded_bytes_locked()))
         _PROGRESS_CURRENT_FILE = None
         _PROGRESS_ACTIVE_MODEL = model
         _PROGRESS_ACTIVE_REPO = repo_id
@@ -397,34 +422,58 @@ def _friendly_download_item(description: str | None, total: int | None) -> str:
     return "model files"
 
 
+def _next_transfer_id() -> int:
+    global _NEXT_TRANSFER_ID
+    with _PROGRESS_LOCK:
+        _NEXT_TRANSFER_ID += 1
+        return _NEXT_TRANSFER_ID
+
+
 def register_model_download_transfer(
     transfer_id: int,
     *,
     total: int | None,
     initial: int = 0,
     description: str | None = None,
+    unit: str = "B",
 ) -> None:
-    """Register one file transfer reported by huggingface_hub."""
-    global _PROGRESS_DOWNLOADED_BYTES
-    global _PROGRESS_EXPECTED_BYTES
+    """Register one byte transfer reported by huggingface_hub.
+
+    Hugging Face also creates an item-count progress bar for snapshot-level
+    concurrency.  It is intentionally ignored here so file byte totals are
+    never mixed with the number of files.
+    """
     global _PROGRESS_CURRENT_FILE
 
+    if str(unit or "").lower() not in {"b", "byte", "bytes"}:
+        return
+
     with _PROGRESS_LOCK:
-        if total is not None and total > 0:
-            _PROGRESS_TRANSFER_TOTALS[transfer_id] = int(total)
-            _PROGRESS_EXPECTED_BYTES = max(
-                _PROGRESS_EXPECTED_BYTES,
-                sum(_PROGRESS_TRANSFER_TOTALS.values()),
-            )
-        _PROGRESS_TRANSFER_LABELS[transfer_id] = _friendly_download_item(
+        label = _friendly_download_item(
             description,
             total,
         )
-        if initial > 0:
-            _PROGRESS_DOWNLOADED_BYTES += int(initial)
-            _PROGRESS_SAMPLES.clear()
-            _PROGRESS_SAMPLES.append((time.monotonic(), _PROGRESS_DOWNLOADED_BYTES))
-        _PROGRESS_CURRENT_FILE = _friendly_download_item(description, total)
+        known_total = int(total) if total is not None and total > 0 else None
+        existing = _PROGRESS_TRANSFERS.get(transfer_id)
+        if existing is None:
+            transfer = _TransferProgress(
+                initial_bytes=max(0, int(initial)),
+                current_bytes=max(0, int(initial)),
+                total_bytes=known_total,
+                label=label,
+            )
+        else:
+            # A retry can re-enter the progress-bar constructor.  Preserve
+            # absolute progress and only fill in a total learned later.
+            transfer = replace(
+                existing,
+                total_bytes=existing.total_bytes or known_total,
+                label=label,
+            )
+        _PROGRESS_TRANSFERS[transfer_id] = transfer
+        _PROGRESS_CURRENT_FILE = transfer.label
+        _PROGRESS_SAMPLES.clear()
+        _PROGRESS_SAMPLES.append((time.monotonic(), _downloaded_bytes_locked()))
 
 
 def report_model_download_bytes(
@@ -434,7 +483,6 @@ def report_model_download_bytes(
     description: str | None = None,
 ) -> None:
     """Add a byte delta from a Hugging Face HTTP or Xet transfer callback."""
-    global _PROGRESS_DOWNLOADED_BYTES
     global _PROGRESS_CURRENT_FILE
 
     byte_delta = max(0, int(delta))
@@ -442,18 +490,48 @@ def report_model_download_bytes(
         return
     now = time.monotonic()
     with _PROGRESS_LOCK:
-        _PROGRESS_DOWNLOADED_BYTES += byte_delta
-        _PROGRESS_CURRENT_FILE = _PROGRESS_TRANSFER_LABELS.get(
-            transfer_id,
-            _friendly_download_item(description, None),
+        existing = _PROGRESS_TRANSFERS.get(transfer_id)
+        if existing is None:
+            existing = _TransferProgress(
+                initial_bytes=0,
+                current_bytes=0,
+                total_bytes=None,
+                label=_friendly_download_item(description, None),
+            )
+        next_current = existing.current_bytes + byte_delta
+        if existing.total_bytes is not None:
+            next_current = min(next_current, existing.total_bytes)
+        updated = replace(
+            existing,
+            current_bytes=next_current,
         )
-        _PROGRESS_SAMPLES.append((now, _PROGRESS_DOWNLOADED_BYTES))
+        _PROGRESS_TRANSFERS[transfer_id] = updated
+        _PROGRESS_CURRENT_FILE = updated.label
+        _PROGRESS_SAMPLES.append((now, _downloaded_bytes_locked()))
+
+
+def _downloaded_bytes_locked() -> int:
+    return _PROGRESS_BASELINE_BYTES + sum(
+        transfer.current_bytes for transfer in _PROGRESS_TRANSFERS.values()
+    )
+
+
+def _expected_bytes_locked() -> int | None:
+    if _PROGRESS_EXPECTED_BYTES is not None:
+        return _PROGRESS_EXPECTED_BYTES
+    if any(transfer.total_bytes is None for transfer in _PROGRESS_TRANSFERS.values()):
+        return None
+    if not _PROGRESS_TRANSFERS:
+        return None
+    return _PROGRESS_BASELINE_BYTES + sum(
+        transfer.total_bytes or 0 for transfer in _PROGRESS_TRANSFERS.values()
+    )
 
 
 def _progress_metrics() -> dict[str, int | float | str | None]:
     now = time.monotonic()
-    downloaded = _PROGRESS_DOWNLOADED_BYTES
-    total = max(_PROGRESS_EXPECTED_BYTES, downloaded)
+    downloaded = _downloaded_bytes_locked()
+    total = _expected_bytes_locked()
     rate = 0.0
 
     if _PROGRESS_SAMPLES:
@@ -468,11 +546,15 @@ def _progress_metrics() -> dict[str, int | float | str | None]:
         if now - _PROGRESS_SAMPLES[-1][0] > 15:
             rate = 0.0
 
-    percent = min(99.0, downloaded / total * 100) if total > 0 else 0.0
-    remaining = max(0, total - downloaded)
-    eta = round(remaining / rate) if rate > 1024 and remaining > 0 else None
+    percent = (
+        min(99.0, downloaded / total * 100)
+        if total is not None and total > 0
+        else None
+    )
+    remaining = max(0, total - downloaded) if total is not None else None
+    eta = round(remaining / rate) if rate > 1024 and remaining and remaining > 0 else None
     return {
-        "progress_percent": round(percent, 1),
+        "progress_percent": round(percent, 1) if percent is not None else None,
         "downloaded_bytes": downloaded,
         "total_bytes": total,
         "bytes_per_second": round(rate) if rate > 0 else None,
@@ -489,7 +571,7 @@ def mark_model_loading() -> None:
         if _MODEL_DOWNLOAD_STATE is None:
             return
         metrics = _progress_metrics()
-        total = int(metrics["total_bytes"] or 0)
+        downloaded = int(metrics["downloaded_bytes"] or 0)
         _MODEL_DOWNLOAD_STATE = replace(
             _MODEL_DOWNLOAD_STATE,
             status="downloading",
@@ -497,8 +579,8 @@ def mark_model_loading() -> None:
             detail="download complete; loading model",
             phase="loading",
             progress_percent=100.0,
-            downloaded_bytes=total,
-            total_bytes=total,
+            downloaded_bytes=downloaded,
+            total_bytes=metrics["total_bytes"],
             bytes_per_second=None,
             eta_seconds=None,
             current_file=None,
@@ -526,30 +608,61 @@ def track_huggingface_download_progress() -> Iterator[None]:
             _murmur_progress_bridge = True
 
             def __init__(self, *args, **kwargs):
-                self._murmur_transfer_id = id(self)
+                self._murmur_transfer_id = _next_transfer_id()
                 self._murmur_description = kwargs.get("desc")
+                self._murmur_unit = str(kwargs.get("unit", "it"))
+                self._murmur_is_byte_transfer = self._murmur_unit.lower() in {
+                    "b",
+                    "byte",
+                    "bytes",
+                }
                 super().__init__(*args, **kwargs)
                 register_model_download_transfer(
                     self._murmur_transfer_id,
                     total=int(self.total) if self.total is not None else None,
                     initial=int(self.n),
                     description=self._murmur_description,
+                    unit=self._murmur_unit,
                 )
+                self._murmur_last_n = int(self.n)
 
             def update(self, n=1):
                 result = super().update(n)
-                report_model_download_bytes(
-                    self._murmur_transfer_id,
-                    n,
-                    description=self._murmur_description,
-                )
+                if getattr(self, "disable", False):
+                    delta = max(0, int(n))
+                    self._murmur_last_n += delta
+                else:
+                    current_n = int(self.n)
+                    delta = max(0, current_n - self._murmur_last_n)
+                    self._murmur_last_n = current_n
+                if self._murmur_is_byte_transfer:
+                    report_model_download_bytes(
+                        self._murmur_transfer_id,
+                        delta,
+                        description=self._murmur_description,
+                    )
                 return result
 
-        tqdm_module.tqdm = ReportingTqdm
+        patched_modules: list[tuple[object, str, object]] = []
+        for module_name, attribute in (
+            ("huggingface_hub.utils.tqdm", "tqdm"),
+            ("huggingface_hub.file_download", "tqdm"),
+            ("huggingface_hub._snapshot_download", "hf_tqdm"),
+        ):
+            try:
+                module = importlib.import_module(module_name)
+                original = getattr(module, attribute)
+            except (ImportError, AttributeError):
+                continue
+            if getattr(original, "_murmur_progress_bridge", False):
+                continue
+            setattr(module, attribute, ReportingTqdm)
+            patched_modules.append((module, attribute, original))
         try:
             yield
         finally:
-            tqdm_module.tqdm = original_tqdm
+            for module, attribute, original in reversed(patched_modules):
+                setattr(module, attribute, original)
 
 
 def get_model_download_state() -> dict | None:

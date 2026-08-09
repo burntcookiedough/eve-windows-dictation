@@ -6,6 +6,10 @@ import socket
 
 import uvicorn
 
+from runtime_paths import configure_windows_cuda_dll_search
+
+configure_windows_cuda_dll_search()
+
 from config import get_settings
 from pidfile import register_cleanup, remove_pid_file, write_pid_file
 from version import SERVER_VERSION

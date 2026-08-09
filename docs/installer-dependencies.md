@@ -116,12 +116,12 @@ This is the most complex dependency story and the most likely source of end-user
 
 When the server starts:
 
-1. `discover_engines()` in `factory.py` tries `import nemo.collections.asr` first (line 29)
-2. If NeMo is installed, this triggers `import torch`, which calls `os.add_dll_directory()` to add `torch/lib/` to the DLL search path
-3. CTranslate2 (faster-whisper) can then find cublas/cuDNN DLLs from PyTorch's lib directory
-4. GPU transcription works
+1. The Electron server launcher prepends the packaged `.venv/Lib/site-packages/torch/lib/` directory to the child `PATH`.
+2. `runtime_paths.py` registers that same directory with `os.add_dll_directory()` before settings and optional engine imports load native code.
+3. When the engine manager constructs Nemotron, `nemotron.py` imports PyTorch/NeMo; Whisper imports PyTorch before CTranslate2. Both native paths therefore resolve against the same packaged directory.
+4. Nemotron runs a real CUDA/cuDNN convolution before a candidate engine is activated; DLL entry-point or device initialization failures become a recoverable preparation error.
 
-**The problem:** If only the Whisper extra is installed (no Nemotron/PyTorch), CTranslate2 has no CUDA DLLs available, and GPU mode silently fails.
+**The boundary:** If only the Whisper extra is installed (no Nemotron/PyTorch), CTranslate2 has no bundled CUDA DLL set available, so GPU mode remains unavailable; CPU mode is unaffected.
 
 ### 4.3 Runtime Diagnostics
 
@@ -137,14 +137,14 @@ These warnings are actionable and include guidance or links where possible.
 
 | Build Config | PyTorch? | cuBLAS/cuDNN available? | Whisper GPU? | Nemotron GPU? |
 |-------------|----------|------------------------|-------------|--------------|
-| `uv sync --extra all` | Yes (cu124) | Yes, via torch/lib/ | Yes (if torch imported first) | Yes |
-| `uv sync --extra nemotron` | Yes (cu124) | Yes, via torch/lib/ | N/A (not installed) | Yes |
+| `uv sync --extra all` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if driver/runtime preflight passes) | Yes (if CUDA/cuDNN preflight passes) |
+| `uv sync --extra nemotron` | Yes (cu124) | Yes, via packaged torch/lib/ | N/A (not installed) | Yes (if CUDA/cuDNN preflight passes) |
 | `uv sync --extra whisper` | **No** | **No** | **No — GPU broken** | N/A (not installed) |
 | `uv sync` (bare) | **No** | **No** | N/A (not installed) | N/A (not installed) |
 
 ### 4.5 Recommendation
 
-Build with `--extra all` to ensure PyTorch's bundled CUDA DLLs are available for both engines. The `discover_engines()` function's NeMo import attempt ensures `torch` is imported early, making DLLs available before CTranslate2 needs them.
+Build with `--extra all` to ensure PyTorch's locked cu124 wheel and its bundled CUDA DLLs are available for both engines. Eve makes the packaged `torch/lib` directory first in the Windows search order and validates the Nemotron CUDA/cuDNN operation before activation.
 
 For a whisper-only build, you would need to either:
 - Add `torch` as a dependency of the whisper extra (heavy, ~2.5 GB)

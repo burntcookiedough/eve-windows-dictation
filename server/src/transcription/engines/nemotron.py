@@ -14,9 +14,20 @@ import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
 
+from runtime_paths import configure_windows_cuda_dll_search
 from transcription.base import EngineInfo
-from transcription.errors import VramExhaustedError
-from transcription.model_download import DownloadDiskPreflightError, check_download_disk_space, is_repo_cached, update_model_download_state
+from transcription.errors import NemotronCudaPreflightError, VramExhaustedError
+from transcription.model_download import (
+    DownloadDiskPreflightError,
+    begin_model_download_progress,
+    check_download_disk_space,
+    get_cached_required_bytes,
+    is_repo_cached,
+    mark_model_loading,
+    track_huggingface_download_progress,
+    update_model_download_state,
+)
+from transcription.nemotron_runtime import preflight_nemotron_cuda
 from transcription.types import TranscribeOptions, TranscribeResult
 
 logger = logging.getLogger(__name__)
@@ -137,6 +148,7 @@ def _suppress_nemo_logging() -> None:
 
 class NemotronEngine:
     def __init__(self, model_name: str, device: str = "auto") -> None:
+        configure_windows_cuda_dll_search()
         import torch
 
         repo_id = _resolve_repo_id(model_name)
@@ -163,6 +175,12 @@ class NemotronEngine:
                         detail=str(exc), repo_id=repo_id, phase="error",
                     )
                     raise
+                begin_model_download_progress(
+                    model=model_name,
+                    repo_id=repo_id,
+                    size_gb=_MODEL_SIZE_GB,
+                    initial_bytes=get_cached_required_bytes(repo_id),
+                )
                 update_model_download_state(
                     model=model_name,
                     size_gb=_MODEL_SIZE_GB,
@@ -171,6 +189,7 @@ class NemotronEngine:
                     detail="download started",
                     repo_id=repo_id,
                     phase="downloading",
+                    progress_percent=None,
                 )
                 logger.info(
                     "Nemotron model not found in cache; downloading (~%.1f GB).",
@@ -210,8 +229,9 @@ class NemotronEngine:
         logger.info("Loading Nemotron model: %s (device=%s)", model_name, resolved_device)
 
         try:
-            with _public_model_anonymous_access(model_name, nemo_common):
-                self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+            with track_huggingface_download_progress():
+                with _public_model_anonymous_access(model_name, nemo_common):
+                    self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
         except Exception as exc:
             if _is_network_error(exc):
                 logger.warning(
@@ -220,8 +240,9 @@ class NemotronEngine:
                 old_val = os.environ.get("HF_HUB_OFFLINE")
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 try:
-                    with _public_model_anonymous_access(model_name, nemo_common):
-                        self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
+                    with track_huggingface_download_progress():
+                        with _public_model_anonymous_access(model_name, nemo_common):
+                            self._model = nemo_asr.models.ASRModel.from_pretrained(model_name)
                 except Exception as offline_exc:
                     if preflight_cached is False:
                         update_model_download_state(
@@ -251,6 +272,24 @@ class NemotronEngine:
                         phase="error",
                     )
                 raise
+        if preflight_cached is False:
+            mark_model_loading()
+
+        if resolved_device != "cpu":
+            try:
+                preflight_nemotron_cuda(torch)
+            except NemotronCudaPreflightError:
+                update_model_download_state(
+                    model=model_name,
+                    size_gb=_MODEL_SIZE_GB,
+                    status="error",
+                    cached=preflight_cached,
+                    detail="CUDA runtime preflight failed",
+                    repo_id=repo_id,
+                    phase="error",
+                )
+                raise
+
         self._model.eval()
         self._model = self._model.to(resolved_device)
 

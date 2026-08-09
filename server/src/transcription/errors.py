@@ -35,6 +35,10 @@ class VramExhaustedError(RecoverableTranscriptionError):
         )
 
 
+class NemotronCudaPreflightError(RuntimeError):
+    """The real Nemotron CUDA/cuDNN operation could not initialize safely."""
+
+
 _AUTH_ERROR_MARKERS = (
     "oauth token signature",
     "invalid token",
@@ -62,6 +66,11 @@ _NETWORK_ERROR_MARKERS = (
     "tls",
     "ssl",
 )
+_CUDA_PREPARATION_MARKERS = (
+    "cuda preflight",
+    "cudnn",
+    "cuda runtime",
+)
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -82,6 +91,13 @@ def _exception_text(exc: BaseException) -> str:
 def safe_engine_preparation_message(exc: BaseException) -> str:
     """Return a stable user-facing engine error while logs retain the raw exception."""
     text = _exception_text(exc)
+    if isinstance(exc, NemotronCudaPreflightError) or any(
+        marker in text for marker in _CUDA_PREPARATION_MARKERS
+    ):
+        return (
+            "Nemotron could not initialize the packaged CUDA runtime. "
+            "Switch Nemotron to CPU or check GPU/driver support, then retry or revert."
+        )
     if any(marker in text for marker in _AUTH_ERROR_MARKERS):
         return (
             "Hugging Face authentication failed while preparing this model. "
