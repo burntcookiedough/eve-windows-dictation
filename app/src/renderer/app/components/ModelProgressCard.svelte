@@ -29,6 +29,12 @@
         value={view.progressPercent}
         aria-label={`${view.title}: ${Math.round(view.progressPercent)}%`}
       ></progress>
+    {:else if view.phase === 'downloading'}
+      <progress
+        class="mt-3 h-1.5 w-full overflow-hidden rounded-full accent-amber-400"
+        max="100"
+        aria-label={`${view.title}: progress unavailable; transfer is continuing`}
+      ></progress>
     {/if}
 
     {#if view.metrics}

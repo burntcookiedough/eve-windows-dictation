@@ -26,6 +26,7 @@ import {
   START_PID_TIMEOUT_MS,
   waitForPidFile,
 } from './server-startup.js';
+import { buildChildEnvironment } from './server-environment.js';
 
 const log = createLogger('ServerManager');
 
@@ -413,6 +414,7 @@ export class ServerManager {
       const runtimePython = path.join(serverDir, '.runtime', 'python.exe');
       const legacyPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
       const sitePackages = path.join(serverDir, '.venv', 'Lib', 'site-packages');
+      const torchLib = path.join(sitePackages, 'torch', 'lib');
       const mainPy = path.join(serverDir, 'src', 'main.py');
 
       let pythonExe = runtimePython;
@@ -433,6 +435,13 @@ export class ServerManager {
         return null;
       }
 
+      const systemPath = Object.entries(process.env).find(
+        ([key]) => key.toLowerCase() === 'path',
+      )?.[1];
+      const bundledRuntimePath = fs.existsSync(torchLib)
+        ? [torchLib, systemPath].filter(Boolean).join(path.delimiter)
+        : systemPath;
+
       return {
         command: pythonExe,
         args: [mainPy],
@@ -443,6 +452,7 @@ export class ServerManager {
           PYTHONPATH: fs.existsSync(sitePackages)
             ? [sitePackages, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
             : process.env.PYTHONPATH,
+          PATH: bundledRuntimePath,
         },
       };
     } else {
@@ -520,13 +530,11 @@ export class ServerManager {
 
     try {
       const spawnStartedAt = Date.now();
-      const childEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        ...serverCmd.env,
+      const childEnv = buildChildEnvironment(process.env, serverCmd.env, {
         MURMUR_PID_FILE: this.getPidFilePath(),
         MURMUR_SETTINGS_FILE: path.join(app.getPath('userData'), 'server-settings.json'),
         MURMUR_PORT: '0',
-      };
+      });
       // Transformers v5 removes this deprecated variable. HF_HOME and the
       // standard Hugging Face cache discovery continue to work normally.
       delete childEnv.TRANSFORMERS_CACHE;
