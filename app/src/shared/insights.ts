@@ -267,12 +267,12 @@ export function buildTrendPoints(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, bucket]) => {
       const dictations = bucket.length;
-      const words = bucket.reduce((sum, item) => sum + finiteNonNegative(item.wordCount ?? countWords(item.text)), 0);
-      const audioSeconds = bucket.reduce((sum, item) => sum + finiteNonNegative(item.audioDuration), 0);
-      const processingMs = bucket.reduce((sum, item) => sum + finiteNonNegative(item.transcriptionTime), 0);
+      const words = bucket.reduce((sum, item) => saturatingAdd(sum, finiteNonNegative(item.wordCount ?? countWords(item.text))), 0);
+      const audioSeconds = bucket.reduce((sum, item) => saturatingAdd(sum, finiteNonNegative(item.audioDuration)), 0);
+      const processingMs = bucket.reduce((sum, item) => saturatingAdd(sum, finiteNonNegative(item.transcriptionTime)), 0);
       const confidenceEntries = bucket.filter((item) => Number.isFinite(item.confidence) && item.confidence >= 0);
       const avgConfidence = confidenceEntries.length
-        ? Math.min(1, confidenceEntries.reduce((sum, item) => sum + finiteNonNegative(item.confidence), 0) / confidenceEntries.length)
+        ? Math.min(1, saturatingAddMany(confidenceEntries.map((item) => finiteNonNegative(item.confidence))) / confidenceEntries.length)
         : 0;
 
       return {
@@ -291,4 +291,13 @@ export function buildTrendPoints(
 
 function finiteNonNegative(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function saturatingAdd(first: number, second: number): number {
+  const sum = first + second;
+  return Number.isFinite(sum) ? sum : Number.MAX_VALUE;
+}
+
+function saturatingAddMany(values: number[]): number {
+  return values.reduce((sum, value) => saturatingAdd(sum, value), 0);
 }

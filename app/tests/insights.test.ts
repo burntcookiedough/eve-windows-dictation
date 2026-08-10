@@ -160,4 +160,18 @@ describe('insights helpers', () => {
     }
   });
 
+  test('saturates extreme bucket sums without producing Infinity', () => {
+    const now = new Date(2026, 6, 1, 12).getTime();
+    const first = { ...entry('max-one', now, 'one', Number.MAX_VALUE, Number.MAX_VALUE), wordCount: Number.MAX_VALUE };
+    const second = { ...entry('max-two', now, 'two', Number.MAX_VALUE, Number.MAX_VALUE), wordCount: Number.MAX_VALUE };
+    const [trend] = buildTrendPoints([first, second], 'today', now);
+
+    expect(trend?.words).toBe(Number.MAX_VALUE);
+    expect(trend?.audioSeconds).toBe(Number.MAX_VALUE);
+    expect(trend?.processingMs).toBe(Number.MAX_VALUE);
+    expect(Number.isFinite(trend?.words)).toBe(true);
+    expect(Number.isFinite(trend?.audioSeconds)).toBe(true);
+    expect(Number.isFinite(trend?.processingMs)).toBe(true);
+  });
+
 });
