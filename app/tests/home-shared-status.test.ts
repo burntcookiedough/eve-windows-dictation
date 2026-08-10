@@ -227,7 +227,8 @@ describe('Home and shared server status', () => {
     expect(statusController).toContain('percent < 25');
     expect(card).toContain("aria-live={announce ? 'polite' : undefined}");
     expect(banner).not.toContain('aria-live="assertive"');
-    expect(serverView).not.toContain('aria-live="polite"');
+    expect(serverView.match(/aria-live="polite"/g)?.length).toBe(1);
+    expect(serverView).toContain('data-server-logs-loading role="status" aria-live="polite"');
     expect(appView).toContain('aria-live="polite"');
     expect(serverView).toContain('let active = true;');
     expect(serverView).toContain('if (!active) return;');

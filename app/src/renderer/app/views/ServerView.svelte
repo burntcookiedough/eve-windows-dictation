@@ -6,6 +6,13 @@
   import type { ServerStatePayload, ServerLogEntry } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
   import { getServerManagementMode, serverStatusState } from '../server-status';
+  import {
+    getServerLogBodySize,
+    getServerLogCountLabel,
+    MAX_SERVER_LOG_ENTRIES,
+    SERVER_LOG_LOAD_ERROR,
+    type ServerLogLoadState,
+  } from '../server-log';
 
   interface Props {
     embedded?: boolean;
@@ -27,18 +34,21 @@
 
   let serverState = $derived($serverStatusState.state ?? unavailableState);
   let logs = $state<ServerLogEntry[]>([]);
+  let logsLoadState = $state<ServerLogLoadState>('loading');
   let showLogs = $state(false);
   let autoStart = $state(true);
   let configuredExternalServer = $state(false);
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
+  let logsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
   let diagnosticsCopyState = $state<'idle' | 'copied' | 'error'>('idle');
   let diagnosticsCopyTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingLogs: ServerLogEntry[] = [];
   let logFrame: number | null = null;
   let scrollAfterLogBatch = false;
   let removeLogListener: (() => void) | null = null;
+  let reloadLogs: (() => Promise<void>) | null = null;
 
   let externalMode = $derived(
     externalModeProp ?? getServerManagementMode({ ...$serverStatusState, configuredExternalServer }) === 'external'
@@ -71,6 +81,8 @@
   let modelDownload = $derived(serverState.modelDownload);
   let showModelProgress = $derived(shouldShowModelProgress(modelDownload));
   let modelDownloadError = $derived(modelDownload?.status === 'error');
+  let logBodySize = $derived(getServerLogBodySize(logsLoadState, logs.length));
+  let logCountLabel = $derived(getServerLogCountLabel(logsLoadState, logs.length));
 
   function formatUptime(ms: number): string {
     const seconds = Math.floor(ms / 1000);
@@ -158,12 +170,18 @@
   }
 
   function copyLogs() {
+    if (logsLoadState !== 'ready' || logs.length === 0) return;
+
     const text = logs
       .map((log) => `${formatLogTime(log.timestamp)} ${log.message}`)
       .join('\n');
     window.murmurMain.copyToClipboard(text);
     logsCopied = true;
-    setTimeout(() => (logsCopied = false), 2000);
+    if (logsCopiedTimer !== null) clearTimeout(logsCopiedTimer);
+    logsCopiedTimer = setTimeout(() => {
+      logsCopied = false;
+      logsCopiedTimer = null;
+    }, 2000);
   }
 
   async function copyDiagnostics() {
@@ -184,14 +202,15 @@
   function queueLog(entry: ServerLogEntry) {
     scrollAfterLogBatch ||= showLogs && isScrolledToBottom();
     pendingLogs.push(entry);
-    if (pendingLogs.length > 500) pendingLogs = pendingLogs.slice(-500);
+    if (pendingLogs.length > MAX_SERVER_LOG_ENTRIES) pendingLogs = pendingLogs.slice(-MAX_SERVER_LOG_ENTRIES);
     if (logFrame !== null) return;
 
     logFrame = requestAnimationFrame(() => {
       logFrame = null;
       const nextLogs = pendingLogs;
       pendingLogs = [];
-      logs = [...logs, ...nextLogs].slice(-500);
+      logs = [...logs, ...nextLogs].slice(-MAX_SERVER_LOG_ENTRIES);
+      logsLoadState = 'ready';
       if (scrollAfterLogBatch) {
         scrollAfterLogBatch = false;
         requestAnimationFrame(scrollLogsToBottom);
@@ -199,20 +218,44 @@
     });
   }
 
+  async function retryLogs(): Promise<void> {
+    if (logsLoadState === 'loading') return;
+    await reloadLogs?.();
+  }
+
   onMount(() => {
     let active = true;
 
+    const loadLogs = async (): Promise<void> => {
+      const shouldScroll = showLogs && isScrolledToBottom();
+      logsLoadState = 'loading';
+
+      try {
+        const initialLogs = await window.murmurMain.getServerLogs();
+        if (!active) return;
+        logs = initialLogs.slice(-MAX_SERVER_LOG_ENTRIES);
+        logsLoadState = 'ready';
+        if (shouldScroll) requestAnimationFrame(scrollLogsToBottom);
+      } catch (error) {
+        console.error('Failed to load server logs:', error);
+        if (!active) return;
+        logs = [];
+        logsLoadState = 'error';
+      }
+    };
+
+    reloadLogs = loadLogs;
+
     async function load(): Promise<void> {
-      const initialLogs = await window.murmurMain.getServerLogs();
+      await loadLogs();
       if (!active) return;
-      logs = initialLogs;
 
       const settings = await window.murmurMain.getSettings();
       if (!active) return;
       autoStart = settings.serverAutoStart;
       configuredExternalServer = settings.useExternalServer;
 
-      if (!active) return;
+      if (!active || removeLogListener) return;
       removeLogListener = window.murmurMain.onServerLog((entry) => {
         queueLog(entry);
       });
@@ -221,14 +264,17 @@
     void load();
     return () => {
       active = false;
+      reloadLogs = null;
     };
   });
 
   onDestroy(() => {
     if (logFrame !== null) cancelAnimationFrame(logFrame);
+    if (logsCopiedTimer !== null) clearTimeout(logsCopiedTimer);
     if (diagnosticsCopyTimer !== null) clearTimeout(diagnosticsCopyTimer);
     removeLogListener?.();
     removeLogListener = null;
+    reloadLogs = null;
   });
 </script>
 
@@ -451,21 +497,42 @@
         aria-expanded={showLogs}
         aria-controls={logOutputId}
         aria-describedby={privacyWarningId}
+        aria-label={`Server logs, ${logCountLabel}`}
         class="flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-700 bg-zinc-800/70 px-3 py-2 text-left transition-colors hover:bg-zinc-800 cursor-pointer focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100"
       >
         <span class="min-w-0 text-sm text-zinc-200 [overflow-wrap:anywhere]">Server logs</span>
-        <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs tabular-nums text-zinc-400">{logs.length}</span>
+        <span data-server-logs-count class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs tabular-nums text-zinc-400">{logCountLabel}</span>
       </button>
       <p id={privacyWarningId} data-server-logs-privacy class="mt-3 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">Raw logs may contain local paths. Review them before sharing.</p>
 
       <div id={logOutputId} hidden={!showLogs} class="mt-3 min-w-0">
+        {#if logsLoadState === 'loading'}
+          <p data-server-logs-state="loading" data-server-logs-loading role="status" aria-live="polite" class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-400">Loading recent server logs…</p>
+        {:else if logsLoadState === 'error'}
+          <div data-server-logs-state="error" data-server-logs-error role="alert" class="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-3">
+            <p class="min-w-0 text-xs leading-5 text-red-300 [overflow-wrap:anywhere]">{SERVER_LOG_LOAD_ERROR}</p>
+            <button
+              type="button"
+              onclick={retryLogs}
+              disabled={logsLoadState === 'loading'}
+              class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Retry
+            </button>
+          </div>
+        {:else if logs.length === 0}
+          <p data-server-logs-state="empty" data-server-logs-empty class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-500">No server logs are available yet.</p>
+        {/if}
+
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             onclick={copyLogs}
-            disabled={logs.length === 0}
+            data-server-logs-copy
+            aria-describedby={privacyWarningId}
+            disabled={logsLoadState !== 'ready' || logs.length === 0}
             class="inline-flex min-h-9 items-center justify-center gap-1 rounded-lg border border-zinc-700 px-3 py-2 text-xs transition-colors focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100
-              {logs.length === 0
+              {logsLoadState !== 'ready' || logs.length === 0
                 ? 'cursor-not-allowed text-zinc-600'
                 : logsCopied
                   ? 'cursor-default text-emerald-400'
@@ -474,27 +541,26 @@
             {#if logsCopied}Copied{:else}Copy raw logs{/if}
           </button>
         </div>
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard focus is required to scroll the bounded log region) -->
-        <div
-          data-server-log-output
-          id={`${logOutputId}-scroll`}
-          bind:this={logsContainer}
-          tabindex="0"
-          role="log"
-          aria-label="Server log output"
-          class="mt-2 max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100"
-        >
-          {#if logs.length === 0}
-            <p class="py-8 text-center text-zinc-500">No logs yet</p>
-          {:else}
+        {#if logBodySize !== 'empty'}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard focus is required to scroll the bounded log region) -->
+          <div
+            data-server-log-output
+            data-log-size={logBodySize}
+            id={`${logOutputId}-scroll`}
+            bind:this={logsContainer}
+            tabindex="0"
+            role="log"
+            aria-label="Server log output"
+            class={`mt-2 min-w-0 rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-zinc-100 ${logBodySize === 'long' ? 'max-h-64 overflow-y-auto overscroll-contain' : 'min-h-16 overflow-hidden'}`}
+          >
             {#each logs as log}
               <div class="flex min-w-0 gap-2 py-0.5">
                 <span class="shrink-0 text-zinc-500">{formatLogTime(log.timestamp)}</span>
                 <span class="min-w-0 break-all {log.level === 'stderr' ? 'text-red-300' : 'text-zinc-300'}">{log.message}</span>
               </div>
             {/each}
-          {/if}
-        </div>
+          </div>
+        {/if}
       </div>
     </div>
   </section>

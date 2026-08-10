@@ -15,6 +15,10 @@ const cases = [
   ['external-ready', false, 'external-ready.png'],
   ['managed-ready', true, 'logs-expanded.png'],
   ['managed-long', false, 'long-strings.png'],
+  ['managed-short', true, null],
+  ['managed-empty', true, null],
+  ['managed-log-error', true, null],
+  ['managed-log-loading', true, null],
 ];
 
 app.setPath('userData', userData);
@@ -52,6 +56,9 @@ async function measure(window, state, logsExpanded, zoom) {
     const logPanelId = logsToggle?.getAttribute('aria-controls');
     const logPanel = logPanelId ? document.getElementById(logPanelId) : null;
     const logOutput = document.querySelector('[data-server-log-output]');
+    const logState = document.querySelector('[data-server-logs-state]');
+    const logCopy = document.querySelector('[data-server-logs-copy]');
+    const retryLogs = document.querySelector('[data-server-logs-error] button');
     const controls = [...document.querySelectorAll('[data-server-mode-surface] button, [data-server-mode-surface] input, [data-server-health-surface] button, [data-server-diagnostics-surface] button, [data-server-logs-surface] button')].filter((control) => control.offsetParent !== null);
     const focusTarget = meta.logsExpanded ? (logOutput ?? logsToggle ?? controls[0]) : (logsToggle ?? controls[0]);
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
@@ -93,6 +100,14 @@ async function measure(window, state, logsExpanded, zoom) {
       logsAssociation: !!logsToggle && !!logPanel && logsToggle.getAttribute('aria-controls') === logPanel.id,
       logsExpanded: logPanel ? !logPanel.hidden : false,
       logsScroller: logOutput ? { overflowY: getComputedStyle(logOutput).overflowY, overscrollBehaviorY: getComputedStyle(logOutput).overscrollBehaviorY, clientHeight: logOutput.clientHeight, scrollHeight: logOutput.scrollHeight, tabIndex: logOutput.tabIndex, role: logOutput.getAttribute('role'), ariaLabel: logOutput.getAttribute('aria-label') } : null,
+      logState: logState?.getAttribute('data-server-logs-state') ?? (logOutput && logPanel && !logPanel.hidden ? 'ready' : null),
+      logStateRole: logState?.getAttribute('role') ?? null,
+      logStateLive: logState?.getAttribute('aria-live') ?? null,
+      logBodySize: logOutput?.getAttribute('data-log-size') ?? null,
+      logEmpty: !!document.querySelector('[data-server-logs-empty]'),
+      logError: !!document.querySelector('[data-server-logs-error]'),
+      logRetryVisible: !!retryLogs && retryLogs.offsetParent !== null,
+      logCopyDisabled: logCopy?.disabled ?? null,
       privacyWarning: !!document.querySelector('[data-server-logs-privacy]'),
       scrollersOutsideLogs: scrollersOutsideLogs.length,
     };

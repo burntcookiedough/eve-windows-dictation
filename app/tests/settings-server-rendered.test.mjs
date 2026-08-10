@@ -140,7 +140,7 @@ const { measurements } = result;
 
 describe('rendered Phase 3 Server and diagnostics fixture', () => {
   test('keeps one page scroll owner and no horizontal overflow at narrow/high zoom states', () => {
-    expect(measurements.length).toBe(30);
+    expect(measurements.length).toBe(54);
     for (const measurement of measurements) {
       expect(measurement.owner.overflowY).toBe('auto');
       expect(measurement.owner.scrollHeight).toBeGreaterThan(measurement.owner.clientHeight);
@@ -187,6 +187,41 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     expect(expanded.logsScroller.tabIndex).toBe(0);
     expect(expanded.logsScroller.role).toBe('log');
     expect(expanded.logsScroller.ariaLabel).toBe('Server log output');
+  });
+
+  test('distinguishes loading, empty, unavailable, short, and bounded long log states', () => {
+    const short = measurements.find((measurement) => measurement.state === 'managed-short' && measurement.zoom === 1 && measurement.viewport.width === 960);
+    const empty = measurements.find((measurement) => measurement.state === 'managed-empty' && measurement.zoom === 1 && measurement.viewport.width === 960);
+    const unavailable = measurements.find((measurement) => measurement.state === 'managed-log-error' && measurement.zoom === 1 && measurement.viewport.width === 960);
+    const loading = measurements.find((measurement) => measurement.state === 'managed-log-loading' && measurement.zoom === 1 && measurement.viewport.width === 960);
+    const long = measurements.find((measurement) => measurement.state === 'managed-long' && measurement.zoom === 1 && measurement.viewport.width === 960);
+
+    expect(short.logState).toBe('ready');
+    expect(short.logBodySize).toBe('short');
+    expect(short.logsScroller.overflowY).toBe('hidden');
+    expect(short.logCopyDisabled).toBeFalse();
+
+    expect(empty.logState).toBe('empty');
+    expect(empty.logEmpty).toBeTrue();
+    expect(empty.logCopyDisabled).toBeTrue();
+    expect(empty.logsScroller).toBeNull();
+
+    expect(unavailable.logState).toBe('error');
+    expect(unavailable.logError).toBeTrue();
+    expect(unavailable.logStateRole).toBe('alert');
+    expect(unavailable.logRetryVisible).toBeTrue();
+    expect(unavailable.logCopyDisabled).toBeTrue();
+    expect(unavailable.logsScroller).toBeNull();
+
+    expect(loading.logState).toBe('loading');
+    expect(loading.logStateRole).toBe('status');
+    expect(loading.logStateLive).toBe('polite');
+    expect(loading.logCopyDisabled).toBeTrue();
+    expect(loading.logsScroller).toBeNull();
+
+    expect(long.logBodySize).toBe('long');
+    expect(long.logsScroller.overflowY).toBe('auto');
+    expect(long.logsScroller.overscrollBehaviorY).toBe('contain');
   });
 
   test('keeps heading associations, visible focus, and long strings contained', () => {

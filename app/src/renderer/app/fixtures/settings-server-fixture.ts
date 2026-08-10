@@ -5,13 +5,24 @@ import { serverStatusState } from '../server-status';
 import SettingsServerFixture from './SettingsServerFixture.svelte';
 import '../app.css';
 
-type FixtureState = 'managed-ready' | 'managed-error' | 'external-ready' | 'managed-long';
+type FixtureState =
+  | 'managed-ready'
+  | 'managed-error'
+  | 'external-ready'
+  | 'managed-long'
+  | 'managed-short'
+  | 'managed-empty'
+  | 'managed-log-error'
+  | 'managed-log-loading';
 
 const params = new URLSearchParams(globalThis.location.search);
 const fixtureState = (params.get('state') ?? 'managed-ready') as FixtureState;
 const externalMode = fixtureState === 'external-ready';
 const longStrings = fixtureState === 'managed-long';
 const hasError = fixtureState === 'managed-error';
+const logError = fixtureState === 'managed-log-error';
+const logLoading = fixtureState === 'managed-log-loading';
+const logCount = fixtureState === 'managed-short' ? 3 : fixtureState === 'managed-empty' || logError || logLoading ? 0 : 42;
 
 const longWarning = 'The fixture warning deliberately contains a long diagnostic explanation with a host, a compatibility hint, and a recovery action so responsive wrapping can be measured without accessing personal data.';
 const engineStatus = {
@@ -56,7 +67,7 @@ const serverState: ServerStatePayload = {
   },
 };
 
-const logs: ServerLogEntry[] = Array.from({ length: 42 }, (_, index) => ({
+const logs: ServerLogEntry[] = Array.from({ length: logCount }, (_, index) => ({
   timestamp: Date.UTC(2026, 7, 3, 12, 0, index),
   level: index % 11 === 0 ? 'stderr' : 'stdout',
   message: longStrings
@@ -82,7 +93,11 @@ serverStatusState.set({
 });
 
 const fixtureMain = {
-  getServerLogs: async () => logs,
+  getServerLogs: async () => {
+    if (logLoading) return new Promise<ServerLogEntry[]>(() => {});
+    if (logError) throw new Error('fixture log retrieval failed');
+    return logs;
+  },
   getSettings: async () => fixtureSettings,
   onServerLog: (_callback: (entry: ServerLogEntry) => void) => () => {},
   copyDiagnostics: async () => {},
