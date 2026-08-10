@@ -148,6 +148,51 @@ try {
   assert.equal(bulkService.getInsights('all').summary.totalDictations, 0);
   bulkService.close();
 
+  const cleanupDbPath = join(workDir, 'day-scoped-cleanup.db');
+  const cleanupService = new HistoryService(cleanupDbPath);
+  cleanupService.initialize();
+  cleanupService.save(transcription('cleanup-a', now + 4000, 'Cleanup day entry', 1, 100));
+  const cleanupDb = new Database(cleanupDbPath);
+  cleanupDb.prepare(`
+    INSERT INTO insights_word_counts (day, word, count)
+    VALUES ('2099-01-01', 'unrelated', 0)
+  `).run();
+  cleanupDb.close();
+  cleanupService.deleteMany(['cleanup-a']);
+  const cleanupCheckDb = new Database(cleanupDbPath);
+  assert.deepEqual(
+    cleanupCheckDb.prepare(`
+      SELECT count FROM insights_word_counts
+      WHERE day = '2099-01-01' AND word = 'unrelated'
+    `).get(),
+    { count: 0 },
+  );
+  cleanupCheckDb.close();
+  cleanupService.close();
+
+  const chunkDbPath = join(workDir, 'chunk-boundary-history.db');
+  const chunkService = new HistoryService(chunkDbPath);
+  chunkService.initialize();
+  for (let index = 0; index < 501; index += 1) {
+    chunkService.save(transcription(
+      `chunk-${index}`,
+      now + 5000 + index,
+      `Chunk boundary ${index}`,
+      1,
+      100,
+    ));
+  }
+  const chunkIds = chunkService.getEntryIds({ text: 'Chunk boundary' });
+  assert.equal(chunkIds.length, 501);
+  assert.deepEqual(chunkService.deleteMany(chunkIds), {
+    requestedCount: 501,
+    deletedCount: 501,
+    deletedIds: chunkIds,
+    missingIds: [],
+  });
+  assert.equal(chunkService.getInsights('all').summary.totalDictations, 0);
+  chunkService.close();
+
   const migrationDbPath = join(workDir, 'migration-history.db');
   const migrationDb = new Database(migrationDbPath);
   migrationDb.exec(`

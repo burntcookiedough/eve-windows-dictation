@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { arch, release } from 'node:os';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
+import { isHistoryFilters } from '../../shared/history-validation.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { isInsightsRange } from '../../shared/insights.js';
 import { copyToClipboard } from '../services/clipboard.js';
@@ -157,7 +158,10 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
 
   ipcMain.handle(
     IPC_CHANNELS.HISTORY_GET_ENTRY_IDS,
-    (_event, filters?: HistoryFilters) => {
+    (_event, filters: unknown) => {
+      if (!isHistoryFilters(filters)) {
+        throw new TypeError('Invalid history filters');
+      }
       if (!historyServiceRef) {
         return [];
       }

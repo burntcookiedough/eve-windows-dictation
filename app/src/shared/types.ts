@@ -187,6 +187,7 @@ export interface HistoryResponse {
   hasMore: boolean;
 }
 
+// requestedCount counts the deduplicated, non-empty IDs supplied by the caller.
 export interface HistoryDeleteResult {
   requestedCount: number;
   deletedCount: number;

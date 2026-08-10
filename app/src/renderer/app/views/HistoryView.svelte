@@ -122,6 +122,13 @@
     else enterSelectionMode();
   }
 
+  function removeEntryFromSelection(id: string): void {
+    if (!selectedIds.has(id)) return;
+    const next = new Set(selectedIds);
+    next.delete(id);
+    selectedIds = next;
+  }
+
   function toggleEntrySelection(id: string, selected: boolean): void {
     const next = new Set(selectedIds);
     if (selected) next.add(id);
@@ -274,10 +281,11 @@
 
   async function confirmDelete() {
     if (!deleteConfirmId) return;
+    const id = deleteConfirmId;
     try {
-      await window.murmurMain.deleteHistoryEntry(deleteConfirmId);
-      history = history.filter((item) => item.id !== deleteConfirmId);
-      exitSelectionMode();
+      await window.murmurMain.deleteHistoryEntry(id);
+      history = history.filter((item) => item.id !== id);
+      removeEntryFromSelection(id);
       toast('Transcription deleted', 'info');
     } catch (err) {
       console.error('Failed to delete:', err);
@@ -420,7 +428,6 @@
 
     // Listen for new entries
     const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry((entry) => {
-      if (selectionMode || selectedIds.size > 0) exitSelectionMode();
       // Prepend new entry if it passes current filters
       const filters = buildFilters();
       let shouldAdd = true;

@@ -29,6 +29,7 @@ import type {
 } from '../../shared/types.js';
 
 const INSIGHTS_PHRASE_ENTRY_LIMIT = 5000;
+const HISTORY_ID_CHUNK_SIZE = 500;
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -290,17 +291,15 @@ export class HistoryService {
       const missingIds = selectedIds.filter((id) => !existingIds.has(id));
       let deletedCount = 0;
 
-      for (let offset = 0; offset < selectedIds.length; offset += 500) {
-        const chunk = selectedIds.slice(offset, offset + 500);
+      for (let offset = 0; offset < selectedIds.length; offset += HISTORY_ID_CHUNK_SIZE) {
+        const chunk = selectedIds.slice(offset, offset + HISTORY_ID_CHUNK_SIZE);
         const result = this.db!.prepare(
           `DELETE FROM transcriptions WHERE id IN (${buildIdPlaceholders(chunk)})`
         ).run(buildIdParams(chunk));
         deletedCount += result.changes;
       }
 
-      for (const entry of existing) {
-        this.removeEntryFromInsightsWithinTransaction(entry);
-      }
+      this.removeEntriesFromInsightsWithinTransaction(existing);
 
       const deletedIds = selectedIds.filter((id) => existingIds.has(id));
       return {
@@ -311,7 +310,7 @@ export class HistoryService {
       };
     });
 
-    return remove(requestedIds);
+    return remove.immediate(requestedIds);
   }
 
   getById(id: string): TranscriptionEntry | null {
@@ -346,8 +345,8 @@ export class HistoryService {
     if (!this.db || ids.length === 0) return [];
     const entries: TranscriptionEntry[] = [];
 
-    for (let offset = 0; offset < ids.length; offset += 500) {
-      const chunk = ids.slice(offset, offset + 500);
+    for (let offset = 0; offset < ids.length; offset += HISTORY_ID_CHUNK_SIZE) {
+      const chunk = ids.slice(offset, offset + HISTORY_ID_CHUNK_SIZE);
       const rows = this.db.prepare(`
         SELECT
           id,
@@ -590,19 +589,15 @@ export class HistoryService {
     });
   }
 
-  private removeEntryFromInsightsWithinTransaction(entry: TranscriptionEntry): void {
+  private removeEntriesFromInsightsWithinTransaction(entries: TranscriptionEntry[]): void {
     if (!this.db) throw new Error('Database not initialized');
+    if (entries.length === 0) return;
+
     const wasProcessed = this.db.prepare(`
       SELECT 1 FROM insights_processed_entries WHERE id = @id
-    `).get({ id: entry.id });
-    if (!wasProcessed) return;
+    `);
 
-    const wordCount = entry.wordCount ?? countWords(entry.text);
-    const day = getLocalDayKey(entry.timestamp);
-    const confidence = Number.isFinite(entry.confidence) ? entry.confidence : 0;
-    const confidenceCount = Number.isFinite(entry.confidence) ? 1 : 0;
-
-    this.db.prepare(`
+    const updateRollup = this.db.prepare(`
       UPDATE insights_daily_rollups
       SET
         dictations = MAX(dictations - 1, 0),
@@ -612,19 +607,7 @@ export class HistoryService {
         confidenceSum = MAX(confidenceSum - @confidenceSum, 0),
         confidenceCount = MAX(confidenceCount - @confidenceCount, 0)
       WHERE day = @day
-    `).run({
-      day,
-      words: wordCount,
-      audioSeconds: entry.audioDuration || 0,
-      processingMs: entry.transcriptionTime || 0,
-      confidenceSum: confidence,
-      confidenceCount,
-    });
-
-    const counts = new Map<string, number>();
-    for (const word of tokenizeInsightWords(entry.text)) {
-      counts.set(word, (counts.get(word) ?? 0) + 1);
-    }
+    `);
 
     const decrementWord = this.db.prepare(`
       UPDATE insights_word_counts
@@ -632,13 +615,46 @@ export class HistoryService {
       WHERE day = @day AND word = @word
     `);
 
-    for (const [word, count] of counts) {
-      decrementWord.run({ day, word, count });
-    }
+    const deleteZeroWords = this.db.prepare(
+      'DELETE FROM insights_word_counts WHERE day = @day AND count <= 0'
+    );
+    const deleteZeroRollup = this.db.prepare(
+      'DELETE FROM insights_daily_rollups WHERE day = @day AND dictations <= 0'
+    );
+    const deleteProcessed = this.db.prepare(
+      'DELETE FROM insights_processed_entries WHERE id = @id'
+    );
 
-    this.db.prepare('DELETE FROM insights_word_counts WHERE count <= 0').run();
-    this.db.prepare('DELETE FROM insights_daily_rollups WHERE day = @day AND dictations <= 0').run({ day });
-    this.db.prepare('DELETE FROM insights_processed_entries WHERE id = @id').run({ id: entry.id });
+    for (const entry of entries) {
+      if (!wasProcessed.get({ id: entry.id })) continue;
+
+      const wordCount = entry.wordCount ?? countWords(entry.text);
+      const day = getLocalDayKey(entry.timestamp);
+      const confidence = Number.isFinite(entry.confidence) ? entry.confidence : 0;
+      const confidenceCount = Number.isFinite(entry.confidence) ? 1 : 0;
+
+      updateRollup.run({
+        day,
+        words: wordCount,
+        audioSeconds: entry.audioDuration || 0,
+        processingMs: entry.transcriptionTime || 0,
+        confidenceSum: confidence,
+        confidenceCount,
+      });
+
+      const counts = new Map<string, number>();
+      for (const word of tokenizeInsightWords(entry.text)) {
+        counts.set(word, (counts.get(word) ?? 0) + 1);
+      }
+
+      for (const [word, count] of counts) {
+        decrementWord.run({ day, word, count });
+      }
+
+      deleteZeroWords.run({ day });
+      deleteZeroRollup.run({ day });
+      deleteProcessed.run({ id: entry.id });
+    }
   }
 
   private processPendingInsights(limit: number): number {
