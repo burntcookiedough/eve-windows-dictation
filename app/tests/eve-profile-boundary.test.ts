@@ -285,7 +285,7 @@ const events = [];
     expect(qaSmokeState).toEqual({
       loaded: true,
       events: [
-        `get:appData:${qaAppData}`,
+        `get:appData:${qaCanonicalAppData}`,
         `set:userData:${qaEveRoot}`,
         `set:sessionData:${qaEveRoot}`,
         `lock:userData:${qaEveRoot}:sessionData:${qaEveRoot}`,
