@@ -48,7 +48,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsView).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
     expect(settingsView).not.toContain('h-screen');
     expect(serverView).toContain("embedded ? 'min-w-0 space-y-6'");
-    expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
+    expect(serverView).toContain("${logBodySize === 'long' ? 'max-h-64 overflow-y-auto overscroll-contain' : 'min-h-16 overflow-hidden'}");
   });
 
   test('keeps controls trailing at every width and contains control content', () => {

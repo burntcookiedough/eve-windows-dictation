@@ -43,7 +43,7 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('window.murmurMain.restartServer()');
   });
 
-  test('keeps factual status and diagnostics readable without creating another live announcer', () => {
+  test('keeps factual status and diagnostics readable without duplicating app announcements', () => {
     expect(serverView).toContain('data-server-health-status');
     expect(serverView).toContain('data-server-health-details');
     expect(serverView).toContain('md:grid-cols-[auto_minmax(0,1fr)_auto]');
@@ -52,7 +52,8 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
     expect(serverView).toContain('aria-describedby={diagnosticsStatusId}');
     expect(serverView).toContain('id={diagnosticsStatusId}');
-    expect(serverView).not.toContain('aria-live="polite"');
+    expect(serverView.match(/aria-live="polite"/g)?.length).toBe(1);
+    expect(serverView).toContain('data-server-logs-loading role="status" aria-live="polite"');
     expect(serverView).not.toContain('aria-label={`Server status: ${statusDisplay.label}`}');
     expect(serverView).toContain('motion-safe:animate-ping');
     expect(settingsRow).toContain('focus-visible:ring-2');
@@ -71,7 +72,12 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('tabindex="0"');
     expect(serverView).toContain('role="log"');
     expect(serverView).toContain('aria-label="Server log output"');
-    expect(serverView).toContain('max-h-64 min-h-24 min-w-0 overflow-y-auto overscroll-contain');
+    expect(serverView).toContain('data-log-size={logBodySize}');
+    expect(serverView).toContain("${logBodySize === 'long' ? 'max-h-64 overflow-y-auto overscroll-contain' : 'min-h-16 overflow-hidden'}");
+    expect(serverView).toContain('data-server-logs-state="loading"');
+    expect(serverView).toContain('data-server-logs-state="error"');
+    expect(serverView).toContain('data-server-logs-state="empty"');
+    expect(serverView).toContain('SERVER_LOG_LOAD_ERROR');
     expect(serverView).not.toContain('data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 focus-within');
     expect(serverView).toContain('focus:outline-offset-[-2px]');
     expect(serverView).not.toContain('opacity-45 pointer-events-none select-none');

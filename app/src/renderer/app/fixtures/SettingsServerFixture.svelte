@@ -4,7 +4,15 @@
   import ServerView from '../views/ServerView.svelte';
   import Toggle from '../components/Toggle.svelte';
 
-  type FixtureState = 'managed-ready' | 'managed-error' | 'external-ready' | 'managed-long';
+  type FixtureState =
+    | 'managed-ready'
+    | 'managed-error'
+    | 'external-ready'
+    | 'managed-long'
+    | 'managed-short'
+    | 'managed-empty'
+    | 'managed-log-error'
+    | 'managed-log-loading';
 
   const params = new URLSearchParams(globalThis.location.search);
   const fixtureState = (params.get('state') ?? 'managed-ready') as FixtureState;
