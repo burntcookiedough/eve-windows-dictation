@@ -167,8 +167,15 @@ async def test_swap_engine_restores_old_engine_when_activation_callback_fails(
         return engine
 
     shutdown_calls: list[str] = []
+    cleanup_events: list[str] = []
     monkeypatch.setattr(factory_module, "_create_engine", _fake_create)
-    monkeypatch.setattr(_DummyEngine, "shutdown", lambda self: shutdown_calls.append(self._engine_id))
+
+    def _record_shutdown(self: _DummyEngine) -> None:
+        shutdown_calls.append(self._engine_id)
+        cleanup_events.append(f"shutdown:{self._engine_id}")
+
+    monkeypatch.setattr(_DummyEngine, "shutdown", _record_shutdown)
+    monkeypatch.setattr(factory_module, "_force_free_vram", lambda: cleanup_events.append("free"))
 
     manager = factory_module.EngineManager(settings)
     manager._engine = _DummyEngine("whisper")
@@ -188,6 +195,7 @@ async def test_swap_engine_restores_old_engine_when_activation_callback_fails(
     assert manager._settings is settings
     assert len(created) == 2
     assert shutdown_calls == ["whisper", "whisper"]
+    assert cleanup_events == ["shutdown:whisper", "free", "shutdown:whisper", "free"]
 
 
 @pytest.mark.asyncio

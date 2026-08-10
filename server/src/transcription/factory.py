@@ -459,6 +459,7 @@ class EngineManager:
             except Exception as activation_error:
                 try:
                     await loop.run_in_executor(None, new_engine.shutdown)
+                    _force_free_vram()
                 except Exception as shutdown_error:
                     logger.error("Failed to discard unactivated engine: %s", shutdown_error)
                 restore_error = await restore_previous_engine()
