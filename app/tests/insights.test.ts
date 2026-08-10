@@ -51,8 +51,12 @@ describe('insights helpers', () => {
   test('calculates weighted speaking and processing performance metrics', () => {
     expect(calcWordsPerMinute(120, 60)).toBe(120);
     expect(calcWordsPerMinute(10, 0)).toBe(0);
+    expect(calcWordsPerMinute(-10, 60)).toBe(0);
+    expect(calcWordsPerMinute(Number.POSITIVE_INFINITY, 60)).toBe(0);
     expect(calcProcessingRatio(30, 15000)).toBe(2);
     expect(calcProcessingRatio(30, 0)).toBe(0);
+    expect(calcProcessingRatio(-30, 15000)).toBe(0);
+    expect(calcProcessingRatio(30, Number.NaN)).toBe(0);
   });
 
   test('tokenizes common words with stop-word filtering', () => {
@@ -124,6 +128,35 @@ describe('insights helpers', () => {
     } finally {
       if (originalTimezone === undefined) delete process.env.TZ;
       else process.env.TZ = originalTimezone;
+    }
+  });
+
+  test('keeps sparse fixed-range buckets explicit and finite', () => {
+    const now = new Date(2026, 6, 1, 12).getTime();
+    const trends = buildTrendPoints([
+      entry('one', now, 'one record', 30, 1000),
+      entry('malformed', new Date(2026, 5, 29, 12).getTime(), 'bad record', Number.NaN, Number.POSITIVE_INFINITY),
+    ], '7d', now);
+
+    expect(trends).toHaveLength(7);
+    expect(trends.map((trend) => trend.date)).toEqual([
+      '2026-06-25',
+      '2026-06-26',
+      '2026-06-27',
+      '2026-06-28',
+      '2026-06-29',
+      '2026-06-30',
+      '2026-07-01',
+    ]);
+    expect(trends.find((trend) => trend.date === '2026-06-28')?.audioSeconds).toBe(0);
+    expect(trends.find((trend) => trend.date === '2026-06-29')?.audioSeconds).toBe(0);
+    expect(trends.find((trend) => trend.date === '2026-07-01')?.audioSeconds).toBe(30);
+    for (const trend of trends) {
+      expect(Number.isFinite(trend.audioSeconds)).toBe(true);
+      expect(Number.isFinite(trend.processingMs)).toBe(true);
+      expect(Number.isFinite(trend.avgWpm)).toBe(true);
+      expect(trend.audioSeconds).toBeGreaterThanOrEqual(0);
+      expect(trend.processingMs).toBeGreaterThanOrEqual(0);
     }
   });
 

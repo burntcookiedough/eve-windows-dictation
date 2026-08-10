@@ -152,13 +152,15 @@ export function countWords(text: string): number {
 }
 
 export function calcWordsPerMinute(wordCount: number, audioDurationSec: number): number {
-  if (audioDurationSec <= 0) return 0;
-  return wordCount / (audioDurationSec / 60);
+  if (!Number.isFinite(wordCount) || wordCount <= 0 || !Number.isFinite(audioDurationSec) || audioDurationSec <= 0) return 0;
+  const result = wordCount / (audioDurationSec / 60);
+  return Number.isFinite(result) && result > 0 ? result : 0;
 }
 
 export function calcProcessingRatio(audioDurationSec: number, processingTimeMs: number): number {
-  if (processingTimeMs <= 0) return 0;
-  return audioDurationSec / (processingTimeMs / 1000);
+  if (!Number.isFinite(audioDurationSec) || audioDurationSec <= 0 || !Number.isFinite(processingTimeMs) || processingTimeMs <= 0) return 0;
+  const result = audioDurationSec / (processingTimeMs / 1000);
+  return Number.isFinite(result) && result > 0 ? result : 0;
 }
 
 export function tokenizeInsightWords(text: string): string[] {
@@ -185,7 +187,8 @@ export function buildPhraseStats(entries: Pick<InsightSourceEntry, 'text'>[], li
 
 export function sortWordStats(counts: Map<string, number>, limit: number): InsightsWordStat[] {
   return [...counts.entries()]
-    .map(([text, count]) => ({ text, count }))
+    .map(([text, count]) => ({ text, count: finiteNonNegative(count) }))
+    .filter(({ count }) => count > 0)
     .sort((a, b) => b.count - a.count || a.text.localeCompare(b.text))
     .slice(0, limit);
 }
@@ -243,6 +246,7 @@ export function buildTrendPoints(
   const rangeStart = getRangeStart(range, now);
 
   for (const entry of entries) {
+    if (!Number.isFinite(entry.timestamp)) continue;
     if (rangeStart !== null && entry.timestamp < rangeStart) continue;
     const key = getLocalDayKey(entry.timestamp);
     const bucket = buckets.get(key) ?? [];
@@ -263,12 +267,12 @@ export function buildTrendPoints(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, bucket]) => {
       const dictations = bucket.length;
-      const words = bucket.reduce((sum, item) => sum + (item.wordCount ?? countWords(item.text)), 0);
-      const audioSeconds = bucket.reduce((sum, item) => sum + (item.audioDuration || 0), 0);
-      const processingMs = bucket.reduce((sum, item) => sum + (item.transcriptionTime || 0), 0);
-      const confidenceEntries = bucket.filter((item) => Number.isFinite(item.confidence));
+      const words = bucket.reduce((sum, item) => sum + finiteNonNegative(item.wordCount ?? countWords(item.text)), 0);
+      const audioSeconds = bucket.reduce((sum, item) => sum + finiteNonNegative(item.audioDuration), 0);
+      const processingMs = bucket.reduce((sum, item) => sum + finiteNonNegative(item.transcriptionTime), 0);
+      const confidenceEntries = bucket.filter((item) => Number.isFinite(item.confidence) && item.confidence >= 0);
       const avgConfidence = confidenceEntries.length
-        ? confidenceEntries.reduce((sum, item) => sum + item.confidence, 0) / confidenceEntries.length
+        ? Math.min(1, confidenceEntries.reduce((sum, item) => sum + finiteNonNegative(item.confidence), 0) / confidenceEntries.length)
         : 0;
 
       return {
@@ -283,4 +287,8 @@ export function buildTrendPoints(
         avgProcessingRatio: calcProcessingRatio(audioSeconds, processingMs),
       };
     });
+}
+
+function finiteNonNegative(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }

@@ -91,6 +91,55 @@ try {
   ]);
   service.close();
 
+  const deterministicDbPath = join(workDir, 'deterministic-insights.db');
+  const deterministicService = new HistoryService(deterministicDbPath);
+  deterministicService.initialize();
+  deterministicService.save(transcription(
+    'det-older',
+    new Date(2026, 5, 29, 10).getTime(),
+    'Older deterministic record',
+    40,
+    4000,
+  ));
+  deterministicService.save(transcription(
+    'det-current',
+    now,
+    'Current deterministic record',
+    20,
+    2000,
+  ));
+  const deterministic = deterministicService.getInsights('7d', now);
+  assert.deepEqual(deterministic.trends.map(({ date }) => date), [
+    '2026-06-25',
+    '2026-06-26',
+    '2026-06-27',
+    '2026-06-28',
+    '2026-06-29',
+    '2026-06-30',
+    '2026-07-01',
+  ]);
+  assert.equal(deterministic.trends.find(({ date }) => date === '2026-06-29')?.audioSeconds, 40);
+  assert.equal(deterministic.trends.find(({ date }) => date === '2026-06-30')?.audioSeconds, 0);
+  assert.equal(deterministic.trends.find(({ date }) => date === '2026-07-01')?.audioSeconds, 20);
+  assert.equal(deterministic.summary.totalAudioSeconds, 60);
+
+  deterministicService.delete('det-older');
+  const afterDeterministicDelete = deterministicService.getInsights('7d', now);
+  assert.equal(afterDeterministicDelete.trends.find(({ date }) => date === '2026-06-29')?.audioSeconds, 0);
+  assert.equal(afterDeterministicDelete.summary.totalAudioSeconds, 20);
+
+  deterministicService.save(transcription(
+    'det-middle',
+    new Date(2026, 5, 30, 10).getTime(),
+    'Middle deterministic record',
+    10,
+    1000,
+  ));
+  const afterDeterministicAdd = deterministicService.getInsights('7d', now);
+  assert.equal(afterDeterministicAdd.trends.find(({ date }) => date === '2026-06-30')?.audioSeconds, 10);
+  assert.equal(afterDeterministicAdd.summary.totalAudioSeconds, 30);
+  deterministicService.close();
+
   const bulkDbPath = join(workDir, 'bulk-history.db');
   const bulkService = new HistoryService(bulkDbPath);
   bulkService.initialize();
