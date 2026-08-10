@@ -71,6 +71,7 @@ try {
   assert.equal(saved.summary.avgWpm, 7);
   assert.equal(saved.commonWords[0]?.text, 'project');
   assert.equal(saved.commonWords[0]?.count, 3);
+  assert.deepEqual(service.getEntryIds({ text: 'planning' }), ['a']);
 
   service.rebuildInsights();
   const rebuilt = service.getInsights('all');
@@ -88,8 +89,109 @@ try {
     { text: 'project', count: 1 },
     { text: 'review', count: 1 },
   ]);
-
   service.close();
+
+  const bulkDbPath = join(workDir, 'bulk-history.db');
+  const bulkService = new HistoryService(bulkDbPath);
+  bulkService.initialize();
+  assert.deepEqual(bulkService.deleteMany([]), {
+    requestedCount: 0,
+    deletedCount: 0,
+    deletedIds: [],
+    missingIds: [],
+  });
+  bulkService.save(transcription('bulk-a', now + 1000, 'Bulk alpha alpha', 5, 1000));
+  bulkService.save(transcription('bulk-b', now + 2000, 'Bulk beta notes', 6, 1200));
+  bulkService.save(transcription('bulk-fail', now + 3000, 'Bulk failure notes', 7, 1400));
+
+  assert.deepEqual(bulkService.getEntryIds({ text: 'alpha' }), ['bulk-a']);
+  const staleDelete = bulkService.deleteMany(['bulk-a', 'missing-entry', 'bulk-a']);
+  assert.deepEqual(staleDelete, {
+    requestedCount: 2,
+    deletedCount: 1,
+    deletedIds: ['bulk-a'],
+    missingIds: ['missing-entry'],
+  });
+  assert.equal(bulkService.getById('bulk-a'), null);
+  assert.equal(bulkService.getInsights('all').summary.totalDictations, 2);
+
+  const beforeFailedDelete = bulkService.getInsights('all').summary;
+  const triggerDb = new Database(bulkDbPath);
+  try {
+    triggerDb.exec(`
+      CREATE TRIGGER fail_bulk_delete
+      AFTER DELETE ON transcriptions
+      WHEN OLD.id = 'bulk-fail'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced bulk failure');
+      END;
+    `);
+    assert.throws(
+      () => bulkService.deleteMany(['bulk-fail', 'bulk-b']),
+      /forced bulk failure/
+    );
+    assert.ok(bulkService.getById('bulk-fail'));
+    assert.ok(bulkService.getById('bulk-b'));
+    assert.deepEqual(bulkService.getInsights('all').summary, beforeFailedDelete);
+  } finally {
+    triggerDb.exec('DROP TRIGGER fail_bulk_delete');
+    triggerDb.close();
+  }
+
+  const finalBulkDelete = bulkService.deleteMany(['bulk-fail', 'bulk-b']);
+  assert.deepEqual(finalBulkDelete, {
+    requestedCount: 2,
+    deletedCount: 2,
+    deletedIds: ['bulk-fail', 'bulk-b'],
+    missingIds: [],
+  });
+  assert.equal(bulkService.getInsights('all').summary.totalDictations, 0);
+  bulkService.close();
+
+  const cleanupDbPath = join(workDir, 'day-scoped-cleanup.db');
+  const cleanupService = new HistoryService(cleanupDbPath);
+  cleanupService.initialize();
+  cleanupService.save(transcription('cleanup-a', now + 4000, 'Cleanup day entry', 1, 100));
+  const cleanupDb = new Database(cleanupDbPath);
+  cleanupDb.prepare(`
+    INSERT INTO insights_word_counts (day, word, count)
+    VALUES ('2099-01-01', 'unrelated', 0)
+  `).run();
+  cleanupDb.close();
+  cleanupService.deleteMany(['cleanup-a']);
+  const cleanupCheckDb = new Database(cleanupDbPath);
+  assert.deepEqual(
+    cleanupCheckDb.prepare(`
+      SELECT count FROM insights_word_counts
+      WHERE day = '2099-01-01' AND word = 'unrelated'
+    `).get(),
+    { count: 0 },
+  );
+  cleanupCheckDb.close();
+  cleanupService.close();
+
+  const chunkDbPath = join(workDir, 'chunk-boundary-history.db');
+  const chunkService = new HistoryService(chunkDbPath);
+  chunkService.initialize();
+  for (let index = 0; index < 501; index += 1) {
+    chunkService.save(transcription(
+      `chunk-${index}`,
+      now + 5000 + index,
+      `Chunk boundary ${index}`,
+      1,
+      100,
+    ));
+  }
+  const chunkIds = chunkService.getEntryIds({ text: 'Chunk boundary' });
+  assert.equal(chunkIds.length, 501);
+  assert.deepEqual(chunkService.deleteMany(chunkIds), {
+    requestedCount: 501,
+    deletedCount: 501,
+    deletedIds: chunkIds,
+    missingIds: [],
+  });
+  assert.equal(chunkService.getInsights('all').summary.totalDictations, 0);
+  chunkService.close();
 
   const migrationDbPath = join(workDir, 'migration-history.db');
   const migrationDb = new Database(migrationDbPath);

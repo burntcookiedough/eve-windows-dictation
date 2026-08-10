@@ -4,6 +4,7 @@ import type {
   ConnectionStatePayload,
   EngineStatus,
   HistoryEntryWithGroup,
+  HistoryDeleteResult,
   HistoryFilters,
   HistoryResponse,
   Hotkey,
@@ -35,7 +36,9 @@ declare global {
       cancelHotkeyCapture: () => Promise<void>;
       getHotkeyDisplayName: (hotkey: Hotkey) => Promise<string>;
       getHistoryEntries: (offset: number, limit: number, filters?: HistoryFilters) => Promise<HistoryResponse>;
+      getHistoryEntryIds: (filters?: HistoryFilters) => Promise<string[]>;
       deleteHistoryEntry: (id: string) => Promise<void>;
+      deleteHistoryEntries: (ids: string[]) => Promise<HistoryDeleteResult>;
       getInsights: (range: InsightsRange) => Promise<InsightsResponse | null>;
       rebuildInsights: () => Promise<void>;
       onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => () => void;

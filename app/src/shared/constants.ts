@@ -38,7 +38,9 @@ export const IPC_CHANNELS = {
 
   // History
   HISTORY_GET_ENTRIES: 'history:get-entries',
+  HISTORY_GET_ENTRY_IDS: 'history:get-entry-ids',
   HISTORY_DELETE: 'history:delete',
+  HISTORY_DELETE_BULK: 'history:delete-bulk',
   HISTORY_NEW_ENTRY: 'history:new-entry',
 
   // Insights

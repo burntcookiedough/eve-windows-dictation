@@ -31,9 +31,27 @@
   let deleteConfirmId: string | null = $state(null);
   let deleteDialog: HTMLDivElement | undefined = $state(undefined);
   let deleteTrigger: HTMLElement | null = null;
+  let bulkDeleteConfirmOpen = $state(false);
+  let bulkDeleteDialog: HTMLDivElement | undefined = $state(undefined);
+  let bulkDeleteTrigger: HTMLElement | null = null;
+  let selectionToggle: HTMLButtonElement | undefined;
+
+  // Selection mode
+  let selectionMode = $state(false);
+  let selectedIds = $state<Set<string>>(new Set());
+  let selectingAll = $state(false);
+  let bulkDeleting = $state(false);
+  let selectionFeedback = $state('');
+  let selectionGeneration = 0;
+  let selectedCount = $derived(selectedIds.size);
+  let hasSelection = $derived(selectedCount > 0);
 
   $effect(() => {
     if (deleteConfirmId) queueMicrotask(() => deleteDialog?.focus());
+  });
+
+  $effect(() => {
+    if (bulkDeleteConfirmOpen) queueMicrotask(() => bulkDeleteDialog?.focus());
   });
 
   // Expanded item
@@ -83,9 +101,65 @@
     return hasFilters ? filters : undefined;
   }
 
+  function clearSelection(): void {
+    selectionGeneration += 1;
+    selectedIds = new Set();
+    selectionFeedback = '';
+  }
+
+  function enterSelectionMode(): void {
+    selectionMode = true;
+    clearSelection();
+  }
+
+  function exitSelectionMode(): void {
+    selectionMode = false;
+    clearSelection();
+  }
+
+  function toggleSelectionMode(): void {
+    if (selectionMode) exitSelectionMode();
+    else enterSelectionMode();
+  }
+
+  function removeEntryFromSelection(id: string): void {
+    if (!selectedIds.has(id)) return;
+    const next = new Set(selectedIds);
+    next.delete(id);
+    selectedIds = next;
+  }
+
+  function toggleEntrySelection(id: string, selected: boolean): void {
+    const next = new Set(selectedIds);
+    if (selected) next.add(id);
+    else next.delete(id);
+    selectedIds = next;
+    selectionFeedback = '';
+  }
+
+  async function selectAllCurrentFilter(): Promise<void> {
+    if (selectingAll || bulkDeleting) return;
+    const generation = ++selectionGeneration;
+    selectingAll = true;
+    selectionFeedback = '';
+    try {
+      const ids = await window.murmurMain.getHistoryEntryIds(buildFilters());
+      if (generation !== selectionGeneration) return;
+      selectedIds = new Set(ids);
+      if (ids.length === 0) selectionFeedback = 'No entries match the current filters.';
+    } catch (err) {
+      if (generation !== selectionGeneration) return;
+      console.error('Failed to select history entries:', err);
+      selectionFeedback = 'History could not be selected. Try again.';
+    } finally {
+      selectingAll = false;
+    }
+  }
+
   // Load entries
   async function loadEntries(reset = false) {
     if (reset) {
+      if (selectionMode || selectedIds.size > 0) exitSelectionMode();
       requestGeneration += 1;
       offset = 0;
       hasMore = true;
@@ -133,6 +207,7 @@
   // Debounced search
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
   function handleSearchInput() {
+    clearSelection();
     if (searchTimeout) clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
       loadEntries(true);
@@ -141,6 +216,7 @@
 
   // Filter changes
   function handleFilterChange() {
+    clearSelection();
     loadEntries(true);
   }
 
@@ -151,6 +227,7 @@
     maxDuration = '';
     minConfidence = '';
     editedOnly = false;
+    clearSelection();
     loadEntries(true);
   }
 
@@ -204,9 +281,11 @@
 
   async function confirmDelete() {
     if (!deleteConfirmId) return;
+    const id = deleteConfirmId;
     try {
-      await window.murmurMain.deleteHistoryEntry(deleteConfirmId);
-      history = history.filter((item) => item.id !== deleteConfirmId);
+      await window.murmurMain.deleteHistoryEntry(id);
+      history = history.filter((item) => item.id !== id);
+      removeEntryFromSelection(id);
       toast('Transcription deleted', 'info');
     } catch (err) {
       console.error('Failed to delete:', err);
@@ -219,22 +298,75 @@
     closeDeleteDialog();
   }
 
+  function openBulkDeleteDialog(): void {
+    if (!hasSelection || bulkDeleting) return;
+    bulkDeleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    selectionFeedback = '';
+    bulkDeleteConfirmOpen = true;
+  }
+
+  function closeBulkDeleteDialog(): void {
+    bulkDeleteConfirmOpen = false;
+    const trigger = bulkDeleteTrigger;
+    bulkDeleteTrigger = null;
+    queueMicrotask(() => {
+      if (trigger?.isConnected) trigger.focus();
+      else selectionToggle?.focus();
+    });
+  }
+
+  function cancelBulkDelete(): void {
+    exitSelectionMode();
+    closeBulkDeleteDialog();
+  }
+
+  async function confirmBulkDelete(): Promise<void> {
+    if (bulkDeleting || !hasSelection) return;
+    const ids = [...selectedIds];
+    const requestedCount = ids.length;
+    bulkDeleting = true;
+    selectionFeedback = '';
+    try {
+      const result = await window.murmurMain.deleteHistoryEntries(ids);
+      exitSelectionMode();
+      closeBulkDeleteDialog();
+      await loadEntries(true);
+      if (result.missingIds.length > 0) {
+        toast(`Deleted ${result.deletedCount} of ${requestedCount} selected entries; ${result.missingIds.length} were already gone.`, 'info');
+      } else {
+        toast(`Deleted ${result.deletedCount} selected ${result.deletedCount === 1 ? 'entry' : 'entries'}.`, 'info');
+      }
+    } catch (err) {
+      console.error('Failed to delete selected history:', err);
+      selectionFeedback = 'History could not be deleted. Nothing was removed. Try again.';
+      toast('Failed to delete selected entries', 'error');
+    } finally {
+      bulkDeleting = false;
+    }
+  }
+
+  function getActiveConfirmationDialog(): HTMLDivElement | undefined {
+    return deleteConfirmId ? deleteDialog : bulkDeleteConfirmOpen ? bulkDeleteDialog : undefined;
+  }
+
   function handleWindowKeydown(event: KeyboardEvent) {
-    if (!deleteConfirmId) return;
+    const activeDialog = getActiveConfirmationDialog();
+    if (!activeDialog) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      cancelDelete();
+      if (deleteConfirmId) cancelDelete();
+      else if (!bulkDeleting) cancelBulkDelete();
       return;
     }
-    if (event.key === 'Tab' && deleteDialog) {
+    if (event.key === 'Tab') {
       const focusable = Array.from(
-        deleteDialog.querySelectorAll<HTMLElement>(
+        activeDialog.querySelectorAll<HTMLElement>(
           'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         )
       );
       if (focusable.length === 0) {
         event.preventDefault();
-        deleteDialog.focus();
+        activeDialog.focus();
         return;
       }
       const first = focusable[0];
@@ -507,6 +639,64 @@
       </div>
     {/if}
 
+    <div data-history-selection-toolbar class="mt-3 flex min-w-0 flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.018] p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        {#if selectionMode}
+          <p data-history-selection-count class="text-xs text-zinc-200" aria-live="polite">{selectedCount} selected</p>
+          <p class="mt-1 text-[11px] text-zinc-500">Selection applies to the current filters.</p>
+        {:else}
+          <p class="text-xs text-zinc-500">Select entries to delete more than one at a time.</p>
+        {/if}
+        {#if selectionFeedback && !bulkDeleteConfirmOpen}
+          <p data-history-selection-feedback class="mt-1 text-xs text-red-300" role="alert">{selectionFeedback}</p>
+        {/if}
+      </div>
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-history-selection-toggle
+          bind:this={selectionToggle}
+          aria-pressed={selectionMode}
+          onclick={toggleSelectionMode}
+          class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+        >
+          {selectionMode ? 'Exit selection' : 'Select entries'}
+        </button>
+        {#if selectionMode}
+          <button
+            type="button"
+            data-history-select-all
+            aria-label="Select all entries in the current filter"
+            aria-busy={selectingAll}
+            disabled={selectingAll || bulkDeleting}
+            onclick={selectAllCurrentFilter}
+            class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {selectingAll ? 'Selecting…' : 'Select all'}
+          </button>
+          <button
+            type="button"
+            data-history-clear-selection
+            disabled={!hasSelection || selectingAll || bulkDeleting}
+            onclick={clearSelection}
+            class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Clear selection
+          </button>
+          <button
+            type="button"
+            data-history-delete-selected
+            disabled={!hasSelection || selectingAll || bulkDeleting}
+            aria-busy={bulkDeleting}
+            onclick={openBulkDeleteDialog}
+            class="min-h-9 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-950 transition-colors hover:bg-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {bulkDeleting ? 'Deleting…' : 'Delete selected'}
+          </button>
+        {/if}
+      </div>
+    </div>
+
   </div>
 
   <!-- History List -->
@@ -557,6 +747,18 @@
             <!-- Collapsed/Preview State -->
             <div class="px-3 py-3">
               <div class="flex items-center gap-3">
+                {#if selectionMode}
+                  <label class="flex shrink-0 items-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      disabled={selectingAll || bulkDeleting}
+                      aria-label={`Select transcription from ${formatFullDate(item.timestamp)}`}
+                      onchange={(event) => toggleEntrySelection(item.id, event.currentTarget.checked)}
+                      class="h-4 w-4 cursor-pointer rounded border-zinc-700 bg-zinc-800 text-zinc-200 focus:ring-2 focus:ring-zinc-200 focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </label>
+                {/if}
                 <button
                   type="button"
                   onclick={() => toggleExpand(item.id)}
@@ -710,6 +912,47 @@
           class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors cursor-pointer"
         >
           Delete
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if bulkDeleteConfirmOpen}
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div
+      bind:this={bulkDeleteDialog}
+      tabindex="-1"
+      class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bulk-delete-dialog-title"
+      aria-describedby="bulk-delete-dialog-description"
+    >
+      <h3 id="bulk-delete-dialog-title" class="text-lg font-medium text-zinc-100 mb-2">Delete {selectedCount} selected {selectedCount === 1 ? 'entry' : 'entries'}?</h3>
+      <p id="bulk-delete-dialog-description" class="text-sm text-zinc-400 mb-4">
+        This action cannot be undone. Exactly {selectedCount} selected {selectedCount === 1 ? 'entry will' : 'entries will'} be permanently removed from your history.
+      </p>
+      {#if selectionFeedback}
+        <p data-bulk-delete-error class="mb-4 text-sm text-red-300" role="alert">{selectionFeedback}</p>
+      {/if}
+      <div class="flex gap-3 justify-end">
+        <button
+          type="button"
+          onclick={cancelBulkDelete}
+          disabled={bulkDeleting}
+          class="px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onclick={confirmBulkDelete}
+          disabled={bulkDeleting}
+          aria-busy={bulkDeleting}
+          class="px-4 py-2 text-sm font-medium bg-zinc-100 hover:bg-white text-zinc-950 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {bulkDeleting ? 'Deleting…' : `Delete ${selectedCount}`}
         </button>
       </div>
     </div>
