@@ -9,6 +9,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -32,6 +33,24 @@ function createFixtureRoot(): string {
   return root;
 }
 
+function snapshotMetadata(root: string): Array<{ relative: string; size: number; mtimeMs: number }> {
+  const entries: Array<{ relative: string; size: number; mtimeMs: number }> = [];
+  const visit = (directory: string) => {
+    for (const name of readdirSync(directory)) {
+      const fullPath = path.join(directory, name);
+      const stats = statSync(fullPath);
+      const relative = path.relative(root, fullPath);
+      entries.push({ relative, size: stats.size, mtimeMs: stats.mtimeMs });
+      if (stats.isDirectory()) {
+        visit(fullPath);
+      }
+    }
+  };
+
+  visit(root);
+  return entries.sort((left, right) => left.relative.localeCompare(right.relative));
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -51,6 +70,8 @@ describe('user-data root preparation', () => {
     const runnerPath = path.join(fixture, 'electron-bootstrap-smoke.cjs');
     const resultPath = path.join(fixture, 'electron-bootstrap-result.json');
     const preBootstrapUserData = path.join(fixture, 'PreBootstrapUserData');
+    const qaAppData = path.join(fixture, 'QaRoaming');
+    const qaRequestedUserData = path.join(qaAppData, 'eve');
     const electronPath = path.join(
       appRoot,
       'node_modules',
@@ -63,11 +84,24 @@ describe('user-data root preparation', () => {
     mkdirSync(localAppData);
     mkdirSync(userProfile);
     mkdirSync(temp);
+    mkdirSync(qaAppData);
+    const qaCanonicalAppData = realpathSync.native(qaAppData);
     writeFileSync(legacySentinel, 'controlled legacy data');
 
     buildSync({
       entryPoints: [path.join(appRoot, 'src', 'main', 'bootstrap-core.ts')],
       outfile: bundlePath,
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'cjs',
+      logLevel: 'silent',
+    });
+
+    const qaBundlePath = path.join(fixture, 'qa-profile-isolation.cjs');
+    buildSync({
+      entryPoints: [path.join(appRoot, 'src', 'main', 'qa-profile-isolation.ts')],
+      outfile: qaBundlePath,
       bundle: true,
       platform: 'node',
       target: 'node20',
@@ -81,38 +115,40 @@ describe('user-data root preparation', () => {
 const fs = require('node:fs');
 const { app } = require('electron');
 const { bootstrapApplication } = require(${JSON.stringify(bundlePath)});
+const { resolveQaProfileIsolation } = require(${JSON.stringify(qaBundlePath)});
 
-app.setPath('appData', ${JSON.stringify(appData)});
-app.setName('Murmur');
 const events = [];
-const electronApp = {
-  getPath(name) {
-    const value = app.getPath(name);
-    events.push(\`get:\${name}:\${value}\`);
-    return value;
-  },
-  setPath(name, value) {
-    app.setPath(name, value);
-    events.push(\`set:\${name}:\${value}\`);
-  },
-  requestSingleInstanceLock() {
-    events.push(
-      \`lock:userData:\${app.getPath('userData')}:sessionData:\${app.getPath('sessionData')}\`
-    );
-    return app.requestSingleInstanceLock();
-  },
-  quit() {
-    events.push('quit');
-    app.quit();
-  },
-  setAppUserModelId(id) {
-    events.push(\`app-id:\${id}\`);
-    app.setAppUserModelId(id);
-  },
-};
 
 (async () => {
   try {
+    const qaProfileIsolation = resolveQaProfileIsolation(process.argv);
+    app.setPath('appData', qaProfileIsolation ? qaProfileIsolation.appDataPath : ${JSON.stringify(appData)});
+    app.setName('Murmur');
+    const electronApp = {
+      getPath(name) {
+        const value = app.getPath(name);
+        events.push(\`get:\${name}:\${value}\`);
+        return value;
+      },
+      setPath(name, value) {
+        app.setPath(name, value);
+        events.push(\`set:\${name}:\${value}\`);
+      },
+      requestSingleInstanceLock() {
+        events.push(
+          \`lock:userData:\${app.getPath('userData')}:sessionData:\${app.getPath('sessionData')}\`
+        );
+        return app.requestSingleInstanceLock();
+      },
+      quit() {
+        events.push('quit');
+        app.quit();
+      },
+      setAppUserModelId(id) {
+        events.push(\`app-id:\${id}\`);
+        app.setAppUserModelId(id);
+      },
+    };
     const loaded = await bootstrapApplication(
       electronApp,
       async () => {
@@ -201,6 +237,99 @@ const electronApp = {
       sessionData: eveRoot,
       lockHeld: true,
     });
+    expect(readFileSync(legacySentinel, 'utf8')).toBe('controlled legacy data');
+    expect(readdirSync(legacyRoot)).toEqual(['legacy-sentinel.txt']);
+
+    const normalProfileMetadataBeforeQa = snapshotMetadata(appData);
+    const qaResult = Bun.spawnSync({
+      cmd: [
+        electronPath,
+        '--eve-qa-isolation',
+        `--eve-qa-user-data-root=${qaRequestedUserData}`,
+        runnerPath,
+      ],
+      cwd: fixture,
+      env: {
+        APPDATA: appData,
+        LOCALAPPDATA: localAppData,
+        USERPROFILE: userProfile,
+        HOME: userProfile,
+        TEMP: temp,
+        TMP: temp,
+        PATH: process.env.PATH,
+        PATHEXT: process.env.PATHEXT,
+        SystemRoot: process.env.SystemRoot,
+        windir: process.env.windir,
+        ComSpec: process.env.ComSpec,
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      },
+      timeout: 30_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    expect(qaResult.success).toBeTrue();
+    expect(qaResult.exitCode).toBe(0);
+
+    const qaSmoke = JSON.parse(readFileSync(resultPath, 'utf8')) as {
+      loaded: boolean;
+      events: string[];
+      userData: string;
+      sessionData: string;
+      lockHeld: boolean;
+      electronVersion: string;
+    };
+    const qaEveRoot = path.join(qaCanonicalAppData, 'Eve');
+    const { electronVersion: qaElectronVersion, ...qaSmokeState } = qaSmoke;
+    expect(qaElectronVersion).toMatch(/^40\./);
+    expect(qaSmokeState).toEqual({
+      loaded: true,
+      events: [
+        `get:appData:${qaCanonicalAppData}`,
+        `set:userData:${qaEveRoot}`,
+        `set:sessionData:${qaEveRoot}`,
+        `lock:userData:${qaEveRoot}:sessionData:${qaEveRoot}`,
+        'app-id:io.github.burntcookiedough.eve',
+        'load',
+      ],
+      userData: qaEveRoot,
+      sessionData: qaEveRoot,
+      lockHeld: true,
+    });
+    expect(snapshotMetadata(appData)).toEqual(normalProfileMetadataBeforeQa);
+    expect(readFileSync(legacySentinel, 'utf8')).toBe('controlled legacy data');
+    expect(readdirSync(legacyRoot)).toEqual(['legacy-sentinel.txt']);
+
+    const normalProfileMetadataBeforeInvalidQa = snapshotMetadata(appData);
+    const invalidQaResult = Bun.spawnSync({
+      cmd: [electronPath, '--eve-qa-isolation', runnerPath],
+      cwd: fixture,
+      env: {
+        APPDATA: appData,
+        LOCALAPPDATA: localAppData,
+        USERPROFILE: userProfile,
+        HOME: userProfile,
+        TEMP: temp,
+        TMP: temp,
+        PATH: process.env.PATH,
+        PATHEXT: process.env.PATHEXT,
+        SystemRoot: process.env.SystemRoot,
+        windir: process.env.windir,
+        ComSpec: process.env.ComSpec,
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      },
+      timeout: 30_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    expect(invalidQaResult.success).toBeFalse();
+    expect(invalidQaResult.exitCode).toBe(1);
+    expect(JSON.parse(readFileSync(resultPath, 'utf8'))).toMatchObject({
+      events: [],
+      error: expect.stringMatching(/Invalid packaged QA profile arguments/),
+    });
+    expect(snapshotMetadata(appData)).toEqual(normalProfileMetadataBeforeInvalidQa);
     expect(readFileSync(legacySentinel, 'utf8')).toBe('controlled legacy data');
     expect(readdirSync(legacyRoot)).toEqual(['legacy-sentinel.txt']);
   });

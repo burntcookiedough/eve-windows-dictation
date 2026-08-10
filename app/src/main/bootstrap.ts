@@ -2,10 +2,16 @@ import { app, dialog } from 'electron';
 import { bootstrapApplication } from './bootstrap-core.js';
 import { EVE_USER_DATA_DIRECTORY_NAME } from './identity.js';
 import { createLogger } from './lib/logger.js';
+import { resolveQaProfileIsolation } from './qa-profile-isolation.js';
 
 const log = createLogger('Bootstrap');
 
 try {
+  const qaProfileIsolation = resolveQaProfileIsolation(process.argv);
+  if (qaProfileIsolation) {
+    app.setPath('appData', qaProfileIsolation.appDataPath);
+  }
+
   await bootstrapApplication(app, () => import('./index.js'), {
     userDataDirectoryName: EVE_USER_DATA_DIRECTORY_NAME,
   });
