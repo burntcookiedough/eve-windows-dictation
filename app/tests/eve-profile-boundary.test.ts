@@ -85,6 +85,7 @@ describe('user-data root preparation', () => {
     mkdirSync(userProfile);
     mkdirSync(temp);
     mkdirSync(qaAppData);
+    const qaCanonicalAppData = realpathSync.native(qaAppData);
     writeFileSync(legacySentinel, 'controlled legacy data');
 
     buildSync({
@@ -278,7 +279,7 @@ const events = [];
       lockHeld: boolean;
       electronVersion: string;
     };
-    const qaEveRoot = path.join(qaAppData, 'Eve');
+    const qaEveRoot = path.join(qaCanonicalAppData, 'Eve');
     const { electronVersion: qaElectronVersion, ...qaSmokeState } = qaSmoke;
     expect(qaElectronVersion).toMatch(/^40\./);
     expect(qaSmokeState).toEqual({
