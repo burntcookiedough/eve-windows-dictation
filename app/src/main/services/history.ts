@@ -373,17 +373,17 @@ export class HistoryService {
     return entries;
   }
 
-  getInsights(range: InsightsRange): InsightsResponse {
+  getInsights(range: InsightsRange, now = Date.now()): InsightsResponse {
     if (!this.db) throw new Error('Database not initialized');
     if (this.processPendingInsights(this.queryCatchupLimit) >= this.queryCatchupLimit) {
       this.scheduleInsightsCatchup();
     }
 
-    const now = Date.now();
-    const rangeStart = getRangeStart(range, now);
+    const generatedAt = Number.isFinite(now) ? now : Date.now();
+    const rangeStart = getRangeStart(range, generatedAt);
     const dayStart = rangeStart === null ? null : getLocalDayKey(rangeStart);
     const rows = this.getDailyRows(dayStart);
-    const trends = this.buildTrends(rows, range, now);
+    const trends = this.buildTrends(rows, range, generatedAt);
     const summary = this.buildSummary(rows);
     const indexing = this.getIndexingStatus();
     const commonWords = this.getCommonWords(dayStart, 18);
@@ -394,7 +394,7 @@ export class HistoryService {
 
     return {
       range,
-      generatedAt: now,
+      generatedAt,
       hasData: summary.totalDictations > 0,
       indexing,
       summary,
@@ -744,7 +744,7 @@ export class HistoryService {
         SELECT day, dictations, words, audioSeconds, processingMs, confidenceSum, confidenceCount
         FROM insights_daily_rollups
         ORDER BY day ASC
-      `).all() as DailyRollupRow[];
+      `).all().map(normalizeDailyRow);
     }
 
     return this.db.prepare(`
@@ -752,13 +752,14 @@ export class HistoryService {
       FROM insights_daily_rollups
       WHERE day >= @dayStart
       ORDER BY day ASC
-    `).all({ dayStart }) as DailyRollupRow[];
+    `).all({ dayStart }).map(normalizeDailyRow);
   }
 
   private buildTrends(rows: DailyRollupRow[], range: InsightsRange, now: number): InsightsTrendPoint[] {
-    const rowMap = new Map(rows.map((row) => [row.day, row]));
+    const normalizedRows = rows.map(normalizeDailyRow);
+    const rowMap = new Map(normalizedRows.map((row) => [row.day, row]));
     const activeRows = range === 'all'
-      ? rows
+      ? normalizedRows
       : buildRangeDayKeys(range, now).map((day) => rowMap.get(day) ?? emptyDailyRow(day));
 
     return activeRows.map((row) => ({
@@ -769,26 +770,27 @@ export class HistoryService {
       audioSeconds: row.audioSeconds,
       processingMs: row.processingMs,
       avgWpm: calcWordsPerMinute(row.words, row.audioSeconds),
-      avgConfidence: row.confidenceCount > 0 ? row.confidenceSum / row.confidenceCount : 0,
+      avgConfidence: safeConfidence(row.confidenceSum, row.confidenceCount),
       avgProcessingRatio: calcProcessingRatio(row.audioSeconds, row.processingMs),
     }));
   }
 
   private buildSummary(rows: DailyRollupRow[]): InsightsSummary {
-    const totalDictations = rows.reduce((sum, row) => sum + row.dictations, 0);
-    const totalWords = rows.reduce((sum, row) => sum + row.words, 0);
-    const totalAudioSeconds = rows.reduce((sum, row) => sum + row.audioSeconds, 0);
-    const totalProcessingMs = rows.reduce((sum, row) => sum + row.processingMs, 0);
-    const confidenceSum = rows.reduce((sum, row) => sum + row.confidenceSum, 0);
-    const confidenceCount = rows.reduce((sum, row) => sum + row.confidenceCount, 0);
-    const busiest = [...rows].sort((a, b) => b.words - a.words || b.dictations - a.dictations)[0];
+    const normalizedRows = rows.map(normalizeDailyRow);
+    const totalDictations = normalizedRows.reduce((sum, row) => safeAdd(sum, row.dictations), 0);
+    const totalWords = normalizedRows.reduce((sum, row) => safeAdd(sum, row.words), 0);
+    const totalAudioSeconds = normalizedRows.reduce((sum, row) => safeAdd(sum, row.audioSeconds), 0);
+    const totalProcessingMs = normalizedRows.reduce((sum, row) => safeAdd(sum, row.processingMs), 0);
+    const confidenceSum = normalizedRows.reduce((sum, row) => safeAdd(sum, row.confidenceSum), 0);
+    const confidenceCount = normalizedRows.reduce((sum, row) => safeAdd(sum, row.confidenceCount), 0);
+    const busiest = [...normalizedRows].sort((a, b) => b.words - a.words || b.dictations - a.dictations)[0];
 
     return {
       totalDictations,
       totalWords,
       totalAudioSeconds,
       totalProcessingMs,
-      avgConfidence: confidenceCount > 0 ? confidenceSum / confidenceCount : 0,
+      avgConfidence: safeConfidence(confidenceSum, confidenceCount),
       // Weighted by recorded audio duration so a one-word clip cannot skew the speaking pace.
       avgWpm: calcWordsPerMinute(totalWords, totalAudioSeconds),
       avgProcessingRatio: calcProcessingRatio(totalAudioSeconds, totalProcessingMs),
@@ -885,6 +887,36 @@ interface DailyRollupRow {
   confidenceCount: number;
 }
 
+function normalizeDailyRow(row: DailyRollupRow): DailyRollupRow {
+  return {
+    day: typeof row.day === 'string' ? row.day : '',
+    dictations: safeCount(row.dictations),
+    words: safeCount(row.words),
+    audioSeconds: safeNonNegative(row.audioSeconds),
+    processingMs: safeNonNegative(row.processingMs),
+    confidenceSum: safeNonNegative(row.confidenceSum),
+    confidenceCount: safeCount(row.confidenceCount),
+  };
+}
+
+function safeCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function safeNonNegative(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function safeConfidence(sum: number, count: number): number {
+  if (!Number.isFinite(sum) || !Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(1, Math.max(0, sum / count));
+}
+
+function safeAdd(first: number, second: number): number {
+  const sum = first + second;
+  return Number.isFinite(sum) ? sum : Number.MAX_VALUE;
+}
+
 function emptyDailyRow(day: string): DailyRollupRow {
   return {
     day,
@@ -929,15 +961,17 @@ function getNextLocalDayKey(dayKey: string): string {
 }
 
 function toEntryStat(entry: InsightSourceEntry): InsightsEntryStat {
-  const wordCount = entry.wordCount ?? countWords(entry.text);
+  const wordCount = safeCount(entry.wordCount ?? countWords(entry.text));
+  const audioDuration = safeNonNegative(entry.audioDuration);
+  const transcriptionTime = safeNonNegative(entry.transcriptionTime);
   return {
     id: entry.id,
     timestamp: entry.timestamp,
     text: entry.text,
     wordCount,
-    audioDuration: entry.audioDuration || 0,
-    transcriptionTime: entry.transcriptionTime || 0,
-    processingRatio: calcProcessingRatio(entry.audioDuration || 0, entry.transcriptionTime || 0),
+    audioDuration,
+    transcriptionTime,
+    processingRatio: calcProcessingRatio(audioDuration, transcriptionTime),
   };
 }
 

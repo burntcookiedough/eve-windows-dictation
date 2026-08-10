@@ -10,6 +10,8 @@
   import { createLatestRequestGuard } from '../latest-request';
   import PrimaryPage from '../components/PrimaryPage.svelte';
   import EveDropdown from '../components/EveDropdown.svelte';
+  import { buildDictationTimeChart, formatInsightsDuration } from '../insights-chart';
+  import type { DictationTimeChart } from '../insights-chart';
 
   const ranges: Array<{ id: InsightsRange; label: string }> = [
     { id: 'today', label: 'Today' },
@@ -24,6 +26,8 @@
   let error = $state<string | null>(null);
   let scrollContainer: HTMLDivElement | undefined = $state(undefined);
   const insightRequests = createLatestRequestGuard();
+  let selectedRangeLabel = $derived(ranges.find((option) => option.id === range)?.label ?? range);
+  let dailyChart = $derived(buildDictationTimeChart(insights?.trends ?? []));
 
   async function loadInsights() {
     const requestId = insightRequests.begin();
@@ -52,27 +56,22 @@
   }
 
   function formatInteger(value: number): string {
-    return Math.round(value).toLocaleString();
+    return Math.max(0, Math.round(finiteNonNegative(value))).toLocaleString();
   }
 
   function formatDuration(seconds: number): string {
-    if (seconds < 60) return `${Math.round(seconds)}s`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.round(seconds % 60);
-    if (minutes < 60) return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+    return formatInsightsDuration(seconds);
   }
 
   function formatPercent(value: number): string {
-    if (value <= 0) return '0%';
-    return `${Math.round(value * 100)}%`;
+    const bounded = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+    return `${Math.round(bounded * 100)}%`;
   }
 
   function formatRatio(value: number): string {
-    if (value <= 0) return '0x';
-    return `${value.toFixed(value >= 10 ? 0 : 1)}x`;
+    const safeValue = finiteNonNegative(value);
+    if (safeValue <= 0) return '0x';
+    return `${safeValue.toFixed(safeValue >= 10 ? 0 : 1)}x`;
   }
 
   function formatEntryTime(timestamp: number): string {
@@ -85,6 +84,10 @@
   function truncateText(text: string): string {
     const cleaned = text.replace(/\s+/g, ' ').trim();
     return cleaned.length > 88 ? `${cleaned.slice(0, 85)}...` : cleaned;
+  }
+
+  function finiteNonNegative(value: number): number {
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
   onMount(() => {
@@ -150,13 +153,15 @@
       {/if}
 
       <div class="grid grid-cols-1 gap-2.5">
-        <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictation-time-heading">
-          <div>
-            <h2 id="dictation-time-heading" class="text-xs text-zinc-400">Dictation time</h2>
-            <p class="mt-1.5 text-[22px] font-medium leading-none text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)}</p>
-            <p class="mt-2 text-[11px] text-zinc-500">Total dictation time</p>
+        <section data-insights-dictation-time-chart class="rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictation-time-heading">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h2 id="dictation-time-heading" class="text-xs text-zinc-300">Daily dictation time</h2>
+              <p class="mt-1 text-[11px] text-zinc-500">{dailyChart.unitLabel} · {selectedRangeLabel}</p>
+            </div>
+            <p class="shrink-0 text-sm font-medium tabular-nums text-zinc-100">{formatDuration(insights.summary.totalAudioSeconds)} total</p>
           </div>
-          {@render MiniBars(insights.trends, 'audioSeconds')}
+          {@render DailyDictationChart(dailyChart, selectedRangeLabel)}
         </section>
         <section class="flex min-h-[106px] items-center justify-between rounded-[9px] border border-white/10 bg-white/[0.025] px-3 py-3" aria-labelledby="dictations-heading">
           <div>
@@ -166,7 +171,7 @@
           </div>
           <div class="grid w-40 grid-cols-8 gap-1.5" role="img" aria-label="{formatInteger(insights.summary.totalDictations)} total dictations">
             {#each Array(48) as _, index}
-              <span class="h-2 w-2 rounded-full {index < Math.min(insights.summary.totalDictations, 48) ? 'bg-zinc-300/75' : 'bg-zinc-700/45'}"></span>
+              <span class="h-2 w-2 rounded-full {index < Math.min(Math.floor(finiteNonNegative(insights.summary.totalDictations)), 48) ? 'bg-zinc-300/75' : 'bg-zinc-700/45'}"></span>
             {/each}
           </div>
         </section>
@@ -182,18 +187,20 @@
         </section>
 
         <section class="overflow-hidden rounded-[9px] border border-white/10 bg-white/[0.025]" aria-labelledby="day-table-heading">
-          <h2 id="day-table-heading" class="border-b border-white/[0.08] px-3 py-2.5 text-xs text-zinc-300">Dictation time by day</h2>
+          <h2 id="day-table-heading" class="border-b border-white/[0.08] px-3 py-2.5 text-xs text-zinc-300">Daily totals</h2>
           <table class="w-full text-left text-[11px]">
             <thead class="text-zinc-500">
               <tr><th class="px-3 py-2 font-normal">Day</th><th class="px-3 py-2 font-normal">Time</th><th class="px-3 py-2 font-normal"><span class="sr-only">Relative duration</span></th></tr>
             </thead>
             <tbody class="divide-y divide-white/[0.07] text-zinc-300">
-              {#each insights.trends.slice(-7) as point}
+              {#each dailyChart.bars.slice(-7) as bar}
                 <tr>
-                  <th scope="row" class="px-3 py-2 font-normal">{point.label}</th>
-                  <td class="px-3 py-2 tabular-nums">{formatDuration(point.audioSeconds)}</td>
+                  <th scope="row" class="px-3 py-2 font-normal">{bar.label}</th>
+                  <td class="px-3 py-2 tabular-nums">{bar.valueLabel}</td>
                   <td class="w-1/2 px-3 py-2">
-                    <span class="block h-1 rounded-full bg-zinc-300/70" style:width={`${Math.max(4, (point.audioSeconds / Math.max(...insights.trends.map((trend) => trend.audioSeconds), 1)) * 100)}%`}></span>
+                    <span class="block h-1 rounded-full bg-zinc-800" aria-hidden="true">
+                      <span class="block h-1 rounded-full bg-zinc-300/70" style:width={`${bar.relativeWidth}%`}></span>
+                    </span>
                   </td>
                 </tr>
               {/each}
@@ -249,34 +256,53 @@
   </div>
 </PrimaryPage>
 
-{#snippet MiniBars(points: InsightsTrendPoint[], metric: 'dictations' | 'words' | 'audioSeconds' | 'processingMs')}
-  {@const peak = Math.max(...points.map((point) => point[metric]), 1)}
-  <svg
-    viewBox="0 0 160 52"
-    class="h-[52px] w-40 shrink-0"
-    role="img"
-    aria-label="Recent {metric === 'audioSeconds' ? 'dictation time' : metric} trend"
-  >
-    <line x1="0" y1="49" x2="160" y2="49" stroke="rgb(113 113 122 / 0.35)" stroke-width="1" />
-    {#each points.slice(-7) as point, index}
-      {@const height = Math.max(3, (point[metric] / peak) * 42)}
-      <rect
-        x={index * 22 + 3}
-        y={49 - height}
-        width="12"
-        height={height}
-        rx="2"
-        class="fill-zinc-300/80"
-      >
-        <title>{point.label}: {point[metric]}</title>
-      </rect>
-    {/each}
-  </svg>
+{#snippet DailyDictationChart(chart: DictationTimeChart, periodLabel: string)}
+  <div class="mt-3" data-insights-chart>
+    <svg
+      viewBox={`0 0 ${chart.width} ${chart.height}`}
+      class="h-28 w-full max-w-full"
+      role="img"
+      aria-label={`${chart.metricLabel}; ${chart.unitLabel}; period ${periodLabel}; ${chart.xAxisDescription}; zero baseline; maximum scale ${chart.scaleLabel}`}
+    >
+      {#each chart.ticks as tick}
+        <line x1={chart.plotLeft} x2={chart.plotRight} y1={tick.y} y2={tick.y} stroke="rgb(113 113 122 / 0.22)" stroke-width="1" />
+        <text x="1" y={tick.y + 3} fill="rgb(161 161 170)" font-size="8">{tick.label}</text>
+      {/each}
+      <line x1={chart.plotLeft} x2={chart.plotRight} y1={chart.zeroY} y2={chart.zeroY} stroke="rgb(212 212 216 / 0.65)" stroke-width="1" />
+      {#each chart.bars as bar}
+        <rect x={bar.x} y={bar.y} width={bar.width} height={bar.height} rx="1.5" class="fill-zinc-300/80">
+          <title>{bar.label}: {bar.valueLabel}</title>
+        </rect>
+      {/each}
+    </svg>
+    <div class="flex min-h-4 justify-between gap-3 pl-8 text-[10px] text-zinc-600" data-insights-chart-x-axis>
+      {#if chart.xAxisEndLabel}
+        <span>{chart.xAxisStartLabel}</span>
+        <span>{chart.xAxisEndLabel}</span>
+      {:else if chart.bars.length === 1}
+        <span>Only recorded day: {chart.xAxisStartLabel}</span>
+      {:else}
+        <span>{chart.xAxisStartLabel}</span>
+      {/if}
+    </div>
+    <p class="mt-2 text-[10px] text-zinc-600">
+      {#if chart.gapDays > 0}
+        {formatInteger(chart.gapDays)} empty calendar {chart.gapDays === 1 ? 'day is' : 'days are'} shown as gaps; fixed-range empty days are zero.
+      {:else}
+        Empty calendar days are shown at zero.
+      {/if}
+    </p>
+  </div>
 {/snippet}
 
 {#snippet MiniLine(points: InsightsTrendPoint[])}
   {@const recent = points.slice(-7)}
-  {@const averages = recent.map((point) => point.dictations > 0 ? point.audioSeconds / point.dictations : 0)}
+  {@const averages = recent.map((point) => {
+    const dictations = Math.floor(finiteNonNegative(point.dictations));
+    const audioSeconds = finiteNonNegative(point.audioSeconds);
+    const average = dictations > 0 ? audioSeconds / dictations : 0;
+    return Number.isFinite(average) && average > 0 ? average : 0;
+  })}
   {@const peak = Math.max(...averages, 1)}
   {@const coordinates = averages.map((average, index) => `${index * 25 + 5},${48 - (average / peak) * 38}`).join(' ')}
   <svg viewBox="0 0 160 52" class="h-[52px] w-40 shrink-0" role="img" aria-label="Average dictation length trend">

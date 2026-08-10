@@ -52,15 +52,19 @@ describe('renderer visual regression guards', () => {
   });
 
   test('keeps the approved Insights visual hierarchy backed by real trend data', () => {
-    expect(insightsView).toContain('Dictation time');
+    expect(insightsView).toContain('Daily dictation time');
     expect(insightsView).toContain('Dictations');
     expect(insightsView).toContain('Average dictation length');
-    expect(insightsView).toContain('Dictation time by day');
-    expect(insightsView).toContain("MiniBars(insights.trends, 'audioSeconds')");
+    expect(insightsView).toContain('Daily totals');
+    expect(insightsView).toContain('dailyChart.unitLabel');
+    expect(insightsView).toContain('@render DailyDictationChart(dailyChart, selectedRangeLabel)');
+    expect(insightsView).toContain('data-insights-chart-x-axis');
+    expect(insightsView).toContain('chart.xAxisStartLabel');
+    expect(insightsView).toContain('chart.xAxisEndLabel');
+    expect(insightsView).toContain('period ${periodLabel}; ${chart.xAxisDescription}; zero baseline; maximum scale');
     expect(insightsView).toContain('MiniLine(insights.trends)');
-    expect(insightsView).toContain('point.audioSeconds / point.dictations');
     expect(insightsView).toContain('formatDuration(averages[index])');
-    expect(insightsView).toContain('insights.trends.slice(-7)');
+    expect(insightsView).toContain('dailyChart.bars.slice(-7)');
     expect(insightsView).toContain('<EveDropdown');
     expect(eveDropdown).toContain('role="combobox"');
     expect(eveDropdown).toContain('aria-haspopup="listbox"');
