@@ -39,6 +39,16 @@ class NemotronCudaPreflightError(RuntimeError):
     """The real Nemotron CUDA/cuDNN operation could not initialize safely."""
 
 
+ENGINE_RECOVERY_REQUIRED_MESSAGE = (
+    "Eve could not restore the previous speech engine. "
+    "Restart the managed server, then retry or revert the selected model."
+)
+
+
+class EngineRecoveryRequiredError(RuntimeError):
+    """A failed unload-first swap left no usable engine until the server restarts."""
+
+
 _AUTH_ERROR_MARKERS = (
     "oauth token signature",
     "invalid token",
@@ -91,6 +101,8 @@ def _exception_text(exc: BaseException) -> str:
 def safe_engine_preparation_message(exc: BaseException) -> str:
     """Return a stable user-facing engine error while logs retain the raw exception."""
     text = _exception_text(exc)
+    if isinstance(exc, EngineRecoveryRequiredError):
+        return ENGINE_RECOVERY_REQUIRED_MESSAGE
     if isinstance(exc, NemotronCudaPreflightError):
         return (
             "Nemotron could not initialize the packaged CUDA runtime. "

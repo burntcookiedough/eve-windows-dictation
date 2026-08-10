@@ -49,5 +49,7 @@ describe('Engine settings transaction UI', () => {
     expect(settingsView).toContain('function revertEngineSettings()');
     expect(settingsView).toContain('pendingEngine = {};');
     expect(settingsView).toContain('disabled={engineApplying || engineRevertDisabled}');
+    expect(settingsView).toContain('recoverInterruptedManagedPreparation');
+    expect(settingsView).toContain('data-engine-preparation-interrupted');
   });
 });

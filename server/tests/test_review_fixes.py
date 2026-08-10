@@ -191,26 +191,95 @@ async def test_swap_engine_restores_old_engine_when_activation_callback_fails(
 
 
 @pytest.mark.asyncio
-async def test_swap_engine_restore_also_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When both new engine and restore fail, _engine is None and original error propagates."""
+async def test_swap_engine_restore_failure_reports_recovery_and_can_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed unload-first restore must surface recovery instead of a silent empty manager."""
     settings = Settings(engine="whisper", unload_before_swap=True)
     monkeypatch.setattr(factory_module, "_get_available_engine_ids", lambda: ["whisper", "nemotron"])
     _stub_gpu(monkeypatch)
 
-    def _always_fail(s: Settings) -> _DummyEngine:
-        raise RuntimeError(f"Cannot create {s.engine}")
+    create_calls: list[str] = []
 
-    monkeypatch.setattr(factory_module, "_create_engine", _always_fail)
+    def _fail_then_recover(s: Settings) -> _DummyEngine:
+        create_calls.append(s.engine)
+        if len(create_calls) <= 2:
+            raise RuntimeError(f"Cannot create {s.engine}")
+        return _DummyEngine(s.engine)
+
+    monkeypatch.setattr(factory_module, "_create_engine", _fail_then_recover)
 
     manager = factory_module.EngineManager(settings)
     manager._engine = _DummyEngine("whisper")
 
     new_settings = Settings(engine="nemotron", unload_before_swap=True)
-    with pytest.raises(RuntimeError, match="Cannot create nemotron"):
+    with pytest.raises(
+        factory_module.EngineRecoveryRequiredError,
+        match="Candidate engine creation and previous-engine recovery both failed",
+    ):
         await manager.swap_engine(new_settings)
 
-    # Engine should be None since both attempts failed
-    assert manager._engine is None
+    status = manager.get_status()
+    assert status.current == "whisper"
+    assert status.status == "error"
+    assert status.info is None
+    assert status.message == (
+        "Eve could not restore the previous speech engine. "
+        "Restart the managed server, then retry or revert the selected model."
+    )
+    assert status.recovery == {
+        "action": "restart_server",
+        "message": status.message,
+    }
+    assert manager._settings is settings
+    with pytest.raises(RuntimeError, match="Restart the managed server"):
+        _ = manager.engine
+
+    # A fresh managed-server start invokes the same committed-settings path.
+    await manager.swap_engine(settings)
+    recovered = manager.get_status()
+    assert recovered.status == "ready"
+    assert recovered.current == "whisper"
+    assert recovered.recovery is None
+    assert create_calls == ["nemotron", "whisper", "whisper"]
+
+
+@pytest.mark.asyncio
+async def test_swap_engine_restore_failure_after_persistence_callback_is_recoverable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(engine="whisper", whisper_model="small", unload_before_swap=True)
+    monkeypatch.setattr(factory_module, "_get_available_engine_ids", lambda: ["whisper"])
+    _stub_gpu(monkeypatch)
+
+    def _fail_restoring_committed_engine(s: Settings) -> _DummyEngine:
+        if s.whisper_model == "small":
+            raise RuntimeError("Cannot restore whisper")
+        return _DummyEngine(s.engine)
+
+    monkeypatch.setattr(factory_module, "_create_engine", _fail_restoring_committed_engine)
+
+    manager = factory_module.EngineManager(settings)
+    manager._engine = _DummyEngine("whisper")
+
+    with pytest.raises(
+        factory_module.EngineRecoveryRequiredError,
+        match="Candidate engine activation and previous-engine recovery both failed",
+    ):
+        await manager.swap_engine(
+            Settings(
+                engine="whisper",
+                whisper_model="medium",
+                unload_before_swap=True,
+            ),
+            before_activate=lambda: (_ for _ in ()).throw(OSError("disk unavailable")),
+        )
+
+    status = manager.get_status()
+    assert status.status == "error"
+    assert status.recovery is not None
+    assert status.recovery["action"] == "restart_server"
+    assert manager._settings is settings
 
 
 # ---------------------------------------------------------------------------

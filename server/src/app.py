@@ -120,6 +120,8 @@ def create_app() -> FastAPI:
             payload["pending"] = status.pending
         if status.message:
             payload["message"] = status.message
+        if getattr(status, "recovery", None):
+            payload["recovery"] = status.recovery
         return payload
 
     @app.get("/health")

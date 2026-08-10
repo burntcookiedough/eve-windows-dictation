@@ -12,7 +12,12 @@
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
   import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
   import { getServerManagementMode, serverStatusState } from '../server-status';
-  import { serverSettingsStateKey, shouldClearServerSettings, shouldRetryServerSettings } from '../server-settings-recovery';
+  import {
+    recoverInterruptedManagedPreparation,
+    serverSettingsStateKey,
+    shouldClearServerSettings,
+    shouldRetryServerSettings,
+  } from '../server-settings-recovery';
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
   import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
@@ -355,11 +360,26 @@
   $effect(() => {
     const state = sharedServerState;
     if (shouldClearServerSettings(state, externalMode)) {
+      const recovery = recoverInterruptedManagedPreparation(state, externalMode, {
+        pending: pendingEngine,
+        requested: enginePreparationRequested,
+        active: enginePreparationActive,
+        observed: enginePreparationObserved,
+        applying: engineApplying,
+      });
       serverSettings = null;
       engineStatus = null;
       availableEngines = [];
       serverConnected = false;
       lastServerSettingsAttemptKey = null;
+      if (recovery) {
+        pendingEngine = recovery.pending;
+        enginePreparationRequested = recovery.requested;
+        enginePreparationActive = recovery.active;
+        enginePreparationObserved = recovery.observed;
+        engineApplying = recovery.applying;
+        if (recovery.message) engineApplyError = recovery.message;
+      }
       return;
     }
 
@@ -839,6 +859,9 @@
       {#if !serverConnected || !serverSettings}
         <div data-speech-model-panel class="min-w-0 w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
           <p class="text-xs leading-5 text-zinc-500">Speech model choices are available when the server reports its settings.</p>
+          {#if engineApplyError}
+            <p data-engine-preparation-interrupted role="alert" class="mt-2 text-xs leading-5 text-red-300">{engineApplyError}</p>
+          {/if}
         </div>
       {:else}
         <SpeechModelChooser

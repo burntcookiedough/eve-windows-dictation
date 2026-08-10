@@ -358,6 +358,10 @@ export interface EngineStatus {
     status: 'loading' | 'ready' | 'error';
     message?: string;
   };
+  recovery?: {
+    action: 'restart_server';
+    message: string;
+  };
 }
 
 export interface ServerSettingsResponse {
