@@ -100,7 +100,7 @@ async function measure(window, state, logsExpanded, zoom) {
       logsAssociation: !!logsToggle && !!logPanel && logsToggle.getAttribute('aria-controls') === logPanel.id,
       logsExpanded: logPanel ? !logPanel.hidden : false,
       logsScroller: logOutput ? { overflowY: getComputedStyle(logOutput).overflowY, overscrollBehaviorY: getComputedStyle(logOutput).overscrollBehaviorY, clientHeight: logOutput.clientHeight, scrollHeight: logOutput.scrollHeight, tabIndex: logOutput.tabIndex, role: logOutput.getAttribute('role'), ariaLabel: logOutput.getAttribute('aria-label') } : null,
-      logState: logState?.getAttribute('data-server-logs-state') ?? null,
+      logState: logState?.getAttribute('data-server-logs-state') ?? (logOutput && logPanel && !logPanel.hidden ? 'ready' : null),
       logStateRole: logState?.getAttribute('role') ?? null,
       logStateLive: logState?.getAttribute('aria-live') ?? null,
       logBodySize: logOutput?.getAttribute('data-log-size') ?? null,

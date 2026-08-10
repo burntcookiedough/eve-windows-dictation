@@ -46,6 +46,11 @@ describe('Server log state and sizing contracts', () => {
     expect(serverView).toContain('await window.murmurMain.getServerLogs()');
     expect(serverView).toContain('SERVER_LOG_LOAD_ERROR');
     expect(SERVER_LOG_LOAD_ERROR).toBe('Server logs are unavailable right now.');
+
+    const logPanelStart = serverView.indexOf('<div id={logOutputId} hidden={!showLogs}');
+    const logStateStart = serverView.indexOf('{#if logsLoadState === \'loading\'}');
+    expect(logPanelStart).toBeGreaterThanOrEqual(0);
+    expect(logStateStart).toBeGreaterThan(logPanelStart);
   });
 
   test('keeps short content natural and bounds only long content to the nested log scroller', () => {

@@ -505,25 +505,25 @@
       </button>
       <p id={privacyWarningId} data-server-logs-privacy class="mt-3 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">Raw logs may contain local paths. Review them before sharing.</p>
 
-      {#if logsLoadState === 'loading'}
-        <p data-server-logs-state="loading" data-server-logs-loading role="status" aria-live="polite" class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-400">Loading recent server logs…</p>
-      {:else if logsLoadState === 'error'}
-        <div data-server-logs-state="error" data-server-logs-error role="alert" class="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-3">
-          <p class="min-w-0 text-xs leading-5 text-red-300 [overflow-wrap:anywhere]">{SERVER_LOG_LOAD_ERROR}</p>
-          <button
-            type="button"
-            onclick={retryLogs}
-            disabled={logsLoadState === 'loading'}
-            class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Retry
-          </button>
-        </div>
-      {:else if logs.length === 0}
-        <p data-server-logs-state="empty" data-server-logs-empty class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-500">No server logs are available yet.</p>
-      {/if}
-
       <div id={logOutputId} hidden={!showLogs} class="mt-3 min-w-0">
+        {#if logsLoadState === 'loading'}
+          <p data-server-logs-state="loading" data-server-logs-loading role="status" aria-live="polite" class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-400">Loading recent server logs…</p>
+        {:else if logsLoadState === 'error'}
+          <div data-server-logs-state="error" data-server-logs-error role="alert" class="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-3">
+            <p class="min-w-0 text-xs leading-5 text-red-300 [overflow-wrap:anywhere]">{SERVER_LOG_LOAD_ERROR}</p>
+            <button
+              type="button"
+              onclick={retryLogs}
+              disabled={logsLoadState === 'loading'}
+              class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Retry
+            </button>
+          </div>
+        {:else if logs.length === 0}
+          <p data-server-logs-state="empty" data-server-logs-empty class="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-xs text-zinc-500">No server logs are available yet.</p>
+        {/if}
+
         <div class="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <button
             type="button"
