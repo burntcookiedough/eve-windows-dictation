@@ -187,6 +187,13 @@ export interface HistoryResponse {
   hasMore: boolean;
 }
 
+export interface HistoryDeleteResult {
+  requestedCount: number;
+  deletedCount: number;
+  deletedIds: string[];
+  missingIds: string[];
+}
+
 export interface InsightSourceEntry {
   id: string;
   timestamp: number;

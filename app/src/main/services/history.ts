@@ -14,6 +14,7 @@ import {
   tokenizeInsightWords,
 } from '../../shared/insights.js';
 import type {
+  HistoryDeleteResult,
   HistoryFilters,
   HistoryEntryWithGroup,
   HistoryResponse,
@@ -40,6 +41,57 @@ function computeDateGroup(timestamp: number): string {
   if (date >= yesterday) return 'Yesterday';
   if (date >= weekAgo) return 'This Week';
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+interface HistoryQuery {
+  whereClause: string;
+  params: Record<string, unknown>;
+}
+
+function buildHistoryQuery(filters?: HistoryFilters): HistoryQuery {
+  const conditions: string[] = [];
+  const params: Record<string, unknown> = {};
+
+  if (filters?.text) {
+    conditions.push('text LIKE @textSearch');
+    params.textSearch = `%${filters.text}%`;
+  }
+  if (filters?.dateFrom !== undefined) {
+    conditions.push('timestamp >= @dateFrom');
+    params.dateFrom = filters.dateFrom;
+  }
+  if (filters?.dateTo !== undefined) {
+    conditions.push('timestamp <= @dateTo');
+    params.dateTo = filters.dateTo;
+  }
+  if (filters?.minDuration !== undefined) {
+    conditions.push('audioDuration >= @minDuration');
+    params.minDuration = filters.minDuration;
+  }
+  if (filters?.maxDuration !== undefined) {
+    conditions.push('audioDuration <= @maxDuration');
+    params.maxDuration = filters.maxDuration;
+  }
+  if (filters?.minConfidence !== undefined) {
+    conditions.push('confidence >= @minConfidence');
+    params.minConfidence = filters.minConfidence;
+  }
+  if (filters?.editedOnly) {
+    conditions.push('editedAt IS NOT NULL');
+  }
+
+  return {
+    whereClause: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  };
+}
+
+function buildIdParams(ids: string[]): Record<string, string> {
+  return Object.fromEntries(ids.map((id, index) => [`id${index}`, id]));
+}
+
+function buildIdPlaceholders(ids: string[]): string {
+  return ids.map((_id, index) => `@id${index}`).join(', ');
 }
 
 export class HistoryService {
@@ -155,40 +207,7 @@ export class HistoryService {
 
   getEntries(offset: number, limit: number, filters?: HistoryFilters): HistoryResponse {
     if (!this.db) throw new Error('Database not initialized');
-
-    const conditions: string[] = [];
-    const params: Record<string, unknown> = {};
-
-    // Build WHERE clause from filters
-    if (filters?.text) {
-      conditions.push('text LIKE @textSearch');
-      params.textSearch = `%${filters.text}%`;
-    }
-    if (filters?.dateFrom !== undefined) {
-      conditions.push('timestamp >= @dateFrom');
-      params.dateFrom = filters.dateFrom;
-    }
-    if (filters?.dateTo !== undefined) {
-      conditions.push('timestamp <= @dateTo');
-      params.dateTo = filters.dateTo;
-    }
-    if (filters?.minDuration !== undefined) {
-      conditions.push('audioDuration >= @minDuration');
-      params.minDuration = filters.minDuration;
-    }
-    if (filters?.maxDuration !== undefined) {
-      conditions.push('audioDuration <= @maxDuration');
-      params.maxDuration = filters.maxDuration;
-    }
-    if (filters?.minConfidence !== undefined) {
-      conditions.push('confidence >= @minConfidence');
-      params.minConfidence = filters.minConfidence;
-    }
-    if (filters?.editedOnly) {
-      conditions.push('editedAt IS NOT NULL');
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { whereClause, params } = buildHistoryQuery(filters);
 
     // Fetch one extra to determine if there are more entries
     const query = `
@@ -236,15 +255,63 @@ export class HistoryService {
     };
   }
 
+  getEntryIds(filters?: HistoryFilters): string[] {
+    if (!this.db) throw new Error('Database not initialized');
+    const { whereClause, params } = buildHistoryQuery(filters);
+    const rows = this.db.prepare(`
+      SELECT id
+      FROM transcriptions
+      ${whereClause}
+      ORDER BY timestamp DESC
+    `).all(params) as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
+
   delete(id: string): void {
+    this.deleteMany([id]);
+  }
+
+  deleteMany(ids: string[]): HistoryDeleteResult {
     if (!this.db) throw new Error('Database not initialized');
 
-    const existing = this.getById(id);
-    const stmt = this.db.prepare('DELETE FROM transcriptions WHERE id = @id');
-    const result = stmt.run({ id });
-    if (result.changes > 0 && existing) {
-      this.removeEntryFromInsights(existing);
+    const requestedIds = [...new Set(ids.filter((id) => id.length > 0))];
+    if (requestedIds.length === 0) {
+      return {
+        requestedCount: 0,
+        deletedCount: 0,
+        deletedIds: [],
+        missingIds: [],
+      };
     }
+
+    const remove = this.db.transaction((selectedIds: string[]): HistoryDeleteResult => {
+      const existing = this.getEntriesByIds(selectedIds);
+      const existingIds = new Set(existing.map((entry) => entry.id));
+      const missingIds = selectedIds.filter((id) => !existingIds.has(id));
+      let deletedCount = 0;
+
+      for (let offset = 0; offset < selectedIds.length; offset += 500) {
+        const chunk = selectedIds.slice(offset, offset + 500);
+        const result = this.db!.prepare(
+          `DELETE FROM transcriptions WHERE id IN (${buildIdPlaceholders(chunk)})`
+        ).run(buildIdParams(chunk));
+        deletedCount += result.changes;
+      }
+
+      for (const entry of existing) {
+        this.removeEntryFromInsightsWithinTransaction(entry);
+      }
+
+      const deletedIds = selectedIds.filter((id) => existingIds.has(id));
+      return {
+        requestedCount: selectedIds.length,
+        deletedCount,
+        deletedIds,
+        missingIds,
+      };
+    });
+
+    return remove(requestedIds);
   }
 
   getById(id: string): TranscriptionEntry | null {
@@ -273,6 +340,38 @@ export class HistoryService {
 
     const row = stmt.get({ id });
     return row ? mapTranscriptionEntry(row) : null;
+  }
+
+  private getEntriesByIds(ids: string[]): TranscriptionEntry[] {
+    if (!this.db || ids.length === 0) return [];
+    const entries: TranscriptionEntry[] = [];
+
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      const chunk = ids.slice(offset, offset + 500);
+      const rows = this.db.prepare(`
+        SELECT
+          id,
+          timestamp,
+          text,
+          confidence,
+          audioDuration,
+          transcriptionTime,
+          wordCount,
+          sessionMode,
+          engine,
+          model,
+          device,
+          computeType,
+          cudaActive,
+          editedAt,
+          originalText
+        FROM transcriptions
+        WHERE id IN (${buildIdPlaceholders(chunk)})
+      `).all(buildIdParams(chunk));
+      entries.push(...rows.map(mapTranscriptionEntry));
+    }
+
+    return entries;
   }
 
   getInsights(range: InsightsRange): InsightsResponse {
@@ -491,7 +590,7 @@ export class HistoryService {
     });
   }
 
-  private removeEntryFromInsights(entry: TranscriptionEntry): void {
+  private removeEntryFromInsightsWithinTransaction(entry: TranscriptionEntry): void {
     if (!this.db) throw new Error('Database not initialized');
     const wasProcessed = this.db.prepare(`
       SELECT 1 FROM insights_processed_entries WHERE id = @id
@@ -503,47 +602,43 @@ export class HistoryService {
     const confidence = Number.isFinite(entry.confidence) ? entry.confidence : 0;
     const confidenceCount = Number.isFinite(entry.confidence) ? 1 : 0;
 
-    const remove = this.db.transaction(() => {
-      this.db!.prepare(`
-        UPDATE insights_daily_rollups
-        SET
-          dictations = MAX(dictations - 1, 0),
-          words = MAX(words - @words, 0),
-          audioSeconds = MAX(audioSeconds - @audioSeconds, 0),
-          processingMs = MAX(processingMs - @processingMs, 0),
-          confidenceSum = MAX(confidenceSum - @confidenceSum, 0),
-          confidenceCount = MAX(confidenceCount - @confidenceCount, 0)
-        WHERE day = @day
-      `).run({
-        day,
-        words: wordCount,
-        audioSeconds: entry.audioDuration || 0,
-        processingMs: entry.transcriptionTime || 0,
-        confidenceSum: confidence,
-        confidenceCount,
-      });
-
-      const counts = new Map<string, number>();
-      for (const word of tokenizeInsightWords(entry.text)) {
-        counts.set(word, (counts.get(word) ?? 0) + 1);
-      }
-
-      const decrementWord = this.db!.prepare(`
-        UPDATE insights_word_counts
-        SET count = MAX(count - @count, 0)
-        WHERE day = @day AND word = @word
-      `);
-
-      for (const [word, count] of counts) {
-        decrementWord.run({ day, word, count });
-      }
-
-      this.db!.prepare('DELETE FROM insights_word_counts WHERE count <= 0').run();
-      this.db!.prepare('DELETE FROM insights_daily_rollups WHERE day = @day AND dictations <= 0').run({ day });
-      this.db!.prepare('DELETE FROM insights_processed_entries WHERE id = @id').run({ id: entry.id });
+    this.db.prepare(`
+      UPDATE insights_daily_rollups
+      SET
+        dictations = MAX(dictations - 1, 0),
+        words = MAX(words - @words, 0),
+        audioSeconds = MAX(audioSeconds - @audioSeconds, 0),
+        processingMs = MAX(processingMs - @processingMs, 0),
+        confidenceSum = MAX(confidenceSum - @confidenceSum, 0),
+        confidenceCount = MAX(confidenceCount - @confidenceCount, 0)
+      WHERE day = @day
+    `).run({
+      day,
+      words: wordCount,
+      audioSeconds: entry.audioDuration || 0,
+      processingMs: entry.transcriptionTime || 0,
+      confidenceSum: confidence,
+      confidenceCount,
     });
 
-    remove();
+    const counts = new Map<string, number>();
+    for (const word of tokenizeInsightWords(entry.text)) {
+      counts.set(word, (counts.get(word) ?? 0) + 1);
+    }
+
+    const decrementWord = this.db.prepare(`
+      UPDATE insights_word_counts
+      SET count = MAX(count - @count, 0)
+      WHERE day = @day AND word = @word
+    `);
+
+    for (const [word, count] of counts) {
+      decrementWord.run({ day, word, count });
+    }
+
+    this.db.prepare('DELETE FROM insights_word_counts WHERE count <= 0').run();
+    this.db.prepare('DELETE FROM insights_daily_rollups WHERE day = @day AND dictations <= 0').run({ day });
+    this.db.prepare('DELETE FROM insights_processed_entries WHERE id = @id').run({ id: entry.id });
   }
 
   private processPendingInsights(limit: number): number {

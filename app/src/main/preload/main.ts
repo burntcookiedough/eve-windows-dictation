@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type {
   HistoryFilters,
+  HistoryDeleteResult,
   HistoryResponse,
   HistoryEntryWithGroup,
   InsightsRange,
@@ -73,8 +74,16 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_ENTRIES, offset, limit, filters);
   },
 
+  getHistoryEntryIds: (filters?: HistoryFilters): Promise<string[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_ENTRY_IDS, filters);
+  },
+
   deleteHistoryEntry: (id: string): Promise<void> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id);
+  },
+
+  deleteHistoryEntries: (ids: string[]): Promise<HistoryDeleteResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE_BULK, ids);
   },
 
   getInsights: (range: InsightsRange): Promise<InsightsResponse | null> => {

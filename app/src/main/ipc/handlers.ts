@@ -155,12 +155,32 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
     }
   );
 
+  ipcMain.handle(
+    IPC_CHANNELS.HISTORY_GET_ENTRY_IDS,
+    (_event, filters?: HistoryFilters) => {
+      if (!historyServiceRef) {
+        return [];
+      }
+      return historyServiceRef.getEntryIds(filters);
+    }
+  );
+
   // Handle history delete
   ipcMain.handle(IPC_CHANNELS.HISTORY_DELETE, (_event, id: string) => {
     if (!historyServiceRef) {
       return;
     }
     historyServiceRef.delete(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_DELETE_BULK, (_event, ids: unknown) => {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || id.length === 0)) {
+      throw new TypeError('Invalid history entry IDs');
+    }
+    if (!historyServiceRef) {
+      throw new Error('History service is unavailable; try again.');
+    }
+    return historyServiceRef.deleteMany(ids);
   });
 
   ipcMain.handle(IPC_CHANNELS.INSIGHTS_GET, (_event, range: unknown) => {
