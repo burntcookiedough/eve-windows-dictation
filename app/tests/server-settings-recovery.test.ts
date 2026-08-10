@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  recoverInterruptedManagedPreparation,
   serverSettingsStateKey,
   shouldClearServerSettings,
   shouldRetryServerSettings,
@@ -39,5 +40,26 @@ describe('Settings server-state recovery', () => {
   test('retries when the live endpoint changes even if its port is reused', () => {
     const samePortDifferentEndpoint = { ...ready, wsUrl: 'ws://127.0.0.1:51490/transcribe' };
     expect(serverSettingsStateKey(samePortDifferentEndpoint)).not.toBe(serverSettingsStateKey(ready));
+  });
+
+  test('clears an interrupted managed preparation and preserves external-server state', () => {
+    const lifecycle = {
+      pending: { engine: 'nemotron', nemotron_model: 'nvidia/canary-qwen-2.5b' },
+      requested: true,
+      active: true,
+      observed: true,
+      applying: true,
+    };
+
+    expect(recoverInterruptedManagedPreparation(starting, false, lifecycle)).toEqual({
+      pending: {},
+      requested: false,
+      active: false,
+      observed: false,
+      applying: false,
+      message: 'The managed speech server stopped while model settings were being prepared. Restart it, then select and apply the model again.',
+    });
+    expect(recoverInterruptedManagedPreparation(starting, true, lifecycle)).toBeNull();
+    expect(recoverInterruptedManagedPreparation(ready, false, lifecycle)).toBeNull();
   });
 });

@@ -12,7 +12,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from transcription.base import EngineInfo, EngineSession, TranscriptionEngine
-from transcription.errors import safe_engine_preparation_message
+from transcription.errors import (
+    ENGINE_RECOVERY_REQUIRED_MESSAGE,
+    EngineRecoveryRequiredError,
+    safe_engine_preparation_message,
+)
 from transcription.vram import (
     detect_gpu_capabilities,
     estimate_max_duration_s,
@@ -136,6 +140,7 @@ class EngineStatus:
     info: EngineInfo | None = None
     pending: dict | None = None
     message: str | None = None
+    recovery: dict | None = None
 
 
 class EngineManager:
@@ -149,6 +154,7 @@ class EngineManager:
         self._pending_engine_id: str | None = None
         self._pending_message: str | None = None
         self._swap_error: str | None = None
+        self._recovery_required = False
         self._gpu_name: str | None = None
         self._gpu_vram_gb: float | None = None
         self._estimated_max_duration_s: int | None = None
@@ -271,6 +277,8 @@ class EngineManager:
     @property
     def engine(self) -> TranscriptionEngine:
         if self._engine is None:
+            if self._recovery_required:
+                raise RuntimeError(ENGINE_RECOVERY_REQUIRED_MESSAGE)
             raise RuntimeError("Engine not loaded. Call load_initial_engine() first.")
         return self._engine
 
@@ -307,6 +315,11 @@ class EngineManager:
             }
         if self._swap_error:
             status.message = self._swap_error
+        if self._recovery_required:
+            status.recovery = {
+                "action": "restart_server",
+                "message": ENGINE_RECOVERY_REQUIRED_MESSAGE,
+            }
         return status
 
     def create_session(self, session_id: str) -> EngineSession:
@@ -390,9 +403,9 @@ class EngineManager:
                 await loop.run_in_executor(None, old_engine.shutdown)
                 _force_free_vram()
 
-            async def restore_previous_engine() -> None:
+            async def restore_previous_engine() -> Exception | None:
                 if not should_unload_old or self._shutting_down:
-                    return
+                    return None
                 logger.warning(
                     "Engine activation failed; attempting to restore previous engine"
                 )
@@ -410,13 +423,20 @@ class EngineManager:
                         await loop.run_in_executor(None, restored.shutdown)
                     else:
                         logger.info("Previous engine restored successfully")
+                    return None
                 except Exception as restore_error:
                     logger.error("Failed to restore previous engine: %s", restore_error)
+                    return restore_error
 
             try:
                 new_engine = await loop.run_in_executor(None, lambda: _create_engine(new_settings))
             except Exception as create_error:
-                await restore_previous_engine()
+                restore_error = await restore_previous_engine()
+                if restore_error is not None:
+                    self._recovery_required = True
+                    raise EngineRecoveryRequiredError(
+                        "Candidate engine creation and previous-engine recovery both failed"
+                    ) from create_error
                 raise create_error
 
             try:
@@ -436,12 +456,18 @@ class EngineManager:
                             old_engine is not None
                             and old_engine in self._active_sessions.values()
                         )
-            except Exception:
+            except Exception as activation_error:
                 try:
                     await loop.run_in_executor(None, new_engine.shutdown)
+                    _force_free_vram()
                 except Exception as shutdown_error:
                     logger.error("Failed to discard unactivated engine: %s", shutdown_error)
-                await restore_previous_engine()
+                restore_error = await restore_previous_engine()
+                if restore_error is not None:
+                    self._recovery_required = True
+                    raise EngineRecoveryRequiredError(
+                        "Candidate engine activation and previous-engine recovery both failed"
+                    ) from activation_error
                 raise
 
             if discard_new_engine:
@@ -462,6 +488,7 @@ class EngineManager:
             self._pending_engine_id = None
             self._pending_message = None
             self._swap_error = None
+            self._recovery_required = False
             logger.info("Engine swap complete: now using %s", new_settings.engine)
 
         except Exception as e:
