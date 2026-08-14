@@ -33,11 +33,14 @@ Models are downloaded from their public Hugging Face repositories the first time
 
 | Choice | Best for | Engine and model |
 | --- | --- | --- |
-| **Nemotron English Performance** | Focused English dictation on capable hardware | [NVIDIA Nemotron Speech Streaming](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
 | **Large V3 Turbo — Recommended Multilingual** | A balanced everyday multilingual option | [faster-whisper-large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) |
 | **Large V3 — Maximum Multilingual Accuracy** | Quality-first multilingual work | [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) |
 | **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
 | **Medium / Tiny — Advanced** | Raw engine choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
+
+The v0.8.1 alpha ships Faster-Whisper as its sole selectable engine. Nemotron
+remains in the source tree and optional `nemotron` dependency for deferred
+repair work; it is not shipped or user-selectable in this alpha.
 
 Eve derives device and precision availability from the installed PyTorch and CTranslate2 runtimes. `auto` is the safest starting point; a particular device/precision/model combination still depends on the local driver, VRAM, and runtime capabilities. The catalog is not a promise of every device-by-precision combination.
 
@@ -81,7 +84,7 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --extra all --frozen` when preparing a release runtime with both shipped engines. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
+Use `uv sync --extra release --frozen` when preparing the Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
 
 ## Compatibility and provenance
 

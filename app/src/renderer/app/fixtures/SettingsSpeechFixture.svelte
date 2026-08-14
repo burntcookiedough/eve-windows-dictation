@@ -16,12 +16,12 @@
   let compatibilityOpen = $state(params.get('compatibility') === 'expanded');
   let selectedPreset = $state<SpeechModelPreset>(
     fixtureState === 'ready' || fixtureState === 'external'
-      ? SPEECH_MODEL_PRESETS[1]!
-      : SPEECH_MODEL_PRESETS[2]!,
+      ? SPEECH_MODEL_PRESETS[0]!
+      : SPEECH_MODEL_PRESETS[1]!,
   );
 
-  const currentPreset = SPEECH_MODEL_PRESETS[1]!;
-  const targetPreset = SPEECH_MODEL_PRESETS[2]!;
+  const currentPreset = SPEECH_MODEL_PRESETS[0]!;
+  const targetPreset = SPEECH_MODEL_PRESETS[1]!;
   const currentEngineStatus: EngineStatus = {
     current: currentPreset.engine,
     status: 'ready',

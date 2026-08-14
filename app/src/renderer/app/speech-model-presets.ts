@@ -1,7 +1,7 @@
 import type { EngineStatus, ModelDownloadState } from '$shared/types';
 
 export interface SpeechModelPreset {
-  id: 'english-performance' | 'recommended-multilingual' | 'maximum-multilingual-accuracy' | 'lightweight';
+  id: 'recommended-multilingual' | 'maximum-multilingual-accuracy' | 'lightweight';
   label: string;
   engine: 'nemotron' | 'whisper';
   setting: 'nemotron_model' | 'whisper_model';
@@ -12,7 +12,6 @@ export interface SpeechModelPreset {
 }
 
 export const SPEECH_MODEL_PRESETS: readonly SpeechModelPreset[] = [
-  { id: 'english-performance', label: 'English Performance', engine: 'nemotron', setting: 'nemotron_model', model: 'nvidia/nemotron-speech-streaming-en-0.6b', sizeGb: 2.3, language: 'English only', summary: 'A focused English option for capable hardware.' },
   { id: 'recommended-multilingual', label: 'Recommended Multilingual', engine: 'whisper', setting: 'whisper_model', model: 'large-v3-turbo', sizeGb: 1.5, language: 'Multilingual', summary: 'A balanced multilingual option.' },
   { id: 'maximum-multilingual-accuracy', label: 'Maximum Multilingual Accuracy', engine: 'whisper', setting: 'whisper_model', model: 'large-v3', sizeGb: 2.9, language: 'Multilingual', summary: 'A larger multilingual option for quality-focused use.' },
   { id: 'lightweight', label: 'Lightweight', engine: 'whisper', setting: 'whisper_model', model: 'small', sizeGb: 0.5, language: 'Multilingual', summary: 'A smaller option for constrained hardware.' },

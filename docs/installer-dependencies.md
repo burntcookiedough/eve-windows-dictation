@@ -7,16 +7,16 @@
 
 ## Executive Summary
 
-The Murmur installer bundles a self-contained Python environment (no system Python needed) and the Electron app. GPU acceleration depends on CUDA runtime libraries that are bundled via PyTorch when both engines are installed, and **AI models are not included in the installer** — they download on first run. The release pipeline now installs all engines and ships a nsis-web installer with payload artifacts; remaining risk areas are GPU drivers, Visual C++ Redistributable availability, and first-run model download bandwidth.
+The Murmur installer bundles a self-contained Python environment (no system Python needed) and the Electron app. The v0.8.1 alpha ships Faster-Whisper as its sole selectable engine, with locked CUDA PyTorch in the `release` extra for GPU support. Nemotron remains source-only and deferred for repair work; it is not shipped or user-selectable. **AI models are not included in the installer** — they download on first run. Remaining risk areas are GPU drivers, Visual C++ Redistributable availability, and first-run model download bandwidth.
 
 ### Key Findings
 
 | Finding | Severity | Status |
 |---------|----------|--------|
-| Release workflow installs transcription engines | **Critical** | Resolved |
+| Release workflow installs the shipped Whisper closure | **Critical** | Resolved |
 | NSIS 2GB installer size limit vs. 5+ GB bundled venv | **Critical** | Resolved via nsis-web |
-| CUDA DLL gap when using Whisper-only (no PyTorch) | **High** | Mitigated (default build + diagnostics) |
-| NeMo Toolkit not officially supported on Windows pip | **Medium** | Known risk |
+| CUDA DLL gap when using the plain Whisper extra (no PyTorch) | **High** | Resolved for the shipped `release` extra |
+| NeMo Toolkit not officially supported on Windows pip | **Medium** | Deferred repair risk |
 | Visual C++ Redistributable check/bundling | **Low** | Resolved (runtime warning + link) |
 | Models download on first run (~2-4 GB) | **Info** | Documented + UI messaging |
 
@@ -44,14 +44,14 @@ Per the `extraResources` config in `app/package.json`:
 - dependency test suites, static `.lib` linker archives, and PyTorch headers
 - standalone-Python development/UI assets (`include`, `libs`, `idlelib`, `tkinter`, Tcl)
 
-These exclusions remove build-time material only. Release validation imports both
-engines and runs a WebSocket transcription smoke against the packaged runtime
-layout before publication.
+These exclusions remove build-time material only. Release validation imports the
+shipped Whisper closure, proves NeMo and torchaudio are absent, and checks that
+packaged engine discovery reports Whisper available and Nemotron unavailable.
 
 ### What's NOT in the installer at all
 
 - AI models (downloaded on first run)
-- CUDA toolkit / cuDNN (system dependency; not required for default build)
+- CUDA toolkit / cuDNN (not required as system dependencies; the release extra supplies the packaged runtime DLLs)
 - Visual C++ Redistributable (system dependency; app warns and links installer if missing)
 - GPU drivers (system dependency)
 
@@ -69,13 +69,15 @@ layout before publication.
 | **Internet** | Required for nsis-web install (payload download) and first-run model download |
 | **Visual C++ Redistributable** | Required by Electron native modules and Python C extensions. Usually pre-installed on Windows 10/11. If missing, the app warns and links to [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe). |
 
-### 2.2 For GPU Acceleration (Recommended)
+### 2.2 For Shipped Whisper GPU Acceleration (Recommended)
 
 | Requirement | Details |
 |-------------|---------|
 | **NVIDIA GPU** | Any CUDA-capable GPU (GTX 900 series or newer) |
 | **GPU Driver** | >= 525.x (for CUDA 12.4 compatibility). Current recommended: R535 LTS or R570+. The app warns if the driver is too old or `nvidia-smi` is unavailable. |
-| **VRAM** | Whisper: ~1.5 GB (int8) to ~2.5 GB (fp16). Nemotron: ~5 GB base + growth, 8 GB+ recommended |
+| **VRAM** | Whisper: ~1.5 GB (int8) to ~2.5 GB (fp16) |
+
+Nemotron has a larger VRAM profile but is deferred and not shipped or user-selectable in this alpha.
 
 ### 2.3 CPU-Only Mode
 
@@ -101,7 +103,7 @@ The release workflow verifies imports and starts `/health` with this exact split
 
 ## 4. CUDA Runtime Libraries and Diagnostics
 
-This is the most complex dependency story and the most likely source of end-user GPU failures. The default release build installs both engines, so PyTorch provides CUDA DLLs, and the app surfaces diagnostics if anything is missing.
+This is the most complex dependency story and the most likely source of end-user GPU failures. The release build installs Whisper plus locked CUDA PyTorch, so PyTorch provides the CUDA DLLs required by the shipped engine, and the app surfaces diagnostics if anything is missing.
 
 ### 4.1 How CUDA DLLs Are (or Aren't) Provided
 
@@ -118,10 +120,10 @@ When the server starts:
 
 1. The Electron server launcher prepends the packaged `.venv/Lib/site-packages/torch/lib/` directory to the child `PATH`.
 2. `runtime_paths.py` registers that same directory with `os.add_dll_directory()` before settings and optional engine imports load native code.
-3. When the engine manager constructs Nemotron, `nemotron.py` imports PyTorch/NeMo; Whisper imports PyTorch before CTranslate2. Both native paths therefore resolve against the same packaged directory.
-4. Nemotron runs a real CUDA/cuDNN convolution before a candidate engine is activated; DLL entry-point or device initialization failures become a recoverable preparation error.
+3. Whisper imports PyTorch before CTranslate2. Both native paths therefore resolve against the same packaged directory.
+4. Release verification checks the packaged Whisper import closure and engine discovery without importing the deferred Nemotron stack.
 
-**The boundary:** If only the Whisper extra is installed (no Nemotron/PyTorch), CTranslate2 has no bundled CUDA DLL set available, so GPU mode remains unavailable; CPU mode is unaffected.
+**The boundary:** The `release` extra adds locked CUDA PyTorch to `murmur[whisper]`, so the shipped Whisper path has its packaged CUDA DLL set. The plain `whisper` extra remains CPU-oriented. Nemotron retains a separate optional extra for deferred repair work and is not in the alpha runtime closure.
 
 ### 4.3 Runtime Diagnostics
 
@@ -135,29 +137,28 @@ These warnings are actionable and include guidance or links where possible.
 
 ### 4.4 Scenarios Matrix
 
-| Build Config | PyTorch? | cuBLAS/cuDNN available? | Whisper GPU? | Nemotron GPU? |
-|-------------|----------|------------------------|-------------|--------------|
-| `uv sync --extra all` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if driver/runtime preflight passes) | Yes (if CUDA/cuDNN preflight passes) |
-| `uv sync --extra nemotron` | Yes (cu124) | Yes, via packaged torch/lib/ | N/A (not installed) | Yes (if CUDA/cuDNN preflight passes) |
-| `uv sync --extra whisper` | **No** | **No** | **No — GPU broken** | N/A (not installed) |
-| `uv sync` (bare) | **No** | **No** | N/A (not installed) | N/A (not installed) |
+| Build Config | PyTorch? | cuBLAS/cuDNN available? | Whisper GPU? | Nemotron |
+|-------------|----------|------------------------|-------------|----------|
+| `uv sync --extra release` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if the driver supports it) | Deferred |
+| `uv sync --extra all` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if the driver supports it) | Experimental only |
+| `uv sync --extra nemotron` | Yes (cu124) | Yes, via packaged torch/lib/ | N/A (not installed) | Deferred repair |
+| `uv sync --extra whisper` | **No** | **No** | CPU only | N/A |
+| `uv sync` (bare) | **No** | **No** | N/A (not installed) | N/A |
 
 ### 4.5 Recommendation
 
-Build with `--extra all` to ensure PyTorch's locked cu124 wheel and its bundled CUDA DLLs are available for both engines. Eve makes the packaged `torch/lib` directory first in the Windows search order and validates the Nemotron CUDA/cuDNN operation before activation.
+Build with `--extra release` to ensure the shipped Whisper alpha has PyTorch's locked cu124 wheel and its bundled CUDA DLLs. Eve makes the packaged `torch/lib` directory first in the Windows search order and release verification checks that Whisper is discoverable while Nemotron remains unavailable.
 
-For a whisper-only build, you would need to either:
-- Add `torch` as a dependency of the whisper extra (heavy, ~2.5 GB)
-- Install `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` pip packages in the venv
-- Require the end-user to install CUDA Toolkit 12.x separately
+For the alpha's Whisper-only build, the `release` extra supplies the locked PyTorch
+CUDA runtime. No separate CUDA Toolkit or user-installed NeMo stack is required.
 
 ---
 
 ## 5. Build Pipeline Status (Resolved Blockers)
 
-### 5.1 Release Workflow Installs Engines (Resolved)
+### 5.1 Release Workflow Installs the Whisper Closure (Resolved)
 
-The release workflow now runs `uv sync --extra all`, so both Whisper and Nemotron extras are included in the packaged venv. This also ensures PyTorch's CUDA DLLs are present for GPU acceleration in the default build.
+The release workflow now runs `uv sync --extra release`, so the packaged venv contains Faster-Whisper and locked CUDA PyTorch without NeMo or torchaudio. This provides the CUDA DLLs needed for the shipped Whisper engine while keeping Nemotron deferred and unavailable in the alpha.
 
 ### 5.2 NSIS 2GB Installer Size Limit (Resolved via nsis-web)
 
@@ -170,9 +171,11 @@ NeMo Toolkit is **not officially supported on Windows via pip**. Known issues in
 - Dependency `mamba-ssm` fails to build on Windows
 - NVIDIA recommends Docker containers for NeMo
 
-The release workflow runs on `windows-latest`, so if any NeMo transitive dependency requires compilation from source, the build will fail.
+The shipped release workflow does not install this deferred extra. A separately
+authorized repair workflow would still need to account for Windows compilation
+failures if any NeMo transitive dependency requires source builds.
 
-**Mitigation:** Pre-built wheels exist for most NeMo dependencies on Windows. As long as `uv sync` resolves to pre-built wheels only, installation works. But this is fragile and could break with any NeMo version bump.
+**Mitigation for deferred work:** Pre-built wheels exist for most NeMo dependencies on Windows. As long as a repair-only `uv sync` resolves to pre-built wheels only, installation works. This remains fragile and is outside the shipped alpha closure.
 
 ---
 
@@ -182,8 +185,9 @@ Models are **not bundled** in the installer. They download from Hugging Face on 
 
 | Engine | Default Model | Download Size | Cache Location |
 |--------|--------------|---------------|----------------|
-| Nemotron | `nvidia/nemotron-speech-streaming-en-0.6b` | ~2.47 GB | `~/.cache/huggingface/hub/` |
 | Whisper | `large-v3-turbo` (CTranslate2 format) | ~1.6 GB | `~/.cache/huggingface/hub/` |
+
+The Nemotron checkpoint remains deferred and is not selectable or shipped in this alpha.
 
 ### Implications for End Users
 
@@ -207,21 +211,20 @@ From `server/src/transcription/vram.py`:
 
 | Engine | Base VRAM | Growth Rate | Min Recommended | Typical Usage |
 |--------|-----------|-------------|-----------------|---------------|
-| Nemotron | 5.0 GB | 100 MB/sec of audio | 8.0 GB | 5-8 GB for short recordings |
 | Whisper (fp16) | 3.1 GB | 57 MB/sec of audio | — | ~2.5 GB (benchmarked) |
 | Whisper (int8) | ~2.0 GB | ~40 MB/sec of audio | — | ~1.5 GB (benchmarked) |
 
-The server has VRAM-aware engine selection: if Nemotron is selected but VRAM is below 8 GB, it auto-falls back to Whisper (unless the user explicitly chose Nemotron).
+The server retains VRAM-aware engine logic for deferred engines, while the packaged alpha exposes Whisper only.
 
 ### GPU Compatibility Quick Guide
 
 | GPU | VRAM | Whisper | Nemotron |
 |-----|------|---------|----------|
-| GTX 1050/1650 (4 GB) | 4 GB | Yes (int8) | No (auto-fallback) |
-| GTX 1060/1660 (6 GB) | 6 GB | Yes | Marginal (short recordings) |
-| RTX 3060/4060 (8 GB) | 8 GB | Yes | Yes |
-| RTX 3070/4070 (8-12 GB) | 8-12 GB | Yes | Yes (comfortable) |
-| RTX 3080/4080+ (12-16 GB) | 12-16 GB | Yes | Yes (long recordings) |
+| GTX 1050/1650 (4 GB) | 4 GB | Yes (int8) | Deferred |
+| GTX 1060/1660 (6 GB) | 6 GB | Yes | Deferred |
+| RTX 3060/4060 (8 GB) | 8 GB | Yes | Deferred |
+| RTX 3070/4070 (8-12 GB) | 8-12 GB | Yes | Deferred |
+| RTX 3080/4080+ (12-16 GB) | 12-16 GB | Yes | Deferred |
 
 ---
 
@@ -257,7 +260,7 @@ https://aka.ms/vs/17/release/vc_redist.x64.exe
 
 ### Completed in the current release pipeline
 
-1. Release workflow installs engines with `uv sync --extra all`
+1. Release workflow installs the shipped Whisper closure with `uv sync --extra release`
 2. nsis-web packaging avoids the 2GB limit and ships payload artifacts with releases
 3. Runtime diagnostics warn about missing VC++ Redistributable, CUDA DLLs, or outdated drivers
 4. First-run model download UX includes status messaging and retry guidance
@@ -266,7 +269,7 @@ https://aka.ms/vs/17/release/vc_redist.x64.exe
 ### Remaining opportunities
 
 1. Offline model bundling option for air-gapped or enterprise deployments
-2. Optional smaller whisper-only build with clear GPU limitations
+2. Deferred Nemotron repair and a later optional engine build
 3. Additional CUDA DLL verification or auto-repair
 
 ---

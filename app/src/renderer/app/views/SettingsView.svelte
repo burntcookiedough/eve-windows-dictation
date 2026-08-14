@@ -120,7 +120,7 @@
     return setting?.value as T | undefined;
   }
 
-  let selectedEngine = $derived(getSettingValue<string>('engine') ?? 'nemotron');
+  let selectedEngine = $derived(getSettingValue<string>('engine') ?? 'whisper');
   let draftWhisperDevice = $derived(getSettingValue<string>('whisper_device') ?? 'auto');
   let selectedPreset = $derived(SPEECH_MODEL_PRESETS.find((preset) =>
     getSettingValue<string>('engine') === preset.engine && getSettingValue<string>(preset.setting) === preset.model
@@ -132,7 +132,7 @@
   );
   let engineRevertDisabled = $derived(shouldDisableEngineRevert(enginePreparationActive));
 
-  // Whether the current engine supports hotwords (Whisper: yes, Nemotron: no)
+  // Whether the current engine supports hotwords, as reported by the server.
   let hotwordsSupported = $derived(sharedEngineStatus?.info?.supports_hotwords ?? true);
 
   // Check visibility: should a setting be shown based on visible_when?
@@ -735,8 +735,8 @@
                 <path d="M12 8h.01"/>
               </svg>
               <div>
-                <p class="text-zinc-300">Hotwords are not supported with the Nemotron engine.</p>
-                <p class="mt-1 text-xs text-zinc-500">Switch to Faster-Whisper to use hotwords.</p>
+                <p class="text-zinc-300">Hotwords are not supported by the current engine.</p>
+                <p class="mt-1 text-xs text-zinc-500">Choose a compatible engine to enable hotwords.</p>
               </div>
             </div>
           {/if}
@@ -967,17 +967,6 @@
           </SettingsRow>
         {/if}
 
-        {#if serverSettings.nemotron_model && isVisible(serverSettings.nemotron_model)}
-          <SettingsRow label={serverSettings.nemotron_model.label} description="Raw Nemotron model name or path">
-            <input
-              aria-label={serverSettings.nemotron_model.label}
-              value={getSettingValue<string>('nemotron_model') ?? String(serverSettings.nemotron_model.value)}
-              oninput={(e) => updateEngineSetting('nemotron_model', e.currentTarget.value)}
-              disabled={externalMode}
-              class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-56"
-            />
-          </SettingsRow>
-        {/if}
         {#if serverSettings.whisper_language && isVisible(serverSettings.whisper_language)}
           <SettingsRow label={serverSettings.whisper_language.label} description={serverSettings.whisper_language.description}>
             <input
@@ -987,20 +976,6 @@
               disabled={externalMode}
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-28"
             />
-          </SettingsRow>
-        {/if}
-        {#if serverSettings.nemotron_device && isVisible(serverSettings.nemotron_device)}
-          <SettingsRow label="Device" description="Hardware device for inference">
-            <EveDropdown
-              label="Nemotron device"
-              value={String(getSettingValue('nemotron_device') ?? serverSettings.nemotron_device.value)}
-              options={toDropdownOptions(getOptions('nemotron_device'))}
-              onchange={(value) => updateEngineSetting('nemotron_device', value)}
-              disabled={externalMode}
-            />
-            {#each disabledOptionReasons(getOptions('nemotron_device')) as reason}
-              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
-            {/each}
           </SettingsRow>
         {/if}
         {#if serverSettings.whisper_device && isVisible(serverSettings.whisper_device)}

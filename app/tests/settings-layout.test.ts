@@ -98,7 +98,7 @@ describe('Phase 1 Settings layout contracts', () => {
     expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
     expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
     expect(settingsView).toContain('data-hotwords-editor');
-    expect(settingsView.match(/<EveDropdown\b/g)?.length).toBe(7);
+    expect(settingsView.match(/<EveDropdown\b/g)?.length).toBe(6);
   });
 
   test('keeps the Phase 2 General subgroup foundation aligned with the row primitive', () => {

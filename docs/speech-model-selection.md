@@ -1,13 +1,16 @@
 # Speech model selection
 
-Eve v0.8 presents four curated choices over the engines already bundled with the app:
+The v0.8.1 alpha presents three curated Whisper choices. Nemotron remains in
+the source tree and optional `nemotron` extra for deferred repair work; it is
+not shipped or user-selectable in this alpha:
 
-- English Performance: Nemotron Speech with `nvidia/nemotron-speech-streaming-en-0.6b` (English only, approximately 2.3 GB).
 - Recommended Multilingual: Faster-Whisper `large-v3-turbo` (multilingual, approximately 1.5 GB).
 - Maximum Multilingual Accuracy: Faster-Whisper `large-v3` (multilingual, approximately 2.9 GB).
 - Lightweight: Faster-Whisper `small` (multilingual, approximately 0.5 GB).
 
-The labels describe relative use cases, not Eve benchmark claims. Engine availability comes from the running server; a missing engine runtime is not installed by this UI.
+The labels describe relative use cases, not Eve benchmark claims. The packaged
+alpha exposes Whisper only; engine availability still comes from the running
+server, and a missing engine runtime is not installed by this UI.
 
 Selecting a choice is local to the renderer. **Apply and prepare model** is the explicit action that persists the existing server settings and begins the existing engine/model swap path. Eve keeps the current engine active while the selected model downloads or loads where the server supports that behavior. A selected choice is not called current until the server reports that engine and model ready.
 

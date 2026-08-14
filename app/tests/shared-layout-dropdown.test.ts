@@ -98,6 +98,12 @@ describe('shared primary-page and dropdown foundation', () => {
     expect(findTypeaheadIndex(options, 'missing')).toBe(-1);
   });
 
+  test('skips a transiently missing option during typeahead', () => {
+    const sparseOptions = [undefined, { label: 'Alpha' }] as unknown as readonly typeof options;
+
+    expect(findTypeaheadIndex(sparseOptions, 'a')).toBe(1);
+  });
+
   test('constrains the listbox to the viewport and flips above near the bottom edge', () => {
     const below = calculateDropdownPosition({
       top: 80,
