@@ -161,6 +161,16 @@ def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
         {"name": "torch"},
     ]
 
+    locked_versions = {
+        package["name"]: package["version"]
+        for package in _load_server_lock()["package"]
+        if package["name"] in {"faster-whisper", "torch"}
+    }
+    assert locked_versions == {
+        "faster-whisper": "1.2.1",
+        "torch": "2.6.0+cu124",
+    }
+
 
 def test_release_verification_requires_only_the_shipped_engine_closure() -> None:
     contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
@@ -173,6 +183,20 @@ def test_release_verification_requires_only_the_shipped_engine_closure() -> None
     assert "Deferred Nemotron packages" in contents
     assert "torchaudio" in contents
     assert "nemo.collections.asr" not in contents
+
+
+def test_release_verification_requires_both_engine_discovery_properties() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+    required_properties = '$requiredEngineProperties = @("whisper", "nemotron")'
+    missing_properties = "$missingEngineProperties"
+    whisper_availability = "$whisperAvailable = [bool]$discovery.whisper"
+
+    assert required_properties in contents
+    assert missing_properties in contents
+    assert "Packaged engine discovery omitted required properties" in contents
+    assert contents.index(missing_properties) < contents.index(whisper_availability)
 
 
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:

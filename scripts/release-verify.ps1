@@ -197,6 +197,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Packaged engine discovery probe failed with exit code $LASTEXITCODE"
 }
 $discovery = $discoveryOutput | ConvertFrom-Json
+$requiredEngineProperties = @("whisper", "nemotron")
+$discoveryPropertyNames = @($discovery.PSObject.Properties.Name)
+$missingEngineProperties = @(
+    $requiredEngineProperties | Where-Object { $_ -notin $discoveryPropertyNames }
+)
+if ($missingEngineProperties.Count -gt 0) {
+    throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join ', ')"
+}
 $whisperAvailable = [bool]$discovery.whisper
 $nemotronAvailable = [bool]$discovery.nemotron
 if (-not $whisperAvailable -or $nemotronAvailable) {

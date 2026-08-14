@@ -4,6 +4,11 @@ import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetDownloadLab
 
 describe('speech model presets', () => {
   test('keeps the three exact shipped mappings and factual established sizes', () => {
+    expect(SPEECH_MODEL_PRESETS.map(({ id }) => id)).toEqual([
+      'recommended-multilingual',
+      'maximum-multilingual-accuracy',
+      'lightweight',
+    ]);
     expect(SPEECH_MODEL_PRESETS.map(({ label, engine, model, sizeGb }) => ({ label, engine, model, sizeGb }))).toEqual([
       { label: 'Recommended Multilingual', engine: 'whisper', model: 'large-v3-turbo', sizeGb: 1.5 },
       { label: 'Maximum Multilingual Accuracy', engine: 'whisper', model: 'large-v3', sizeGb: 2.9 },
