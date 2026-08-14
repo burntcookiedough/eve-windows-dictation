@@ -99,7 +99,7 @@ describe('shared primary-page and dropdown foundation', () => {
   });
 
   test('skips a transiently missing option during typeahead', () => {
-    const sparseOptions = [undefined, { label: 'Alpha' }] as unknown as readonly typeof options;
+    const sparseOptions = [undefined, { label: 'Alpha' }] as unknown as Readonly<typeof options>;
 
     expect(findTypeaheadIndex(sparseOptions, 'a')).toBe(1);
   });
