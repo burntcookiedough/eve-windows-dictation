@@ -56,7 +56,7 @@ export function findTypeaheadIndex<T extends { label: string; disabled?: boolean
   for (let offset = 1; offset <= options.length; offset += 1) {
     const index = (startIndex + offset + options.length) % options.length;
     const option = options[index];
-    if (!option?.disabled && option.label.toLocaleLowerCase().startsWith(normalized)) {
+    if (option && !option.disabled && option.label.toLocaleLowerCase().startsWith(normalized)) {
       return index;
     }
   }

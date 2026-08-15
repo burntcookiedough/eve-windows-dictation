@@ -10,7 +10,9 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
 - Use the current clone path; do not copy environments or depend on user paths.
 - For app work: `Set-Location app; bun run <script>`.
 - For server work: `Set-Location server; uv sync --extra whisper --group dev --frozen; uv run pytest`.
-- Use `uv sync --extra all --frozen` only for release-runtime preparation.
+- Use `uv sync --extra release --frozen` for release-runtime preparation. The
+  `nemotron` extra remains available for deferred repair work and is not part
+  of the shipped alpha.
 
 ## Product and privacy boundaries
 

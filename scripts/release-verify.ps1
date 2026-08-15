@@ -23,6 +23,20 @@ function Assert-Path {
     }
 }
 
+function Assert-NoPackage {
+    param([string]$SitePackages, [string]$Description)
+    $forbidden = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq "nemo" -or
+            $_.Name -like "nemo_toolkit-*.dist-info" -or
+            $_.Name -eq "torchaudio" -or
+            $_.Name -like "torchaudio-*.dist-info"
+        })
+    if ($forbidden.Count -gt 0) {
+        throw "$Description found: $($forbidden.Name -join ', ')"
+    }
+}
+
 function Assert-Contains {
     param([string]$Value, [string]$Expected, [string]$Description)
     if ($Value -notlike "*$Expected*") {
@@ -126,11 +140,12 @@ Write-Step "Checking installed payload contents"
 $appExe = Join-Path $InstallDir "Eve.exe"
 $serverRoot = Join-Path $InstallDir "resources\server"
 $pythonExe = Join-Path $serverRoot ".runtime\python.exe"
+$sitePackages = Join-Path $serverRoot ".venv\Lib\site-packages"
 Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
-Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\faster_whisper") "faster-whisper package"
-Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\torch") "torch package"
-Assert-Path (Join-Path $serverRoot ".venv\Lib\site-packages\nemo") "nemo package"
+Assert-Path (Join-Path $sitePackages "faster_whisper") "faster-whisper package"
+Assert-Path (Join-Path $sitePackages "torch") "torch package"
+Assert-NoPackage -SitePackages $sitePackages -Description "Deferred Nemotron packages"
 Assert-SelfContainedRuntime -RuntimePath (Join-Path $serverRoot ".runtime") -PythonExe $pythonExe
 
 Write-Step "Checking installed server health/version"
@@ -163,8 +178,38 @@ $env:MURMUR_WHISPER_DEVICE = "cpu"
 $env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
 $env:MURMUR_LOG_LEVEL = "INFO"
 $env:PYTHONNOUSERSITE = "1"
-$env:PYTHONPATH = Join-Path $serverRoot ".venv\Lib\site-packages"
-Invoke-Native $pythonExe -c "import faster_whisper, torch, nemo.collections.asr"
+$env:PYTHONPATH = $sitePackages
+Invoke-Native $pythonExe -c "import faster_whisper, torch"
+
+Write-Step "Checking packaged engine discovery"
+$discoveryProbe = @"
+import json
+import sys
+
+sys.path.insert(0, r"$serverRoot\src")
+from transcription.factory import discover_engines
+
+engines = {entry["id"]: bool(entry["available"]) for entry in discover_engines()}
+print(json.dumps(engines, sort_keys=True))
+"@
+$discoveryOutput = & $pythonExe -c $discoveryProbe
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged engine discovery probe failed with exit code $LASTEXITCODE"
+}
+$discovery = $discoveryOutput | ConvertFrom-Json
+$requiredEngineProperties = @("whisper", "nemotron")
+$discoveryPropertyNames = @($discovery.PSObject.Properties.Name)
+$missingEngineProperties = @(
+    $requiredEngineProperties | Where-Object { $_ -notin $discoveryPropertyNames }
+)
+if ($missingEngineProperties.Count -gt 0) {
+    throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join ', ')"
+}
+$whisperAvailable = [bool]$discovery.whisper
+$nemotronAvailable = [bool]$discovery.nemotron
+if (-not $whisperAvailable -or $nemotronAvailable) {
+    throw "Packaged engine discovery mismatch: whisper=$whisperAvailable nemotron=$nemotronAvailable"
+}
 
 $process = Start-Process -FilePath $pythonExe `
     -ArgumentList @("src\main.py") `

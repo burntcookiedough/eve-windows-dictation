@@ -740,19 +740,19 @@ export class HistoryService {
   private getDailyRows(dayStart: string | null): DailyRollupRow[] {
     if (!this.db) throw new Error('Database not initialized');
     if (dayStart === null) {
-      return this.db.prepare(`
+      return (this.db.prepare(`
         SELECT day, dictations, words, audioSeconds, processingMs, confidenceSum, confidenceCount
         FROM insights_daily_rollups
         ORDER BY day ASC
-      `).all().map(normalizeDailyRow);
+      `).all() as DailyRollupRow[]).map(normalizeDailyRow);
     }
 
-    return this.db.prepare(`
+    return (this.db.prepare(`
       SELECT day, dictations, words, audioSeconds, processingMs, confidenceSum, confidenceCount
       FROM insights_daily_rollups
       WHERE day >= @dayStart
       ORDER BY day ASC
-    `).all({ dayStart }).map(normalizeDailyRow);
+    `).all({ dayStart }) as DailyRollupRow[]).map(normalizeDailyRow);
   }
 
   private buildTrends(rows: DailyRollupRow[], range: InsightsRange, now: number): InsightsTrendPoint[] {

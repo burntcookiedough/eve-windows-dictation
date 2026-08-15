@@ -70,6 +70,6 @@ describe('Server setting option compatibility metadata', () => {
     expect(settingsView).toContain('getWhisperComputeOptions()');
     expect(settingsView).toContain("disabledOptionReasons(getWhisperComputeOptions())");
     expect(settingsView).toContain("disabledOptionReasons(getOptions('whisper_device'))");
-    expect(settingsView).toContain("disabledOptionReasons(getOptions('nemotron_device'))");
+    expect(settingsView).not.toContain("disabledOptionReasons(getOptions('nemotron_device'))");
   });
 });

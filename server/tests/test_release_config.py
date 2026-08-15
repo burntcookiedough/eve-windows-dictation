@@ -7,6 +7,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +17,16 @@ def _load_package_json() -> dict:
     package_path = ROOT / "app" / "package.json"
     with package_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _load_server_pyproject() -> dict:
+    with (ROOT / "server" / "pyproject.toml").open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def _load_server_lock() -> dict:
+    with (ROOT / "server" / "uv.lock").open("rb") as handle:
+        return tomllib.load(handle)
 
 
 def _extract_targets(target_value: object) -> list[str]:
@@ -129,6 +140,70 @@ def test_release_verification_targets_eve_with_legacy_payload_name() -> None:
     assert '"Eve.Web.Setup.$ExpectedVersion.exe"' in contents
     assert '"Eve.exe"' in contents
     assert '"murmur-$ExpectedVersion-x64.nsis.7z"' in contents
+
+
+def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
+    project = _load_server_pyproject()["project"]
+    extras = project["optional-dependencies"]
+
+    assert extras["release"] == ["murmur[whisper]", "torch>=2.0"]
+    assert extras["all"] == ["murmur[whisper,nemotron]"]
+    assert "nemo_toolkit[asr]>=2.2.0" in extras["nemotron"]
+    assert "torchaudio>=2.0" in extras["nemotron"]
+
+    murmur = next(
+        package
+        for package in _load_server_lock()["package"]
+        if package["name"] == "murmur"
+    )
+    assert murmur["optional-dependencies"]["release"] == [
+        {"name": "faster-whisper"},
+        {"name": "torch"},
+    ]
+
+    locked_versions = {
+        package["name"]: package["version"]
+        for package in _load_server_lock()["package"]
+        if package["name"] in {"faster-whisper", "torch"}
+    }
+    assert locked_versions == {
+        "faster-whisper": "1.2.1",
+        "torch": "2.6.0+cu124",
+    }
+
+
+def test_release_verification_requires_only_the_shipped_engine_closure() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert 'Join-Path $sitePackages "faster_whisper"' in contents
+    assert 'Join-Path $sitePackages "torch"' in contents
+    assert "import faster_whisper, torch" in contents
+    assert "discover_engines" in contents
+    assert "Deferred Nemotron packages" in contents
+    assert "torchaudio" in contents
+    assert "nemo.collections.asr" not in contents
+
+
+def test_release_verification_requires_both_engine_discovery_properties() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+    required_properties = '$requiredEngineProperties = @("whisper", "nemotron")'
+    missing_properties = "$missingEngineProperties"
+    missing_guard = "if ($missingEngineProperties.Count -gt 0) {"
+    missing_throw = 'throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join \', \')"'
+    whisper_availability = "$whisperAvailable = [bool]$discovery.whisper"
+
+    assert required_properties in contents
+    assert missing_properties in contents
+    assert missing_guard in contents
+    assert missing_throw in contents
+    missing_properties_index = contents.index(missing_properties)
+    missing_guard_index = contents.index(missing_guard, missing_properties_index)
+    missing_throw_index = contents.index(missing_throw, missing_guard_index)
+    whisper_availability_index = contents.index(whisper_availability)
+    assert missing_properties_index < missing_guard_index < missing_throw_index < whisper_availability_index
 
 
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:

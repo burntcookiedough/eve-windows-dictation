@@ -2417,6 +2417,10 @@ nemotron = [
     { name = "torch" },
     { name = "torchaudio" },
 ]
+release = [
+    { name = "faster-whisper" },
+    { name = "torch" },
+]
 ui = [
     { name = "pyside6" },
     { name = "sounddevice" },
@@ -2443,6 +2447,7 @@ ui = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.1.0" },
+    { name = "murmur", extras = ["whisper"], marker = "extra == 'release'" },
     { name = "murmur", extras = ["whisper", "nemotron"], marker = "extra == 'all'" },
     { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'nemotron'", specifier = ">=2.2.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -2456,12 +2461,13 @@ requires-dist = [
     { name = "sounddevice", marker = "extra == 'ui'", specifier = ">=0.4.6" },
     { name = "soundfile", specifier = ">=0.12.0" },
     { name = "torch", marker = "extra == 'nemotron'", specifier = ">=2.0", index = "https://download.pytorch.org/whl/cu124" },
+    { name = "torch", marker = "extra == 'release'", specifier = ">=2.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchaudio", marker = "extra == 'nemotron'", specifier = ">=2.0", index = "https://download.pytorch.org/whl/cu124" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", marker = "extra == 'dev'", specifier = ">=13.0" },
     { name = "websockets", marker = "extra == 'ui'", specifier = ">=13.0" },
 ]
-provides-extras = ["whisper", "nemotron", "all", "dev", "ui"]
+provides-extras = ["whisper", "nemotron", "all", "release", "dev", "ui"]
 
 [package.metadata.requires-dev]
 dev = [

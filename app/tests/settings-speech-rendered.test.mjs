@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync, promises as fs, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
+const settingsViewSource = readFileSync(new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url), 'utf8');
+const settingsMarkup = settingsViewSource.replace(/<script[\s\S]*?<\/script>/, '');
 const fixtureTempRoot = resolve(tmpdir());
 const screenshotDir = resolve(fixtureTempRoot, 'eve-phase2-settings-screenshots');
 const vitePort = 52000 + (process.pid % 100);
@@ -39,7 +41,7 @@ async function cleanupUserData(target) {
 }
 
 async function waitForFixtureServer() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     try {
       const response = await fetch(fixtureUrl);
       if (response.ok) return;
@@ -92,6 +94,12 @@ const result = await runElectron();
 const { measurements } = result;
 
 describe('rendered Phase 2 Settings/Speech fixture', () => {
+  test('keeps the alpha Settings markup free of deferred engine names and controls', () => {
+    expect(settingsMarkup).not.toContain('Nemotron');
+    expect(settingsMarkup).not.toContain('nemotron_model');
+    expect(settingsMarkup).not.toContain('nemotron_device');
+  });
+
   test('keeps the General and Speech fixture inside one page scroll owner at all zooms', () => {
     expect(measurements.length).toBe(36);
     for (const measurement of measurements) {
@@ -108,7 +116,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
       const stateMeasurements = measurements.filter((measurement) => measurement.view === 'speech' && measurement.state === state && !measurement.compatibility);
       expect(stateMeasurements.length).toBe(6);
       for (const measurement of stateMeasurements) {
-        expect(measurement.optionCount).toBe(4);
+        expect(measurement.optionCount).toBe(3);
         expect(measurement.checkedCount).toBe(1);
         expect(measurement.optionContained).toBeTrue();
         expect(measurement.focus.focusWithin).toBeTrue();
@@ -136,9 +144,8 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('keeps the renderer mounted while selecting every curated model', () => {
-    expect(result.interactions).toHaveLength(4);
+    expect(result.interactions).toHaveLength(3);
     expect(result.interactions.map((interaction) => interaction.label)).toEqual([
-      'English Performance, Selected',
       'Recommended Multilingual, Current',
       'Maximum Multilingual Accuracy, Selected',
       'Lightweight, Selected',
@@ -146,7 +153,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     for (const interaction of result.interactions) {
       expect(interaction.checked).toBeTrue();
       expect(interaction.panelPresent).toBeTrue();
-      expect(interaction.optionCount).toBe(4);
+      expect(interaction.optionCount).toBe(3);
       expect(interaction.rendererFailed).toBeFalse();
       expect(interaction.scrollDelta).toBeLessThanOrEqual(1);
     }

@@ -70,7 +70,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).toContain('externalMode || unavailable(preset)');
     expect(settingsView).toContain("'whisper_compute_type'");
     expect(settingsView).toContain("'whisper_language'");
-    expect(settingsView).toContain("'nemotron_device'");
+    expect(settingsView).not.toContain("'nemotron_device'");
     expect(settingsView).toContain("'whisper_device'");
     expect(settingsView).toContain("'unload_before_swap'");
     expect(settingsView).toContain('data-compatibility-footer');

@@ -243,7 +243,9 @@ def test_packaged_resource_and_runtime_harness_guards() -> None:
     assert '"package": "bun run notices:generate && bun run build && electron-builder"' in package
     assert '"to": "legal"' in package
     assert ".runtime\\python.exe" in verify
-    assert "import faster_whisper, torch, nemo.collections.asr" in verify
+    assert "import faster_whisper, torch" in verify
+    assert "nemo.collections.asr" not in verify
+    assert "Deferred Nemotron packages" in verify
     assert 'Remove-Item -Path "env:$key"' in verify
 
 

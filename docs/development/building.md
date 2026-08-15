@@ -24,9 +24,10 @@ uv run pytest
 uv run python -m src.main
 ```
 
-Use `uv sync --extra all --frozen` only when preparing the shipped closure that
-includes both engines. Development commands must use the current clone, never a
-copied user environment.
+Use `uv sync --extra release --frozen` when preparing the shipped Whisper-only
+closure. The experimental `nemotron` extra remains available for deferred
+repair work, but is not shipped or user-selectable in this alpha. Development
+commands must use the current clone, never a copied user environment.
 
 ## Windows package preparation
 
@@ -34,7 +35,7 @@ The supported installer is `nsis-web`. Before a release-authorized package attem
 
 ```powershell
 Set-Location server
-uv sync --extra all --frozen
+uv sync --extra release --frozen
 ../scripts/prepare-python-runtime.ps1 -ServerDir .
 
 Set-Location ../app
