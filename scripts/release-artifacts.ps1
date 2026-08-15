@@ -15,13 +15,14 @@ $version=$Matches[1]
 if($ExpectedCommit -notmatch '^[0-9a-f]{40}$'){throw 'ExpectedCommit must be a lowercase 40-character SHA.'}
 if($Mode -eq 'Verify' -and $ExpectedManifestSha256 -notmatch '^[0-9a-fA-F]{64}$'){throw 'ExpectedManifestSha256 must be 64 hex characters.'}
 $names=@("Eve.Web.Setup.$version.exe","murmur-$version-x64.nsis.7z",'latest.yml',"eve-v$version-artifact-manifest.json",'SHA256SUMS.txt','SHA512SUMS.txt','THIRD_PARTY_NOTICES.txt')
+$manifest=Join-Path $dir "eve-v$version-artifact-manifest.json"
+$requiredNames=@(if($Mode -eq 'Create'){$names | Where-Object {$_ -ne (Split-Path $manifest -Leaf)}}else{$names})
 $files=Get-ChildItem $dir -File
-$actual=@($files.Name | Sort-Object); $expected=@($names | Sort-Object)
-if((Compare-Object $actual $expected)){throw "Release asset allowlist mismatch. Expected exactly: $($names -join ', ')"}
+$actual=@($files.Name | Sort-Object); $expected=@($requiredNames | Sort-Object)
+if((Compare-Object $actual $expected)){throw "Release asset allowlist mismatch. Expected exactly: $($requiredNames -join ', ')"}
 foreach($file in $files){if($file.Length -ge 2100000000){throw "Asset exceeds 2.10 GB safety ceiling: $($file.Name)"}}
 $payload=Get-Item (Join-Path $dir "murmur-$version-x64.nsis.7z")
 if($payload.Length -ge 2050000000){throw "NSIS-web payload exceeds 2.05 GB release target: $($payload.Name)"}
-$manifest=Join-Path $dir "eve-v$version-artifact-manifest.json"
 if($Mode -eq 'Create'){
   $entries=@(); foreach($name in $names | Where-Object {$_ -ne (Split-Path $manifest -Leaf)}){$f=Get-Item (Join-Path $dir $name);$entries += [ordered]@{name=$f.Name;bytes=$f.Length;sha256=(Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant();sha512=(Get-FileHash $f -Algorithm SHA512).Hash.ToLowerInvariant()}}
   [ordered]@{schema=1;tag=$ExpectedTag;commit=$ExpectedCommit;version=$version;assets=$entries}|ConvertTo-Json -Depth 5|Set-Content $manifest -Encoding utf8

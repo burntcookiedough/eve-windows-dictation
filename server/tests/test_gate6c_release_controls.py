@@ -120,6 +120,30 @@ def _verify_release_fixture(
     )
 
 
+def _create_release_fixture(directory: Path) -> subprocess.CompletedProcess[str]:
+    pwsh = shutil.which("pwsh")
+    assert pwsh, "PowerShell 7 is required for release-control tests."
+    return subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(ROOT / "scripts" / "release-artifacts.ps1"),
+            "-Mode",
+            "Create",
+            "-ArtifactDir",
+            str(directory),
+            "-ExpectedTag",
+            "v1.2.3",
+            "-ExpectedCommit",
+            RELEASE_COMMIT,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_release_workflow_is_manual_and_never_builds_or_uploads() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
@@ -258,6 +282,21 @@ def test_release_artifacts_accepts_electron_builder_latest_yml_ordering(
     )
     result = _verify_release_fixture(tmp_path, manifest_sha256)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_release_artifacts_create_generates_and_verifies_manifest_from_six_inputs(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "eve-v1.2.3-artifact-manifest.json"
+    _write_release_fixture(tmp_path, _latest_yml())
+    manifest_path.unlink()
+
+    create = _create_release_fixture(tmp_path)
+
+    assert create.returncode == 0, create.stdout + create.stderr
+    assert manifest_path.is_file()
+    verify = _verify_release_fixture(tmp_path, _digest(manifest_path, "sha256"))
+    assert verify.returncode == 0, verify.stdout + verify.stderr
 
 
 @pytest.mark.parametrize(
