@@ -191,12 +191,19 @@ def test_release_verification_requires_both_engine_discovery_properties() -> Non
     )
     required_properties = '$requiredEngineProperties = @("whisper", "nemotron")'
     missing_properties = "$missingEngineProperties"
+    missing_guard = "if ($missingEngineProperties.Count -gt 0) {"
+    missing_throw = 'throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join \', \')"'
     whisper_availability = "$whisperAvailable = [bool]$discovery.whisper"
 
     assert required_properties in contents
     assert missing_properties in contents
-    assert "Packaged engine discovery omitted required properties" in contents
-    assert contents.index(missing_properties) < contents.index(whisper_availability)
+    assert missing_guard in contents
+    assert missing_throw in contents
+    missing_properties_index = contents.index(missing_properties)
+    missing_guard_index = contents.index(missing_guard, missing_properties_index)
+    missing_throw_index = contents.index(missing_throw, missing_guard_index)
+    whisper_availability_index = contents.index(whisper_availability)
+    assert missing_properties_index < missing_guard_index < missing_throw_index < whisper_availability_index
 
 
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
