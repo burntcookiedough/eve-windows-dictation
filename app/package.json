@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.8.1",
+  "version": "0.8.2-alpha.1",
   "description": "Desktop voice transcription app",
   "repository": {
     "type": "git",

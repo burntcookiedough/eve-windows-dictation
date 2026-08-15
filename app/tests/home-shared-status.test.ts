@@ -259,7 +259,7 @@ describe('Home and shared server status', () => {
   test('preserves the frozen Eve identity and cross-runtime version baseline', () => {
     const appVersion = (JSON.parse(packageJson) as { version: string }).version;
     const backendVersion = serverVersion.match(/^SERVER_VERSION = "([^"]+)"$/m)?.[1];
-    expect(appVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(appVersion).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     expect(appVersion).toBe(backendVersion);
     expect(packageJson).toContain('"appId": "io.github.burntcookiedough.eve"');
     expect(packageJson).toContain('"guid": "0204d005-75b3-5b31-b1f6-ef2831e2b204"');
