@@ -1,300 +1,97 @@
-<!--
-  burntcookiedough / profile README
-  direction: black-lab dossier — visual, animated, technical, restrained
--->
+# Eve for Windows
 
-<div align="center">
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.1-orange?style=flat-square" alt="v0.8.2-alpha.1"> <strong>Source status: v0.8.2-alpha.1 pre-alpha · unreleased</strong></p>
 
-<br/>
+## Local-first dictation that stays in your flow
 
-<samp>LOCAL_INFERENCE / AGENT_SYSTEMS / FAILURE_RECOVERY</samp>
+Eve is a Windows desktop dictation app for turning speech into usable text quickly. Hold a global hotkey, speak into a calm click-through overlay, then keep working: your text can go to the clipboard, local History, or Insights without leaving the app.
 
-# Anshul Panigrahi
+![Eve workspace showing History, Insights, and Settings](docs/architecture/assets/eve-gate-5-application-reference.png)
 
-<samp>AI/ML engineer building local-first systems, practical automation, and tools around real problems</samp>
+![Eve recording overlay states](docs/architecture/assets/eve-gate-5-overlay-reference.png)
 
-<br/>
+### The everyday workflow
 
-<img
-  src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=14&duration=2300&pause=700&color=C9D1D9&center=true&vCenter=true&width=680&lines=%3E+notice+the+friction;%3E+build+the+smallest+useful+fix;%3E+test+it+against+real+work;%3E+keep+the+parts+that+actually+help"
-  alt="Current engineering loop"
-/>
+1. Press the dictation hotkey and speak.
+2. Watch the overlay show microphone levels, partial text, and long-dictation state.
+3. Stop when you are done. Eve can copy the result, paste it into the active app, and keep a searchable local record.
 
-<br/>
+## Built for real work
 
-[![Email](https://img.shields.io/badge/email-contact-161B22?style=flat-square&logo=gmail&logoColor=C9D1D9)](mailto:anshulpanigrahi3678@gmail.com)
-[![LinkedIn](https://img.shields.io/badge/linkedin-anshul--panigrahi22-161B22?style=flat-square&logo=linkedin&logoColor=C9D1D9)](https://linkedin.com/in/anshul-panigrahi22)
-[![GitHub](https://img.shields.io/badge/github-burntcookiedough-161B22?style=flat-square&logo=github&logoColor=C9D1D9)](https://github.com/burntcookiedough)
-[![Resume](https://img.shields.io/badge/resume-PDF-161B22?style=flat-square&logo=adobeacrobatreader&logoColor=C9D1D9)](./Anshul_Panigrahi.pdf)
+- Fast Dictation and Long Dictation modes with a global hotkey.
+- A click-through overlay that keeps recording state visible without taking focus.
+- Automatic clipboard copy and paste, with optional clipboard restoration.
+- Searchable local History and aggregate Insights.
+- A packaged Python transcription service with CPU fallback and CUDA diagnostics for supported NVIDIA systems.
+- Privacy-bounded diagnostics and explicit server controls.
 
-<br/><br/>
+The desktop client captures 16 kHz mono audio and sends it over a local WebSocket to the packaged Python service. The service returns partial and final text for the overlay, clipboard, and local History.
 
-<sub>currently building → <b>Hermes Agent + custom tool harness</b></sub>
+## Choose your model
 
-</div>
+Models are downloaded from their public Hugging Face repositories the first time you use them; they are not embedded in the installer. The catalog below reflects the built-in choices exposed by Eve.
 
----
+| Choice | Best for | Engine and model |
+| --- | --- | --- |
+| **Large V3 Turbo — Recommended Multilingual** | A balanced everyday multilingual option | [faster-whisper-large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) |
+| **Large V3 — Maximum Multilingual Accuracy** | Quality-first multilingual work | [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) |
+| **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
+| **Medium / Tiny — Advanced** | Raw engine choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
 
-> [!IMPORTANT]
-> **Open to AI/ML internships** around local inference, agent reliability, industrial ML, and embedded / edge systems.
+The v0.8.2-alpha.1 alpha ships Faster-Whisper as its sole selectable engine. Nemotron
+remains in the source tree and optional `nemotron` dependency for deferred
+repair work; it is not shipped or user-selectable in this alpha.
 
-<div align="center">
+Eve derives device and precision availability from the installed PyTorch and CTranslate2 runtimes. `auto` is the safest starting point; a particular device/precision/model combination still depends on the local driver, VRAM, and runtime capabilities. The catalog is not a promise of every device-by-precision combination.
 
-<table>
-<tr>
-<td align="center" width="25%">
-<sub>PUBLISHED PATENTS</sub><br/>
-<kbd>03</kbd>
-</td>
-<td align="center" width="25%">
-<sub>EDGE INFERENCE</sub><br/>
-<kbd>&lt;100 ms</kbd>
-</td>
-<td align="center" width="25%">
-<sub>HACKATHON</sub><br/>
-<kbd>Winner</kbd>
-</td>
-</tr>
-</table>
+## Local-first, with clear network boundaries
 
-</div>
+The default packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. External-server mode is an explicit choice: when enabled, audio is sent to the server URL configured by the user rather than the packaged local service.
 
----
+Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
 
-## `01 / selected_work`
+## Installation and release status
 
-<table>
-<tr>
-<td width="50%" valign="top">
+The current public release is **Eve v0.7.0**. [Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0). It is published and available from GitHub. The `nsis-web` installer downloads the application payload during installation, and internet access is required again if an engine needs its model. The release is unsigned and may trigger Windows reputation warnings.
 
-### [Eve Windows Dictation ↗](https://github.com/burntcookiedough/eve-windows-dictation)
+### v0.7.0 integrity evidence
 
-<sub>LOCAL INFERENCE / PRODUCT SYSTEMS</sub>
+The [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0) lists these uploaded assets. SHA-256 values are integrity evidence; GitHub release metadata is not treated as immutable.
 
-Local-first Windows dictation with packaged speech-model workflows, global hotkeys, a click-through live overlay, searchable history, automatic insertion, CPU/CUDA fallback, and hardened WebSocket session transitions.
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Eve.Web.Setup.0.7.0.exe` | 654,555 | `e27646c15be0563c45e35b34b157105af2a61424ef1bff6cf8a9c72f8a763e4a` |
+| `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
+| `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-`Faster-Whisper` `Electron` `Python` `WebSocket`
+The current source tree also contains **Eve v0.8.2-alpha.1 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact; use the [development setup](#development) below to run it locally.
 
-**Why it matters:** the interesting work is not merely transcription — it is getting inference, desktop runtime, session state, model delivery, and release packaging to behave as one product.
+## Development
 
-</td>
-<td width="50%" valign="top">
+Development and packaging target Windows. If you open the repository from WSL, run Bun, uv, Python, pytest, and packaging commands through Windows PowerShell so platform-specific environments are not replaced with Linux binaries.
 
-### Real-Time Predictive Maintenance
+The supported Windows installer packaging target is `nsis-web`; packaging remains a release-authorized step.
 
-<sub>INDUSTRIAL ML / STREAMING</sub>
+```powershell
+# Server
+cd server
+uv sync --extra whisper --group dev
+uv run pytest
 
-Kafka, Spark, Cassandra, PyTorch, and graph analytics across **5,000 simulated factory machines**, combining streaming anomaly detection with cascade-failure analysis and constrained mitigation.
+# Desktop app, in a separate PowerShell session
+cd app
+bun install
+bun run dev
+```
 
-`~100 sensor msg/s` `5,000 machines` `graph analysis`
+Use `uv sync --extra release --frozen` when preparing the Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
 
-**Why it matters:** model output is connected to a live data path and downstream decisions rather than treated as an isolated notebook prediction.
+## Compatibility and provenance
 
-<br/>
-<sub>Repository private · available on request</sub>
+Eve preserves the upgrade boundaries established by its Windows history: the visible Eve product and profile, frozen installer identity, internal `murmur` package name, compatibility payload name, and `MURMUR_*` interfaces remain stable. Eve uses a separate `%APPDATA%\Eve` profile and does not automatically import or delete Murmur History, settings, or other personal state. Historical Murmur v0.6.3 assets remain immutable.
 
-</td>
-</tr>
+The [v0.6.3 engineering case study](docs/archive/engineering/v0.6.3-release-case-study.md) records the release-hardening work behind the current Windows path. The [roadmap](docs/project/roadmap.md) separates research and planned component downloads from shipped functionality.
 
-<tr>
-<td width="50%" valign="top">
+## License
 
-### [Physically-Bounded Mode Discovery ↗](https://github.com/burntcookiedough/Physical-Bounded-Multimodal-Mode-Discovery)
-
-<sub>UNSUPERVISED ML / RESEARCH</sub>
-
-HDBSCAN proposes operating regimes on NASA CMAPSS and CWRU while domain constraints reject mechanically or thermodynamically implausible clusters.
-
-`zero labels` `CMAPSS` `CWRU` `physics constraints`
-
-**Why it matters:** discovery is not accepted simply because a clustering metric likes it — the result also has to make physical sense.
-
-</td>
-<td width="50%" valign="top">
-
-### [Veri-Dose ↗](https://github.com/burntcookiedough/Veridose)
-
-<sub>EMBEDDED INFERENCE / RASPBERRY PI</sub>
-
-Medication verification using quantized MobileNetV2 on Raspberry Pi 4. Low-confidence predictions route to a human fallback instead of pretending certainty.
-
-`<100 ms` `offline` `MobileNetV2` `Raspberry Pi 4`
-
-**Patent:** `IN202641027860 A1`
-
-</td>
-</tr>
-</table>
-
-<div align="center">
-
-<a href="https://github.com/burntcookiedough/eve-windows-dictation">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=burntcookiedough&repo=eve-windows-dictation&theme=github_dark&hide_border=true&show_owner=false" width="47%" alt="Eve repository card"/>
-</a>
-<a href="https://github.com/burntcookiedough/ZRead">
-  <img src="https://github-readme-stats.vercel.app/api/pin/?username=burntcookiedough&repo=ZRead&theme=github_dark&hide_border=true&show_owner=false" width="47%" alt="ZRead repository card"/>
-</a>
-
-</div>
-
----
-
-## `02 / problem_first`
-
-Most of my projects start with **friction I run into myself**.
-
-If something is repetitive, awkward, slow, or keeps getting in the way, my first instinct is usually to ask whether I can automate it, simplify it, or build a small tool around it. Sometimes that becomes a larger project; sometimes the useful result is just one focused fix.
-
-The same applies to problems I see other people repeatedly dealing with. I like understanding the workflow first, then building around the actual pain point instead of starting with a technology and looking for somewhere to use it.
-
-I also spend time digging through open-source projects — using them, reading how they are put together, borrowing good ideas, and figuring out what I would change for my own workflow.
-
-> **Problem first. Tool second. Keep what actually makes the workflow better.**
-
----
-
-## `03 / repository_map`
-
-<div align="center">
-
-| Track | Systems |
-|:---|:---|
-| **AI / Product** | [Eve](https://github.com/burntcookiedough/eve-windows-dictation) · [ZRead](https://github.com/burntcookiedough/ZRead) · [Stella](https://github.com/burntcookiedough/Stella) |
-| **Agents / Systems** | [Cognitive Load Scheduler](https://github.com/burntcookiedough/Cognitive-Load-Aware-Distributed-Task-Scheduler) · [Aether Dashboard](https://github.com/burntcookiedough/aether-dashboard) |
-| **Edge / IoT** | [Vision Air Sim](https://github.com/burntcookiedough/vision-augmented-air-sim) · [Air Safety Assistant](https://github.com/burntcookiedough/Edge-Deployed-Air-Safety-Assistant) · [Smart Energy](https://github.com/burntcookiedough/Smart-Energy-Monitoring-System) |
-| **Vision / Security** | [Face Privacy Filter](https://github.com/burntcookiedough/Face-Privacy-Filter) · [Sobel CUDA](https://github.com/burntcookiedough/Sobel-Edge-Detection) · [QR Security](https://github.com/burntcookiedough/QR-Code-Security-System) · [SecureTorrent](https://github.com/burntcookiedough/SecureTorrent) |
-
-</div>
-
----
-
-## `04 / model_radar`
-
-AI is as much an interest for me as it is an engineering tool. I follow new model releases, read model cards and benchmarks, test them against real tasks, and work out where they actually fit into my workflows.
-
-I am especially interested in agentic systems, coding agents, tool use, orchestration, inference, and the rapidly changing model landscape. When something new ships, I want to understand **what changed, what it is genuinely good at, and whether it changes the way I build**.
-
-> **New models are interesting. New capabilities that change a workflow are much more interesting.**
-
----
-
-## `05 / signals`
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**Experience**
-
-**Brandworks Technologies · AI/ML Intern**  
-Built a nine-stage computer-vision data pipeline and trained/evaluated a YOLOv8s detector across **26,419 images / 8 categories**.
-
-</td>
-<td width="50%" valign="top">
-
-**Hackathons**
-
-**Hackathon Winner · IEEE CS 2025**  
-Yantra Central Hackathon finalist.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Patents**
-
-`03 published`
-
-Secure sensing · embedded medication verification · cognitive-load-aware distributed scheduling.
-
-</td>
-<td width="50%" valign="top">
-
-**Credentials**
-
-IBM Agentic AI · NVIDIA DLI Deep Learning · Oracle OCI AI Foundations.
-
-</td>
-</tr>
-</table>
-
----
-
-## `06 / live_github`
-
-<div align="center">
-
-<a href="https://github.com/burntcookiedough">
-  <img
-    src="https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username=burntcookiedough&theme=github_dark"
-    width="94%"
-    alt="GitHub profile summary"
-  />
-</a>
-
-<br/><br/>
-
-<a href="https://github.com/burntcookiedough">
-  <img
-    src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=burntcookiedough&theme=github_dark"
-    width="45%"
-    alt="GitHub stats"
-  />
-</a>
-<a href="https://github.com/burntcookiedough">
-  <img
-    src="https://github-profile-summary-cards.vercel.app/api/cards/most-commit-language?username=burntcookiedough&theme=github_dark"
-    width="45%"
-    alt="Most committed languages"
-  />
-</a>
-
-<br/><br/>
-
-<a href="https://github.com/burntcookiedough">
-  <img
-    src="https://github-readme-activity-graph.vercel.app/graph?username=burntcookiedough&theme=github-compact&hide_border=true&area=true"
-    width="94%"
-    alt="GitHub contribution activity graph"
-  />
-</a>
-
-</div>
-
----
-
-## `07 / contribution_snake`
-
-<picture>
-  <source
-    media="(prefers-color-scheme: dark)"
-    srcset="https://raw.githubusercontent.com/burntcookiedough/burntcookiedough/output/github-snake-dark.svg"
-  />
-  <source
-    media="(prefers-color-scheme: light)"
-    srcset="https://raw.githubusercontent.com/burntcookiedough/burntcookiedough/output/github-snake.svg"
-  />
-  <img
-    alt="GitHub contribution snake"
-    src="https://raw.githubusercontent.com/burntcookiedough/burntcookiedough/output/github-snake.svg"
-    width="100%"
-  />
-</picture>
-
-<div align="center">
-
-<br/>
-
-<a href="https://github.com/burntcookiedough">
-  <img
-    src="https://komarev.com/ghpvc/?username=burntcookiedough&color=0D1117&style=flat-square&label=profile+views"
-    alt="Profile views"
-  />
-</a>
-
-<br/><br/>
-
-<samp>notice the friction · build the fix · keep what works</samp>
-
-</div>
+The source is available under the [MIT License](LICENSE). Eve contains software derived from the MIT-licensed Murmur project; original copyright notices and commit authorship are preserved. See [NOTICE.md](NOTICE.md).
