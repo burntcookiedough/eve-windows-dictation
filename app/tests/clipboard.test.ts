@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 let clipboardText = '';
+let clipboardFormats: string[] = [];
 let clipboardWrites: string[] = [];
 const execFile = mock((
   command: string,
@@ -19,8 +20,10 @@ mock.module('electron', () => ({
   },
   clipboard: {
     readText: () => clipboardText,
+    availableFormats: () => [...clipboardFormats],
     writeText: (text: string) => {
       clipboardText = text;
+      clipboardFormats = ['text/plain'];
       clipboardWrites.push(text);
     },
   },
@@ -35,6 +38,7 @@ const { buildSendInputScriptContent, getForegroundWindowHandle, pasteText, simul
 describe('pasteText', () => {
   beforeEach(() => {
     clipboardText = 'previous';
+    clipboardFormats = ['text/plain'];
     clipboardWrites = [];
     execFile.mockClear();
   });
@@ -72,6 +76,21 @@ describe('pasteText', () => {
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     expect(clipboardText).toBe('user text');
+  });
+
+  test('does not restore over rich clipboard content with the same text', async () => {
+    await pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    clipboardFormats = ['text/plain', 'text/html'];
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardText).toBe('new text');
+    expect(clipboardFormats).toEqual(['text/plain', 'text/html']);
   });
 
   test('does not let an older paste restore over a newer paste', async () => {

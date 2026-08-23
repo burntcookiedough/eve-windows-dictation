@@ -185,6 +185,13 @@ export function readFromClipboard(): string {
   return clipboard.readText();
 }
 
+function readClipboardOwnershipSignature(): string {
+  return JSON.stringify({
+    text: clipboard.readText(),
+    formats: [...clipboard.availableFormats()].sort(),
+  });
+}
+
 export function getForegroundWindowHandle(): Promise<number | null> {
   return new Promise((resolve) => {
     execFile(
@@ -296,13 +303,17 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
   const pasteGeneration = ++latestPasteGeneration;
   const previous = clipboard.readText();
   clipboard.writeText(text);
+  const clipboardOwnershipSignature = readClipboardOwnershipSignature();
   try {
     await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
     await simulatePaste(options.method, options.targetWindowHandle);
   } finally {
     if (options.restoreClipboard) {
       setTimeout(() => {
-        if (pasteGeneration !== latestPasteGeneration || clipboard.readText() !== text) {
+        if (
+          pasteGeneration !== latestPasteGeneration ||
+          readClipboardOwnershipSignature() !== clipboardOwnershipSignature
+        ) {
           return;
         }
         try {
