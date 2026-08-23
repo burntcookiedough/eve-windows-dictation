@@ -8,9 +8,9 @@ Network access is still required in these cases:
 
 - the NSIS web installer downloads the application payload from GitHub Releases;
 - an engine downloads its model files from Hugging Face on first use;
-- a developer or user deliberately configures external-server mode.
+- a developer runs a separately started localhost speech service during development.
 
-External-server mode changes the trust boundary because captured audio is sent to the configured server URL. Users are responsible for the operator and privacy terms of that endpoint.
+Packaged Eve keeps speech processing on its bundled local service. It does not expose a configurable external-server endpoint.
 
 ## Local data
 

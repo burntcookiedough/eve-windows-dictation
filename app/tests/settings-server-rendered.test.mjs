@@ -140,10 +140,10 @@ const { measurements } = result;
 
 describe('rendered Phase 3 Server and diagnostics fixture', () => {
   test('keeps one page scroll owner and no horizontal overflow at narrow/high zoom states', () => {
-    expect(measurements.length).toBe(54);
+    expect(measurements.length).toBe(48);
     for (const measurement of measurements) {
       expect(measurement.owner.overflowY).toBe('auto');
-      expect(measurement.owner.scrollHeight).toBeGreaterThan(measurement.owner.clientHeight);
+      expect(measurement.owner.scrollHeight).toBeGreaterThanOrEqual(measurement.owner.clientHeight);
       expect(measurement.owner.scrollWidth).toBeLessThanOrEqual(measurement.owner.clientWidth);
       expect(measurement.document.scrollWidth).toBeLessThanOrEqual(measurement.document.clientWidth);
       expect(measurement.scrollersOutsideLogs).toBe(1);
@@ -155,22 +155,9 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     const ready = measurements.find((measurement) => measurement.state === 'managed-ready' && measurement.zoom === 1 && measurement.viewport.width === 960);
     const error = measurements.find((measurement) => measurement.state === 'managed-error' && measurement.zoom === 1 && measurement.viewport.width === 960);
     expect(ready.status).toBe('Running');
-    expect(ready.external).toBeFalse();
-    expect(ready.restriction).toBeFalse();
     expect(ready.healthButtonsDisabled.every((disabled) => disabled === false)).toBeTrue();
     expect(error.status).toBe('Error');
-    expect(error.external).toBeFalse();
     expect(error.healthButtonsDisabled.every((disabled) => disabled === false)).toBeTrue();
-  });
-
-  test('renders external restrictions without hiding factual health, diagnostics, or logs', () => {
-    const external = measurements.find((measurement) => measurement.state === 'external-ready' && measurement.zoom === 1 && measurement.viewport.width === 960);
-    expect(external.external).toBeTrue();
-    expect(external.restriction).toBeTrue();
-    expect(external.healthButtonsDisabled.every((disabled) => disabled === true)).toBeTrue();
-    expect(external.autoStartDisabled).toBeTrue();
-    expect(external.status).toBe('Running');
-    expect(external.privacyWarning).toBeTrue();
   });
 
   test('keeps collapsed and expanded logs associated, private-data warning visible, and output bounded', () => {
@@ -238,7 +225,7 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
   });
 
   test('cleans the isolated Electron userData directory and writes deterministic screenshots', () => {
-    expect(result.screenshots).toHaveLength(5);
+    expect(result.screenshots).toHaveLength(4);
     for (const screenshot of result.screenshots) {
       expect(existsSync(screenshot)).toBeTrue();
     }

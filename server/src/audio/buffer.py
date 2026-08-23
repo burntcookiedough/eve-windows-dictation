@@ -68,6 +68,33 @@ class AudioBuffer:
             return np.array([], dtype=np.float32)
         return samples.astype(np.float32) / 32768.0
 
+    def get_audio_tail_float32(self, max_samples: int) -> NDArray[np.float32]:
+        """Get a bounded tail of accumulated audio as float32 samples.
+
+        Only chunks needed for the requested tail are copied and converted;
+        earlier retained audio is not materialized.
+        """
+        if max_samples <= 0 or not self._chunks:
+            return np.array([], dtype=np.float32)
+
+        remaining = min(max_samples, self._total_samples)
+        tail_chunks: list[NDArray[np.float32]] = []
+        for chunk in reversed(self._chunks):
+            if remaining <= 0:
+                break
+            if len(chunk) == 0:
+                continue
+            tail = chunk[-remaining:]
+            tail_chunks.append(tail.astype(np.float32) / 32768.0)
+            remaining -= len(tail)
+
+        if not tail_chunks:
+            return np.array([], dtype=np.float32)
+        tail_chunks.reverse()
+        if len(tail_chunks) == 1:
+            return tail_chunks[0]
+        return np.concatenate(tail_chunks)
+
     def clear(self) -> None:
         """Clear all accumulated audio."""
         self._chunks.clear()

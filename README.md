@@ -46,7 +46,7 @@ Eve derives device and precision availability from the installed PyTorch and CTr
 
 ## Local-first, with clear network boundaries
 
-The default packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. External-server mode is an explicit choice: when enabled, audio is sent to the server URL configured by the user rather than the packaged local service.
+The packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. During development, Eve may connect to a separately started localhost speech service; packaged builds use the bundled local service only.
 
 Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
 
@@ -84,7 +84,7 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --extra release --frozen` when preparing the Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
+Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
 
 ## Compatibility and provenance
 

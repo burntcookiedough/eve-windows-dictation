@@ -113,7 +113,7 @@ VC++ runtime installed: yes
       history: sensitiveValues[2],
     });
 
-    expect(output).toContain('Server mode: external');
+    expect(output).toContain('Server mode: detected');
     expect(output).toContain('Model: custom/local model');
     expect(output).toContain('- cuda_unavailable: CUDA is unavailable; Eve may use CPU mode.');
     expect(output).toContain('- unknown_warning: Additional details omitted for privacy.');
@@ -153,7 +153,7 @@ VC++ runtime installed: yes
     expect(output).not.toContain('ETA:');
   });
 
-  test('does not copy regex-valid secrets from an external server', () => {
+  test('does not copy regex-valid secrets from a detected server', () => {
     const secret = 'top-secret-token';
     const output = report({
       status: 'running',

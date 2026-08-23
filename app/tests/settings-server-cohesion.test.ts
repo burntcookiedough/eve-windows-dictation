@@ -16,7 +16,7 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
   test('uses one cohesive Server & diagnostics section without nested SettingsSection composition', () => {
     expect(settingsView).toContain('title="Server &amp; diagnostics"');
     expect(settingsView).toContain('data-server-diagnostics');
-    expect(settingsView).toContain('<ServerView embedded externalMode={externalMode} />');
+    expect(settingsView).toContain('<ServerView embedded />');
     expect(settingsView).not.toContain('<SettingsSection title="Server">');
     expect(serverView).not.toContain('<SettingsSection');
     expect(serverView).not.toContain('title="Settings"');
@@ -24,20 +24,15 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('aria-labelledby={headingId(');
   });
 
-  test('keeps management mode, endpoint, auto-start, health, and truthful external restrictions together', () => {
-    expect(settingsView).toContain('data-server-management');
-    expect(settingsView).toContain('data-server-mode-surface');
-    expect(settingsView).toContain('label="Use external server"');
-    expect(settingsView).toContain('data-external-server-panel');
-    expect(serverFixture).toContain('{#if externalEnabled}');
+  test('keeps managed lifecycle, health, diagnostics, and logs together', () => {
+    expect(settingsView).not.toContain('data-server-mode-surface');
+    expect(settingsView).not.toContain('Use external server');
+    expect(settingsView).not.toContain('data-external-server-panel');
+    expect(serverFixture).not.toContain('external');
     expect(serverView).toContain('data-server-section="management"');
     expect(serverView).toContain('label="Auto-start server"');
-    expect(serverView).toContain('disabled={externalMode}');
-    expect(serverView).toContain('data-server-action-restriction');
-    expect(serverView.match(/!externalMode &&/g)?.length).toBe(3);
-    expect(serverView).toContain('getServerManagementMode');
-    expect(serverView).toContain('Management mode &amp; endpoint section above.');
-    expect(serverView).toContain('Settings &gt; Server &amp; diagnostics.');
+    expect(serverView).not.toContain('externalMode');
+    expect(serverView).not.toContain('data-server-action-restriction');
     expect(serverView).toContain('window.murmurMain.startServer()');
     expect(serverView).toContain('window.murmurMain.stopServer()');
     expect(serverView).toContain('window.murmurMain.restartServer()');
@@ -89,7 +84,6 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
     expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
     expect(settingsView).toContain('min-h-9 w-full max-w-full rounded-lg border border-zinc-700');
-    expect(settingsView).toContain('[overflow-wrap:anywhere]');
     expect(serverView).toContain('[overflow-wrap:anywhere]');
     expect(serverView).toContain('serverState.version !== undefined');
     expect(serverView).toContain('serverState.uptime !== undefined');

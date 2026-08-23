@@ -124,9 +124,14 @@ registerProcessor('audio-processor', AudioProcessor);
       this.analyserNode.fftSize = 256;
       this.analyserNode.smoothingTimeConstant = 0.5;
 
-      this.workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
-      this.workletNode.port.onmessage = (event) => {
-        if (!this.isCapturing) return;
+      const workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+      this.workletNode = workletNode;
+      workletNode.port.onmessage = (event) => {
+        if (
+          !this.isCapturing ||
+          generation !== this.startGeneration ||
+          this.workletNode !== workletNode
+        ) return;
         const { audioData } = event.data;
         if (audioData) {
           this.sendAudioToServer(audioData);
@@ -161,6 +166,7 @@ registerProcessor('audio-processor', AudioProcessor);
     }
 
     if (this.workletNode) {
+      this.workletNode.port.onmessage = null;
       this.workletNode.disconnect();
       this.workletNode = null;
     }

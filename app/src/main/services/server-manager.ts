@@ -368,7 +368,7 @@ export class ServerManager {
     this.setDiagnostics(health.diagnostics);
     this.setModelDownload(health.modelDownload);
     this.setEngineStatus(health.engineStatus);
-    this.managed = false; // External server
+    this.managed = false; // The server was detected rather than spawned by Eve.
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
 
@@ -674,7 +674,7 @@ export class ServerManager {
     }
 
     if (!this.managed) {
-      log.info('Server is not managed (external), cannot stop');
+      log.info('Server is not managed, cannot stop a detected process');
       return;
     }
 
@@ -760,7 +760,7 @@ export class ServerManager {
    */
   async restart(): Promise<void> {
     if (!this.managed) {
-      log.info('Server is not managed (external), cannot restart');
+      log.info('Server is not managed, cannot restart a detected process');
       return;
     }
 

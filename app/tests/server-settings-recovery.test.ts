@@ -7,6 +7,7 @@ import {
 } from '../src/renderer/app/server-settings-recovery';
 
 const starting = { status: 'starting' as const, managed: true };
+const unmanagedStarting = { status: 'starting' as const, managed: false };
 const ready = {
   status: 'running' as const,
   managed: true,
@@ -31,10 +32,9 @@ describe('Settings server-state recovery', () => {
     const loading = { ...ready, engineStatus: { current: 'whisper', status: 'loading' as const } };
     expect(serverSettingsStateKey(loading)).not.toBe(readyKey);
     expect(shouldRetryServerSettings(loading, false, false, readyKey)).toBeTrue();
-    expect(shouldClearServerSettings(null, false)).toBeFalse();
-    expect(shouldClearServerSettings(starting, false)).toBeTrue();
-    expect(shouldClearServerSettings(starting, true)).toBeFalse();
-    expect(shouldClearServerSettings(ready, false)).toBeFalse();
+    expect(shouldClearServerSettings(null)).toBeFalse();
+    expect(shouldClearServerSettings(starting)).toBeTrue();
+    expect(shouldClearServerSettings(ready)).toBeFalse();
   });
 
   test('retries when the live endpoint changes even if its port is reused', () => {
@@ -42,7 +42,7 @@ describe('Settings server-state recovery', () => {
     expect(serverSettingsStateKey(samePortDifferentEndpoint)).not.toBe(serverSettingsStateKey(ready));
   });
 
-  test('clears an interrupted managed preparation and preserves external-server state', () => {
+  test('clears an interrupted managed preparation after the server stops', () => {
     const lifecycle = {
       pending: { engine: 'nemotron', nemotron_model: 'nvidia/canary-qwen-2.5b' },
       requested: true,
@@ -51,7 +51,7 @@ describe('Settings server-state recovery', () => {
       applying: true,
     };
 
-    expect(recoverInterruptedManagedPreparation(starting, false, lifecycle)).toEqual({
+    expect(recoverInterruptedManagedPreparation(starting, lifecycle)).toEqual({
       pending: {},
       requested: false,
       active: false,
@@ -59,7 +59,19 @@ describe('Settings server-state recovery', () => {
       applying: false,
       message: 'The managed speech server stopped while model settings were being prepared. Restart it, then select and apply the model again.',
     });
-    expect(recoverInterruptedManagedPreparation(starting, true, lifecycle)).toBeNull();
-    expect(recoverInterruptedManagedPreparation(ready, false, lifecycle)).toBeNull();
+    expect(recoverInterruptedManagedPreparation(ready, lifecycle)).toBeNull();
+  });
+
+  test('preserves staged preparation during an unmanaged development outage', () => {
+    const lifecycle = {
+      pending: { engine: 'whisper' },
+      requested: true,
+      active: true,
+      observed: true,
+      applying: true,
+    };
+
+    expect(shouldClearServerSettings(unmanagedStarting)).toBeTrue();
+    expect(recoverInterruptedManagedPreparation(unmanagedStarting, lifecycle)).toBeNull();
   });
 });

@@ -11,7 +11,7 @@
   import ServerView from './ServerView.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
   import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
-  import { getServerManagementMode, serverStatusState } from '../server-status';
+  import { serverStatusState } from '../server-status';
   import {
     recoverInterruptedManagedPreparation,
     serverSettingsStateKey,
@@ -23,10 +23,6 @@
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
-
-  const DEFAULT_SERVER_HOST = 'localhost';
-  const DEFAULT_SERVER_PORT = 51717;
-  const TRANSCRIBE_PATH = '/transcribe';
 
   const DICTATION_MODE_OPTIONS: EveDropdownOption[] = [
     { value: 'raw', label: 'Raw Dictation' },
@@ -84,9 +80,6 @@
   let settingsLoaded = $state(false);
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
-  let externalServerHost = $state(DEFAULT_SERVER_HOST);
-  let externalServerPort = $state(String(DEFAULT_SERVER_PORT));
-  let externalServerError = $state('');
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
   let hotwordCount = $derived(hotwordEntries.length);
@@ -111,7 +104,6 @@
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(engineStatus ?? sharedServerState?.engineStatus ?? null);
-  let externalMode = $derived(settings.useExternalServer || getServerManagementMode($serverStatusState) === 'external');
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -204,82 +196,10 @@
     ].join('\n');
   }
 
-  function parseServerUrl(url: string): { host: string; port: string } {
-    try {
-      const parsed = new URL(url);
-      return {
-        host: parsed.hostname || DEFAULT_SERVER_HOST,
-        port: parsed.port || String(DEFAULT_SERVER_PORT),
-      };
-    } catch {
-      return {
-        host: DEFAULT_SERVER_HOST,
-        port: String(DEFAULT_SERVER_PORT),
-      };
-    }
-  }
-
-  function parseHostPaste(input: string): { host: string; port?: string } {
-    const trimmed = input.trim();
-    if (!trimmed) {
-      return { host: '' };
-    }
-
-    try {
-      const withProtocol = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
-        ? trimmed
-        : `ws://${trimmed}`;
-      const parsed = new URL(withProtocol);
-      return {
-        host: parsed.hostname,
-        port: parsed.port || undefined,
-      };
-    } catch {
-      const hostPortMatch = trimmed.match(/^([^/:\s]+):(\d{1,5})$/);
-      if (hostPortMatch) {
-        return {
-          host: hostPortMatch[1] ?? '',
-          port: hostPortMatch[2],
-        };
-      }
-      return { host: trimmed };
-    }
-  }
-
-  function syncExternalServerFields(url: string): void {
-    const parsed = parseServerUrl(url);
-    externalServerHost = parsed.host;
-    externalServerPort = parsed.port;
-  }
-
-  function buildExternalServerUrl(host: string, port: number): string {
-    return `ws://${host}:${port}${TRANSCRIBE_PATH}`;
-  }
-
-  function updateExternalServerUrl(): void {
-    const host = externalServerHost.trim();
-    const port = Number(externalServerPort);
-    const isValidPort = Number.isInteger(port) && port > 0 && port <= 65535;
-
-    if (!host) {
-      externalServerError = 'Host is required';
-      return;
-    }
-
-    if (!isValidPort) {
-      externalServerError = 'Port must be a number between 1 and 65535';
-      return;
-    }
-
-    externalServerError = '';
-    updateSetting('serverUrl', buildExternalServerUrl(host, port));
-  }
-
   async function loadCoreSettings() {
     try {
       const loadedSettings = await window.murmurMain.getSettings();
       settings = loadedSettings;
-      syncExternalServerFields(loadedSettings.serverUrl);
       settingsLoaded = true;
 
       const displayNames = await Promise.allSettled([
@@ -359,8 +279,8 @@
 
   $effect(() => {
     const state = sharedServerState;
-    if (shouldClearServerSettings(state, externalMode)) {
-      const recovery = recoverInterruptedManagedPreparation(state, externalMode, {
+    if (shouldClearServerSettings(state)) {
+      const recovery = recoverInterruptedManagedPreparation(state, {
         pending: pendingEngine,
         requested: enginePreparationRequested,
         active: enginePreparationActive,
@@ -413,13 +333,6 @@
     settings.hotwordsCsl = value;
     window.murmurMain.updateSetting('hotwordsCsl', value);
     hotwordsFileMessage = '';
-  }
-
-  function updateUseExternalServer(enabled: boolean) {
-    updateSetting('useExternalServer', enabled);
-    if (enabled) {
-      updateExternalServerUrl();
-    }
   }
 
   function openHotkeyCapture(target: 'quick' | 'long') {
@@ -483,7 +396,7 @@
   }
 
   function selectPreset(preset: typeof SPEECH_MODEL_PRESETS[number]): void {
-    if (externalMode || !isEngineAvailable(preset.engine)) return;
+    if (!isEngineAvailable(preset.engine)) return;
     pendingEngine = { ...pendingEngine, ...presetPatch(preset) };
     engineApplyError = '';
   }
@@ -870,7 +783,6 @@
           availabilityKnown={availableEngines.length > 0}
           engineStatus={sharedEngineStatus}
           modelDownload={sharedServerState?.modelDownload}
-          externalMode={externalMode}
           preparationFailed={preparationFailed}
           onSelect={selectPreset}
         >
@@ -880,7 +792,7 @@
                 {preparationFailed ? 'Preparation failed. Retry or revert your selected model.' : 'Selected model is pending preparation; the current engine remains active until the selected model is ready.'}
               </p>
             {/if}
-            {#if stagedPreset && !externalMode}
+            {#if stagedPreset}
               <div class="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onclick={applyEngineSettings} disabled={engineApplying} class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}">{engineApplying ? 'Preparing…' : preparationFailed ? 'Retry preparation' : 'Apply and prepare model'}</button>
                 <button type="button" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying || engineRevertDisabled ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
@@ -926,13 +838,6 @@
             {/if}
           </div>
 
-          {#if externalMode}
-            <div data-compatibility-external class="mt-4 flex items-start gap-3 border-t border-white/[0.08] pt-4 text-xs leading-5 text-zinc-400">
-              <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-300"></span>
-              <p>Compatibility controls are read-only while an external server is active. Configure the external server through its own endpoint.</p>
-            </div>
-          {/if}
-
       {#if !serverConnected}
         <div class="mt-4 border-t border-white/[0.08] pt-4">
           <p class="text-xs leading-5 text-zinc-500">
@@ -940,7 +845,7 @@
           </p>
         </div>
       {:else if serverSettings}
-        <div id="compatibility-controls" hidden={!compatibilityControlsOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2 {externalMode ? 'opacity-60' : ''}">
+        <div id="compatibility-controls" hidden={!compatibilityControlsOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
         {#if serverSettings.whisper_model}
           <SettingsRow label={serverSettings.whisper_model.label} description="Raw Whisper compatibility model, including Medium and Tiny">
             <EveDropdown
@@ -948,7 +853,6 @@
               value={String(getSettingValue('whisper_model') ?? serverSettings.whisper_model.value)}
               options={toDropdownOptions(getOptions('whisper_model'))}
               onchange={(value) => updateEngineSetting('whisper_model', value)}
-              disabled={externalMode}
             />
           </SettingsRow>
         {/if}
@@ -959,7 +863,6 @@
               value={String(getSettingValue('whisper_compute_type') ?? serverSettings.whisper_compute_type.value)}
               options={toDropdownOptions(getWhisperComputeOptions())}
               onchange={(value) => updateEngineSetting('whisper_compute_type', value)}
-              disabled={externalMode}
             />
             {#each disabledOptionReasons(getWhisperComputeOptions()) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
@@ -973,7 +876,6 @@
               aria-label={serverSettings.whisper_language.label}
               value={getSettingValue<string>('whisper_language') ?? String(serverSettings.whisper_language.value ?? '')}
               oninput={(e) => updateEngineSetting('whisper_language', e.currentTarget.value)}
-              disabled={externalMode}
               class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-28"
             />
           </SettingsRow>
@@ -985,7 +887,6 @@
               value={String(getSettingValue('whisper_device') ?? serverSettings.whisper_device.value)}
               options={toDropdownOptions(getOptions('whisper_device'))}
               onchange={(value) => updateEngineSetting('whisper_device', value)}
-              disabled={externalMode}
             />
             {#each disabledOptionReasons(getOptions('whisper_device')) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
@@ -998,7 +899,6 @@
               enabled={!!getSettingValue('unload_before_swap')}
               onchange={(v) => updateEngineSetting('unload_before_swap', v)}
               label="Unload before swap"
-              disabled={externalMode}
             />
           </SettingsRow>
         {/if}
@@ -1013,9 +913,9 @@
                   <button
                     type="button"
                     onclick={applyEngineSettings}
-                    disabled={engineApplying || externalMode}
+                    disabled={engineApplying}
                     class="min-h-9 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
-                      {engineApplying || externalMode
+                      {engineApplying
                         ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
                         : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
                   >
@@ -1027,7 +927,7 @@
                       Apply compatibility changes
                     {/if}
                   </button>
-                  <button type="button" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled || externalMode} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying || engineRevertDisabled || externalMode ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
+                  <button type="button" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled} class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 {engineApplying || engineRevertDisabled ? 'cursor-not-allowed' : 'hover:bg-zinc-800 cursor-pointer'}">Revert</button>
                 </div>
               {/if}
             </div>
@@ -1085,97 +985,11 @@
 
     <SettingsSection
       title="Server &amp; diagnostics"
-      description="Management mode, endpoint, health, diagnostics, and recent logs."
+      description="Server health, diagnostics, lifecycle, and recent logs."
       variant="content"
     >
       <div data-server-diagnostics class="min-w-0 space-y-6">
-        <section data-server-management class="min-w-0 space-y-2" aria-labelledby="settings-server-management-heading">
-          <div class="min-w-0 px-1">
-            <h3 id="settings-server-management-heading" class="text-sm font-semibold text-zinc-200">Management mode &amp; endpoint</h3>
-            <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Choose Eve-managed processing or connect to an external endpoint.</p>
-          </div>
-
-          <div data-server-mode-surface class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
-            <SettingsRow
-              label="Use external server"
-              description="Connect to your own server and disable built-in server management"
-            >
-              <Toggle
-                enabled={settings.useExternalServer}
-                onchange={updateUseExternalServer}
-                label="Use external server"
-              />
-            </SettingsRow>
-
-            <div class="overflow-hidden border-t border-white/[0.08]">
-              {#if settings.useExternalServer}
-                <div data-external-server-panel class="min-w-0 p-4">
-                  <p class="text-sm text-zinc-200">Custom server endpoint</p>
-                  <p class="mt-1 text-xs leading-5 text-zinc-500">
-                    Set the host and port for your transcription server. Eve connects to <span class="font-mono">/transcribe</span>.
-                  </p>
-
-                  {#if externalServerError}
-                    <p class="mt-3 text-xs leading-5 text-red-300 [overflow-wrap:anywhere]">{externalServerError}</p>
-                  {:else}
-                    <p class="mt-3 text-xs leading-5 text-zinc-500 [overflow-wrap:anywhere]">
-                      Using endpoint <span class="font-mono text-zinc-300">{settings.serverUrl}</span>
-                    </p>
-                  {/if}
-
-                  <div class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div class="min-w-0">
-                      <label for="external-server-host" class="mb-1 block text-xs text-zinc-500">Host</label>
-                      <input
-                        id="external-server-host"
-                        type="text"
-                        value={externalServerHost}
-                        onpaste={(e) => {
-                          const pasted = e.clipboardData?.getData('text') ?? '';
-                          if (!pasted) {
-                            return;
-                          }
-                          const parsed = parseHostPaste(pasted);
-                          if (parsed.host) {
-                            e.preventDefault();
-                            externalServerHost = parsed.host;
-                            if (parsed.port) {
-                              externalServerPort = parsed.port;
-                            }
-                            updateExternalServerUrl();
-                          }
-                        }}
-                        oninput={(e) => {
-                          externalServerHost = e.currentTarget.value;
-                          updateExternalServerUrl();
-                        }}
-                        class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-                        placeholder="localhost"
-                      />
-                    </div>
-
-                    <div class="min-w-0">
-                      <label for="external-server-port" class="mb-1 block text-xs text-zinc-500">Port</label>
-                      <input
-                        id="external-server-port"
-                        type="text"
-                        value={externalServerPort}
-                        oninput={(e) => {
-                          externalServerPort = e.currentTarget.value;
-                          updateExternalServerUrl();
-                        }}
-                        class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-                        placeholder="51717"
-                      />
-                    </div>
-                  </div>
-                </div>
-              {/if}
-            </div>
-          </div>
-        </section>
-
-        <ServerView embedded externalMode={externalMode} />
+        <ServerView embedded />
       </div>
     </SettingsSection>
 

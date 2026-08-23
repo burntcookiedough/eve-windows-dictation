@@ -4,7 +4,6 @@ import { get } from 'svelte/store';
 import {
   disposeServerStatus,
   getDownloadMilestone,
-  getServerManagementMode,
   getServerStatusPhase,
   initializeServerStatus,
   refresh,
@@ -203,10 +202,8 @@ describe('Home and shared server status', () => {
     expect(mount).not.toContain('updateServerSettings');
     expect(mount).not.toContain('prepare');
     expect(homeView).toContain('onclick={retry}');
-    expect(homeView).toContain('External server — Eve cannot restart this endpoint.');
-    expect(homeView).toContain('Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.');
-    expect(statusController).toContain('const settings = await window.murmurMain.getSettings();');
-    expect(statusController).toContain('setConfiguredExternalServer(settings.useExternalServer);');
+    expect(homeView).not.toContain('External server');
+    expect(statusController).not.toContain('useExternalServer');
     expect(homeView).toContain('if (retrying) return;');
     expect(homeView).toContain('disabled={retrying}');
     expect(statusController).toContain('if (!initialized || !current.state?.managed || retryInFlight) return false;');
@@ -234,16 +231,16 @@ describe('Home and shared server status', () => {
     expect(serverView).toContain('if (!active) return;');
     expect(banner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
     expect(banner).not.toContain('Open Server and use Restart');
-    expect(homeView).toContain('By default, Eve processes speech locally.');
-    expect(homeView).toContain('audio is sent to that endpoint under your control.');
+    expect(homeView).toContain('Packaged Eve uses its managed local service for speech.');
+    expect(homeView).toContain('During development, Eve may use a separately started localhost service.');
   });
 
-  test('shares external management truth and retains a forced-colors focus fallback', () => {
-    expect(getServerManagementMode({ state: null, phase: 'unavailable', announcement: '', configuredExternalServer: null })).toBe('unknown');
-    expect(getServerManagementMode({ state: null, phase: 'unavailable', announcement: '', configuredExternalServer: true })).toBe('external');
-    expect(getServerManagementMode({ state: { status: 'running', managed: true }, phase: 'stale', announcement: '', configuredExternalServer: false })).toBe('managed');
+  test('keeps detected development servers separate from managed retry actions', () => {
+    expect(getServerStatusPhase({ status: 'running', managed: false, engineStatus: { current: 'whisper', status: 'ready' } })).toBe('ready');
+    expect(statusController).toContain('!current.state?.managed');
+    expect(homeView).not.toContain('getServerManagementMode');
     expect(homeView).toContain('focus-visible:outline-hidden');
-    expect(banner).toContain('getServerManagementMode($serverStatusState)');
+    expect(banner).not.toContain('getServerManagementMode');
   });
 
   test('uses the expressive Home composition and tolerates sparse runtime metadata', () => {

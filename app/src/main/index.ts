@@ -13,6 +13,7 @@ import { ServerManager } from './services/server-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
 import { getForegroundWindowHandle } from './services/clipboard.js';
 import { getSettings, getSetting } from './services/settings.js';
+import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { IPC_CHANNELS } from '../shared/constants.js';
 import { buildHotwordsPrompt } from '../shared/hotwords.js';
@@ -165,12 +166,10 @@ function getRecordingDebugState(): RecordingDebugState {
 async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick') {
   if (isRecording || isStopping || !overlayWindow) return;
 
-  const useExternalServer = getSetting('useExternalServer');
-
-  // In packaged builds, require managed server discovery unless external mode is enabled.
+  // Packaged builds only trust the URL discovered from the managed server.
   const serverState = serverManager?.getState();
   const discoveredServerUrl = serverState?.wsUrl;
-  if (app.isPackaged && !useExternalServer && !discoveredServerUrl) {
+  if (app.isPackaged && !discoveredServerUrl) {
     log.error('Cannot start recording: managed server URL unavailable', {
       serverStatus: serverState?.status,
       managed: serverState?.managed,
@@ -180,7 +179,6 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
   if (
     app.isPackaged &&
-    !useExternalServer &&
     serverState?.engineStatus?.status !== 'ready'
   ) {
     const engineStatus = serverState?.engineStatus;
@@ -224,9 +222,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   const settings = getSettings();
   const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
 
-  const serverUrl = useExternalServer
-    ? getSetting('serverUrl')
-    : (discoveredServerUrl ?? getSetting('serverUrl'));
+  // Development can connect to a separately started localhost server.
+  const serverUrl = discoveredServerUrl ?? LOCAL_SERVER_URL;
 
   const service = new TranscriptionService(
     serverUrl,
@@ -599,9 +596,6 @@ async function startApplication(): Promise<void> {
   if (isDev) {
     // Development mode: just detect existing server, don't spawn
     log.info('Development mode: detecting existing server');
-    await serverManager.detectExisting();
-  } else if (getSetting('useExternalServer')) {
-    log.info('Production mode: using external server, skipping managed auto-start');
     await serverManager.detectExisting();
   } else {
     // Production mode: auto-start if enabled

@@ -139,7 +139,7 @@ These warnings are actionable and include guidance or links where possible.
 
 | Build Config | PyTorch? | cuBLAS/cuDNN available? | Whisper GPU? | Nemotron |
 |-------------|----------|------------------------|-------------|----------|
-| `uv sync --extra release` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if the driver supports it) | Deferred |
+| `uv sync --python 3.11 --no-dev --extra release --frozen` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if the driver supports it) | Deferred |
 | `uv sync --extra all` | Yes (cu124) | Yes, via packaged torch/lib/ | Yes (if the driver supports it) | Experimental only |
 | `uv sync --extra nemotron` | Yes (cu124) | Yes, via packaged torch/lib/ | N/A (not installed) | Deferred repair |
 | `uv sync --extra whisper` | **No** | **No** | CPU only | N/A |
@@ -158,7 +158,7 @@ CUDA runtime. No separate CUDA Toolkit or user-installed NeMo stack is required.
 
 ### 5.1 Release Workflow Installs the Whisper Closure (Resolved)
 
-The release workflow now runs `uv sync --extra release`, so the packaged venv contains Faster-Whisper and locked CUDA PyTorch without NeMo or torchaudio. This provides the CUDA DLLs needed for the shipped Whisper engine while keeping Nemotron deferred and unavailable in the alpha.
+The release workflow now runs `uv sync --python 3.11 --no-dev --extra release --frozen`, so the packaged venv contains Faster-Whisper and locked CUDA PyTorch without NeMo, torchaudio, or the default development group. This provides the CUDA DLLs needed for the shipped Whisper engine while keeping Nemotron deferred and unavailable in the alpha.
 
 ### 5.2 NSIS 2GB Installer Size Limit (Resolved via nsis-web)
 
@@ -260,7 +260,7 @@ https://aka.ms/vs/17/release/vc_redist.x64.exe
 
 ### Completed in the current release pipeline
 
-1. Release workflow installs the shipped Whisper closure with `uv sync --extra release`
+1. Release workflow installs the shipped Whisper closure with `uv sync --python 3.11 --no-dev --extra release --frozen`
 2. nsis-web packaging avoids the 2GB limit and ships payload artifacts with releases
 3. Runtime diagnostics warn about missing VC++ Redistributable, CUDA DLLs, or outdated drivers
 4. First-run model download UX includes status messaging and retry guidance

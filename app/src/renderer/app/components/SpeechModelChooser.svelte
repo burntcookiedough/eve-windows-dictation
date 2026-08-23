@@ -9,7 +9,6 @@
     availabilityKnown: boolean;
     engineStatus: EngineStatus | null;
     modelDownload?: ModelDownloadState;
-    externalMode: boolean;
     preparationFailed: boolean;
     onSelect: (preset: SpeechModelPreset) => void;
     children?: Snippet;
@@ -21,7 +20,6 @@
     availabilityKnown,
     engineStatus,
     modelDownload,
-    externalMode,
     preparationFailed,
     onSelect,
     children,
@@ -99,49 +97,43 @@
       Select a curated model to stage. Apply and prepare model confirms the change. The current engine stays active until the selected model is ready.
     </p>
 
-    {#if externalMode}
-      <div data-speech-model-external role="status" class="mt-4 border-t border-white/[0.08] pt-4 text-xs leading-5 text-zinc-400">
-        An external server controls model preparation. Manage its model through that server's own endpoint.
-      </div>
-    {:else}
-      <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
-        {#each SPEECH_MODEL_PRESETS as preset}
-          {@const disabled = externalMode || unavailable(preset)}
-          {@const checked = selected?.id === preset.id}
-          {@const label = stateLabel(preset)}
-          <label
-            data-speech-model-option
-            class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100
-              {disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}"
-          >
-            <input
-              class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100 disabled:cursor-not-allowed"
-              type="radio"
-              name={`speech-model-preset-${componentId}`}
-              checked={checked}
-              disabled={disabled}
-              onchange={() => onSelect(preset)}
-              aria-label={`${preset.label}, ${label}`}
-              aria-describedby={detailId(preset.id)}
-            />
-            <span class="min-w-0 flex-1">
-              <span class="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-x-3 sm:gap-y-1">
-                <span class="min-w-0 text-sm font-medium text-zinc-100 [overflow-wrap:anywhere]">{preset.label}</span>
-                <span data-speech-model-state class="max-w-full text-xs [overflow-wrap:anywhere] {stateClass(label)}">{label}</span>
-              </span>
-              <span id={detailId(preset.id)} class="mt-1 block text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">
-                {preset.language} · approx. {preset.sizeGb} GB. {preset.summary}
-              </span>
-              {#if disabled}
-                <span class="mt-1 block text-xs text-amber-300">This server does not have the required {preset.engine} runtime.</span>
-              {:else if isError(preset)}
-                <span class="mt-1 block text-xs text-red-300">Preparation failed. Use Retry preparation or Revert below.</span>
-              {/if}
+    <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
+      {#each SPEECH_MODEL_PRESETS as preset}
+        {@const disabled = unavailable(preset)}
+        {@const checked = selected?.id === preset.id}
+        {@const label = stateLabel(preset)}
+        <label
+          data-speech-model-option
+          class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100
+            {disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}"
+        >
+          <input
+            class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100 disabled:cursor-not-allowed"
+            type="radio"
+            name={`speech-model-preset-${componentId}`}
+            checked={checked}
+            disabled={disabled}
+            onchange={() => onSelect(preset)}
+            aria-label={`${preset.label}, ${label}`}
+            aria-describedby={detailId(preset.id)}
+          />
+          <span class="min-w-0 flex-1">
+            <span class="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-x-3 sm:gap-y-1">
+              <span class="min-w-0 text-sm font-medium text-zinc-100 [overflow-wrap:anywhere]">{preset.label}</span>
+              <span data-speech-model-state class="max-w-full text-xs [overflow-wrap:anywhere] {stateClass(label)}">{label}</span>
             </span>
-          </label>
-        {/each}
-      </div>
-    {/if}
+            <span id={detailId(preset.id)} class="mt-1 block text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+              {preset.language} · approx. {preset.sizeGb} GB. {preset.summary}
+            </span>
+            {#if disabled}
+              <span class="mt-1 block text-xs text-amber-300">This server does not have the required {preset.engine} runtime.</span>
+            {:else if isError(preset)}
+              <span class="mt-1 block text-xs text-red-300">Preparation failed. Use Retry preparation or Revert below.</span>
+            {/if}
+          </span>
+        </label>
+      {/each}
+    </div>
   </fieldset>
 
   {#if children}

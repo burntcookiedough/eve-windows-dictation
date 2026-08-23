@@ -18,27 +18,15 @@ export interface SharedServerStatus {
   state: ServerStatePayload | null;
   phase: ServerStatusPhase;
   announcement: string;
-  configuredExternalServer: boolean | null;
 }
 
 const initialStatus: SharedServerStatus = {
   state: null,
   phase: 'connecting',
   announcement: 'Checking Eve speech readiness.',
-  configuredExternalServer: null,
 };
 
 export const serverStatusState = writable<SharedServerStatus>(initialStatus);
-
-export type ServerManagementMode = 'managed' | 'external' | 'unknown';
-
-export function getServerManagementMode(status: SharedServerStatus): ServerManagementMode {
-  if (status.configuredExternalServer === true || (status.state !== null && !status.state.managed)) {
-    return 'external';
-  }
-  if (status.state?.managed) return 'managed';
-  return 'unknown';
-}
 
 export function getServerStatusPhase(state: ServerStatePayload | null): ServerStatusPhase {
   if (!state) return 'unavailable';
@@ -114,21 +102,6 @@ function publish(state: ServerStatePayload | null): void {
   schedulePoll();
 }
 
-function setConfiguredExternalServer(configuredExternalServer: boolean): void {
-  current = { ...current, configuredExternalServer };
-  serverStatusState.set(current);
-}
-
-async function refreshConfiguredExternalServer(): Promise<void> {
-  const requestLifecycle = lifecycleGeneration;
-  try {
-    const settings = await window.murmurMain.getSettings();
-    if (requestLifecycle === lifecycleGeneration) setConfiguredExternalServer(settings.useExternalServer);
-  } catch {
-    // Keep management mode unknown when its settings cannot be read.
-  }
-}
-
 function clearPoll(): void {
   if (pollTimer !== null) {
     clearTimeout(pollTimer);
@@ -172,7 +145,6 @@ export function initializeServerStatus(): void {
     publish(state);
   });
   window.addEventListener('focus', reseedOnFocus);
-  void refreshConfiguredExternalServer();
   void refresh();
 }
 

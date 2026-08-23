@@ -22,7 +22,6 @@ const settings: Settings = {
   clipboardRestoreDelayMs: 250,
   pasteMethod: 'sendinput',
   silenceTimeout: 15,
-  serverUrl: 'ws://localhost:51717/transcribe',
   appendPeriod: false,
   appendSpace: false,
   dictationMode: 'clean_prompt',
@@ -30,7 +29,6 @@ const settings: Settings = {
   launchOnBoot: false,
   startMinimized: false,
   serverAutoStart: true,
-  useExternalServer: false,
   hotwordsEnabled: false,
   hotwordsCsl: '',
 };

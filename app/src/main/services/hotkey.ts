@@ -153,27 +153,45 @@ export function resetKeyState(): void {
 
 // --- Hotkey Capture ---
 
-let captureListener: ((e: UiohookKeyboardEvent) => void) | null = null;
+type HotkeyCaptureResult = { hotkey: Hotkey; displayName: string };
+
+interface HotkeyCapture {
+  listener: (e: UiohookKeyboardEvent) => void;
+  resolve: (value: HotkeyCaptureResult) => void;
+  reject: (reason?: unknown) => void;
+}
+
+let activeCapture: HotkeyCapture | null = null;
 
 /**
  * Start capturing a hotkey. The next non-modifier key press will be captured.
  * Returns a promise that resolves with the captured hotkey and its display name.
  */
-export function startHotkeyCapture(): Promise<{ hotkey: Hotkey; displayName: string }> {
-  return new Promise((resolve) => {
-    // Remove any existing capture listener
-    if (captureListener) {
-      uIOhook.off('keydown', captureListener);
-    }
+export function startHotkeyCapture(): Promise<HotkeyCaptureResult> {
+  if (activeCapture) {
+    rejectCapturedHotkey(activeCapture, 'replaced');
+  }
 
-    captureListener = (e: UiohookKeyboardEvent) => {
+  return new Promise((resolve, reject) => {
+    const capture: HotkeyCapture = {
+      listener: () => undefined,
+      resolve,
+      reject,
+    };
+
+    capture.listener = (e: UiohookKeyboardEvent) => {
+      // A key event already queued for an older request must not affect a newer one.
+      if (activeCapture !== capture) {
+        return;
+      }
+
       if (isModifierKey(e.keycode)) {
         const modifierHotkey = captureModifierChord(eventSnapshot(e));
         if (!modifierHotkey) {
           return;
         }
 
-        resolveCapturedHotkey(modifierHotkey, resolve);
+        resolveCapturedHotkey(capture, modifierHotkey);
         return;
       }
 
@@ -185,34 +203,46 @@ export function startHotkeyCapture(): Promise<{ hotkey: Hotkey; displayName: str
         metaKey: e.metaKey,
       };
 
-      resolveCapturedHotkey(hotkey, resolve);
+      resolveCapturedHotkey(capture, hotkey);
     };
 
-    uIOhook.on('keydown', captureListener);
+    activeCapture = capture;
+    uIOhook.on('keydown', capture.listener);
   });
 }
 
 function resolveCapturedHotkey(
+  capture: HotkeyCapture,
   hotkey: Hotkey,
-  resolve: (value: { hotkey: Hotkey; displayName: string }) => void,
 ): void {
-  const displayName = formatHotkey(hotkey);
-
-  if (captureListener) {
-    uIOhook.off('keydown', captureListener);
-    captureListener = null;
+  if (activeCapture !== capture) {
+    return;
   }
 
+  const displayName = formatHotkey(hotkey);
+
+  uIOhook.off('keydown', capture.listener);
+  activeCapture = null;
+
   resetKeyState();
-  resolve({ hotkey, displayName });
+  capture.resolve({ hotkey, displayName });
+}
+
+function rejectCapturedHotkey(capture: HotkeyCapture, reason: 'cancelled' | 'replaced'): void {
+  if (activeCapture !== capture) {
+    return;
+  }
+
+  uIOhook.off('keydown', capture.listener);
+  activeCapture = null;
+  capture.reject(new Error(`Hotkey capture ${reason}`));
 }
 
 /**
  * Cancel an in-progress hotkey capture
  */
 export function cancelHotkeyCapture(): void {
-  if (captureListener) {
-    uIOhook.off('keydown', captureListener);
-    captureListener = null;
+  if (activeCapture) {
+    rejectCapturedHotkey(activeCapture, 'cancelled');
   }
 }

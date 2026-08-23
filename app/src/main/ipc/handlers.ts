@@ -10,7 +10,7 @@ import { copyToClipboard } from '../services/clipboard.js';
 import { formatDiagnosticsReport } from '../services/diagnostics-report.js';
 import type { HistoryService } from '../services/history.js';
 import type { ServerManager } from '../services/server-manager.js';
-import { getSetting, getSettings, updateSetting } from '../services/settings.js';
+import { getSettings, updateSetting } from '../services/settings.js';
 import {
   getServerSettings,
   updateServerSettings,
@@ -19,7 +19,7 @@ import {
 } from '../services/server-settings.js';
 import { startHotkeyCapture, cancelHotkeyCapture } from '../services/hotkey.js';
 import { formatHotkey } from '../services/keycodes.js';
-import { resolveServerApiUrl } from '../services/server-api-url.js';
+import { LOCAL_SERVER_URL, resolveServerApiUrl } from '../services/server-api-url.js';
 import { createLogger } from '../lib/logger.js';
 import {
   applyLaunchOnBoot,
@@ -31,12 +31,12 @@ let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
 
 function getServerApiUrl(): string {
-  const configuredUrl = getSetting('serverUrl');
-  return resolveServerApiUrl(
-    configuredUrl,
-    serverManagerRef?.getState(),
-    getSetting('useExternalServer'),
-  );
+  const configuredUrl = app.isPackaged ? undefined : LOCAL_SERVER_URL;
+  const serverUrl = resolveServerApiUrl(configuredUrl, serverManagerRef?.getState());
+  if (!serverUrl) {
+    throw new Error('Managed server URL unavailable');
+  }
+  return serverUrl;
 }
 
 export function setupIpcHandlers(historyService?: HistoryService, serverManager?: ServerManager): void {
@@ -88,7 +88,7 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   // Handle setting updates
   ipcMain.handle(
     IPC_CHANNELS.UPDATE_SETTING,
-    async (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
+    (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
       if (key === 'launchOnBoot') {
         const result = applyLaunchOnBoot(app, value, {
           localAppData: process.env.LOCALAPPDATA,
@@ -101,10 +101,6 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       }
 
       updateSetting(key, value);
-
-      if (key === 'useExternalServer' && value === true && serverManagerRef) {
-        await serverManagerRef.stop();
-      }
     }
   );
 
@@ -227,9 +223,6 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   });
 
   ipcMain.handle(IPC_CHANNELS.SERVER_START, async () => {
-    if (getSetting('useExternalServer')) {
-      throw new Error('Server management is disabled while external server mode is enabled');
-    }
     if (!serverManagerRef) {
       throw new Error('Server manager not initialized');
     }
@@ -246,9 +239,6 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
   });
 
   ipcMain.handle(IPC_CHANNELS.SERVER_RESTART, async () => {
-    if (getSetting('useExternalServer')) {
-      throw new Error('Server management is disabled while external server mode is enabled');
-    }
     if (!serverManagerRef) {
       throw new Error('Server manager not initialized');
     }

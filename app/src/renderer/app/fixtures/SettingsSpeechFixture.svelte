@@ -8,14 +8,14 @@
   import Toggle from '../components/Toggle.svelte';
   import EveDropdown from '../components/EveDropdown.svelte';
 
-  type FixtureState = 'ready' | 'preparing' | 'error' | 'external';
+  type FixtureState = 'ready' | 'preparing' | 'error';
 
   const params = new URLSearchParams(globalThis.location.search);
   const fixtureState = (params.get('state') ?? 'ready') as FixtureState;
   const fixtureView = params.get('view') ?? 'all';
   let compatibilityOpen = $state(params.get('compatibility') === 'expanded');
   let selectedPreset = $state<SpeechModelPreset>(
-    fixtureState === 'ready' || fixtureState === 'external'
+    fixtureState === 'ready'
       ? SPEECH_MODEL_PRESETS[0]!
       : SPEECH_MODEL_PRESETS[1]!,
   );
@@ -152,7 +152,6 @@
                 availabilityKnown
                 engineStatus={engineStatus}
                 modelDownload={modelDownload}
-                externalMode={fixtureState === 'external'}
                 preparationFailed={fixtureState === 'error'}
                 onSelect={selectPreset}
               >

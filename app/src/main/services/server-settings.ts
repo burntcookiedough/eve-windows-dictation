@@ -1,5 +1,4 @@
 import type { ServerSettingsResponse, EngineStatus, AvailableEngine } from '../../shared/types.js';
-import { getSetting } from './settings.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ServerSettings');
@@ -8,16 +7,15 @@ const log = createLogger('ServerSettings');
  * Derive the server base URL from a WebSocket endpoint.
  * e.g. "ws://localhost:51717/transcribe" → "http://localhost:51717"
  */
-function getBaseUrl(serverUrl?: string): string {
-  const wsUrl = serverUrl ?? getSetting('serverUrl');
-  const url = new URL(wsUrl);
+function getBaseUrl(serverUrl: string): string {
+  const url = new URL(serverUrl);
   url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
   // Strip path (e.g. /transcribe) to get the base
   url.pathname = '';
   return url.origin;
 }
 
-async function fetchJson<T>(path: string, options?: RequestInit, serverUrl?: string): Promise<T> {
+async function fetchJson<T>(path: string, options: RequestInit | undefined, serverUrl: string): Promise<T> {
   const base = getBaseUrl(serverUrl);
   const url = `${base}${path}`;
   log.debug('Fetching', { url, method: options?.method ?? 'GET' });
@@ -38,13 +36,13 @@ async function fetchJson<T>(path: string, options?: RequestInit, serverUrl?: str
   return response.json() as Promise<T>;
 }
 
-export async function getServerSettings(serverUrl?: string): Promise<ServerSettingsResponse> {
+export async function getServerSettings(serverUrl: string): Promise<ServerSettingsResponse> {
   return fetchJson<ServerSettingsResponse>('/settings', undefined, serverUrl);
 }
 
 export async function updateServerSettings(
   patch: Record<string, unknown>,
-  serverUrl?: string,
+  serverUrl: string,
 ): Promise<ServerSettingsResponse> {
   return fetchJson<ServerSettingsResponse>('/settings', {
     method: 'PATCH',
@@ -52,11 +50,11 @@ export async function updateServerSettings(
   }, serverUrl);
 }
 
-export async function getEngineStatus(serverUrl?: string): Promise<EngineStatus> {
+export async function getEngineStatus(serverUrl: string): Promise<EngineStatus> {
   return fetchJson<EngineStatus>('/engine/status', undefined, serverUrl);
 }
 
-export async function getAvailableEngines(serverUrl?: string): Promise<AvailableEngine[]> {
+export async function getAvailableEngines(serverUrl: string): Promise<AvailableEngine[]> {
   const data = await fetchJson<{ engines: AvailableEngine[] }>('/engines', undefined, serverUrl);
   return data.engines;
 }

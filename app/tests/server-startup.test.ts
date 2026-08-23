@@ -69,6 +69,28 @@ describe('packaged server startup timing', () => {
     );
   });
 
+  test('keeps packaged recording on discovered managed readiness', () => {
+    const source = readFileSync(
+      new URL('../src/main/index.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('if (app.isPackaged && !discoveredServerUrl)');
+    expect(source).toContain('serverState?.engineStatus?.status !== \'ready\'');
+    expect(source).toContain('const serverUrl = discoveredServerUrl ?? LOCAL_SERVER_URL;');
+    expect(source).not.toContain('useExternalServer');
+  });
+
+  test('ignores legacy external endpoint keys in public settings', () => {
+    const source = readFileSync(
+      new URL('../src/main/services/settings.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).not.toContain('serverUrl: store.get');
+    expect(source).not.toContain('useExternalServer: store.get');
+  });
+
   test('keeps one definitive PATH when merging packaged server environment', () => {
     const childEnvironment = buildChildEnvironment(
       {

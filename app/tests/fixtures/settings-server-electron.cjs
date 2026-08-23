@@ -12,7 +12,6 @@ const userData = path.resolve(tempRoot, `eve-settings-server-${process.pid}`);
 const cases = [
   ['managed-ready', false, 'managed-ready.png'],
   ['managed-error', false, 'managed-error.png'],
-  ['external-ready', false, 'external-ready.png'],
   ['managed-ready', true, 'logs-expanded.png'],
   ['managed-long', false, 'long-strings.png'],
   ['managed-short', true, null],
@@ -92,8 +91,6 @@ async function measure(window, state, logsExpanded, zoom) {
       headingIdsUnique: headingIds.every(Boolean) && new Set(headingIds).size === headingIds.length,
       headingLevels: [...document.querySelectorAll('h1, h2, h3')].map((heading) => Number(heading.tagName.slice(1))),
       serverSubsectionCount: serverView?.querySelectorAll('[data-server-section]').length ?? 0,
-      external: !!document.querySelector('[data-server-external-notice]'),
-      restriction: !!document.querySelector('[data-server-action-restriction]'),
       status: document.querySelector('[data-server-status]')?.textContent?.trim() ?? '',
       healthButtonsDisabled: [...document.querySelectorAll('[data-server-health-surface] button')].map((button) => button.disabled),
       autoStartDisabled: document.querySelector('[data-server-management-surface] [role="switch"]')?.disabled ?? false,
