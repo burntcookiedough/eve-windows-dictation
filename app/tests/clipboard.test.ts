@@ -111,8 +111,8 @@ describe('pasteText', () => {
     await Promise.all([firstPaste, secondPaste]);
     await new Promise((resolve) => setTimeout(resolve, 800));
 
-    expect(clipboardText).toBe('new text');
-    expect(clipboardWrites).not.toContain('previous');
+    expect(clipboardText).toBe('previous');
+    expect(clipboardWrites).toContain('previous');
   });
 
   test('does not paste a superseded operation', async () => {
@@ -136,6 +136,67 @@ describe('pasteText', () => {
     expect(execFile.mock.calls[0]?.[1]).toContain('22222');
     expect(execFile.mock.calls[0]?.[1]).not.toContain('11111');
     expect(clipboardWrites).toEqual(['first text', 'second text']);
+  });
+
+  test('serializes an in-flight paste and restores the original sequence baseline', async () => {
+    let finishFirstSimulation: ((error?: Error | null, stdout?: string) => void) | undefined;
+    execFile.mockImplementationOnce((_command, _args, options, callback) => {
+      finishFirstSimulation = typeof options === 'function' ? options : callback;
+      return { kill: mock(() => {}) };
+    });
+
+    const firstPaste = pasteText('first text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 11111,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 140));
+
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile.mock.calls[0]?.[1]).toContain('11111');
+    const secondPaste = pasteText('second text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 22222,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(clipboardText).toBe('first text');
+    expect(execFile).toHaveBeenCalledTimes(1);
+
+    finishFirstSimulation?.(null, '');
+    await Promise.all([firstPaste, secondPaste]);
+
+    expect(execFile).toHaveBeenCalledTimes(2);
+    expect(execFile.mock.calls[1]?.[1]).toContain('22222');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardText).toBe('previous');
+  });
+
+  test('keeps the original baseline when a newer paste starts during settling', async () => {
+    const firstPaste = pasteText('first text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 11111,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const secondPaste = pasteText('second text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 22222,
+    });
+
+    await Promise.all([firstPaste, secondPaste]);
+
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile.mock.calls[0]?.[1]).toContain('22222');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardText).toBe('previous');
   });
 
   test('does not fall back to untargeted VBScript when targeted SendInput fails', async () => {
