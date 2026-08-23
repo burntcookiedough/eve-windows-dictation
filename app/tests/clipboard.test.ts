@@ -115,6 +115,29 @@ describe('pasteText', () => {
     expect(clipboardWrites).not.toContain('previous');
   });
 
+  test('does not paste a superseded operation', async () => {
+    const firstPaste = pasteText('first text', {
+      restoreClipboard: false,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 11111,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const secondPaste = pasteText('second text', {
+      restoreClipboard: false,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 22222,
+    });
+
+    await Promise.all([firstPaste, secondPaste]);
+
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile.mock.calls[0]?.[1]).toContain('22222');
+    expect(execFile.mock.calls[0]?.[1]).not.toContain('11111');
+    expect(clipboardWrites).toEqual(['first text', 'second text']);
+  });
+
   test('does not fall back to untargeted VBScript when targeted SendInput fails', async () => {
     execFile.mockImplementationOnce((_command: string, _args: string[], _options: unknown, callback: (error?: Error | null) => void) => {
       callback(new Error('target activation failed'));

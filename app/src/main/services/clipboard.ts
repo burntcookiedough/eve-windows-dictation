@@ -306,6 +306,12 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
   const clipboardOwnershipSignature = readClipboardOwnershipSignature();
   try {
     await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
+    if (
+      pasteGeneration !== latestPasteGeneration ||
+      readClipboardOwnershipSignature() !== clipboardOwnershipSignature
+    ) {
+      return;
+    }
     await simulatePaste(options.method, options.targetWindowHandle);
   } finally {
     if (options.restoreClipboard) {
