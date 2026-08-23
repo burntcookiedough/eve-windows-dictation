@@ -53,6 +53,19 @@ function Assert-SelfContainedRuntime {
     }
 }
 
+function Get-PythonAbi {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonPath
+    )
+
+    $pythonAbi = (& $PythonPath -I -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")').Trim()
+    if ($LASTEXITCODE -ne 0 -or $pythonAbi -notmatch '^\d+$') {
+        throw "Could not determine the Python ABI for $PythonPath."
+    }
+    return $pythonAbi
+}
+
 uv python install $PythonVersion
 $previousVirtualEnv = $env:VIRTUAL_ENV
 try {
@@ -83,9 +96,15 @@ if ((Test-PathWithin -Path $pythonPath -Root $serverPath) -or
 }
 
 $runtimeSource = Split-Path -Parent $pythonPath
-$pythonAbi = (& $pythonPath -I -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")').Trim()
-if ($LASTEXITCODE -ne 0 -or -not $pythonAbi) {
-    throw "Could not determine the managed Python ABI version."
+$pythonAbi = Get-PythonAbi -PythonPath $pythonPath
+
+$venvPython = Join-Path $serverPath ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+    throw "Release virtual environment is missing its Python executable: $venvPython"
+}
+$venvAbi = Get-PythonAbi -PythonPath $venvPython
+if ($venvAbi -ne $pythonAbi) {
+    throw "Release .venv/runtime Python ABI mismatch: .venv=$venvAbi runtime=$pythonAbi"
 }
 
 foreach ($required in @("python.exe", "python$pythonAbi.dll", "Lib", "DLLs")) {

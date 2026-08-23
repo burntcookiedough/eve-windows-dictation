@@ -142,6 +142,29 @@ def test_release_verification_targets_eve_with_legacy_payload_name() -> None:
     assert '"murmur-$ExpectedVersion-x64.nsis.7z"' in contents
 
 
+def test_release_sync_pins_python_excludes_dev_and_checks_runtime_abi() -> None:
+    release_sync = "uv sync --python 3.11 --no-dev --extra release --frozen"
+    for relative_path in (
+        "AGENTS.md",
+        "README.md",
+        "docs/development/building.md",
+        "docs/installer-dependencies.md",
+    ):
+        assert release_sync in (ROOT / relative_path).read_text(encoding="utf-8")
+
+    runtime_script = (ROOT / "scripts" / "prepare-python-runtime.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert 'Join-Path $serverPath ".venv\\Scripts\\python.exe"' in runtime_script
+    assert "$venvAbi = Get-PythonAbi -PythonPath $venvPython" in runtime_script
+    assert "Release .venv/runtime Python ABI mismatch" in runtime_script
+    mismatch_index = runtime_script.index("Release .venv/runtime Python ABI mismatch")
+    replace_index = runtime_script.index(
+        'Remove-Item -LiteralPath $runtimePath -Recurse -Force'
+    )
+    assert mismatch_index < replace_index
+
+
 def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
     project = _load_server_pyproject()["project"]
     extras = project["optional-dependencies"]

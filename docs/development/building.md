@@ -24,10 +24,13 @@ uv run pytest
 uv run python -m src.main
 ```
 
-Use `uv sync --extra release --frozen` when preparing the shipped Whisper-only
-closure. The experimental `nemotron` extra remains available for deferred
-repair work, but is not shipped or user-selectable in this alpha. Development
-commands must use the current clone, never a copied user environment.
+Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the
+shipped Whisper-only closure. Pinning the sync interpreter keeps compiled
+packages compatible with the relocatable runtime, and `--no-dev` keeps the
+default development group out of the shipped environment. The experimental
+`nemotron` extra remains available for deferred repair work, but is not shipped
+or user-selectable in this alpha. Development commands must use the current
+clone, never a copied user environment.
 
 ## Windows package preparation
 
@@ -35,16 +38,18 @@ The supported installer is `nsis-web`. Before a release-authorized package attem
 
 ```powershell
 Set-Location server
-uv sync --extra release --frozen
+uv sync --python 3.11 --no-dev --extra release --frozen
 ../scripts/prepare-python-runtime.ps1 -ServerDir .
 
 Set-Location ../app
 bun run package:win
 ```
 
-`prepare-python-runtime.ps1` copies and verifies the standalone `.runtime` CPython
-root. Do not substitute a virtual-environment launcher, move caches, or modify the
-frozen app identity, NSIS GUID, profiles, install chain, or historical release assets.
+`prepare-python-runtime.ps1` checks that the synced `.venv` and managed runtime
+use the same Python ABI before copying and verifying the standalone `.runtime`
+CPython root. Do not substitute a virtual-environment launcher, move caches, or
+modify the frozen app identity, NSIS GUID, profiles, install chain, or historical
+release assets.
 The package script uses `--publish never`; package, tag, upload, draft, and public
 release actions each require their applicable authorization and release plan.
 
