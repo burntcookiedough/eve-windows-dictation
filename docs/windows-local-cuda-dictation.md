@@ -149,7 +149,6 @@ Set `%APPDATA%\murmur\settings.json` to:
   "launchOnBoot": true,
   "startMinimized": true,
   "serverAutoStart": true,
-  "useExternalServer": false,
   "hotwordsEnabled": false,
   "hotwordsCsl": ""
 }
@@ -177,7 +176,6 @@ $appSettings = "$env:APPDATA\murmur\settings.json"
   "clipboardRestoreDelayMs": 250,
   "pasteMethod": "sendinput",
   "silenceTimeout": 15,
-  "serverUrl": "ws://localhost:51717/transcribe",
   "appendPeriod": false,
   "appendSpace": true,
   "dictationMode": "clean_prompt",
@@ -185,7 +183,6 @@ $appSettings = "$env:APPDATA\murmur\settings.json"
   "launchOnBoot": true,
   "startMinimized": true,
   "serverAutoStart": true,
-  "useExternalServer": false,
   "hotwordsEnabled": false,
   "hotwordsCsl": "",
   "__internal__": {
@@ -197,7 +194,7 @@ $appSettings = "$env:APPDATA\murmur\settings.json"
 '@ | Set-Content -LiteralPath $appSettings -Encoding UTF8
 ```
 
-`serverUrl` may remain at `51717`; the bundled server manager can allocate a dynamic port and writes the actual active port to `%APPDATA%\murmur\server.pid`.
+The bundled server manager can allocate a dynamic port and writes the active port to `%APPDATA%\murmur\server.pid`; packaged recording uses that discovered endpoint. Development falls back to `ws://localhost:51717/transcribe` when no local server has been detected.
 
 ## Server virtual environment
 

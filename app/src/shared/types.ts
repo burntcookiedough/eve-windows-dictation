@@ -22,7 +22,7 @@ export interface ServerStatePayload {
   uptime?: number;
   error?: string;
   wsUrl?: string;
-  managed: boolean; // false in dev mode (externally running server)
+  managed: boolean; // false when Eve detected an already-running server
   engineStatus?: EngineStatus;
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
@@ -287,7 +287,6 @@ export interface Settings {
   clipboardRestoreDelayMs: number;
   pasteMethod: 'sendinput' | 'vbscript';
   silenceTimeout: number;
-  serverUrl: string;
   // Post-processing
   appendPeriod: boolean;
   appendSpace: boolean;
@@ -299,7 +298,6 @@ export interface Settings {
   startMinimized: boolean;
   // Server management
   serverAutoStart: boolean; // Auto-start server in production mode
-  useExternalServer: boolean; // Bypass managed server and use custom serverUrl
   // Recognition vocabulary hints
   hotwordsEnabled: boolean;
   hotwordsCsl: string;
@@ -416,7 +414,6 @@ export const DEFAULT_SETTINGS: Settings = {
   clipboardRestoreDelayMs: 250,
   pasteMethod: 'sendinput',
   silenceTimeout: 15,
-  serverUrl: 'ws://localhost:51717/transcribe',
   // Post-processing
   appendPeriod: false,
   appendSpace: false,
@@ -428,7 +425,6 @@ export const DEFAULT_SETTINGS: Settings = {
   startMinimized: false,
   // Server management
   serverAutoStart: true,
-  useExternalServer: false,
   // Recognition vocabulary hints
   hotwordsEnabled: false,
   hotwordsCsl: '',

@@ -116,7 +116,7 @@ export function formatDiagnosticsReport(input: DiagnosticsReportInput): string {
   const appVersion = matchingString(input.appVersion, SAFE_VERSION) ?? 'unknown';
   const windowsRelease = matchingString(input.windowsRelease, SAFE_WINDOWS_RELEASE) ?? 'unknown';
   const architecture = enumString(input.architecture, new Set(['x64', 'arm64', 'ia32'])) ?? 'unknown';
-  const managed = typeof state?.managed === 'boolean' ? (state.managed ? 'managed' : 'external') : 'unknown';
+  const managed = typeof state?.managed === 'boolean' ? (state.managed ? 'managed' : 'detected') : 'unknown';
   const serverStatus = enumString(state?.status, SERVER_STATUSES) ?? 'unknown';
   const lines = [
     'Eve diagnostics',

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { ServerStatusPhase } from '../server-status';
-  import { getServerManagementMode, retryManagedServer, serverStatusState } from '../server-status';
+  import { retryManagedServer, serverStatusState } from '../server-status';
   import PrimaryPage from '../components/PrimaryPage.svelte';
 
   interface Props {
@@ -32,7 +32,6 @@
   };
 
   let readiness = $derived(phaseCopy[snapshot.phase]);
-  let managementMode = $derived(getServerManagementMode(snapshot));
   let phaseAccent = $derived(
     snapshot.phase === 'ready'
       ? 'emerald'
@@ -97,9 +96,6 @@
               </span>
               {snapshot.phase === 'ready' ? 'Listening when you are' : readiness.title}
             </span>
-            {#if managementMode === 'external'}
-              <span class="rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-400">External processing</span>
-            {/if}
           </div>
 
           <p class="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Your words, ready to move</p>
@@ -137,9 +133,7 @@
         </div>
       </div>
 
-      {#if managementMode === 'external'}
-        <p class="relative mt-5 text-xs leading-5 text-zinc-500">External server — Eve cannot restart this endpoint.</p>
-      {:else if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
+      {#if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
         <button
           type="button"
           onclick={retry}
@@ -149,8 +143,6 @@
         >
           {retrying ? 'Retrying…' : 'Retry managed server'}
         </button>
-      {:else if managementMode === 'unknown' && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
-        <p class="relative mt-5 text-xs leading-5 text-zinc-500">Management mode cannot be confirmed. Open Settings &gt; Server &amp; diagnostics.</p>
       {/if}
 
       {#if model && snapshot.phase === 'downloading'}
@@ -192,7 +184,7 @@
     <div class="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <h2 id="home-privacy-heading" class="text-sm font-medium text-zinc-200">Private by default</h2>
-        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">By default, Eve processes speech locally. If you configure an external endpoint, audio is sent to that endpoint under your control. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
+        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">Eve processes speech locally through its managed service. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
         {#if shortcutsError}<p class="mt-2 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>{/if}
       </div>
       <span class="shrink-0 rounded-full border border-emerald-300/15 bg-emerald-300/[0.05] px-3 py-1.5 text-xs text-emerald-300">Local-first</span>

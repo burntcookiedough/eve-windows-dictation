@@ -1,6 +1,6 @@
 import type { ServerSettingsResponse, EngineStatus, AvailableEngine } from '../../shared/types.js';
-import { getSetting } from './settings.js';
 import { createLogger } from '../lib/logger.js';
+import { LOCAL_SERVER_URL } from './server-api-url.js';
 
 const log = createLogger('ServerSettings');
 
@@ -9,7 +9,7 @@ const log = createLogger('ServerSettings');
  * e.g. "ws://localhost:51717/transcribe" → "http://localhost:51717"
  */
 function getBaseUrl(serverUrl?: string): string {
-  const wsUrl = serverUrl ?? getSetting('serverUrl');
+  const wsUrl = serverUrl ?? LOCAL_SERVER_URL;
   const url = new URL(wsUrl);
   url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
   // Strip path (e.g. /transcribe) to get the base

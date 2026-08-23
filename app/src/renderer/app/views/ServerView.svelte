@@ -5,7 +5,7 @@
   import ModelProgressCard from '../components/ModelProgressCard.svelte';
   import type { ServerStatePayload, ServerLogEntry } from '$shared/types';
   import { shouldShowModelProgress } from '$shared/model-progress';
-  import { getServerManagementMode, serverStatusState } from '../server-status';
+  import { serverStatusState } from '../server-status';
   import {
     getServerLogBodySize,
     getServerLogCountLabel,
@@ -16,10 +16,9 @@
 
   interface Props {
     embedded?: boolean;
-    externalMode?: boolean;
   }
 
-  let { embedded = false, externalMode: externalModeProp }: Props = $props();
+  let { embedded = false }: Props = $props();
   const componentId = $props.id();
   const headingTag = $derived(embedded ? 'h3' : 'h2');
 
@@ -37,7 +36,6 @@
   let logsLoadState = $state<ServerLogLoadState>('loading');
   let showLogs = $state(false);
   let autoStart = $state(true);
-  let configuredExternalServer = $state(false);
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
@@ -50,9 +48,6 @@
   let removeLogListener: (() => void) | null = null;
   let reloadLogs: (() => Promise<void>) | null = null;
 
-  let externalMode = $derived(
-    externalModeProp ?? getServerManagementMode({ ...$serverStatusState, configuredExternalServer }) === 'external'
-  );
   const logOutputId = `server-log-output-${componentId}`;
   const privacyWarningId = `server-logs-privacy-${componentId}`;
   const diagnosticsStatusId = `server-diagnostics-status-${componentId}`;
@@ -102,19 +97,13 @@
   }
 
   let canStart = $derived(
-    !externalMode &&
     !isLoading &&
     (serverState.status === 'stopped' || serverState.status === 'idle' || serverState.status === 'error')
   );
   let canStop = $derived(
-    !externalMode &&
     !isLoading && serverState.managed && serverState.status === 'running'
   );
   let canRestart = $derived(
-    !externalMode &&
-    !isLoading && serverState.managed && serverState.status === 'running'
-  );
-  let canShutdownManaged = $derived(
     !isLoading && serverState.managed && serverState.status === 'running'
   );
 
@@ -253,7 +242,6 @@
       const settings = await window.murmurMain.getSettings();
       if (!active) return;
       autoStart = settings.serverAutoStart;
-      configuredExternalServer = settings.useExternalServer;
 
       if (!active || removeLogListener) return;
       removeLogListener = window.murmurMain.onServerLog((entry) => {
@@ -279,33 +267,6 @@
 </script>
 
 <div data-server-view class={embedded ? 'min-w-0 space-y-6' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
-  {#if externalMode}
-    <div data-server-external-notice class="flex min-w-0 flex-col gap-3 rounded-xl border border-amber-800/70 bg-amber-950/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="min-w-0">
-        <p class="text-sm text-amber-200">External server mode is enabled</p>
-        <p class="mt-1 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">
-          Built-in server controls are disabled.
-          {#if embedded}
-            Configure the external endpoint in the Management mode &amp; endpoint section above.
-          {:else}
-            Configure the external endpoint in Settings &gt; Server &amp; diagnostics.
-          {/if}
-        </p>
-      </div>
-      {#if serverState.managed && serverState.status === 'running'}
-        <button
-          type="button"
-          onclick={handleStop}
-          disabled={!canShutdownManaged}
-          class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-red-800/70 bg-red-900/60 px-3 py-2 text-xs font-medium text-red-100 transition-colors
-            {canShutdownManaged ? 'cursor-pointer hover:bg-red-900' : 'cursor-not-allowed opacity-60'}"
-        >
-          Shut down built-in server
-        </button>
-      {/if}
-    </div>
-  {/if}
-
   <section data-server-section="diagnostics" class="min-w-0 space-y-2" aria-labelledby={headingId('diagnostics')}>
     <div class="min-w-0 px-1">
       <svelte:element this={headingTag} id={headingId('diagnostics')} class="text-sm font-semibold text-zinc-200">Diagnostics</svelte:element>
@@ -342,7 +303,6 @@
           enabled={autoStart}
           onchange={updateAutoStart}
           label="Auto-start server"
-          disabled={externalMode}
         />
       </SettingsRow>
     </div>
@@ -363,9 +323,6 @@
             <span class="relative h-3 w-3 rounded-full {statusDisplay.bgColor}"></span>
           </span>
           <span data-server-status class="min-w-0 text-lg font-medium {statusDisplay.color} [overflow-wrap:anywhere]">{statusDisplay.label}</span>
-          {#if !serverState.managed && serverState.status === 'running'}
-            <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">External</span>
-          {/if}
         </div>
 
         {#if serverState.status === 'running' && (serverState.pid !== undefined || serverState.port !== undefined || serverState.version !== undefined || serverState.uptime !== undefined)}
@@ -420,10 +377,6 @@
           {/if}
         </div>
       </div>
-
-      {#if externalMode}
-        <p data-server-action-restriction class="mt-3 border-t border-white/[0.08] pt-3 text-xs leading-5 text-zinc-500">Start, restart, and stop are unavailable while an external endpoint is active.</p>
-      {/if}
 
       {#if serverState.error}
         <div class="mt-4 rounded-lg border border-red-900/60 bg-red-950/30 p-3">

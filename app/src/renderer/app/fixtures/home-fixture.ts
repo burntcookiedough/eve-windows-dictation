@@ -51,7 +51,6 @@ serverStatusState.set({
   state,
   phase,
   announcement: `Fixture ${phase}`,
-  configuredExternalServer: false,
 });
 
 Object.assign(window, {

@@ -14,7 +14,6 @@ const electronScreenshots = [
   ['speech', 'ready', false, 'speech-ready.png'],
   ['speech', 'preparing', false, 'speech-preparing.png'],
   ['speech', 'error', false, 'speech-error.png'],
-  ['speech', 'external', false, null],
   ['speech', 'ready', true, 'compatibility-expanded.png'],
 ];
 
@@ -68,7 +67,6 @@ async function measure(window, view, state, compatibility, zoom) {
       optionContained: !!ownerRect && optionRects.every((option) => option && option.left >= ownerRect.left && option.right <= ownerRect.right),
       focus: focusStyle ? { focusWithin: !!focusLabel?.matches(':focus-within'), outlineWidth: focusStyle.outlineWidth, boxShadow: focusStyle.boxShadow } : null,
       document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
-      external: !!document.querySelector('[data-speech-model-external]'),
       compatibilityExpanded: compatibilityButton?.getAttribute('aria-expanded') === 'true' && !!compatibilityControls,
       compatibilityAssociation: !!compatibilityButton && compatibilityButton.getAttribute('aria-controls') === compatibilityControls?.id,
     };

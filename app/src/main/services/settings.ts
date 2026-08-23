@@ -56,7 +56,6 @@ export function getSettings(): Settings {
     clipboardRestoreDelayMs: store.get('clipboardRestoreDelayMs'),
     pasteMethod: store.get('pasteMethod'),
     silenceTimeout: store.get('silenceTimeout'),
-    serverUrl: store.get('serverUrl'),
     appendPeriod: store.get('appendPeriod'),
     appendSpace: store.get('appendSpace'),
     dictationMode: store.get('dictationMode'),
@@ -64,7 +63,6 @@ export function getSettings(): Settings {
     launchOnBoot: store.get('launchOnBoot'),
     startMinimized: store.get('startMinimized'),
     serverAutoStart: store.get('serverAutoStart'),
-    useExternalServer: store.get('useExternalServer'),
     hotwordsEnabled: store.get('hotwordsEnabled'),
     hotwordsCsl: store.get('hotwordsCsl'),
   };

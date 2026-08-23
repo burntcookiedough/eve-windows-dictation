@@ -35,7 +35,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).not.toContain('rounded-xl border p-3 transition-colors');
   });
 
-  test('distinguishes current, selected, available, preparing, error, and external states', () => {
+  test('distinguishes current, selected, available, preparing, and error states', () => {
     expect(chooser).toContain("if (isError(preset)) return isSelected(preset) ? 'Selected · Error' : 'Error'");
     expect(chooser).toContain("if (isPreparing(preset)) return 'Preparing'");
     expect(chooser).toContain("if (isCurrent(preset)) return 'Current'");
@@ -43,7 +43,6 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).toContain("'Selected'");
     expect(chooser).toContain("return 'Available'");
     expect(chooser).toContain("return 'Unavailable'");
-    expect(chooser).toContain('data-speech-model-external');
     expect(chooser).toContain('preparationFailed: boolean');
     expect(settingsView).toContain('preparationFailed={preparationFailed}');
   });
@@ -55,7 +54,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('>Revert</button>');
     expect(settingsView).toContain('current engine remains active until the selected model is ready');
     expect(settingsView).toContain('selectPreset');
-    expect(settingsView).toContain('if (externalMode || !isEngineAvailable(preset.engine)) return;');
+    expect(settingsView).toContain('if (!isEngineAvailable(preset.engine)) return;');
     expect(settingsView).not.toContain('async function pollEngineStatus');
     expect(settingsView).toContain('void loadServerSettings()');
   });
@@ -67,7 +66,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('id="compatibility-controls"');
     expect(settingsView).toContain('hidden={!compatibilityControlsOpen}');
     expect(settingsView).toContain('hasPendingCompatibilityChanges(pendingEngine, stagedPreset)');
-    expect(chooser).toContain('externalMode || unavailable(preset)');
+    expect(chooser).toContain('const disabled = unavailable(preset)');
     expect(settingsView).toContain("'whisper_compute_type'");
     expect(settingsView).toContain("'whisper_language'");
     expect(settingsView).not.toContain("'nemotron_device'");
@@ -76,7 +75,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('data-compatibility-footer');
     expect(settingsView).toContain('Apply compatibility changes');
     expect(settingsView).toContain('data-engine-status');
-    expect(settingsView).toContain('disabled={externalMode}');
+    expect(settingsView).not.toContain('disabled={externalMode}');
     expect(settingsView).not.toContain('engineAdvancedOpen');
     expect(settingsView).not.toContain('engine-advanced-options');
   });

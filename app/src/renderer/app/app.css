@@ -77,15 +77,6 @@
     animation: none;
   }
 
-  ::view-transition-group(external-server-panel) {
-    animation-duration: 180ms;
-    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  ::view-transition-old(external-server-panel),
-  ::view-transition-new(external-server-panel) {
-    animation: none;
-  }
 }
 
 @media (prefers-reduced-transparency: reduce) {

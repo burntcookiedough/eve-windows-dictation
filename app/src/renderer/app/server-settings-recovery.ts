@@ -51,9 +51,8 @@ export function shouldRetryServerSettings(
 
 export function shouldClearServerSettings(
   state: SettingsRecoveryState | null | undefined,
-  externalMode: boolean,
 ): boolean {
-  return !externalMode && state !== null && state !== undefined && state.status !== 'running';
+  return state !== null && state !== undefined && state.status !== 'running';
 }
 
 /**
@@ -63,10 +62,9 @@ export function shouldClearServerSettings(
  */
 export function recoverInterruptedManagedPreparation(
   state: SettingsRecoveryState | null | undefined,
-  externalMode: boolean,
   lifecycle: EnginePreparationLifecycle,
 ): ManagedServerPreparationRecovery | null {
-  if (!shouldClearServerSettings(state, externalMode)) return null;
+  if (!shouldClearServerSettings(state)) return null;
 
   const interrupted = lifecycle.requested
     || lifecycle.active

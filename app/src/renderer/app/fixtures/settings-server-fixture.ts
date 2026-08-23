@@ -8,7 +8,6 @@ import '../app.css';
 type FixtureState =
   | 'managed-ready'
   | 'managed-error'
-  | 'external-ready'
   | 'managed-long'
   | 'managed-short'
   | 'managed-empty'
@@ -17,7 +16,6 @@ type FixtureState =
 
 const params = new URLSearchParams(globalThis.location.search);
 const fixtureState = (params.get('state') ?? 'managed-ready') as FixtureState;
-const externalMode = fixtureState === 'external-ready';
 const longStrings = fixtureState === 'managed-long';
 const hasError = fixtureState === 'managed-error';
 const logError = fixtureState === 'managed-log-error';
@@ -43,8 +41,8 @@ const engineStatus = {
 
 const serverState: ServerStatePayload = {
   status: hasError ? 'error' : 'running',
-  managed: !externalMode,
-  pid: externalMode ? undefined : 4242,
+  managed: true,
+  pid: 4242,
   port: 51717,
   version: longStrings ? '0.8.0-fixture-build-with-a-long-version-label' : '0.8.0',
   uptime: 3725000,
@@ -77,19 +75,12 @@ const logs: ServerLogEntry[] = Array.from({ length: logCount }, (_, index) => ({
 
 const fixtureSettings = {
   ...DEFAULT_SETTINGS,
-  useExternalServer: externalMode,
-  serverUrl: longStrings
-    ? 'ws://fixture-server-with-a-deliberately-long-hostname.example.internal:51717/transcribe'
-    : externalMode
-      ? 'ws://external-fixture.example:51717/transcribe'
-      : DEFAULT_SETTINGS.serverUrl,
 };
 
 serverStatusState.set({
   state: serverState,
   phase: hasError ? 'error' : 'ready',
   announcement: '',
-  configuredExternalServer: externalMode,
 });
 
 const fixtureMain = {

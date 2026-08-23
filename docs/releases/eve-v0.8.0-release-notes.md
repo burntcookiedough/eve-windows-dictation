@@ -21,8 +21,8 @@ created by these notes.
 
 ## Compatibility and privacy
 
-- Eve processes audio locally by default. If a user configures an external endpoint, audio
-  is sent to that endpoint under the user's control.
+- Eve processes audio through its bundled local service. Packaged Eve does not expose a
+  configurable external-server endpoint.
 - Eve does not automatically read, import, merge, prompt for, or delete legacy Murmur
   personal data. `%APPDATA%\murmur` remains untouched; `%APPDATA%\Eve` is the active
   profile.

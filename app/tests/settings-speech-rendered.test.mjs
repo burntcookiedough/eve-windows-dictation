@@ -101,7 +101,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('keeps the General and Speech fixture inside one page scroll owner at all zooms', () => {
-    expect(measurements.length).toBe(36);
+    expect(measurements.length).toBe(30);
     for (const measurement of measurements) {
       expect(measurement.owner.overflowY).toBe('auto');
       expect(measurement.owner.overflowX).toBe('hidden');
@@ -132,12 +132,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(error.states.some((label) => label.includes('Selected') && label.includes('Error'))).toBeTrue();
   });
 
-  test('preserves external restrictions and the compatibility disclosure association', () => {
-    const external = measurements.find((measurement) => measurement.view === 'speech' && measurement.state === 'external' && measurement.zoom === 1);
-    expect(external.external).toBeTrue();
-    expect(external.optionCount).toBe(0);
-    expect(external.focus.focusWithin).toBeFalse();
-
+  test('keeps the compatibility disclosure association', () => {
     const expanded = measurements.find((measurement) => measurement.compatibility);
     expect(expanded.compatibilityExpanded).toBeTrue();
     expect(expanded.compatibilityAssociation).toBeTrue();
@@ -160,7 +155,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {
-    expect(result.screenshots).toHaveLength(5);
+    expect(result.screenshots).toHaveLength(4);
     for (const screenshot of result.screenshots) {
       expect(existsSync(screenshot)).toBeTrue();
     }

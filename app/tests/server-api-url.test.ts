@@ -6,11 +6,12 @@ describe('server API endpoint selection', () => {
   const dynamic = 'ws://localhost:51490/transcribe';
 
   test('uses the manager-reported dynamic endpoint for managed running servers', () => {
-    expect(resolveServerApiUrl(configured, { status: 'running', wsUrl: dynamic }, false)).toBe(dynamic);
-    expect(resolveServerApiUrl(configured, { status: 'starting' }, false)).toBe(configured);
+    expect(resolveServerApiUrl(configured, { status: 'running', wsUrl: dynamic })).toBe(dynamic);
+    expect(resolveServerApiUrl(configured, { status: 'starting' })).toBe(configured);
   });
 
-  test('preserves the configured endpoint for external-server mode', () => {
-    expect(resolveServerApiUrl(configured, { status: 'running', wsUrl: dynamic }, true)).toBe(configured);
+  test('falls back to localhost until the manager reports a running server', () => {
+    expect(resolveServerApiUrl(configured, null)).toBe(configured);
+    expect(resolveServerApiUrl(configured, { status: 'stopped', wsUrl: dynamic })).toBe(configured);
   });
 });
