@@ -52,6 +52,14 @@ describe('Gate 5 accessibility contracts', () => {
     expect(hotkeyModal).toContain('aria-modal="true"');
   });
 
+  test('ignores stale hotkey capture callbacks across cancel and reopen', () => {
+    expect(hotkeyModal).toContain('let captureGeneration = 0;');
+    expect(hotkeyModal).toContain('const generation = ++captureGeneration;');
+    expect(hotkeyModal).toContain('if (generation !== captureGeneration) return;');
+    expect(hotkeyModal).toContain('if (generation === captureGeneration)');
+    expect(hotkeyModal).toContain('captureGeneration += 1;');
+  });
+
   test('keeps the overlay click-through, non-focusable, and noninteractive', () => {
     expect(overlayWindow).toContain('focusable: false');
     expect(overlayWindow).toContain('overlay.setIgnoreMouseEvents(true)');

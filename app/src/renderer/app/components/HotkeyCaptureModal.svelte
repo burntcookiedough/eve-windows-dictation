@@ -13,12 +13,11 @@
   let dialogRef: HTMLDivElement | null = $state(null);
   let cancelButton: HTMLButtonElement | null = $state(null);
   let returnFocus: HTMLElement | null = null;
-  let cancellationRequested = false;
+  let captureGeneration = 0;
   let wasOpen = false;
 
   $effect(() => {
     if (isOpen && !wasOpen) {
-      cancellationRequested = false;
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       queueMicrotask(() => cancelButton?.focus());
     } else if (!isOpen && wasOpen) {
@@ -35,22 +34,26 @@
   });
 
   async function startCapture() {
+    const generation = ++captureGeneration;
     isCapturing = true;
     try {
       const result = await window.murmurMain.startHotkeyCapture();
+      if (generation !== captureGeneration) return;
       onCapture(result.hotkey, result.displayName);
     } catch (error) {
-      if (!cancellationRequested) {
-        console.error('Hotkey capture failed:', error);
-        onCancel();
-      }
+      if (generation !== captureGeneration) return;
+      console.error('Hotkey capture failed:', error);
+      onCancel();
     } finally {
-      isCapturing = false;
+      if (generation === captureGeneration) {
+        isCapturing = false;
+      }
     }
   }
 
   function handleCancel() {
-    cancellationRequested = true;
+    captureGeneration += 1;
+    isCapturing = false;
     void window.murmurMain.cancelHotkeyCapture();
     onCancel();
   }
