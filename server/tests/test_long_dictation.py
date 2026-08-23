@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from audio.buffer import AudioBuffer
 import transcription.processor as processor_module
 from transcription.errors import VramExhaustedError
 from transcription.long_dictation import plan_chunks, stitch_text
@@ -41,6 +42,7 @@ class _FakeAudioBuffer:
 class _RecordingSession:
     def __init__(self) -> None:
         self.calls: list[tuple[int, TranscribeOptions | None]] = []
+        self.audio_inputs: list[np.ndarray] = []
 
     def transcribe(
         self,
@@ -50,6 +52,7 @@ class _RecordingSession:
         options: TranscribeOptions | None = None,
     ) -> TranscribeResult:
         self.calls.append((len(audio), options))
+        self.audio_inputs.append(np.array(audio, copy=True))
         return TranscribeResult(
             text=f"chunk {len(self.calls)}",
             confidence=0.8,
@@ -175,15 +178,28 @@ async def test_long_partial_uses_tail_window_for_speech_timing_only(
 ) -> None:
     session = _RecordingSession()
     manager = _RecordingManager(session)
-    audio = np.zeros(int(40 * 16000), dtype=np.float32)
+    first_chunk = np.full(3 * 16000, 100, dtype=np.int16)
+    last_chunk = np.linspace(-1000, 1000, 16000, dtype=np.int16)
+    audio_buffer = AudioBuffer()
+    audio_buffer.append(0, first_chunk)
+    audio_buffer.append(1, last_chunk)
+
+    def _fail_full_conversion() -> np.ndarray:
+        raise AssertionError("long partials must not convert the full audio buffer")
+
+    monkeypatch.setattr(audio_buffer, "get_audio_float32", _fail_full_conversion)
     context = SimpleNamespace(
         session_id="long-partial",
-        audio_buffer=_FakeAudioBuffer(audio),
+        audio_buffer=audio_buffer,
         hotwords=None,
         last_partial_text="previous visible text",
     )
 
-    monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
+    monkeypatch.setattr(
+        processor_module,
+        "get_settings",
+        lambda: _settings(long_dictation_threshold_s=3.0, long_dictation_chunk_s=2.0),
+    )
     monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
 
     processor = processor_module.TranscriptionProcessor(context)
@@ -193,10 +209,14 @@ async def test_long_partial_uses_tail_window_for_speech_timing_only(
     assert result.text == ""
     assert result.is_empty is True
     assert len(session.calls) == 1
-    assert session.calls[0][0] == int(25 * 16000)
+    assert session.calls[0][0] == 2 * 16000
     assert session.calls[0][1] is not None
     assert session.calls[0][1].condition_on_previous_text is False
-    assert result.last_speech_end == pytest.approx(40.0)
+    expected_tail = (
+        np.concatenate((first_chunk[-16000:], last_chunk)).astype(np.float32) / 32768.0
+    )
+    np.testing.assert_array_equal(session.audio_inputs[0], expected_tail)
+    assert result.last_speech_end == pytest.approx(4.0)
 
 
 @pytest.mark.asyncio

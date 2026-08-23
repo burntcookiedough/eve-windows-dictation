@@ -109,20 +109,18 @@ class TranscriptionProcessor:
 
         start_time = time.perf_counter()
         audio_duration = self._context.audio_buffer.duration_seconds
+        loop = asyncio.get_running_loop()
+        if audio_duration >= self._long_dictation_threshold_s:
+            return await self._transcribe_long_partial_window(
+                audio_duration=audio_duration,
+                start_time=start_time,
+                loop=loop,
+            )
 
         audio = self._context.audio_buffer.get_audio_float32()
 
         if len(audio) == 0:
             return None
-
-        loop = asyncio.get_running_loop()
-        if audio_duration >= self._long_dictation_threshold_s:
-            return await self._transcribe_long_partial_window(
-                audio,
-                audio_duration=audio_duration,
-                start_time=start_time,
-                loop=loop,
-            )
 
         if self._allow_overlapping_inference:
             executor = await get_executor(self._transcription_max_workers)
@@ -210,12 +208,11 @@ class TranscriptionProcessor:
 
     async def _transcribe_long_partial_window(
         self,
-        audio,
         *,
         audio_duration: float,
         start_time: float,
         loop: asyncio.AbstractEventLoop,
-    ) -> TranscriptionResult:
+    ) -> TranscriptionResult | None:
         """Use a bounded tail window for speech timing after long mode starts.
 
         We intentionally suppress live text for long recordings. Re-emitting a
@@ -223,8 +220,13 @@ class TranscriptionProcessor:
         long-context drift that chunked final mode is designed to avoid.
         """
         max_samples = max(1, int(self._long_dictation_chunk_s * AUDIO_SAMPLE_RATE))
-        window_start_sample = max(0, len(audio) - max_samples)
-        window_audio = audio[window_start_sample:]
+        window_audio = self._context.audio_buffer.get_audio_tail_float32(max_samples)
+        if len(window_audio) == 0:
+            return None
+        window_start_sample = max(
+            0,
+            self._context.audio_buffer.sample_count - len(window_audio),
+        )
         result = await self._run_transcribe(
             window_audio,
             loop=loop,
