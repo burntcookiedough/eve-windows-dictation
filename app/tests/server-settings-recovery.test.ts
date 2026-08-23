@@ -7,6 +7,7 @@ import {
 } from '../src/renderer/app/server-settings-recovery';
 
 const starting = { status: 'starting' as const, managed: true };
+const unmanagedStarting = { status: 'starting' as const, managed: false };
 const ready = {
   status: 'running' as const,
   managed: true,
@@ -59,5 +60,18 @@ describe('Settings server-state recovery', () => {
       message: 'The managed speech server stopped while model settings were being prepared. Restart it, then select and apply the model again.',
     });
     expect(recoverInterruptedManagedPreparation(ready, lifecycle)).toBeNull();
+  });
+
+  test('preserves staged preparation during an unmanaged development outage', () => {
+    const lifecycle = {
+      pending: { engine: 'whisper' },
+      requested: true,
+      active: true,
+      observed: true,
+      applying: true,
+    };
+
+    expect(shouldClearServerSettings(unmanagedStarting)).toBeTrue();
+    expect(recoverInterruptedManagedPreparation(unmanagedStarting, lifecycle)).toBeNull();
   });
 });

@@ -184,7 +184,7 @@
     <div class="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <h2 id="home-privacy-heading" class="text-sm font-medium text-zinc-200">Private by default</h2>
-        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">Eve processes speech locally through its managed service. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
+        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">Packaged Eve uses its managed local service for speech. During development, Eve may use a separately started localhost service. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
         {#if shortcutsError}<p class="mt-2 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>{/if}
       </div>
       <span class="shrink-0 rounded-full border border-emerald-300/15 bg-emerald-300/[0.05] px-3 py-1.5 text-xs text-emerald-300">Local-first</span>

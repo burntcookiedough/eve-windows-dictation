@@ -231,7 +231,8 @@ describe('Home and shared server status', () => {
     expect(serverView).toContain('if (!active) return;');
     expect(banner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
     expect(banner).not.toContain('Open Server and use Restart');
-    expect(homeView).toContain('Eve processes speech locally through its managed service.');
+    expect(homeView).toContain('Packaged Eve uses its managed local service for speech.');
+    expect(homeView).toContain('During development, Eve may use a separately started localhost service.');
   });
 
   test('keeps detected development servers separate from managed retry actions', () => {

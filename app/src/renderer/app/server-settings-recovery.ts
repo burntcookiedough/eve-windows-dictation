@@ -1,6 +1,6 @@
 import type { ServerStatePayload } from '../../shared/types';
 
-type SettingsRecoveryState = Pick<ServerStatePayload, 'status' | 'port' | 'wsUrl' | 'version' | 'engineStatus' | 'modelDownload'>;
+type SettingsRecoveryState = Pick<ServerStatePayload, 'status' | 'managed' | 'port' | 'wsUrl' | 'version' | 'engineStatus' | 'modelDownload'>;
 
 export interface EnginePreparationLifecycle {
   pending: Record<string, unknown>;
@@ -56,15 +56,15 @@ export function shouldClearServerSettings(
 }
 
 /**
- * Clear every renderer-only preparation flag when the managed server leaves
- * running state. Keeping a staged model after that transition would leave the
- * Settings surface stuck on Preparing with no server-side transaction alive.
+ * Clear renderer-only preparation flags when a managed server leaves running
+ * state. Unmanaged development outages clear fetched server data through
+ * shouldClearServerSettings, but keep staged settings available for recovery.
  */
 export function recoverInterruptedManagedPreparation(
   state: SettingsRecoveryState | null | undefined,
   lifecycle: EnginePreparationLifecycle,
 ): ManagedServerPreparationRecovery | null {
-  if (!shouldClearServerSettings(state)) return null;
+  if (!shouldClearServerSettings(state) || state?.managed !== true) return null;
 
   const interrupted = lifecycle.requested
     || lifecycle.active

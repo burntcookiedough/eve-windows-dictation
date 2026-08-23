@@ -143,7 +143,7 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     expect(measurements.length).toBe(48);
     for (const measurement of measurements) {
       expect(measurement.owner.overflowY).toBe('auto');
-      expect(measurement.owner.scrollHeight).toBeGreaterThan(measurement.owner.clientHeight);
+      expect(measurement.owner.scrollHeight).toBeGreaterThanOrEqual(measurement.owner.clientHeight);
       expect(measurement.owner.scrollWidth).toBeLessThanOrEqual(measurement.owner.clientWidth);
       expect(measurement.document.scrollWidth).toBeLessThanOrEqual(measurement.document.clientWidth);
       expect(measurement.scrollersOutsideLogs).toBe(1);

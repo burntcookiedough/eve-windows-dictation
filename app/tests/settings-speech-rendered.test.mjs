@@ -155,7 +155,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {
-    expect(result.screenshots).toHaveLength(4);
+    expect(result.screenshots).toHaveLength(5);
     for (const screenshot of result.screenshots) {
       expect(existsSync(screenshot)).toBeTrue();
     }
