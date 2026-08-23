@@ -15,6 +15,7 @@ const FOREGROUND_WINDOW_TIMEOUT_MS = 2000;
 // Written to userData once and reused via cscript.
 let pasteScriptPath: string | null = null;
 let sendInputScriptPath: string | null = null;
+let latestPasteGeneration = 0;
 
 function ensurePasteScript(): string {
   if (pasteScriptPath) return pasteScriptPath;
@@ -292,6 +293,7 @@ function delay(ms: number): Promise<void> {
 }
 
 export async function pasteText(text: string, options: PasteTextOptions): Promise<void> {
+  const pasteGeneration = ++latestPasteGeneration;
   const previous = clipboard.readText();
   clipboard.writeText(text);
   try {
@@ -300,6 +302,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
   } finally {
     if (options.restoreClipboard) {
       setTimeout(() => {
+        if (pasteGeneration !== latestPasteGeneration || clipboard.readText() !== text) {
+          return;
+        }
         try {
           clipboard.writeText(previous);
         } catch (error) {

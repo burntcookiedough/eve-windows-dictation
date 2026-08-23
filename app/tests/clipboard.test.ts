@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 let clipboardText = '';
+let clipboardWrites: string[] = [];
 const execFile = mock((
   command: string,
   args: string[],
@@ -20,6 +21,7 @@ mock.module('electron', () => ({
     readText: () => clipboardText,
     writeText: (text: string) => {
       clipboardText = text;
+      clipboardWrites.push(text);
     },
   },
 }));
@@ -33,6 +35,7 @@ const { buildSendInputScriptContent, getForegroundWindowHandle, pasteText, simul
 describe('pasteText', () => {
   beforeEach(() => {
     clipboardText = 'previous';
+    clipboardWrites = [];
     execFile.mockClear();
   });
 
@@ -55,6 +58,42 @@ describe('pasteText', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(clipboardText).toBe('previous');
+  });
+
+  test('does not restore over a user clipboard change', async () => {
+    await pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    clipboardText = 'user text';
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardText).toBe('user text');
+  });
+
+  test('does not let an older paste restore over a newer paste', async () => {
+    const firstPaste = pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const secondPaste = pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await Promise.all([firstPaste, secondPaste]);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardText).toBe('new text');
+    expect(clipboardWrites).not.toContain('previous');
   });
 
   test('does not fall back to untargeted VBScript when targeted SendInput fails', async () => {
