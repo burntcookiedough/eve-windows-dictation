@@ -31,7 +31,12 @@ let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
 
 function getServerApiUrl(): string {
-  return resolveServerApiUrl(LOCAL_SERVER_URL, serverManagerRef?.getState());
+  const configuredUrl = app.isPackaged ? undefined : LOCAL_SERVER_URL;
+  const serverUrl = resolveServerApiUrl(configuredUrl, serverManagerRef?.getState());
+  if (!serverUrl) {
+    throw new Error('Managed server URL unavailable');
+  }
+  return serverUrl;
 }
 
 export function setupIpcHandlers(historyService?: HistoryService, serverManager?: ServerManager): void {

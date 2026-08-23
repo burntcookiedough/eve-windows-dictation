@@ -16,7 +16,7 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
 
 ## Product and privacy boundaries
 
-- Default processing is local; an external server is an explicit user choice.
+- Packaged processing is local; development may connect to a separately started localhost server.
 - Never commit or inspect private audio, transcripts, clipboard data, tokens,
   personal profiles, caches, or unredacted user paths.
 - Preserve frozen Eve identity and Murmur compatibility: appId, NSIS GUID,

@@ -6,12 +6,13 @@ export const LOCAL_SERVER_URL = 'ws://localhost:51717/transcribe';
  * Resolve the HTTP API endpoint for server settings and engine operations.
  *
  * Managed servers bind an available port and publish it through ServerManager.
- * The localhost URL is only a development fallback while no server is running.
+ * Callers may provide a fallback for development; packaged callers must omit it
+ * until a managed endpoint has been discovered.
  */
 export function resolveServerApiUrl(
-  configuredUrl: string,
+  configuredUrl: string | undefined,
   state: Pick<ServerStatePayload, 'status' | 'wsUrl'> | null | undefined,
-): string {
+): string | undefined {
   if (state?.status === 'running' && state.wsUrl) {
     return state.wsUrl;
   }

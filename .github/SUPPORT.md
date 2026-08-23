@@ -4,7 +4,7 @@ Eve is currently maintained as an engineering project, not a staffed support ser
 
 Before reporting a problem:
 
-1. Confirm the exact release version and whether the app is using the packaged local service or an external server.
+1. Confirm the exact release version and whether the app is using the packaged local service or a separately started localhost development service.
 2. Read [the build guide](../docs/development/building.md) for development and packaging failures.
 3. Use the app's bounded diagnostics summary where available. Review it before sharing.
 4. Remove transcript text, clipboard contents, device labels, tokens, usernames, and full local paths.
