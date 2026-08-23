@@ -1,6 +1,6 @@
 [project]
 name = "murmur"
-version = "0.8.2-alpha.1"
+version = "0.8.2-alpha.2"
 description = "WebSocket-based live voice transcription server"
 requires-python = ">=3.11"
 dependencies = [
