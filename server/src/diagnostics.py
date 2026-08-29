@@ -6,6 +6,7 @@ import ctypes
 import importlib
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ _NVIDIA_SMI_TIMEOUT_S = 2.0
 _last_diagnostics: dict[str, Any] | None = None
 _last_collected_at: float | None = None
 _last_signature: tuple[str, str, str] | None = None
+_diagnostics_refresh_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -301,50 +303,51 @@ def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str,
     global _last_diagnostics, _last_collected_at, _last_signature
 
     signature = (settings.engine, settings.whisper_device, settings.nemotron_device)
-    now = time.time()
 
-    if (
-        not force
-        and _last_diagnostics is not None
-        and _last_collected_at is not None
-        and _last_signature == signature
-        and now - _last_collected_at < _DIAGNOSTICS_CACHE_TTL_S
-    ):
-        return _last_diagnostics
+    with _diagnostics_refresh_lock:
+        now = time.time()
+        if (
+            not force
+            and _last_diagnostics is not None
+            and _last_collected_at is not None
+            and _last_signature == signature
+            and now - _last_collected_at < _DIAGNOSTICS_CACHE_TTL_S
+        ):
+            return _last_diagnostics
 
-    device = _get_engine_device(settings)
-    cuda = check_cuda_capability(device)
-    cuda_dlls = check_ctranslate2_cuda_dlls()
-    driver = check_nvidia_driver()
-    vc_redist = check_vc_redist()
-    warnings = build_warnings(
-        device=device,
-        cuda=cuda,
-        cuda_dlls=cuda_dlls,
-        driver=driver,
-        vc_redist=vc_redist,
-    )
+        device = _get_engine_device(settings)
+        cuda = check_cuda_capability(device)
+        cuda_dlls = check_ctranslate2_cuda_dlls()
+        driver = check_nvidia_driver()
+        vc_redist = check_vc_redist()
+        warnings = build_warnings(
+            device=device,
+            cuda=cuda,
+            cuda_dlls=cuda_dlls,
+            driver=driver,
+            vc_redist=vc_redist,
+        )
 
-    payload = DiagnosticsPayload(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        cuda=cuda,
-        cuda_dlls=cuda_dlls,
-        nvidia_driver=driver,
-        vc_redist=vc_redist,
-        warnings=warnings,
-    )
+        payload = DiagnosticsPayload(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            cuda=cuda,
+            cuda_dlls=cuda_dlls,
+            nvidia_driver=driver,
+            vc_redist=vc_redist,
+            warnings=warnings,
+        )
 
-    serialized = {
-        "generated_at": payload.generated_at,
-        "cuda": asdict(payload.cuda),
-        "cuda_dlls": asdict(payload.cuda_dlls),
-        "nvidia_driver": asdict(payload.nvidia_driver),
-        "vc_redist": asdict(payload.vc_redist),
-        "warnings": [asdict(warning) for warning in payload.warnings],
-    }
+        serialized = {
+            "generated_at": payload.generated_at,
+            "cuda": asdict(payload.cuda),
+            "cuda_dlls": asdict(payload.cuda_dlls),
+            "nvidia_driver": asdict(payload.nvidia_driver),
+            "vc_redist": asdict(payload.vc_redist),
+            "warnings": [asdict(warning) for warning in payload.warnings],
+        }
 
-    _last_diagnostics = serialized
-    _last_collected_at = now
-    _last_signature = signature
+        _last_diagnostics = serialized
+        _last_collected_at = now
+        _last_signature = signature
 
-    return serialized
+        return serialized

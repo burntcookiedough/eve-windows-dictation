@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import subprocess
 import sys
+import threading
 
 from config import Settings
 import diagnostics
@@ -120,3 +121,80 @@ def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
     assert "nvidia_driver" in payload
     assert "vc_redist" in payload
     assert isinstance(payload["warnings"], list)
+
+
+def test_collect_diagnostics_serializes_concurrent_cache_refreshes(monkeypatch) -> None:
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    second_started = threading.Event()
+    probe_calls = 0
+    results: list[dict] = []
+
+    monkeypatch.setattr(diagnostics, "_last_diagnostics", None)
+    monkeypatch.setattr(diagnostics, "_last_collected_at", None)
+    monkeypatch.setattr(diagnostics, "_last_signature", None)
+
+    def check_cuda(device: str) -> CudaDiagnostics:
+        nonlocal probe_calls
+        probe_calls += 1
+        probe_started.set()
+        if not release_probe.wait(timeout=2):
+            raise AssertionError("diagnostics probe was not released")
+        return CudaDiagnostics(
+            available=True,
+            device=device,
+            reason=None,
+            name="GPU",
+            compute_capability="8.6",
+        )
+
+    monkeypatch.setattr(diagnostics, "check_cuda_capability", check_cuda)
+    monkeypatch.setattr(
+        diagnostics,
+        "check_ctranslate2_cuda_dlls",
+        lambda: CudaDllDiagnostics(available=True, detail=None),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_nvidia_driver",
+        lambda: NvidiaDriverDiagnostics(
+            available=True,
+            version="551.86",
+            minimum_version="525.0",
+            meets_minimum=True,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_vc_redist",
+        lambda: VcRedistDiagnostics(
+            required=False,
+            installed=None,
+            missing=None,
+            url=None,
+        ),
+    )
+
+    settings = Settings()
+    first = threading.Thread(
+        target=lambda: results.append(diagnostics.collect_diagnostics(settings))
+    )
+
+    def collect_second() -> None:
+        second_started.set()
+        results.append(diagnostics.collect_diagnostics(settings))
+
+    second = threading.Thread(target=collect_second)
+    first.start()
+    assert probe_started.wait(timeout=1)
+    second.start()
+    assert second_started.wait(timeout=1)
+    release_probe.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert probe_calls == 1
+    assert len(results) == 2
+    assert results[0] is results[1]
