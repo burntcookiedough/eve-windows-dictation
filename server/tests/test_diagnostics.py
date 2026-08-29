@@ -123,23 +123,25 @@ def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
     assert isinstance(payload["warnings"], list)
 
 
-def test_collect_diagnostics_serializes_concurrent_cache_refreshes(monkeypatch) -> None:
+def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monkeypatch) -> None:
     probe_started = threading.Event()
     release_probe = threading.Event()
-    second_started = threading.Event()
+    contenders_finished = threading.Event()
     probe_calls = 0
-    results: list[dict] = []
+    results: dict[str, dict] = {}
+    stall_probe = False
 
     monkeypatch.setattr(diagnostics, "_last_diagnostics", None)
     monkeypatch.setattr(diagnostics, "_last_collected_at", None)
     monkeypatch.setattr(diagnostics, "_last_signature", None)
 
     def check_cuda(device: str) -> CudaDiagnostics:
-        nonlocal probe_calls
+        nonlocal probe_calls, stall_probe
         probe_calls += 1
-        probe_started.set()
-        if not release_probe.wait(timeout=2):
-            raise AssertionError("diagnostics probe was not released")
+        if stall_probe:
+            probe_started.set()
+            if not release_probe.wait(timeout=2):
+                raise AssertionError("diagnostics probe was not released")
         return CudaDiagnostics(
             available=True,
             device=device,
@@ -176,25 +178,39 @@ def test_collect_diagnostics_serializes_concurrent_cache_refreshes(monkeypatch) 
     )
 
     settings = Settings()
+    cached = diagnostics.collect_diagnostics(settings, force=True)
+    stall_probe = True
     first = threading.Thread(
-        target=lambda: results.append(diagnostics.collect_diagnostics(settings))
+        target=lambda: results.__setitem__(
+            "first", diagnostics.collect_diagnostics(settings, force=True)
+        )
     )
 
-    def collect_second() -> None:
-        second_started.set()
-        results.append(diagnostics.collect_diagnostics(settings))
+    def collect_contenders() -> None:
+        results["compatible"] = diagnostics.collect_diagnostics(
+            settings, force=True
+        )
+        incompatible_settings = Settings(whisper_device="cpu")
+        results["incompatible"] = diagnostics.collect_diagnostics(
+            incompatible_settings, force=True
+        )
+        contenders_finished.set()
 
-    second = threading.Thread(target=collect_second)
+    contenders = threading.Thread(target=collect_contenders)
     first.start()
     assert probe_started.wait(timeout=1)
-    second.start()
-    assert second_started.wait(timeout=1)
+    contenders.start()
+    contenders_finished_before_release = contenders_finished.wait(timeout=1)
     release_probe.set()
     first.join(timeout=2)
-    second.join(timeout=2)
+    contenders.join(timeout=2)
 
+    assert contenders_finished_before_release
     assert not first.is_alive()
-    assert not second.is_alive()
-    assert probe_calls == 1
-    assert len(results) == 2
-    assert results[0] is results[1]
+    assert not contenders.is_alive()
+    assert probe_calls == 2
+    assert len(results) == 3
+    assert results["compatible"] is cached
+    assert results["incompatible"]["warnings"][0]["code"] == "diagnostics_refreshing"
+    assert results["incompatible"]["warnings"][0]["severity"] == "warning"
+    assert diagnostics.collect_diagnostics(settings) is results["first"]

@@ -6,16 +6,25 @@ import asyncio
 import importlib
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 from config import Settings
 import app as app_module
-from fastapi import FastAPI
+import diagnostics
+from diagnostics import (
+    CudaDiagnostics,
+    CudaDllDiagnostics,
+    NvidiaDriverDiagnostics,
+    VcRedistDiagnostics,
+)
+from fastapi import FastAPI, WebSocketDisconnect
 import pytest
 from session.context import SessionContext
 from transcription.base import EngineInfo
 from transcription import model_download
-from websocket.handler import _wait_for_start
+import websocket.handler as websocket_handler_module
+from websocket.handler import _wait_for_start, websocket_handler
 
 
 class _DummyEngineStatus:
@@ -421,6 +430,169 @@ async def test_websocket_engine_probes_keep_event_loop_responsive(monkeypatch) -
     assert result is True
     assert sender.engine_info is not None
     assert sender.engine_info["id"] == "whisper"
+
+
+def test_stalled_diagnostics_refresh_does_not_starve_websocket_admission(
+    monkeypatch,
+) -> None:
+    settings = Settings()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    websocket_receive_reached = asyncio.Event()
+
+    def stalled_cuda_probe(device: str) -> CudaDiagnostics:
+        probe_started.set()
+        release_probe.wait()
+        return CudaDiagnostics(
+            available=False,
+            device=device,
+            reason="test probe released",
+        )
+
+    monkeypatch.setattr(diagnostics, "_last_diagnostics", None)
+    monkeypatch.setattr(diagnostics, "_last_collected_at", None)
+    monkeypatch.setattr(diagnostics, "_last_signature", None)
+    monkeypatch.setattr(diagnostics, "check_cuda_capability", stalled_cuda_probe)
+    monkeypatch.setattr(
+        diagnostics,
+        "check_ctranslate2_cuda_dlls",
+        lambda: CudaDllDiagnostics(available=False, detail="unavailable"),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_nvidia_driver",
+        lambda: NvidiaDriverDiagnostics(
+            available=False,
+            minimum_version="525.0",
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_vc_redist",
+        lambda: VcRedistDiagnostics(
+            required=False,
+            installed=None,
+            missing=None,
+            url=None,
+        ),
+    )
+
+    class AdmissionSessionManager:
+        active_count = 0
+        max_sessions = 1
+
+        def create_session(self) -> SessionContext:
+            return SessionContext()
+
+        def remove_session(self, _session_id: str) -> None:
+            return
+
+    class AdmissionWebSocket:
+        async def accept(self) -> None:
+            return
+
+        async def receive(self) -> dict:
+            websocket_receive_reached.set()
+            raise WebSocketDisconnect()
+
+        async def close(self) -> None:
+            return
+
+    session_manager = AdmissionSessionManager()
+    engine_manager = _DummyEngineManager()
+    monkeypatch.setattr(app_module, "get_session_manager", lambda: session_manager)
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: engine_manager)
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(app_module, "get_model_download_state", lambda: None)
+    monkeypatch.setattr(
+        websocket_handler_module,
+        "get_session_manager",
+        lambda: session_manager,
+    )
+    monkeypatch.setattr(
+        websocket_handler_module,
+        "get_engine_manager",
+        lambda: engine_manager,
+    )
+    monkeypatch.setattr(websocket_handler_module, "get_settings", lambda: settings)
+
+    app = app_module.create_app()
+    health_endpoint = _get_route_endpoint(app, "/health", "GET")
+    diagnostics_endpoint = _get_route_endpoint(app, "/diagnostics", "GET")
+
+    async def scenario() -> None:
+        first_request = asyncio.create_task(health_endpoint())
+        contending_requests: list[tuple[str, asyncio.Task[dict]]] = []
+        admission_task: asyncio.Task[None] | None = None
+        try:
+            for _ in range(200):
+                if probe_started.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert probe_started.is_set()
+
+            await asyncio.sleep(0.05)
+            contending_requests.append(
+                ("diagnostics", asyncio.create_task(diagnostics_endpoint()))
+            )
+            await asyncio.sleep(0.05)
+            contending_requests.extend(
+                [
+                    ("health", asyncio.create_task(health_endpoint())),
+                    ("diagnostics", asyncio.create_task(diagnostics_endpoint())),
+                    ("health", asyncio.create_task(health_endpoint())),
+                ]
+            )
+            admission_task = asyncio.create_task(
+                websocket_handler(AdmissionWebSocket())
+            )
+
+            tasks = [task for _, task in contending_requests]
+            tasks.append(admission_task)
+            await asyncio.wait(tasks, timeout=0.5)
+            callers_completed = all(
+                task.done() for _, task in contending_requests
+            )
+            websocket_admitted = websocket_receive_reached.is_set()
+            completed_payloads = [
+                (path, task.result())
+                for path, task in contending_requests
+                if task.done() and not task.cancelled() and task.exception() is None
+            ]
+        finally:
+            release_probe.set()
+            cleanup_tasks = [first_request]
+            cleanup_tasks.extend(task for _, task in contending_requests)
+            if admission_task is not None:
+                cleanup_tasks.append(admission_task)
+            await asyncio.wait_for(
+                asyncio.gather(*cleanup_tasks, return_exceptions=True),
+                timeout=3,
+            )
+
+        assert callers_completed
+        assert websocket_admitted
+        assert len(completed_payloads) == len(contending_requests)
+        required_keys = {
+            "generated_at",
+            "cuda",
+            "cuda_dlls",
+            "nvidia_driver",
+            "vc_redist",
+            "warnings",
+        }
+        for path, payload in completed_payloads:
+            diagnostic_payload = payload["diagnostics"] if path == "health" else payload
+            assert required_keys <= diagnostic_payload.keys()
+            assert any(
+                warning["code"] == "diagnostics_refreshing"
+                for warning in diagnostic_payload["warnings"]
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        with asyncio.Runner() as runner:
+            runner.get_loop().set_default_executor(executor)
+            runner.run(scenario())
 
 
 def test_byte_progress_reports_percentage_speed_and_eta(monkeypatch) -> None:
