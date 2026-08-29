@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 from config import Settings
 import app as app_module
-from fastapi import FastAPI
+import diagnostics
+from diagnostics import (
+    CudaDiagnostics,
+    CudaDllDiagnostics,
+    NvidiaDriverDiagnostics,
+    VcRedistDiagnostics,
+)
+from fastapi import FastAPI, WebSocketDisconnect
+import pytest
+from session.context import SessionContext
+from transcription.base import EngineInfo
 from transcription import model_download
+import websocket.handler as websocket_handler_module
+from websocket.handler import _wait_for_start, websocket_handler
 
 
 class _DummyEngineStatus:
@@ -250,6 +265,334 @@ def test_health_liveness_is_separate_from_engine_readiness(monkeypatch) -> None:
     assert payload["status"] == "healthy"
     assert payload["engine"]["status"] == "loading"
     assert payload["engine"]["pending"]["status"] == "loading"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/health", "/diagnostics"])
+async def test_diagnostic_endpoints_keep_event_loop_responsive(path, monkeypatch) -> None:
+    settings = Settings()
+    release = threading.Event()
+    released = threading.Event()
+
+    def slow_diagnostics(_settings):
+        release.wait()
+        return {"warnings": []}
+
+    class SlowEngineManager:
+        def get_status(self) -> _DummyEngineStatus:
+            release.wait()
+            return _DummyEngineStatus()
+
+    def slow_model_download_state():
+        release.wait()
+        return {"status": "ready"}
+
+    monkeypatch.setattr(app_module, "get_session_manager", lambda: _DummySessionManager())
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(app_module, "collect_diagnostics", slow_diagnostics)
+    monkeypatch.setattr(app_module, "get_model_download_state", slow_model_download_state)
+
+    endpoint = _get_route_endpoint(app_module.create_app(), path, "GET")
+    def release_probes() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_probes)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    request = asyncio.create_task(endpoint())
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        payload = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    assert payload["engine"]["status"] == "ready"
+    assert payload["model_download"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/settings", "/engines", "/engine/status"])
+async def test_status_endpoints_keep_event_loop_responsive(path, monkeypatch) -> None:
+    settings = Settings()
+    release = threading.Event()
+    released = threading.Event()
+
+    class SlowEngineManager:
+        def get_status(self) -> _DummyEngineStatus:
+            release.wait()
+            return _DummyEngineStatus()
+
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        app_module,
+        "discover_engines",
+        lambda: [{"id": "whisper", "available": True}],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_settings_with_metadata",
+        lambda _settings: {"engine": {"value": "whisper"}},
+    )
+
+    endpoint = _get_route_endpoint(app_module.create_app(), path, "GET")
+
+    def release_status() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_status)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    request = asyncio.create_task(endpoint())
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        payload = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    if path == "/settings":
+        assert payload["engine_status"]["status"] == "ready"
+    elif path == "/engines":
+        assert payload["current"] == "whisper"
+    else:
+        assert payload["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_websocket_engine_probes_keep_event_loop_responsive(monkeypatch) -> None:
+    release = threading.Event()
+    released = threading.Event()
+
+    class SlowEngineManager:
+        @property
+        def engine_info(self) -> EngineInfo:
+            release.wait()
+            return EngineInfo(
+                id="whisper",
+                name="Faster-Whisper",
+                model="tiny",
+                supports_hotwords=True,
+            )
+
+    class FakeWebSocket:
+        async def receive(self) -> dict[str, str]:
+            return {
+                "text": '{"frame":"control","type":"start","silence_timeout":5.0}',
+            }
+
+    class FakeSender:
+        engine_info: dict | None = None
+
+        async def send_ready(self, *, engine_info: dict | None = None) -> None:
+            self.engine_info = engine_info
+
+    monkeypatch.setattr(
+        "websocket.handler.get_engine_manager",
+        lambda: SlowEngineManager(),
+    )
+
+    def release_probe() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_probe)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    context = SessionContext()
+    sender = FakeSender()
+    request = asyncio.create_task(
+        _wait_for_start(FakeWebSocket(), sender, context, timeout=1.0)
+    )
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        result = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    assert result is True
+    assert sender.engine_info is not None
+    assert sender.engine_info["id"] == "whisper"
+
+
+def test_stalled_diagnostics_refresh_does_not_starve_websocket_admission(
+    monkeypatch,
+) -> None:
+    settings = Settings()
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    websocket_receive_reached = asyncio.Event()
+
+    def stalled_cuda_probe(device: str) -> CudaDiagnostics:
+        probe_started.set()
+        release_probe.wait()
+        return CudaDiagnostics(
+            available=False,
+            device=device,
+            reason="test probe released",
+        )
+
+    monkeypatch.setattr(diagnostics, "_last_diagnostics", None)
+    monkeypatch.setattr(diagnostics, "_last_collected_at", None)
+    monkeypatch.setattr(diagnostics, "_last_signature", None)
+    monkeypatch.setattr(diagnostics, "check_cuda_capability", stalled_cuda_probe)
+    monkeypatch.setattr(
+        diagnostics,
+        "check_ctranslate2_cuda_dlls",
+        lambda: CudaDllDiagnostics(available=False, detail="unavailable"),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_nvidia_driver",
+        lambda: NvidiaDriverDiagnostics(
+            available=False,
+            minimum_version="525.0",
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_vc_redist",
+        lambda: VcRedistDiagnostics(
+            required=False,
+            installed=None,
+            missing=None,
+            url=None,
+        ),
+    )
+
+    class AdmissionSessionManager:
+        active_count = 0
+        max_sessions = 1
+
+        def create_session(self) -> SessionContext:
+            return SessionContext()
+
+        def remove_session(self, _session_id: str) -> None:
+            return
+
+    class AdmissionWebSocket:
+        async def accept(self) -> None:
+            return
+
+        async def receive(self) -> dict:
+            websocket_receive_reached.set()
+            raise WebSocketDisconnect()
+
+        async def close(self) -> None:
+            return
+
+    session_manager = AdmissionSessionManager()
+    engine_manager = _DummyEngineManager()
+    monkeypatch.setattr(app_module, "get_session_manager", lambda: session_manager)
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: engine_manager)
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(app_module, "get_model_download_state", lambda: None)
+    monkeypatch.setattr(
+        websocket_handler_module,
+        "get_session_manager",
+        lambda: session_manager,
+    )
+    monkeypatch.setattr(
+        websocket_handler_module,
+        "get_engine_manager",
+        lambda: engine_manager,
+    )
+    monkeypatch.setattr(websocket_handler_module, "get_settings", lambda: settings)
+
+    app = app_module.create_app()
+    health_endpoint = _get_route_endpoint(app, "/health", "GET")
+    diagnostics_endpoint = _get_route_endpoint(app, "/diagnostics", "GET")
+
+    async def scenario() -> None:
+        first_request = asyncio.create_task(health_endpoint())
+        contending_requests: list[tuple[str, asyncio.Task[dict]]] = []
+        admission_task: asyncio.Task[None] | None = None
+        try:
+            for _ in range(200):
+                if probe_started.is_set():
+                    break
+                await asyncio.sleep(0.005)
+            assert probe_started.is_set()
+
+            await asyncio.sleep(0.05)
+            contending_requests.append(
+                ("diagnostics", asyncio.create_task(diagnostics_endpoint()))
+            )
+            await asyncio.sleep(0.05)
+            contending_requests.extend(
+                [
+                    ("health", asyncio.create_task(health_endpoint())),
+                    ("diagnostics", asyncio.create_task(diagnostics_endpoint())),
+                    ("health", asyncio.create_task(health_endpoint())),
+                ]
+            )
+            admission_task = asyncio.create_task(
+                websocket_handler(AdmissionWebSocket())
+            )
+
+            tasks = [task for _, task in contending_requests]
+            tasks.append(admission_task)
+            await asyncio.wait(tasks, timeout=0.5)
+            callers_completed = all(
+                task.done() for _, task in contending_requests
+            )
+            websocket_admitted = websocket_receive_reached.is_set()
+            completed_payloads = [
+                (path, task.result())
+                for path, task in contending_requests
+                if task.done() and not task.cancelled() and task.exception() is None
+            ]
+        finally:
+            release_probe.set()
+            cleanup_tasks = [first_request]
+            cleanup_tasks.extend(task for _, task in contending_requests)
+            if admission_task is not None:
+                cleanup_tasks.append(admission_task)
+            await asyncio.wait_for(
+                asyncio.gather(*cleanup_tasks, return_exceptions=True),
+                timeout=3,
+            )
+
+        assert callers_completed
+        assert websocket_admitted
+        assert len(completed_payloads) == len(contending_requests)
+        required_keys = {
+            "generated_at",
+            "cuda",
+            "cuda_dlls",
+            "nvidia_driver",
+            "vc_redist",
+            "warnings",
+        }
+        for path, payload in completed_payloads:
+            diagnostic_payload = payload["diagnostics"] if path == "health" else payload
+            assert required_keys <= diagnostic_payload.keys()
+            assert any(
+                warning["code"] == "diagnostics_refreshing"
+                for warning in diagnostic_payload["warnings"]
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        with asyncio.Runner() as runner:
+            runner.get_loop().set_default_executor(executor)
+            runner.run(scenario())
 
 
 def test_byte_progress_reports_percentage_speed_and_eta(monkeypatch) -> None:

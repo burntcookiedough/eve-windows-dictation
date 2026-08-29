@@ -27,11 +27,17 @@ import {
   waitForPidFile,
 } from './server-startup.js';
 import { buildChildEnvironment } from './server-environment.js';
+import { BoundedLogDeliveryQueue, ServerLogFramer } from './server-log-transport.js';
 
 const log = createLogger('ServerManager');
 
 const MAX_LOG_ENTRIES = 500;
+const SERVER_LOG_DELIVERY_INTERVAL_MS = 50;
+const SERVER_LOG_DELIVERY_BATCH_SIZE = 50;
 const HEALTH_POLL_INTERVAL_MS = 3000;
+// Server-side GPU probes may consume their full two-second timeout. Keep
+// enough response overhead here while still finishing before the next poll.
+const HEALTH_REQUEST_TIMEOUT_MS = 2500;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +46,8 @@ export class ServerManager {
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
   private logs: ServerLogEntry[] = [];
+  private readonly pendingLogDelivery = new BoundedLogDeliveryQueue<ServerLogEntry>(MAX_LOG_ENTRIES);
+  private logDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
   private healthPollInterval: ReturnType<typeof setInterval> | null = null;
   private mainWindow: BrowserWindow | null = null;
   private managed = false; // Whether we spawned the server (production) vs detected it (dev)
@@ -95,15 +103,16 @@ export class ServerManager {
   /**
    * Check server health by hitting the /health endpoint.
    */
-  private async getHealthState(port: number): Promise<HealthState> {
+  private async getHealthState(
+    port: number,
+    timeoutMs = HEALTH_REQUEST_TIMEOUT_MS,
+  ): Promise<HealthState> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
-
       const response = await fetch(`http://localhost:${port}/health`, {
         signal: controller.signal,
       });
-      clearTimeout(timeout);
 
       if (!response.ok) {
         return { healthy: false };
@@ -112,6 +121,8 @@ export class ServerManager {
       return parseHealthyResponse(await response.json());
     } catch {
       return { healthy: false };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -252,6 +263,42 @@ export class ServerManager {
     this.broadcastLog(entry);
   }
 
+  private clearPendingLogDelivery(): void {
+    if (this.logDeliveryTimer !== null) {
+      clearTimeout(this.logDeliveryTimer);
+      this.logDeliveryTimer = null;
+    }
+    this.pendingLogDelivery.clear();
+  }
+
+  private scheduleLogDelivery(): void {
+    if (this.logDeliveryTimer !== null) return;
+
+    this.logDeliveryTimer = setTimeout(() => {
+      this.logDeliveryTimer = null;
+      this.flushLogDelivery();
+    }, SERVER_LOG_DELIVERY_INTERVAL_MS);
+  }
+
+  private flushLogDelivery(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      this.pendingLogDelivery.clear();
+      return;
+    }
+
+    for (const entry of this.pendingLogDelivery.drain(SERVER_LOG_DELIVERY_BATCH_SIZE)) {
+      if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+        this.pendingLogDelivery.clear();
+        return;
+      }
+      this.mainWindow.webContents.send(IPC_CHANNELS.SERVER_LOG, entry);
+    }
+
+    if (this.pendingLogDelivery.size > 0) {
+      this.scheduleLogDelivery();
+    }
+  }
+
   /**
    * Update status and broadcast to renderer.
    */
@@ -275,7 +322,8 @@ export class ServerManager {
    */
   private broadcastLog(entry: ServerLogEntry): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
-    this.mainWindow.webContents.send(IPC_CHANNELS.SERVER_LOG, entry);
+    this.pendingLogDelivery.enqueue(entry);
+    this.scheduleLogDelivery();
   }
 
   /**
@@ -526,6 +574,7 @@ export class ServerManager {
     this.setDiagnostics(undefined);
     this.setModelDownload(undefined);
     this.setEngineStatus(undefined);
+    this.clearPendingLogDelivery();
     this.logs = []; // Clear logs for new session
 
     try {
@@ -547,20 +596,33 @@ export class ServerManager {
         env: childEnv,
       });
 
+      const stdoutFramer = new ServerLogFramer();
+      const stderrFramer = new ServerLogFramer();
+      const emitFramedLogs = (framer: ServerLogFramer, level: 'stdout' | 'stderr') => {
+        for (const line of framer.flush()) {
+          this.addLog(level, line);
+        }
+      };
+
       // Capture stdout
       this.childProcess.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n').filter((l) => l.trim());
-        for (const line of lines) {
+        for (const line of stdoutFramer.push(data)) {
           this.addLog('stdout', line);
         }
       });
+      this.childProcess.stdout?.once('end', () => emitFramedLogs(stdoutFramer, 'stdout'));
 
       // Capture stderr
       this.childProcess.stderr?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n').filter((l) => l.trim());
-        for (const line of lines) {
+        for (const line of stderrFramer.push(data)) {
           this.addLog('stderr', line);
         }
+      });
+      this.childProcess.stderr?.once('end', () => emitFramedLogs(stderrFramer, 'stderr'));
+
+      this.childProcess.once('close', () => {
+        emitFramedLogs(stdoutFramer, 'stdout');
+        emitFramedLogs(stderrFramer, 'stderr');
       });
 
       // Handle process exit
@@ -640,15 +702,35 @@ export class ServerManager {
    * Wait for health check to pass.
    */
   private async waitForHealth(port: number, timeoutMs: number): Promise<HealthState | null> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      const health = await this.getHealthState(port);
-      if (health.healthy) {
-        return health;
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return null;
+
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const health = await Promise.race([
+          this.getHealthState(port, Math.min(HEALTH_REQUEST_TIMEOUT_MS, remainingMs)),
+          new Promise<null>((resolve) => {
+            deadlineTimer = setTimeout(() => resolve(null), remainingMs);
+          }),
+        ]);
+        if (health?.healthy) {
+          return health;
+        }
+      } finally {
+        if (deadlineTimer !== undefined) {
+          clearTimeout(deadlineTimer);
+        }
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const remainingAfterCheckMs = deadline - Date.now();
+      if (remainingAfterCheckMs <= 0) return null;
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, Math.min(500, remainingAfterCheckMs));
+      });
     }
-    return null;
   }
 
   /**
@@ -779,5 +861,7 @@ export class ServerManager {
       log.info('Cleaning up server on app quit');
       await this.stop();
     }
+
+    this.clearPendingLogDelivery();
   }
 }

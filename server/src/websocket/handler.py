@@ -50,7 +50,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         logger.info("[%s] WebSocket connected", context.session_id)
 
         try:
-            engine_status = get_engine_manager().get_status()
+            engine_status = await asyncio.to_thread(get_engine_manager().get_status)
         except Exception as e:
             logger.exception("[%s] Engine manager unavailable: %s", context.session_id, e)
             await sender.send_error(ErrorCode.INTERNAL, "Engine manager unavailable")
@@ -191,7 +191,8 @@ async def _wait_for_start(
     # Send ready with engine info
     try:
         engine_mgr = get_engine_manager()
-        engine_info_dict = asdict(engine_mgr.engine_info)
+        engine_info = await asyncio.to_thread(lambda: engine_mgr.engine_info)
+        engine_info_dict = asdict(engine_info)
     except Exception:
         engine_info_dict = None
     await sender.send_ready(engine_info=engine_info_dict)

@@ -6,6 +6,7 @@ import ctypes
 import importlib
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,9 +20,12 @@ NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx"
 VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 _DIAGNOSTICS_CACHE_TTL_S = 30.0
+_NVIDIA_SMI_TIMEOUT_S = 2.0
 _last_diagnostics: dict[str, Any] | None = None
 _last_collected_at: float | None = None
 _last_signature: tuple[str, str, str] | None = None
+_diagnostics_cache_lock = threading.Lock()
+_diagnostics_refresh_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -93,10 +97,11 @@ def _run_nvidia_smi() -> str | None:
             check=True,
             capture_output=True,
             text=True,
+            timeout=_NVIDIA_SMI_TIMEOUT_S,
         )
     except FileNotFoundError:
         return None
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
 
     output = completed.stdout.strip()
@@ -295,44 +300,55 @@ def build_warnings(
     return warnings
 
 
-def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str, Any]:
-    global _last_diagnostics, _last_collected_at, _last_signature
-
-    signature = (settings.engine, settings.whisper_device, settings.nemotron_device)
-    now = time.time()
-
-    if (
-        not force
-        and _last_diagnostics is not None
-        and _last_collected_at is not None
-        and _last_signature == signature
-        and now - _last_collected_at < _DIAGNOSTICS_CACHE_TTL_S
-    ):
+def _get_cached_diagnostics(
+    signature: tuple[str, str, str],
+    *,
+    fresh_only: bool,
+) -> dict[str, Any] | None:
+    with _diagnostics_cache_lock:
+        if (
+            _last_diagnostics is None
+            or _last_collected_at is None
+            or _last_signature != signature
+        ):
+            return None
+        if fresh_only and time.time() - _last_collected_at >= _DIAGNOSTICS_CACHE_TTL_S:
+            return None
         return _last_diagnostics
 
-    device = _get_engine_device(settings)
-    cuda = check_cuda_capability(device)
-    cuda_dlls = check_ctranslate2_cuda_dlls()
-    driver = check_nvidia_driver()
-    vc_redist = check_vc_redist()
-    warnings = build_warnings(
-        device=device,
-        cuda=cuda,
-        cuda_dlls=cuda_dlls,
-        driver=driver,
-        vc_redist=vc_redist,
-    )
 
+def _diagnostics_refreshing_payload(settings: Settings) -> dict[str, Any]:
+    detail = "Runtime diagnostics refresh is in progress."
     payload = DiagnosticsPayload(
         generated_at=datetime.now(timezone.utc).isoformat(),
-        cuda=cuda,
-        cuda_dlls=cuda_dlls,
-        nvidia_driver=driver,
-        vc_redist=vc_redist,
-        warnings=warnings,
+        cuda=CudaDiagnostics(
+            available=False,
+            device=_get_engine_device(settings),
+            reason=detail,
+        ),
+        cuda_dlls=CudaDllDiagnostics(available=False, detail=detail),
+        nvidia_driver=NvidiaDriverDiagnostics(
+            available=False,
+            version=None,
+            minimum_version=MIN_NVIDIA_DRIVER_VERSION,
+            meets_minimum=None,
+        ),
+        vc_redist=VcRedistDiagnostics(
+            required=sys.platform == "win32",
+            installed=None,
+            missing=None,
+            url=VC_REDIST_URL if sys.platform == "win32" else None,
+        ),
+        warnings=[
+            DiagnosticWarning(
+                code="diagnostics_refreshing",
+                message=detail,
+                action="Retry shortly.",
+                severity="warning",
+            )
+        ],
     )
-
-    serialized = {
+    return {
         "generated_at": payload.generated_at,
         "cuda": asdict(payload.cuda),
         "cuda_dlls": asdict(payload.cuda_dlls),
@@ -341,8 +357,64 @@ def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str,
         "warnings": [asdict(warning) for warning in payload.warnings],
     }
 
-    _last_diagnostics = serialized
-    _last_collected_at = now
-    _last_signature = signature
 
-    return serialized
+def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str, Any]:
+    global _last_diagnostics, _last_collected_at, _last_signature
+
+    signature = (settings.engine, settings.whisper_device, settings.nemotron_device)
+
+    if not force:
+        cached = _get_cached_diagnostics(signature, fresh_only=True)
+        if cached is not None:
+            return cached
+
+    if not _diagnostics_refresh_lock.acquire(blocking=False):
+        cached = _get_cached_diagnostics(signature, fresh_only=False)
+        return cached if cached is not None else _diagnostics_refreshing_payload(settings)
+
+    try:
+        if not force:
+            cached = _get_cached_diagnostics(signature, fresh_only=True)
+            if cached is not None:
+                return cached
+
+        now = time.time()
+        device = _get_engine_device(settings)
+        cuda = check_cuda_capability(device)
+        cuda_dlls = check_ctranslate2_cuda_dlls()
+        driver = check_nvidia_driver()
+        vc_redist = check_vc_redist()
+        warnings = build_warnings(
+            device=device,
+            cuda=cuda,
+            cuda_dlls=cuda_dlls,
+            driver=driver,
+            vc_redist=vc_redist,
+        )
+
+        payload = DiagnosticsPayload(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            cuda=cuda,
+            cuda_dlls=cuda_dlls,
+            nvidia_driver=driver,
+            vc_redist=vc_redist,
+            warnings=warnings,
+        )
+
+        serialized = {
+            "generated_at": payload.generated_at,
+            "cuda": asdict(payload.cuda),
+            "cuda_dlls": asdict(payload.cuda_dlls),
+            "nvidia_driver": asdict(payload.nvidia_driver),
+            "vc_redist": asdict(payload.vc_redist),
+            "warnings": [asdict(warning) for warning in payload.warnings],
+        }
+
+        with _diagnostics_cache_lock:
+            _last_diagnostics = serialized
+            _last_collected_at = now
+            _last_signature = signature
+
+        return serialized
+    finally:
+        _diagnostics_refresh_lock.release()

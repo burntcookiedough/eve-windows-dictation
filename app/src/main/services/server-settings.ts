@@ -2,6 +2,8 @@ import type { ServerSettingsResponse, EngineStatus, AvailableEngine } from '../.
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ServerSettings');
+// Engine status can include a server-side GPU probe with a two-second ceiling.
+const SERVER_SETTINGS_REQUEST_TIMEOUT_MS = 3000;
 
 /**
  * Derive the server base URL from a WebSocket endpoint.
@@ -20,20 +22,27 @@ async function fetchJson<T>(path: string, options: RequestInit | undefined, serv
   const url = `${base}${path}`;
   log.debug('Fetching', { url, method: options?.method ?? 'GET' });
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SERVER_SETTINGS_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Server returned ${response.status}: ${body}`);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Server returned ${response.status}: ${body}`);
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.json() as Promise<T>;
 }
 
 export async function getServerSettings(serverUrl: string): Promise<ServerSettingsResponse> {

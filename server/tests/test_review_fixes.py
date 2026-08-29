@@ -1,6 +1,7 @@
 """Tests for code review fixes (findings 1, 3, 4, 5, 6)."""
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -108,6 +109,53 @@ async def test_swap_engine_serialized(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Should be sequential: start-1, end-1, start-2, end-2
     assert call_log == ["start-1", "end-1", "start-2", "end-2"]
+
+
+def test_get_status_snapshots_transition_before_slow_engine_info() -> None:
+    class BlockingInfoEngine(_DummyEngine):
+        def __init__(self, engine_id: str) -> None:
+            super().__init__(engine_id)
+            self.info_started = threading.Event()
+            self.allow_info = threading.Event()
+
+        @property
+        def engine_info(self) -> EngineInfo:
+            self.info_started.set()
+            if not self.allow_info.wait(timeout=2):
+                raise AssertionError("engine info probe was not released")
+            return super().engine_info
+
+    manager = factory_module.EngineManager(Settings(engine="whisper"))
+    old_engine = BlockingInfoEngine("whisper")
+    manager._engine = old_engine
+    status_result: list[factory_module.EngineStatus] = []
+
+    worker = threading.Thread(target=lambda: status_result.append(manager.get_status()))
+    worker.start()
+    assert old_engine.info_started.wait(timeout=1)
+
+    lock_acquired = manager._lock.acquire(timeout=1)
+    try:
+        assert lock_acquired
+        manager._engine = _DummyEngine("nemotron")
+        manager._settings = Settings(engine="nemotron")
+        manager._pending_engine_id = "nemotron"
+        manager._pending_status = "loading"
+        manager._pending_message = "Loading nemotron engine..."
+    finally:
+        if lock_acquired:
+            manager._lock.release()
+
+    old_engine.allow_info.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert len(status_result) == 1
+    status = status_result[0]
+    assert status.current == "whisper"
+    assert status.status == "ready"
+    assert status.info is not None
+    assert status.info.id == "whisper"
 
 
 # ---------------------------------------------------------------------------

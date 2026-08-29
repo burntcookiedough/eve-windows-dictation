@@ -7,6 +7,11 @@ import {
   SHORT_SERVER_LOG_ENTRY_LIMIT,
   SERVER_LOG_LOAD_ERROR,
 } from '../src/renderer/app/server-log.js';
+import {
+  BoundedLogDeliveryQueue,
+  MAX_PENDING_FRAME_BYTES,
+  ServerLogFramer,
+} from '../src/main/services/server-log-transport.js';
 
 function source(path: string): string {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -81,5 +86,41 @@ describe('Server log state and sizing contracts', () => {
     expect(fixture).toContain('if (logLoading) return new Promise<ServerLogEntry[]>(() => {})');
     expect(fixture).toContain("if (logError) throw new Error('fixture log retrieval failed')");
     expect(fixture).toContain('Array.from({ length: logCount }');
+  });
+
+  test('frames fragmented UTF-8 output and bare carriage-return progress updates', () => {
+    const framer = new ServerLogFramer();
+
+    expect(framer.push(Buffer.from('ready: 50'))).toEqual([]);
+    expect(framer.push(Buffer.from('%\rready: 100%\nnext '))).toEqual([
+      'ready: 50%',
+      'ready: 100%',
+    ]);
+    expect(framer.push(Buffer.from('entry\r\nlast'))).toEqual(['next entry']);
+    expect(framer.flush()).toEqual(['last']);
+  });
+
+  test('bounds delimiter-free UTF-8 output without losing code points', () => {
+    const framer = new ServerLogFramer();
+    const payload = '🙂'.repeat(Math.ceil(MAX_PENDING_FRAME_BYTES / 4) + 7);
+
+    const firstFrames = framer.push(payload);
+    const finalFrames = framer.flush();
+    const frames = [...firstFrames, ...finalFrames];
+
+    expect(frames.length).toBeGreaterThan(1);
+    expect(frames.every((frame) => Buffer.byteLength(frame, 'utf8') <= MAX_PENDING_FRAME_BYTES)).toBeTrue();
+    expect(frames.join('')).toBe(payload);
+  });
+
+  test('bounds high-rate delivery queue while retaining the newest diagnostics', () => {
+    const queue = new BoundedLogDeliveryQueue<number>(3);
+
+    for (let entry = 1; entry <= 6; entry += 1) queue.enqueue(entry);
+
+    expect(queue.size).toBe(3);
+    expect(queue.drain(2)).toEqual([4, 5]);
+    expect(queue.drain(2)).toEqual([6]);
+    expect(queue.size).toBe(0);
   });
 });
