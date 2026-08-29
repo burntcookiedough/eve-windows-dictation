@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import subprocess
 import sys
 
 from config import Settings
@@ -17,6 +19,22 @@ from diagnostics import (
 
 def test_parse_driver_version_handles_patch() -> None:
     assert diagnostics._parse_driver_version("551.86") == (551, 86, 0)
+
+
+def test_run_nvidia_smi_timeout_returns_unavailable(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    def raise_timeout(*args, **kwargs):
+        calls.update(kwargs)
+        raise subprocess.TimeoutExpired(args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(diagnostics.subprocess, "run", raise_timeout)
+
+    assert diagnostics._run_nvidia_smi() is None
+    timeout = calls.get("timeout")
+    assert isinstance(timeout, (int, float))
+    assert math.isfinite(timeout)
+    assert timeout > 0
 
 
 def test_check_vc_redist_reports_missing_dlls(monkeypatch) -> None:

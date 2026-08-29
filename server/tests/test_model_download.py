@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import threading
+import time
 from types import SimpleNamespace
 
 from config import Settings
 import app as app_module
 from fastapi import FastAPI
+import pytest
 from transcription import model_download
 
 
@@ -250,6 +253,56 @@ def test_health_liveness_is_separate_from_engine_readiness(monkeypatch) -> None:
     assert payload["status"] == "healthy"
     assert payload["engine"]["status"] == "loading"
     assert payload["engine"]["pending"]["status"] == "loading"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/health", "/diagnostics"])
+async def test_diagnostic_endpoints_keep_event_loop_responsive(path, monkeypatch) -> None:
+    settings = Settings()
+    release = threading.Event()
+    released = threading.Event()
+
+    def slow_diagnostics(_settings):
+        release.wait()
+        return {"warnings": []}
+
+    class SlowEngineManager:
+        def get_status(self) -> _DummyEngineStatus:
+            release.wait()
+            return _DummyEngineStatus()
+
+    def slow_model_download_state():
+        release.wait()
+        return {"status": "ready"}
+
+    monkeypatch.setattr(app_module, "get_session_manager", lambda: _DummySessionManager())
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(app_module, "collect_diagnostics", slow_diagnostics)
+    monkeypatch.setattr(app_module, "get_model_download_state", slow_model_download_state)
+
+    endpoint = _get_route_endpoint(app_module.create_app(), path, "GET")
+    def release_probes() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_probes)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    request = asyncio.create_task(endpoint())
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        payload = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    assert payload["engine"]["status"] == "ready"
+    assert payload["model_download"]["status"] == "ready"
 
 
 def test_byte_progress_reports_percentage_speed_and_eta(monkeypatch) -> None:

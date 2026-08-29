@@ -54,6 +54,7 @@ _WHISPER_MODEL_ALLOW_PATTERNS = (
     "tokenizer.json",
     "vocabulary.*",
 )
+_NVIDIA_SMI_TIMEOUT_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -155,8 +156,13 @@ def _get_vram_used_gb() -> float | None:
             check=True,
             capture_output=True,
             text=True,
+            timeout=_NVIDIA_SMI_TIMEOUT_S,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
         return None
     first = completed.stdout.strip().splitlines()[0] if completed.stdout.strip() else ""
     try:

@@ -128,26 +128,35 @@ def create_app() -> FastAPI:
     async def health_check() -> dict:
         manager = get_session_manager()
         engine_mgr = get_engine_manager()
-        status = engine_mgr.get_status()
         settings = get_settings()
+        diagnostics_payload, status, model_download = await asyncio.gather(
+            asyncio.to_thread(collect_diagnostics, settings),
+            asyncio.to_thread(engine_mgr.get_status),
+            asyncio.to_thread(get_model_download_state),
+        )
         return {
             "status": "healthy",
             "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
             "engine": serialize_engine_status(status),
-            "diagnostics": collect_diagnostics(settings),
-            "model_download": get_model_download_state(),
+            "diagnostics": diagnostics_payload,
+            "model_download": model_download,
         }
 
     @app.get("/diagnostics")
     async def diagnostics() -> dict:
         settings = get_settings()
         engine_mgr = get_engine_manager()
+        diagnostics_payload, status, model_download = await asyncio.gather(
+            asyncio.to_thread(collect_diagnostics, settings),
+            asyncio.to_thread(engine_mgr.get_status),
+            asyncio.to_thread(get_model_download_state),
+        )
         return {
-            **collect_diagnostics(settings),
-            "engine": serialize_engine_status(engine_mgr.get_status()),
-            "model_download": get_model_download_state(),
+            **diagnostics_payload,
+            "engine": serialize_engine_status(status),
+            "model_download": model_download,
         }
 
     @app.get("/settings")

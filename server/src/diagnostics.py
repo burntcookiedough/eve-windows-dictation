@@ -19,6 +19,7 @@ NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx"
 VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 _DIAGNOSTICS_CACHE_TTL_S = 30.0
+_NVIDIA_SMI_TIMEOUT_S = 2.0
 _last_diagnostics: dict[str, Any] | None = None
 _last_collected_at: float | None = None
 _last_signature: tuple[str, str, str] | None = None
@@ -93,10 +94,11 @@ def _run_nvidia_smi() -> str | None:
             check=True,
             capture_output=True,
             text=True,
+            timeout=_NVIDIA_SMI_TIMEOUT_S,
         )
     except FileNotFoundError:
         return None
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
 
     output = completed.stdout.strip()
