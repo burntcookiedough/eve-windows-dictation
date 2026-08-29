@@ -35,7 +35,9 @@ const MAX_LOG_ENTRIES = 500;
 const SERVER_LOG_DELIVERY_INTERVAL_MS = 50;
 const SERVER_LOG_DELIVERY_BATCH_SIZE = 50;
 const HEALTH_POLL_INTERVAL_MS = 3000;
-const HEALTH_REQUEST_TIMEOUT_MS = 2000;
+// Server-side GPU probes may consume their full two-second timeout. Keep
+// enough response overhead here while still finishing before the next poll.
+const HEALTH_REQUEST_TIMEOUT_MS = 2500;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 

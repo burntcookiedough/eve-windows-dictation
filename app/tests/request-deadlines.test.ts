@@ -32,6 +32,45 @@ function restoreGlobalProperty(
 }
 
 describe('Electron request deadlines', () => {
+  test('keeps client deadlines beyond the server probe ceiling', async () => {
+    const manager = asPrivateManager(new ServerManager());
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    const originalSetTimeout = Object.getOwnPropertyDescriptor(globalThis, 'setTimeout');
+    const scheduledDelays: number[] = [];
+
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: () => Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ status: 'healthy' }),
+      } as Response),
+    });
+    Object.defineProperty(globalThis, 'setTimeout', {
+      configurable: true,
+      writable: true,
+      value: ((_handler: unknown, delay?: number) => {
+        scheduledDelays.push(delay ?? 0);
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }) as typeof setTimeout,
+    });
+
+    try {
+      expect(await manager.getHealthState(51717)).toEqual({ healthy: true });
+      await getServerSettings('ws://localhost:51717/transcribe');
+
+      expect(scheduledDelays).toHaveLength(2);
+      const [healthDeadline, settingsDeadline] = scheduledDelays;
+      const serverProbeCeilingMs = 2000;
+      expect(healthDeadline).toBeGreaterThan(serverProbeCeilingMs);
+      expect(healthDeadline).toBeLessThan(3000);
+      expect(settingsDeadline).toBeGreaterThan(serverProbeCeilingMs);
+    } finally {
+      restoreGlobalProperty('fetch', originalFetch);
+      restoreGlobalProperty('setTimeout', originalSetTimeout);
+    }
+  });
+
   test('aborts a health request when response body consumption stalls', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');

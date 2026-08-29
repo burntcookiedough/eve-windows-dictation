@@ -2,7 +2,8 @@ import type { ServerSettingsResponse, EngineStatus, AvailableEngine } from '../.
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ServerSettings');
-const SERVER_SETTINGS_REQUEST_TIMEOUT_MS = 2000;
+// Engine status can include a server-side GPU probe with a two-second ceiling.
+const SERVER_SETTINGS_REQUEST_TIMEOUT_MS = 3000;
 
 /**
  * Derive the server base URL from a WebSocket endpoint.
