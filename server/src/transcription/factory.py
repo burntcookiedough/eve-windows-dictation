@@ -249,9 +249,10 @@ class EngineManager:
             capabilities.total_vram_gb,
         )
 
-        self._gpu_name = capabilities.name
-        self._gpu_vram_gb = capabilities.total_vram_gb
-        self._estimated_max_duration_s = estimated_max_duration_s
+        with self._lock:
+            self._gpu_name = capabilities.name
+            self._gpu_vram_gb = capabilities.total_vram_gb
+            self._estimated_max_duration_s = estimated_max_duration_s
 
         if capabilities.total_vram_gb is not None:
             logger.info(
@@ -292,30 +293,50 @@ class EngineManager:
         )
 
     def get_status(self) -> EngineStatus:
-        info = self.engine_info if self._engine else None
-        if self._pending_status:
+        with self._lock:
+            engine = self._engine
+            current = self._settings.engine
+            pending_status = self._pending_status
+            pending_engine_id = self._pending_engine_id
+            pending_message = self._pending_message
+            swap_error = self._swap_error
+            recovery_required = self._recovery_required
+            gpu_name = self._gpu_name
+            gpu_vram_gb = self._gpu_vram_gb
+            estimated_max_duration_s = self._estimated_max_duration_s
+
+        info = None
+        if engine is not None:
+            info = replace(
+                engine.engine_info,
+                gpu_name=gpu_name,
+                gpu_vram_gb=gpu_vram_gb,
+                estimated_max_duration_s=estimated_max_duration_s,
+            )
+
+        if pending_status:
             status_value = "loading"
-        elif self._engine:
+        elif engine is not None:
             status_value = "ready"
-        elif self._swap_error:
+        elif swap_error:
             status_value = "error"
         else:
             status_value = "loading"
 
         status = EngineStatus(
-            current=self._settings.engine,
+            current=current,
             status=status_value,
             info=info,
         )
-        if self._pending_status:
+        if pending_status:
             status.pending = {
-                "engine": self._pending_engine_id,
-                "status": self._pending_status,
-                "message": self._pending_message,
+                "engine": pending_engine_id,
+                "status": pending_status,
+                "message": pending_message,
             }
-        if self._swap_error:
-            status.message = self._swap_error
-        if self._recovery_required:
+        if swap_error:
+            status.message = swap_error
+        if recovery_required:
             status.recovery = {
                 "action": "restart_server",
                 "message": ENGINE_RECOVERY_REQUIRED_MESSAGE,
@@ -375,22 +396,24 @@ class EngineManager:
                 if self._shutting_down:
                     return
 
-            self._swap_error = None
+            with self._lock:
+                self._swap_error = None
             available = _get_available_engine_ids()
             self._prepare_engine_selection(new_settings, available)
 
-            self._pending_engine_id = new_settings.engine
-            self._pending_status = "loading"
-            self._pending_message = f"Loading {new_settings.engine} engine..."
+            with self._lock:
+                self._pending_engine_id = new_settings.engine
+                self._pending_status = "loading"
+                self._pending_message = f"Loading {new_settings.engine} engine..."
 
             unload_first = getattr(new_settings, "unload_before_swap", False)
             loop = asyncio.get_running_loop()
 
             old_engine: TranscriptionEngine | None = None
             should_unload_old = False
-            if unload_first and self._engine is not None:
+            if unload_first:
                 with self._lock:
-                    if not self._active_sessions:
+                    if self._engine is not None and not self._active_sessions:
                         old_engine = self._engine
                         self._engine = None
                         should_unload_old = True
@@ -433,7 +456,8 @@ class EngineManager:
             except Exception as create_error:
                 restore_error = await restore_previous_engine()
                 if restore_error is not None:
-                    self._recovery_required = True
+                    with self._lock:
+                        self._recovery_required = True
                     raise EngineRecoveryRequiredError(
                         "Candidate engine creation and previous-engine recovery both failed"
                     ) from create_error
@@ -464,7 +488,8 @@ class EngineManager:
                     logger.error("Failed to discard unactivated engine: %s", shutdown_error)
                 restore_error = await restore_previous_engine()
                 if restore_error is not None:
-                    self._recovery_required = True
+                    with self._lock:
+                        self._recovery_required = True
                     raise EngineRecoveryRequiredError(
                         "Candidate engine activation and previous-engine recovery both failed"
                     ) from activation_error
@@ -473,9 +498,10 @@ class EngineManager:
             if discard_new_engine:
                 logger.info("Discarding engine that finished loading during shutdown")
                 await loop.run_in_executor(None, new_engine.shutdown)
-                self._pending_status = None
-                self._pending_engine_id = None
-                self._pending_message = None
+                with self._lock:
+                    self._pending_status = None
+                    self._pending_engine_id = None
+                    self._pending_message = None
                 return
 
             self._update_runtime_metadata(new_settings)
@@ -484,19 +510,21 @@ class EngineManager:
                 await loop.run_in_executor(None, old_engine.shutdown)
                 _force_free_vram()
 
-            self._pending_status = None
-            self._pending_engine_id = None
-            self._pending_message = None
-            self._swap_error = None
-            self._recovery_required = False
+            with self._lock:
+                self._pending_status = None
+                self._pending_engine_id = None
+                self._pending_message = None
+                self._swap_error = None
+                self._recovery_required = False
             logger.info("Engine swap complete: now using %s", new_settings.engine)
 
         except Exception as e:
             logger.error("Engine swap failed: %s", e)
-            self._swap_error = safe_engine_preparation_message(e)
-            self._pending_status = None
-            self._pending_engine_id = None
-            self._pending_message = None
+            with self._lock:
+                self._swap_error = safe_engine_preparation_message(e)
+                self._pending_status = None
+                self._pending_engine_id = None
+                self._pending_message = None
             raise
 
     def shutdown(self) -> None:
