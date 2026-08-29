@@ -13,6 +13,9 @@ const execFile = mock((
   done?.(null, '12345');
   return { kill: mock(() => {}) };
 });
+const spawn = mock(() => {
+  throw new Error('spawn is not used by clipboard tests');
+});
 
 mock.module('electron', () => ({
   app: {
@@ -31,6 +34,7 @@ mock.module('electron', () => ({
 
 mock.module('child_process', () => ({
   execFile,
+  spawn,
 }));
 
 const { buildSendInputScriptContent, getForegroundWindowHandle, pasteText, simulatePaste } = await import('../src/main/services/clipboard.js');

@@ -12,7 +12,10 @@ from config import Settings
 import app as app_module
 from fastapi import FastAPI
 import pytest
+from session.context import SessionContext
+from transcription.base import EngineInfo
 from transcription import model_download
+from websocket.handler import _wait_for_start
 
 
 class _DummyEngineStatus:
@@ -303,6 +306,121 @@ async def test_diagnostic_endpoints_keep_event_loop_responsive(path, monkeypatch
     assert responsive
     assert payload["engine"]["status"] == "ready"
     assert payload["model_download"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/settings", "/engines", "/engine/status"])
+async def test_status_endpoints_keep_event_loop_responsive(path, monkeypatch) -> None:
+    settings = Settings()
+    release = threading.Event()
+    released = threading.Event()
+
+    class SlowEngineManager:
+        def get_status(self) -> _DummyEngineStatus:
+            release.wait()
+            return _DummyEngineStatus()
+
+    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        app_module,
+        "discover_engines",
+        lambda: [{"id": "whisper", "available": True}],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_settings_with_metadata",
+        lambda _settings: {"engine": {"value": "whisper"}},
+    )
+
+    endpoint = _get_route_endpoint(app_module.create_app(), path, "GET")
+
+    def release_status() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_status)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    request = asyncio.create_task(endpoint())
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        payload = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    if path == "/settings":
+        assert payload["engine_status"]["status"] == "ready"
+    elif path == "/engines":
+        assert payload["current"] == "whisper"
+    else:
+        assert payload["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_websocket_engine_probes_keep_event_loop_responsive(monkeypatch) -> None:
+    release = threading.Event()
+    released = threading.Event()
+
+    class SlowEngineManager:
+        @property
+        def engine_info(self) -> EngineInfo:
+            release.wait()
+            return EngineInfo(
+                id="whisper",
+                name="Faster-Whisper",
+                model="tiny",
+                supports_hotwords=True,
+            )
+
+    class FakeWebSocket:
+        async def receive(self) -> dict[str, str]:
+            return {
+                "text": '{"frame":"control","type":"start","silence_timeout":5.0}',
+            }
+
+    class FakeSender:
+        engine_info: dict | None = None
+
+        async def send_ready(self, *, engine_info: dict | None = None) -> None:
+            self.engine_info = engine_info
+
+    monkeypatch.setattr(
+        "websocket.handler.get_engine_manager",
+        lambda: SlowEngineManager(),
+    )
+
+    def release_probe() -> None:
+        released.set()
+        release.set()
+
+    release_timer = threading.Timer(0.5, release_probe)
+    release_timer.daemon = True
+    release_timer.start()
+    tick = asyncio.create_task(asyncio.sleep(0.05))
+    context = SessionContext()
+    sender = FakeSender()
+    request = asyncio.create_task(
+        _wait_for_start(FakeWebSocket(), sender, context, timeout=1.0)
+    )
+
+    await tick
+    responsive = not released.is_set()
+    release.set()
+    try:
+        result = await request
+    finally:
+        release_timer.cancel()
+
+    assert responsive
+    assert result is True
+    assert sender.engine_info is not None
+    assert sender.engine_info["id"] == "whisper"
 
 
 def test_byte_progress_reports_percentage_speed_and_eta(monkeypatch) -> None:

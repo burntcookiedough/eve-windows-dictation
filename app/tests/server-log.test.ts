@@ -9,6 +9,7 @@ import {
 } from '../src/renderer/app/server-log.js';
 import {
   BoundedLogDeliveryQueue,
+  MAX_PENDING_FRAME_BYTES,
   ServerLogFramer,
 } from '../src/main/services/server-log-transport.js';
 
@@ -97,6 +98,19 @@ describe('Server log state and sizing contracts', () => {
     ]);
     expect(framer.push(Buffer.from('entry\r\nlast'))).toEqual(['next entry']);
     expect(framer.flush()).toEqual(['last']);
+  });
+
+  test('bounds delimiter-free UTF-8 output without losing code points', () => {
+    const framer = new ServerLogFramer();
+    const payload = '🙂'.repeat(Math.ceil(MAX_PENDING_FRAME_BYTES / 4) + 7);
+
+    const firstFrames = framer.push(payload);
+    const finalFrames = framer.flush();
+    const frames = [...firstFrames, ...finalFrames];
+
+    expect(frames.length).toBeGreaterThan(1);
+    expect(frames.every((frame) => Buffer.byteLength(frame, 'utf8') <= MAX_PENDING_FRAME_BYTES)).toBeTrue();
+    expect(frames.join('')).toBe(payload);
   });
 
   test('bounds high-rate delivery queue while retaining the newest diagnostics', () => {

@@ -163,7 +163,7 @@ def create_app() -> FastAPI:
     async def get_server_settings() -> dict:
         settings = get_settings()
         engine_mgr = get_engine_manager()
-        status = engine_mgr.get_status()
+        status = await asyncio.to_thread(engine_mgr.get_status)
         available = [e["id"] for e in discover_engines() if e["available"]]
 
         return {
@@ -227,7 +227,7 @@ def create_app() -> FastAPI:
                     detail="Could not save settings. Please try again.",
                 ) from None
 
-        status = engine_mgr.get_status()
+        status = await asyncio.to_thread(engine_mgr.get_status)
         session_mgr = get_session_manager()
 
         response: dict[str, Any] = {
@@ -248,7 +248,7 @@ def create_app() -> FastAPI:
     async def get_available_engines() -> dict:
         engines = discover_engines()
         engine_mgr = get_engine_manager()
-        status = engine_mgr.get_status()
+        status = await asyncio.to_thread(engine_mgr.get_status)
         return {
             "engines": engines,
             "current": status.current,
@@ -257,7 +257,7 @@ def create_app() -> FastAPI:
     @app.get("/engine/status")
     async def get_engine_status() -> dict:
         engine_mgr = get_engine_manager()
-        status = engine_mgr.get_status()
+        status = await asyncio.to_thread(engine_mgr.get_status)
         return serialize_engine_status(status)
 
     @app.websocket("/transcribe")

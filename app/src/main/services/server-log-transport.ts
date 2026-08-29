@@ -1,9 +1,28 @@
 import { StringDecoder } from 'node:string_decoder';
+import { Buffer } from 'node:buffer';
+
+export const MAX_PENDING_FRAME_BYTES = 64 * 1024;
+
+function takeUtf8Prefix(value: string, maxBytes: number): [string, string] {
+  let byteLength = 0;
+  let end = 0;
+
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, 'utf8');
+    if (byteLength + characterBytes > maxBytes) break;
+    byteLength += characterBytes;
+    end += character.length;
+  }
+
+  return [value.slice(0, end), value.slice(end)];
+}
 
 /**
  * Frames text from a child-process stream without assuming data events align
  * with log boundaries. Newlines and bare carriage returns both terminate an
  * entry so progress updates do not remain embedded in a later log line.
+ * Unterminated output is emitted in bounded UTF-8 chunks to prevent a noisy
+ * child process from retaining an unbounded pending frame.
  */
 export class ServerLogFramer {
   private readonly decoder = new StringDecoder('utf8');
@@ -41,6 +60,13 @@ export class ServerLogFramer {
 
     if (frameStart > 0) {
       this.pending = this.pending.slice(frameStart);
+    }
+
+    while (Buffer.byteLength(this.pending, 'utf8') > MAX_PENDING_FRAME_BYTES) {
+      const [frame, remainder] = takeUtf8Prefix(this.pending, MAX_PENDING_FRAME_BYTES);
+      if (!frame) break;
+      if (frame.trim()) frames.push(frame);
+      this.pending = remainder;
     }
 
     return frames;
