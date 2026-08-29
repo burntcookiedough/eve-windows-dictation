@@ -32,6 +32,7 @@ const log = createLogger('ServerManager');
 
 const MAX_LOG_ENTRIES = 500;
 const HEALTH_POLL_INTERVAL_MS = 3000;
+const HEALTH_REQUEST_TIMEOUT_MS = 2000;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
@@ -95,15 +96,16 @@ export class ServerManager {
   /**
    * Check server health by hitting the /health endpoint.
    */
-  private async getHealthState(port: number): Promise<HealthState> {
+  private async getHealthState(
+    port: number,
+    timeoutMs = HEALTH_REQUEST_TIMEOUT_MS,
+  ): Promise<HealthState> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
-
       const response = await fetch(`http://localhost:${port}/health`, {
         signal: controller.signal,
       });
-      clearTimeout(timeout);
 
       if (!response.ok) {
         return { healthy: false };
@@ -112,6 +114,8 @@ export class ServerManager {
       return parseHealthyResponse(await response.json());
     } catch {
       return { healthy: false };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -640,15 +644,35 @@ export class ServerManager {
    * Wait for health check to pass.
    */
   private async waitForHealth(port: number, timeoutMs: number): Promise<HealthState | null> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      const health = await this.getHealthState(port);
-      if (health.healthy) {
-        return health;
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return null;
+
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const health = await Promise.race([
+          this.getHealthState(port, Math.min(HEALTH_REQUEST_TIMEOUT_MS, remainingMs)),
+          new Promise<null>((resolve) => {
+            deadlineTimer = setTimeout(() => resolve(null), remainingMs);
+          }),
+        ]);
+        if (health?.healthy) {
+          return health;
+        }
+      } finally {
+        if (deadlineTimer !== undefined) {
+          clearTimeout(deadlineTimer);
+        }
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const remainingAfterCheckMs = deadline - Date.now();
+      if (remainingAfterCheckMs <= 0) return null;
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, Math.min(500, remainingAfterCheckMs));
+      });
     }
-    return null;
   }
 
   /**
