@@ -13,6 +13,11 @@ const { getServerSettings } = await import('../src/main/services/server-settings
 
 type PrivateServerManager = {
   getHealthState: (port: number, timeoutMs?: number) => Promise<HealthState>;
+  getState: InstanceType<typeof ServerManager>['getState'];
+  setMainWindow: InstanceType<typeof ServerManager>['setMainWindow'];
+  startHealthPolling: (port: number) => void;
+  stopHealthPolling: () => void;
+  updateStatus: (status: 'running') => void;
   waitForHealth: (port: number, timeoutMs: number) => Promise<HealthState | null>;
 };
 
@@ -21,7 +26,7 @@ function asPrivateManager(manager: InstanceType<typeof ServerManager>): PrivateS
 }
 
 function restoreGlobalProperty(
-  name: 'fetch' | 'setTimeout',
+  name: 'fetch' | 'setInterval' | 'setTimeout',
   descriptor: PropertyDescriptor | undefined,
 ): void {
   if (descriptor) {
@@ -32,6 +37,117 @@ function restoreGlobalProperty(
 }
 
 describe('Electron request deadlines', () => {
+  test('restores running state after a transient health-check failure', async () => {
+    const manager = asPrivateManager(new ServerManager());
+    const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
+    const originalGetHealthState = manager.getHealthState;
+    let poll: (() => Promise<void>) | undefined;
+    const healthStates: HealthState[] = [
+      { healthy: false },
+      { healthy: true, engineStatus: { current: 'whisper', status: 'ready' } },
+    ];
+
+    Object.defineProperty(globalThis, 'setInterval', {
+      configurable: true,
+      writable: true,
+      value: ((handler: unknown) => {
+        poll = handler as () => Promise<void>;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as typeof setInterval,
+    });
+    manager.getHealthState = async () => healthStates.shift() ?? { healthy: true };
+
+    try {
+      manager.updateStatus('running');
+      manager.startHealthPolling(51717);
+
+      await poll?.();
+      expect(manager.getState().status).toBe('error');
+
+      await poll?.();
+      expect(manager.getState()).toMatchObject({
+        status: 'running',
+        engineStatus: { current: 'whisper', status: 'ready' },
+      });
+    } finally {
+      manager.stopHealthPolling();
+      manager.getHealthState = originalGetHealthState;
+      restoreGlobalProperty('setInterval', originalSetInterval);
+    }
+  });
+
+  test('ignores a late healthy response after health polling stops', async () => {
+    const manager = asPrivateManager(new ServerManager());
+    const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
+    const originalGetHealthState = manager.getHealthState;
+    let poll: (() => Promise<void>) | undefined;
+    let resolveHealth: ((health: HealthState) => void) | undefined;
+    const deferredHealth = new Promise<HealthState>((resolve) => {
+      resolveHealth = resolve;
+    });
+    let healthRequestCount = 0;
+    const publishedStates: unknown[] = [];
+
+    Object.defineProperty(globalThis, 'setInterval', {
+      configurable: true,
+      writable: true,
+      value: ((handler: unknown) => {
+        poll = handler as () => Promise<void>;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as typeof setInterval,
+    });
+    manager.getHealthState = async () => {
+      healthRequestCount += 1;
+      return healthRequestCount === 1 ? { healthy: false } : deferredHealth;
+    };
+    manager.setMainWindow({
+      isDestroyed: () => false,
+      webContents: {
+        send: (_channel: string, state: unknown) => publishedStates.push(state),
+      },
+    } as unknown as Parameters<InstanceType<typeof ServerManager>['setMainWindow']>[0]);
+
+    try {
+      manager.updateStatus('running');
+      manager.startHealthPolling(51717);
+
+      await poll?.();
+      expect(manager.getState().status).toBe('error');
+      publishedStates.length = 0;
+
+      const latePoll = poll?.();
+      manager.stopHealthPolling();
+      resolveHealth?.({
+        healthy: true,
+        version: 'late-version',
+        diagnostics: {
+          generated_at: 'late-response',
+          cuda: { available: true, device: 'cuda' },
+          cuda_dlls: { available: true },
+          nvidia_driver: { available: true },
+          vc_redist: { required: false },
+          warnings: [],
+        },
+        engineStatus: { current: 'whisper', status: 'ready' },
+      });
+      await latePoll;
+
+      expect({ state: manager.getState(), publishedStates }).toMatchObject({
+        state: {
+          status: 'error',
+          version: undefined,
+          diagnostics: undefined,
+          engineStatus: undefined,
+        },
+        publishedStates: [],
+      });
+    } finally {
+      manager.stopHealthPolling();
+      manager.getHealthState = originalGetHealthState;
+      restoreGlobalProperty('setInterval', originalSetInterval);
+    }
+  });
+
   test('keeps client deadlines beyond the server probe ceiling', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');

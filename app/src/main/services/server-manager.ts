@@ -49,6 +49,7 @@ export class ServerManager {
   private readonly pendingLogDelivery = new BoundedLogDeliveryQueue<ServerLogEntry>(MAX_LOG_ENTRIES);
   private logDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
   private healthPollInterval: ReturnType<typeof setInterval> | null = null;
+  private healthPollGeneration = 0;
   private mainWindow: BrowserWindow | null = null;
   private managed = false; // Whether we spawned the server (production) vs detected it (dev)
   private startedAt: number | null = null;
@@ -131,21 +132,29 @@ export class ServerManager {
    */
   private startHealthPolling(port: number): void {
     this.stopHealthPolling();
+    const generation = this.healthPollGeneration;
     this.healthPollInterval = setInterval(async () => {
       const health = await this.getHealthState(port);
-      if (!health.healthy && this.status === 'running') {
-        log.warn('Server health check failed');
-        this.setDiagnostics(undefined);
-        this.setModelDownload(undefined);
-        this.setEngineStatus(undefined);
-        this.updateStatus('error', 'Health check failed');
+      if (generation !== this.healthPollGeneration) return;
+      if (!health.healthy) {
+        if (this.status === 'running') {
+          log.warn('Server health check failed');
+          this.setDiagnostics(undefined);
+          this.setModelDownload(undefined);
+          this.setEngineStatus(undefined);
+          this.updateStatus('error', 'Health check failed');
+        }
         return;
       }
 
+      const recovered = this.status === 'error';
+      if (recovered) {
+        this.status = 'running';
+      }
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
       const downloadChanged = this.setModelDownload(health.modelDownload);
       const engineChanged = this.setEngineStatus(health.engineStatus);
-      let shouldBroadcast = diagnosticsChanged || downloadChanged || engineChanged;
+      let shouldBroadcast = recovered || diagnosticsChanged || downloadChanged || engineChanged;
 
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
@@ -241,6 +250,7 @@ export class ServerManager {
    * Stop health polling.
    */
   private stopHealthPolling(): void {
+    this.healthPollGeneration += 1;
     if (this.healthPollInterval) {
       clearInterval(this.healthPollInterval);
       this.healthPollInterval = null;
