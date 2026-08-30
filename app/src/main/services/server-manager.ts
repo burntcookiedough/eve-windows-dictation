@@ -133,19 +133,25 @@ export class ServerManager {
     this.stopHealthPolling();
     this.healthPollInterval = setInterval(async () => {
       const health = await this.getHealthState(port);
-      if (!health.healthy && this.status === 'running') {
-        log.warn('Server health check failed');
-        this.setDiagnostics(undefined);
-        this.setModelDownload(undefined);
-        this.setEngineStatus(undefined);
-        this.updateStatus('error', 'Health check failed');
+      if (!health.healthy) {
+        if (this.status === 'running') {
+          log.warn('Server health check failed');
+          this.setDiagnostics(undefined);
+          this.setModelDownload(undefined);
+          this.setEngineStatus(undefined);
+          this.updateStatus('error', 'Health check failed');
+        }
         return;
       }
 
+      const recovered = this.status === 'error';
+      if (recovered) {
+        this.status = 'running';
+      }
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
       const downloadChanged = this.setModelDownload(health.modelDownload);
       const engineChanged = this.setEngineStatus(health.engineStatus);
-      let shouldBroadcast = diagnosticsChanged || downloadChanged || engineChanged;
+      let shouldBroadcast = recovered || diagnosticsChanged || downloadChanged || engineChanged;
 
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
