@@ -49,6 +49,7 @@ export class ServerManager {
   private readonly pendingLogDelivery = new BoundedLogDeliveryQueue<ServerLogEntry>(MAX_LOG_ENTRIES);
   private logDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
   private healthPollInterval: ReturnType<typeof setInterval> | null = null;
+  private healthPollGeneration = 0;
   private mainWindow: BrowserWindow | null = null;
   private managed = false; // Whether we spawned the server (production) vs detected it (dev)
   private startedAt: number | null = null;
@@ -131,8 +132,10 @@ export class ServerManager {
    */
   private startHealthPolling(port: number): void {
     this.stopHealthPolling();
+    const generation = this.healthPollGeneration;
     this.healthPollInterval = setInterval(async () => {
       const health = await this.getHealthState(port);
+      if (generation !== this.healthPollGeneration) return;
       if (!health.healthy) {
         if (this.status === 'running') {
           log.warn('Server health check failed');
@@ -247,6 +250,7 @@ export class ServerManager {
    * Stop health polling.
    */
   private stopHealthPolling(): void {
+    this.healthPollGeneration += 1;
     if (this.healthPollInterval) {
       clearInterval(this.healthPollInterval);
       this.healthPollInterval = null;
