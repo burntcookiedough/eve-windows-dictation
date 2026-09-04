@@ -38,7 +38,7 @@ Models are downloaded from their public Hugging Face repositories the first time
 | **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
 | **Medium / Tiny — Advanced** | Raw engine choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
 
-The v0.8.2-alpha.1 alpha ships Faster-Whisper as its sole selectable engine. Nemotron
+The v0.8.2-alpha.3 alpha ships Faster-Whisper as its sole selectable engine. Nemotron
 remains in the source tree and optional `nemotron` dependency for deferred
 repair work; it is not shipped or user-selectable in this alpha.
 
@@ -64,7 +64,7 @@ The [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dict
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-The current source tree also contains **Eve v0.8.2-alpha.1 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact; use the [development setup](#development) below to run it locally.
+The current source tree also contains **Eve v0.8.2-alpha.3 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact; use the [development setup](#development) below to run it locally.
 
 ## Development
 
