@@ -146,20 +146,25 @@ def _create_release_fixture(directory: Path) -> subprocess.CompletedProcess[str]
 
 def test_release_workflow_is_manual_and_never_builds_or_uploads() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert "workflow_dispatch:" in workflow
+    dispatch_block = workflow.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+    risk_gate_step = workflow.split("- name: Require explicit risk gates", 1)[1].split(
+        "- name: Download existing draft assets only", 1
+    )[0]
+    assert dispatch_block
     assert "push:" not in workflow
     for forbidden in ("package:win", "electron-builder", "bun install", "softprops/action-gh-release", "gh release upload", "gh release create"):
         assert forbidden not in workflow
     assert "production-release" in workflow
     assert "allow_unsigned" in workflow
     assert "accepted_name_risk" in workflow
-    assert "publish_prerelease" in workflow
+    assert "publish_prerelease:" in dispatch_block
     allow_block = workflow.split("allow_unsigned:", 1)[1].split("accepted_name_risk:", 1)[0]
     name_block = workflow.split("accepted_name_risk:", 1)[1].split("permissions:", 1)[0]
     assert "default: false" in allow_block
     assert "default: false" in name_block
     assert "draft=false" in workflow
-    assert "Prerelease intent must match the semantic-version tag." in workflow
+    assert "PUBLISH_PRERELEASE: ${{ inputs.publish_prerelease }}" in risk_gate_step
+    assert "Prerelease intent must match the semantic-version tag." in risk_gate_step
 
 
 def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
@@ -262,9 +267,12 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert "gh release download" not in workflow
     assert "EXPECTED_MANIFEST_SHA256" in workflow
     assert "-AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')" in workflow
-    assert "gh release edit $env:TAG" in workflow
-    assert "--prerelease --latest=false" in workflow
-    assert "--prerelease=false --latest" in workflow
+    publish_step = workflow.split(
+        "- name: Publish the existing verified draft only", 1
+    )[1]
+    assert "gh release edit $env:TAG" in publish_step
+    assert "--draft=false --prerelease --latest=false" in publish_step
+    assert "--draft=false --prerelease=false --latest" in publish_step
     assert "gh release upload" not in workflow
     assert "gh release create" not in workflow
 
