@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ExpectedVersion = "0.8.2-alpha.2",
+    [string]$ExpectedVersion = "0.8.2-alpha.3",
     [string]$InstallerDir = "E:\EveRelease\release-prep\full-nsis-web\nsis-web",
     [string]$InstallDir = "E:\EveRelease\release-prep\smoke-install\Eve",
     [string]$BaseBranch = "trunk",
