@@ -72,12 +72,14 @@ export function recoverInterruptedManagedPreparation(
     || lifecycle.applying
     || Object.keys(lifecycle.pending).length > 0;
 
+  if (!interrupted) return null;
+
   return {
     pending: {},
     requested: false,
     active: false,
     observed: false,
     applying: false,
-    message: interrupted ? MANAGED_SERVER_PREPARATION_INTERRUPTED : '',
+    message: MANAGED_SERVER_PREPARATION_INTERRUPTED,
   };
 }
