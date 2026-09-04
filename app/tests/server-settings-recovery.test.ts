@@ -62,6 +62,16 @@ describe('Settings server-state recovery', () => {
     expect(recoverInterruptedManagedPreparation(ready, lifecycle)).toBeNull();
   });
 
+  test('does not emit another recovery after an interrupted preparation is already clear', () => {
+    expect(recoverInterruptedManagedPreparation(starting, {
+      pending: {},
+      requested: false,
+      active: false,
+      observed: false,
+      applying: false,
+    })).toBeNull();
+  });
+
   test('preserves staged preparation during an unmanaged development outage', () => {
     const lifecycle = {
       pending: { engine: 'whisper' },
