@@ -234,11 +234,14 @@ def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
     contents = workflow_path.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in contents
     assert "production-release" in contents
+    assert "publish_prerelease" in contents
     assert "release-artifacts.ps1 -Mode Verify" in contents
     assert 'gh api "repos/${{ github.repository }}/releases/$env:EXPECTED_RELEASE_ID"' in contents
     assert "'Accept: application/octet-stream'" in contents
     assert "gh release download" not in contents
     assert "draft=false" in contents
+    assert "--prerelease --latest=false" in contents
+    assert "--prerelease=false --latest" in contents
     allow_block = contents.split("allow_unsigned:", 1)[1].split("accepted_name_risk:", 1)[0]
     name_block = contents.split("accepted_name_risk:", 1)[1].split("permissions:", 1)[0]
     assert "default: false" in allow_block

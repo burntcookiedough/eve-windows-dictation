@@ -153,11 +153,13 @@ def test_release_workflow_is_manual_and_never_builds_or_uploads() -> None:
     assert "production-release" in workflow
     assert "allow_unsigned" in workflow
     assert "accepted_name_risk" in workflow
+    assert "publish_prerelease" in workflow
     allow_block = workflow.split("allow_unsigned:", 1)[1].split("accepted_name_risk:", 1)[0]
     name_block = workflow.split("accepted_name_risk:", 1)[1].split("permissions:", 1)[0]
     assert "default: false" in allow_block
     assert "default: false" in name_block
     assert "draft=false" in workflow
+    assert "Prerelease intent must match the semantic-version tag." in workflow
 
 
 def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
@@ -229,6 +231,9 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert workflow.count("[string]$release.id -ne $env:EXPECTED_RELEASE_ID") == 2
     assert workflow.count("$release.tag_name -ne $env:TAG") == 2
     assert workflow.count("$release.target_commitish -ne $env:EXPECTED_COMMIT") == 2
+    assert workflow.count(
+        "[bool]$release.prerelease -ne ($env:PUBLISH_PRERELEASE -eq 'true')"
+    ) == 2
     assert workflow.count("$assets.Count -ne $expectedNames.Count") == 2
     assert workflow.count("'Accept: application/octet-stream'") == 2
     assert workflow.count('"Authorization: Bearer $env:GH_TOKEN"') == 2
@@ -250,6 +255,7 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert (
         "EXPECTED_RELEASE_ID: ${{ inputs.expected_release_id }}" in promote_step
     )
+    assert "PUBLISH_PRERELEASE: ${{ inputs.publish_prerelease }}" in promote_step
     assert "$ErrorActionPreference = 'Stop'" in promote_step
     assert verifier in promote_step
     assert "gh release view" not in workflow
@@ -257,6 +263,8 @@ def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None
     assert "EXPECTED_MANIFEST_SHA256" in workflow
     assert "-AllowUnsigned:($env:ALLOW_UNSIGNED -eq 'true')" in workflow
     assert "gh release edit $env:TAG" in workflow
+    assert "--prerelease --latest=false" in workflow
+    assert "--prerelease=false --latest" in workflow
     assert "gh release upload" not in workflow
     assert "gh release create" not in workflow
 
