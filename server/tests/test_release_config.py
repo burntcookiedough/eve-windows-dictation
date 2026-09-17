@@ -194,38 +194,33 @@ def test_release_extra_is_the_only_whisper_torch_closure() -> None:
     }
 
 
-def test_release_verification_requires_only_the_shipped_engine_closure() -> None:
+def test_release_verification_requires_only_the_shipped_model_closure() -> None:
     contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
         encoding="utf-8"
     )
     assert 'Join-Path $sitePackages "faster_whisper"' in contents
     assert 'Join-Path $sitePackages "torch"' in contents
     assert "import faster_whisper, torch" in contents
-    assert "discover_engines" in contents
-    assert "Deferred Nemotron packages" in contents
+    assert "discover_models" in contents
+    assert "Assert-NoPath" in contents
+    assert 'src\\transcription\\engines\\nemotron.py' in contents
+    assert 'src\\transcription\\nemotron_runtime.py' in contents
+    assert "Unsupported model-runtime packages" in contents
     assert "torchaudio" in contents
     assert "nemo.collections.asr" not in contents
 
 
-def test_release_verification_requires_both_engine_discovery_properties() -> None:
+def test_release_verification_requires_one_supported_model_catalog_entry() -> None:
     contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
         encoding="utf-8"
     )
-    required_properties = '$requiredEngineProperties = @("whisper", "nemotron")'
-    missing_properties = "$missingEngineProperties"
-    missing_guard = "if ($missingEngineProperties.Count -gt 0) {"
-    missing_throw = 'throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join \', \')"'
-    whisper_availability = "$whisperAvailable = [bool]$discovery.whisper"
-
-    assert required_properties in contents
-    assert missing_properties in contents
-    assert missing_guard in contents
-    assert missing_throw in contents
-    missing_properties_index = contents.index(missing_properties)
-    missing_guard_index = contents.index(missing_guard, missing_properties_index)
-    missing_throw_index = contents.index(missing_throw, missing_guard_index)
-    whisper_availability_index = contents.index(whisper_availability)
-    assert missing_properties_index < missing_guard_index < missing_throw_index < whisper_availability_index
+    assert 'from transcription.factory import discover_models' in contents
+    assert 'if len(models) != 1 or models[0]["id"] != "whisper"' in contents
+    assert 'throw "Packaged Faster-Whisper catalog mismatch:' in contents
+    assert 'Write-Step "Checking packaged Faster-Whisper catalog"' in contents
+    assert "discover_engines" not in contents
+    assert '$requiredEngineProperties = @("whisper", "nemotron")' not in contents
+    assert "$env:MURMUR_ENGINE_PREFERENCE_MODE" not in contents
 
 
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:

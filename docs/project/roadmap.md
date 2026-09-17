@@ -41,15 +41,18 @@ signing, or thin-client distribution.
 
 ## Later: component-based distribution
 
-The measured installer payload is dominated by portable Python and two independent ASR runtime stacks. The planned direction is a thin core client with separately versioned engine packs, while model weights remain separate first-use downloads.
+The measured installer payload is dominated by portable Python and the Faster-Whisper
+runtime. The planned direction is a thin core client with separately versioned model
+adapters, while model weights remain separate first-use downloads.
 
 Required properties include resumable downloads, signed or checksum-verified manifests, exact size and disk preflight, atomic staging and activation, compatibility metadata, rollback, repair, offline behavior, and uninstall rules that preserve user data and model caches.
 
-## Later: profile-based ASR experiments
+## Later: future model adapters
 
-- Fast Dictation: evaluate Nemotron 3.5 ASR Streaming 0.6B through an isolated Transformers/PyTorch pack on native Windows.
-- Long Dictation: evaluate Qwen3-ASR 0.6B through Transformers with deterministic offline decoding.
-- Hinglish: evaluate the Srota Qwen3-ASR fine-tune as an experimental opt-in.
-- Production fallback: retain faster-whisper until challengers pass accuracy, latency, memory, packaging, recovery, and component lifecycle gates on target Windows hardware.
+The current release keeps Faster-Whisper as the only supported model family. A future
+family can be evaluated in an isolated adapter with deterministic offline decoding,
+then promoted only after it passes accuracy, latency, memory, packaging, recovery, and
+component-lifecycle gates on target Windows hardware. Model-family experiments must
+not add discovery or fallback policy to the current adapter.
 
 Do not ship vLLM inside the native Windows client. Benchmark raw ASR output separately from optional cleanup, and preserve model downloads as a different lifecycle from runtime/engine packs.

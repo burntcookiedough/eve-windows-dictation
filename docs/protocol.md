@@ -132,12 +132,12 @@ Confirms session started. Server is now accepting audio.
   "frame": "control",
   "type": "ready",
   "engine": {
-    "id": "nemotron",
-    "name": "Nemotron Speech",
-    "model": "nvidia/nemotron-speech-streaming-en-0.6b",
-    "supports_hotwords": false,
-    "languages": ["en"],
-    "model_size_gb": 2.3
+    "id": "whisper",
+    "name": "Faster-Whisper",
+    "model": "large-v3-turbo",
+    "supports_hotwords": true,
+    "languages": ["en", "de", "fr", "es", "it", "ja", "zh", "nl", "ko", "pt"],
+    "model_size_gb": 1.5
   }
 }
 ```
@@ -146,7 +146,7 @@ Confirms session started. Server is now accepting audio.
 |-------|------|-------------|
 | `frame` | string | `"control"` |
 | `type` | string | `"ready"` |
-| `engine` | object | Optional engine metadata for this session (may be omitted) |
+| `engine` | object | Optional compatibility metadata for the Faster-Whisper model serving this session (may be omitted) |
 
 **Client behavior:** Begin sending audio frames.
 

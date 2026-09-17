@@ -25,12 +25,11 @@ uv run python -m src.main
 ```
 
 Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the
-shipped Whisper-only closure. Pinning the sync interpreter keeps compiled
+shipped Faster-Whisper closure. Pinning the sync interpreter keeps compiled
 packages compatible with the relocatable runtime, and `--no-dev` keeps the
-default development group out of the shipped environment. The experimental
-`nemotron` extra remains available for deferred repair work, but is not shipped
-or user-selectable in this alpha. Development commands must use the current
-clone, never a copied user environment.
+default development group out of the shipped environment. Development commands
+must use the current clone, never a copied user environment. Additional model
+families require a separately reviewed adapter and release dependency closure.
 
 ## Windows package preparation
 

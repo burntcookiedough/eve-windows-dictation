@@ -1,19 +1,30 @@
 # Speech model selection
 
-The v0.8.1 alpha presents three curated Whisper choices. Nemotron remains in
-the source tree and optional `nemotron` extra for deferred repair work; it is
-not shipped or user-selectable in this alpha:
+Eve currently supports one model family: Faster-Whisper running through the
+CTranslate2 adapter. The built-in catalog contains these curated choices:
 
-- Recommended Multilingual: Faster-Whisper `large-v3-turbo` (multilingual, approximately 1.5 GB).
-- Maximum Multilingual Accuracy: Faster-Whisper `large-v3` (multilingual, approximately 2.9 GB).
-- Lightweight: Faster-Whisper `small` (multilingual, approximately 0.5 GB).
+- Recommended multilingual: `large-v3-turbo` (approximately 1.5 GB).
+- Maximum multilingual accuracy: `large-v3` (approximately 2.9 GB).
+- Lightweight: `small` (approximately 0.5 GB).
+- Advanced: `medium` (approximately 1.4 GB) and `tiny` (approximately 0.07 GB).
 
-The labels describe relative use cases, not Eve benchmark claims. The packaged
-alpha exposes Whisper only; engine availability still comes from the running
-server, and a missing engine runtime is not installed by this UI.
+The labels describe relative use cases, not Eve benchmark claims. Catalog entries
+are presentation metadata, not an allowlist: advanced users may provide an explicit
+Faster-Whisper Hugging Face repository or local model path through server settings.
 
-Selecting a choice is local to the renderer. **Apply and prepare model** is the explicit action that persists the existing server settings and begins the existing engine/model swap path. Eve keeps the current engine active while the selected model downloads or loads where the server supports that behavior. A selected choice is not called current until the server reports that engine and model ready.
+**Apply and prepare model** is the explicit action that persists server settings and
+asks the model runtime to prepare the selected model. Eve keeps the current ready
+model serving sessions while a replacement downloads, loads, validates, and commits.
+A selection is not current until the server reports that model ready; a failed
+candidate leaves the previous model usable.
 
-The bundled engine runtime and separately downloaded model weights are different lifecycles. Eve reports only the selected/active model-download state; it does not inventory, pre-download, move, or delete model caches. Hugging Face cache partials remain resumable through the existing server download plumbing.
+The bundled runtime and separately downloaded model weights have different lifecycles.
+Eve reports the selected model's preparation state but does not inventory, move, or
+delete model caches. Hugging Face partial downloads remain resumable through the
+server's existing download plumbing.
 
-Before a missing or partial selected-model download begins, the server checks free capacity on the existing Hugging Face cache filesystem (or its nearest existing parent). It estimates remaining selected-repository bytes from model metadata and already-present required files, with the larger of 10% or 512 MiB reserved as cushion. The check reads capacity and selected-repository metadata only; an unavailable or insufficient filesystem produces an explicit selected-model error and leaves partial data untouched.
+Before a missing or partial download begins, the server checks free capacity on the
+existing Hugging Face cache filesystem (or its nearest existing parent). It estimates
+remaining repository bytes from model metadata and already-present required files,
+reserving the larger of 10% or 512 MiB as a cushion. An unavailable or insufficient
+filesystem produces an explicit model-preparation error and leaves partial data intact.
