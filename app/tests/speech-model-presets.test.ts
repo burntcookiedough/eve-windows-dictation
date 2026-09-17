@@ -1,21 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetDownloadLabel, presetIsPreparing, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
+import type { ModelCatalogItem } from '../src/shared/types';
+import { hasPendingCompatibilityChanges, presetDownloadLabel, presetIsPreparing, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, speechModelPresetsFromCatalog, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
+
+const MODEL_CATALOG: ModelCatalogItem[] = [
+  { model: 'large-v3-turbo', label: 'Recommended Multilingual', summary: 'A balanced multilingual option.', repo_id: 'example/large-v3-turbo', size_gb: 1.5, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+  { model: 'large-v3', label: 'Maximum Multilingual Accuracy', summary: 'A larger multilingual option for quality-focused use.', repo_id: 'example/large-v3', size_gb: 2.9, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+  { model: 'small', label: 'Lightweight', summary: 'A smaller option for constrained hardware.', repo_id: 'example/small', size_gb: 0.5, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+];
+const SPEECH_MODEL_PRESETS = speechModelPresetsFromCatalog(MODEL_CATALOG);
 
 describe('speech model presets', () => {
   test('keeps the three exact shipped mappings and factual established sizes', () => {
     expect(SPEECH_MODEL_PRESETS.map(({ id }) => id)).toEqual([
-      'recommended-multilingual',
-      'maximum-multilingual-accuracy',
-      'lightweight',
+      'large-v3-turbo',
+      'large-v3',
+      'small',
     ]);
     expect(SPEECH_MODEL_PRESETS.map(({ label, model, sizeGb }) => ({ label, model, sizeGb }))).toEqual([
       { label: 'Recommended Multilingual', model: 'large-v3-turbo', sizeGb: 1.5 },
       { label: 'Maximum Multilingual Accuracy', model: 'large-v3', sizeGb: 2.9 },
       { label: 'Lightweight', model: 'small', sizeGb: 0.5 },
     ]);
-    expect(presetPatch(SPEECH_MODEL_PRESETS[0])).toEqual({ engine: 'whisper', whisper_model: 'large-v3-turbo' });
-    expect(presetPatch(SPEECH_MODEL_PRESETS[1])).toEqual({ engine: 'whisper', whisper_model: 'large-v3' });
+    expect(presetPatch(SPEECH_MODEL_PRESETS[0]!)).toEqual({ whisper_model: 'large-v3-turbo' });
+    expect(presetPatch(SPEECH_MODEL_PRESETS[1]!)).toEqual({ whisper_model: 'large-v3' });
   });
 
   test('does not warn for a pure staged preset patch but warns for an additional pending model', () => {
@@ -93,8 +101,9 @@ describe('speech model presets', () => {
     expect(settingsMarkup).not.toContain('unload_before_swap');
     expect(settings).toContain("'whisper_language'");
     const config = readFileSync(new URL('../../server/src/config.py', import.meta.url), 'utf8');
-    expect(config).toContain('"medium"');
-    expect(config).toContain('"tiny"');
+    expect(config).toContain('model_setting_options');
+    expect(config).not.toContain('"medium"');
+    expect(config).not.toContain('"tiny"');
     expect(settings).toContain('whisper_compute_type');
     expect(settings).toContain('Raw Whisper compatibility model, including Medium and Tiny');
     expect(settings).toContain('!stagedPreset');
@@ -103,9 +112,9 @@ describe('speech model presets', () => {
   });
 
   test('routes only an actual staged preset through model preparation and clears the full candidate on revert', () => {
-    expect(stagedPresetFromPending({ whisper_compute_type: 'int8' })).toBeNull();
-    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'medium' })).toBeNull();
-    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' })?.id).toBe('recommended-multilingual');
-    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'custom/local-model', whisper_device: 'cuda' })).toBeNull();
+    expect(stagedPresetFromPending({ whisper_compute_type: 'int8' }, SPEECH_MODEL_PRESETS)).toBeNull();
+    expect(stagedPresetFromPending({ whisper_model: 'medium' }, SPEECH_MODEL_PRESETS)).toBeNull();
+    expect(stagedPresetFromPending({ whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' }, SPEECH_MODEL_PRESETS)?.id).toBe('large-v3-turbo');
+    expect(stagedPresetFromPending({ whisper_model: 'custom/local-model', whisper_device: 'cuda' }, SPEECH_MODEL_PRESETS)).toBeNull();
   });
 });

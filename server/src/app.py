@@ -25,6 +25,7 @@ from config import (
 from diagnostics import collect_diagnostics
 from legacy_settings import migrate_raw_settings
 from session.manager import get_session_manager
+from transcription.catalog import model_catalog_payload
 from transcription.factory import (
     discover_engines,
     get_model_runtime,
@@ -240,13 +241,11 @@ def create_app() -> FastAPI:
     async def get_server_settings() -> dict:
         runtime = get_model_runtime()
         status, settings = await _runtime_snapshot(runtime)
-        discovered = discover_engines()
-        available = [entry["id"] for entry in discovered if entry["available"]]
 
         return {
             "settings": get_settings_with_metadata(settings),
             "engine_status": serialize_engine_status(status),
-            "available_engines": available,
+            "model_catalog": model_catalog_payload(),
         }
 
     @app.patch("/settings")
@@ -302,9 +301,7 @@ def create_app() -> FastAPI:
         response: dict[str, Any] = {
             "settings": get_settings_with_metadata(committed_settings),
             "engine_status": serialize_engine_status(status),
-            "available_engines": [
-                entry["id"] for entry in discover_engines() if entry["available"]
-            ],
+            "model_catalog": model_catalog_payload(),
             "reload_required": needs_reload,
             "reload_started": reload_started,
         }

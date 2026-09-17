@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { EngineStatus, ModelDownloadState } from '$shared/types';
-  import { SPEECH_MODEL_PRESETS, presetIsPreparing, presetMatchesCurrentEngine, presetMatchesPreparationTarget, type SpeechModelPreset } from '../speech-model-presets';
+  import { presetIsPreparing, presetMatchesCurrentEngine, presetMatchesPreparationTarget, type SpeechModelPreset } from '../speech-model-presets';
 
   interface Props {
+    presets: readonly SpeechModelPreset[];
     selected: SpeechModelPreset | null;
     engineStatus: EngineStatus | null;
     modelDownload?: ModelDownloadState;
@@ -13,6 +14,7 @@
   }
 
   let {
+    presets,
     selected,
     engineStatus,
     modelDownload,
@@ -80,8 +82,13 @@
       Select a curated model to stage. Apply and prepare model confirms the change. The current engine stays active until the selected model is ready.
     </p>
 
-    <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
-      {#each SPEECH_MODEL_PRESETS as preset}
+    {#if presets.length === 0}
+      <p data-model-catalog-empty class="mt-4 rounded-lg border border-dashed border-white/[0.12] p-3 text-xs leading-5 text-zinc-500">
+        Curated model metadata is unavailable from this server. Use the raw compatibility controls below to select a model.
+      </p>
+    {:else}
+      <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
+        {#each presets as preset}
         {@const checked = selected?.id === preset.id}
         {@const label = stateLabel(preset)}
         <label
@@ -110,8 +117,9 @@
             {/if}
           </span>
         </label>
-      {/each}
-    </div>
+        {/each}
+      </div>
+    {/if}
   </fieldset>
 
   {#if children}

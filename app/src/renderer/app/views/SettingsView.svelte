@@ -10,7 +10,7 @@
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
-  import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
+  import { hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, speechModelPresetsFromCatalog, stagedPresetFromPending, type SpeechModelPreset } from '../speech-model-presets';
   import { serverStatusState } from '../server-status';
   import {
     recoverInterruptedManagedPreparation,
@@ -21,7 +21,7 @@
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
   import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
-  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DICTATION_MODE_OPTIONS: EveDropdownOption[] = [
@@ -87,6 +87,7 @@
 
   // Server/engine settings state
   let serverSettings = $state<Record<string, ServerSetting<unknown>> | null>(null);
+  let modelCatalog = $state<ModelCatalogItem[]>([]);
   let engineStatus = $state<EngineStatus | null>(null);
   let serverConnected = $state(false);
   let serverSettingsLoading = $state(false);
@@ -103,6 +104,7 @@
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(engineStatus ?? sharedServerState?.engineStatus ?? null);
+  let speechModelPresets = $derived(speechModelPresetsFromCatalog(modelCatalog));
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -112,10 +114,10 @@
   }
 
   let draftWhisperDevice = $derived(getSettingValue<string>('whisper_device') ?? 'auto');
-  let selectedPreset = $derived(SPEECH_MODEL_PRESETS.find((preset) =>
+  let selectedPreset = $derived(speechModelPresets.find((preset) =>
     getSettingValue<string>('whisper_model') === preset.model
   ) ?? null);
-  let stagedPreset = $derived(stagedPresetFromPending(pendingEngine));
+  let stagedPreset = $derived(stagedPresetFromPending(pendingEngine, speechModelPresets));
   let preparationFailed = $derived(
     enginePreparationPhase(sharedEngineStatus) === 'failed' ||
     (!enginePreparationActive && stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
@@ -216,11 +218,13 @@
     try {
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
+      modelCatalog = serverData.model_catalog ?? [];
       engineStatus = serverData.engine_status;
       serverConnected = true;
       return true;
     } catch {
       serverSettings = null;
+      modelCatalog = [];
       engineStatus = null;
       serverConnected = false;
       return false;
@@ -277,6 +281,7 @@
         applying: engineApplying,
       });
       serverSettings = null;
+      modelCatalog = [];
       engineStatus = null;
       serverConnected = false;
       lastServerSettingsAttemptKey = null;
@@ -383,7 +388,7 @@
     pendingEngine = { ...pendingEngine, [key]: value };
   }
 
-  function selectPreset(preset: typeof SPEECH_MODEL_PRESETS[number]): void {
+  function selectPreset(preset: SpeechModelPreset): void {
     pendingEngine = { ...pendingEngine, ...presetPatch(preset) };
     engineApplyError = '';
   }
@@ -408,6 +413,7 @@
       const patch = Object.fromEntries(Object.entries(pendingEngine));
       const response = await window.murmurMain.updateServerSettings(patch);
       serverSettings = response.settings;
+      modelCatalog = response.model_catalog ?? [];
       engineStatus = response.engine_status;
       if (response.reload_started) {
         enginePreparationRequested = true;
@@ -764,6 +770,7 @@
         </div>
       {:else}
         <SpeechModelChooser
+          presets={speechModelPresets}
           selected={selectedPreset}
           engineStatus={sharedEngineStatus}
           modelDownload={sharedServerState?.modelDownload}

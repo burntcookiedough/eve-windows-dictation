@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { EngineStatus, ModelDownloadState } from '$shared/types';
-  import { SPEECH_MODEL_PRESETS, type SpeechModelPreset } from '../speech-model-presets';
+  import type { EngineStatus, ModelCatalogItem, ModelDownloadState } from '$shared/types';
+  import { speechModelPresetsFromCatalog, type SpeechModelPreset } from '../speech-model-presets';
   import SettingsGroup from '../components/SettingsGroup.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
@@ -14,14 +14,47 @@
   const fixtureState = (params.get('state') ?? 'ready') as FixtureState;
   const fixtureView = params.get('view') ?? 'all';
   let compatibilityOpen = $state(params.get('compatibility') === 'expanded');
+  const fixtureCatalog: ModelCatalogItem[] = [
+    {
+      model: 'large-v3-turbo',
+      label: 'Recommended Multilingual',
+      summary: 'A balanced multilingual option.',
+      repo_id: 'example/large-v3-turbo',
+      size_gb: 1.5,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+    {
+      model: 'large-v3',
+      label: 'Maximum Multilingual Accuracy',
+      summary: 'A larger multilingual option for quality-focused use.',
+      repo_id: 'example/large-v3',
+      size_gb: 2.9,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+    {
+      model: 'small',
+      label: 'Lightweight',
+      summary: 'A smaller option for constrained hardware.',
+      repo_id: 'example/small',
+      size_gb: 0.5,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+  ];
+  const fixturePresets = speechModelPresetsFromCatalog(fixtureCatalog);
   let selectedPreset = $state<SpeechModelPreset>(
     fixtureState === 'ready'
-      ? SPEECH_MODEL_PRESETS[0]!
-      : SPEECH_MODEL_PRESETS[1]!,
+      ? fixturePresets[0]!
+      : fixturePresets[1]!,
   );
 
-  const currentPreset = SPEECH_MODEL_PRESETS[0]!;
-  const targetPreset = SPEECH_MODEL_PRESETS[1]!;
+  const currentPreset = fixturePresets[0]!;
+  const targetPreset = fixturePresets[1]!;
   const currentEngineStatus: EngineStatus = {
     current: 'whisper',
     status: 'ready',
@@ -147,6 +180,7 @@
           {#if fixtureView === 'speech' || fixtureView === 'all'}
             <SettingsSection title="Speech model" variant="content">
               <SpeechModelChooser
+                presets={fixturePresets}
                 selected={selectedPreset}
                 engineStatus={engineStatus}
                 modelDownload={modelDownload}

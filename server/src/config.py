@@ -179,13 +179,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "label": "Whisper Model",
         "description": "Model size. Larger = better quality, more VRAM.",
         "type": "select",
-        "options": [
-            {"value": "large-v3-turbo", "label": "Large V3 Turbo", "description": "Best speed/quality balance (~1.5 GB model)"},
-            {"value": "large-v3", "label": "Large V3", "description": "Highest quality, slower"},
-            {"value": "medium", "label": "Medium", "description": "~1.4 GB model"},
-            {"value": "small", "label": "Small", "description": "~0.5 GB model"},
-            {"value": "tiny", "label": "Tiny", "description": "Fastest, lowest quality"},
-        ],
         "requires_reload": True,
         "category": "engine",
         "visible_when": {"engine": "whisper"},
@@ -357,8 +350,18 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
     result = {}
     capabilities = get_runtime_capabilities()
     for key, meta in SETTINGS_METADATA.items():
+        # Import lazily: ``transcription`` still exposes historical package
+        # exports, and loading it while this configuration module is being
+        # initialized would create a cycle.  The catalog remains the sole
+        # owner; this only defers reading it until the API seam is called.
+        if key == "whisper_model":
+            from transcription.catalog import model_setting_options
+
+            source_options = model_setting_options()
+        else:
+            source_options = meta.get("options", [])
         options = []
-        for option in meta.get("options", []):
+        for option in source_options:
             option_data = dict(option)
             disabled, reason = option_compatibility(
                 key, str(option["value"]), capabilities, settings
@@ -384,7 +387,7 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
         result[key] = {
             "value": values[key],
             **meta,
-            **({"options": options} if "options" in meta else {}),
+            **({"options": options} if "options" in meta or key == "whisper_model" else {}),
         }
     return result
 

@@ -14,7 +14,7 @@ import threading
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from transcription.catalog import FASTER_WHISPER_CATALOG
+from transcription.catalog import FASTER_WHISPER_CATALOG, model_catalog_payload
 from transcription.contracts import (
     Failed,
     ModelAdapter,
@@ -231,6 +231,7 @@ def discover_models() -> list[dict[str, Any]]:
 
     available = _module_is_available("faster_whisper")
     first = FASTER_WHISPER_CATALOG[0]
+    models = model_catalog_payload()
     return [
         {
             "id": SUPPORTED_ENGINE_ID,
@@ -241,16 +242,15 @@ def discover_models() -> list[dict[str, Any]]:
             "languages": list(first.languages),
             "features": ["multilingual", "hotwords"],
             **({} if available else {"install_hint": "uv sync --extra whisper"}),
+            # Keep the old discovery payload's aliases while sourcing every
+            # model fact from the canonical catalog serializer.
             "models": [
                 {
-                    "id": str(item.model),
-                    "label": item.label,
-                    "repo_id": item.repo_id,
-                    "model_size_gb": item.size_gb,
-                    "languages": list(item.languages),
-                    "supports_hotwords": item.supports_hotwords,
+                    **item,
+                    "id": item["model"],
+                    "model_size_gb": item["size_gb"],
                 }
-                for item in FASTER_WHISPER_CATALOG
+                for item in models
             ],
         }
     ]

@@ -1,7 +1,8 @@
-import type { EngineStatus, ModelDownloadState } from '$shared/types';
+import type { EngineStatus, ModelCatalogItem, ModelDownloadState } from '$shared/types';
 
 export interface SpeechModelPreset {
-  id: 'recommended-multilingual' | 'maximum-multilingual-accuracy' | 'lightweight';
+  /** Stable UI key derived from the server-owned model ID. */
+  id: string;
   label: string;
   model: string;
   sizeGb: number;
@@ -9,14 +10,48 @@ export interface SpeechModelPreset {
   summary: string;
 }
 
-export const SPEECH_MODEL_PRESETS: readonly SpeechModelPreset[] = [
-  { id: 'recommended-multilingual', label: 'Recommended Multilingual', model: 'large-v3-turbo', sizeGb: 1.5, language: 'Multilingual', summary: 'A balanced multilingual option.' },
-  { id: 'maximum-multilingual-accuracy', label: 'Maximum Multilingual Accuracy', model: 'large-v3', sizeGb: 2.9, language: 'Multilingual', summary: 'A larger multilingual option for quality-focused use.' },
-  { id: 'lightweight', label: 'Lightweight', model: 'small', sizeGb: 0.5, language: 'Multilingual', summary: 'A smaller option for constrained hardware.' },
-];
+/**
+ * Map server-owned presentation metadata into the renderer's view model.
+ *
+ * There is intentionally no local fallback catalog. A missing or malformed
+ * response produces no curated choices; callers keep their raw compatibility
+ * controls available for custom and local model paths.
+ */
+export function speechModelPresetsFromCatalog(
+  catalog: readonly ModelCatalogItem[] | undefined,
+): SpeechModelPreset[] {
+  if (!catalog) return [];
+  return catalog.flatMap((item) => {
+    if (
+      !item || typeof item !== 'object'
+      || typeof item.model !== 'string' || item.model.trim().length === 0
+      || typeof item.label !== 'string' || item.label.trim().length === 0
+      || typeof item.size_gb !== 'number' || !Number.isFinite(item.size_gb) || item.size_gb <= 0
+      || !Array.isArray(item.languages)
+      || item.languages.length === 0
+      || item.languages.some((language) => typeof language !== 'string' || language.trim().length === 0)
+    ) {
+      return [];
+    }
+    const language = typeof item.language_label === 'string' && item.language_label.trim().length > 0
+      ? item.language_label.trim()
+      : item.languages.map((entry) => entry.trim()).join(', ');
+    return [{
+      id: item.model.trim(),
+      label: item.label.trim(),
+      model: item.model.trim(),
+      sizeGb: item.size_gb,
+      language,
+      summary: typeof item.summary === 'string' ? item.summary : '',
+    }];
+  });
+}
 
 export function presetPatch(preset: SpeechModelPreset): Record<string, string> {
-  return { engine: 'whisper', whisper_model: preset.model };
+  // The server already has one supported family. Sending only the model keeps
+  // the new settings path independent from legacy engine discovery while old
+  // clients can continue using their explicit engine compatibility key.
+  return { whisper_model: preset.model };
 }
 
 export function hasPendingCompatibilityChanges(
@@ -29,15 +64,15 @@ export function hasPendingCompatibilityChanges(
   });
 }
 
-export function stagedPresetFromPending(pending: Record<string, unknown>): SpeechModelPreset | null {
-  return SPEECH_MODEL_PRESETS.find((preset) =>
-    pending.engine === 'whisper' && pending.whisper_model === preset.model
-  ) ?? null;
+export function stagedPresetFromPending(
+  pending: Record<string, unknown>,
+  presets: readonly SpeechModelPreset[],
+): SpeechModelPreset | null {
+  return presets.find((preset) => pending.whisper_model === preset.model) ?? null;
 }
 
 export function presetMatchesCurrentEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
-  if (status?.current !== 'whisper') return false;
-  return status.info?.model === preset.model;
+  return status?.info?.model === preset.model;
 }
 
 export function presetMatchesReadyEngine(preset: SpeechModelPreset, status: EngineStatus | null): boolean {
