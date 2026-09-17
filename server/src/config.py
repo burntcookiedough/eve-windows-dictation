@@ -18,6 +18,7 @@ from engine_compatibility import (
     option_compatibility,
     validate_engine_compatibility,
 )
+import legacy_settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,47 @@ def _load_settings_json() -> dict[str, Any]:
             if not isinstance(values, dict):
                 logger.warning("Settings file must contain a JSON object")
                 return {}
-            if values.get("whisper_compute_type") == "int16":
-                values["whisper_compute_type"] = "auto"
-                logger.warning("Migrated legacy Whisper int16 precision setting to auto")
-            return values
+            outcome = legacy_settings.migrate_persisted_settings(values)
+            if outcome.migrated:
+                if outcome.diagnostic:
+                    logger.warning("Settings migration: %s", outcome.diagnostic)
+                try:
+                    legacy_settings.rewrite_settings_file(settings_file, outcome.values)
+                except OSError:
+                    # Migration is best effort: the validated in-memory values
+                    # remain usable and the original file is retried next start.
+                    logger.warning(
+                        "Could not persist migrated settings; continuing with in-memory values."
+                    )
+            return outcome.values
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read settings.json: %s", e)
     return {}
+
+
+def _load_environment_settings(env_settings: Any) -> dict[str, Any]:
+    """Migrate process and dotenv environment values before validation.
+
+    ``EnvSettingsSource`` omits unknown fields after a schema removal, so the
+    compatibility boundary supplements it with the frozen MURMUR_* names that
+    the launcher and existing users may still provide.
+    """
+
+    values = dict(env_settings())
+    values.update(legacy_settings.legacy_environment_values())
+    outcome = legacy_settings.migrate_raw_settings(values)
+    if outcome.migrated and outcome.diagnostic:
+        logger.warning("Environment settings migration: %s", outcome.diagnostic)
+    return outcome.values
+
+
+def _load_dotenv_settings(dotenv_settings: Any) -> dict[str, Any]:
+    """Apply the same raw migration to values loaded from the supported .env file."""
+
+    outcome = legacy_settings.migrate_raw_settings(dict(dotenv_settings()))
+    if outcome.migrated and outcome.diagnostic:
+        logger.warning("Dotenv settings migration: %s", outcome.diagnostic)
+    return outcome.values
 
 
 class Settings(BaseSettings):
@@ -66,8 +101,8 @@ class Settings(BaseSettings):
         """Load persisted values below explicit environment configuration."""
         return (
             init_settings,
-            env_settings,
-            dotenv_settings,
+            lambda: _load_environment_settings(env_settings),
+            lambda: _load_dotenv_settings(dotenv_settings),
             file_secret_settings,
             _load_settings_json,
         )
