@@ -189,7 +189,9 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
         # selection and receives the recommended Whisper replacement.
         if legacy_engine or not has_canonical_whisper_model:
             values["whisper_model"] = RECOMMENDED_WHISPER_MODEL
-        if custom_legacy_engine or (
+        if inferred_legacy_selection and has_canonical_whisper_model:
+            migration_kind = "stale-field"
+        elif custom_legacy_engine or (
             model_seen
             and (
                 not isinstance(legacy_model, str)
@@ -197,8 +199,6 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
             )
         ):
             migration_kind = "custom"
-        elif inferred_legacy_selection and has_canonical_whisper_model:
-            migration_kind = "stale-field"
         else:
             migration_kind = "legacy"
     elif model_seen:

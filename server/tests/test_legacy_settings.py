@@ -117,7 +117,9 @@ def test_stale_nemotron_device_is_removed_without_resetting_whisper_preferences(
         "whisper_language": "fr",
     }
     assert outcome.migrated is True
-    assert outcome.diagnostic is not None
+    assert outcome.diagnostic == (
+        "Removed Nemotron settings ignored; existing Whisper preferences kept."
+    )
 
 
 def test_stale_custom_nemotron_model_does_not_override_explicit_whisper_model() -> None:
@@ -160,7 +162,9 @@ def test_stale_nemotron_model_without_engine_preserves_explicit_whisper_model(
         "whisper_language": "fr",
     }
     assert outcome.migrated is True
-    assert outcome.diagnostic is not None
+    assert outcome.diagnostic == (
+        "Removed Nemotron settings ignored; existing Whisper preferences kept."
+    )
 
 
 def test_non_mapping_source_is_ignored_without_exposing_input() -> None:
