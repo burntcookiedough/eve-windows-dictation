@@ -9,6 +9,7 @@ from transcription.base import EngineInfo
 from transcription.contracts import ModelId, WhisperConfig
 import transcription.faster_whisper_adapter as adapter_module
 from transcription.faster_whisper_adapter import FasterWhisperAdapter
+from transcription.vram import GpuCapabilities
 
 
 def _config() -> WhisperConfig:
@@ -103,3 +104,35 @@ def test_adapter_accepts_explicit_custom_model_sources_without_catalog_allowlist
     prepared = FasterWhisperAdapter().prepare(config, lambda _event: None)
 
     assert prepared.info.model == ModelId("org/private-whisper")
+
+
+def test_adapter_restores_gpu_and_duration_telemetry_when_engine_info_is_sparse(monkeypatch) -> None:
+    class FakeEngine:
+        def __init__(self, settings) -> None:
+            self.engine_info = EngineInfo(
+                id="whisper",
+                name="Faster-Whisper",
+                model=settings.whisper_model,
+                supports_hotwords=True,
+                device="cuda",
+            )
+
+        def create_session(self):
+            return SimpleNamespace(close=lambda: None)
+
+        def shutdown(self):
+            return None
+
+    monkeypatch.setattr(adapter_module, "WhisperEngine", FakeEngine)
+    monkeypatch.setattr(
+        adapter_module,
+        "detect_gpu_capabilities",
+        lambda _device: GpuCapabilities(True, "cuda", 0, "Measured GPU", 12.0),
+    )
+    monkeypatch.setattr(adapter_module, "estimate_max_duration_s", lambda _engine, _vram: 321)
+
+    prepared = FasterWhisperAdapter().prepare(_config(), lambda _event: None)
+
+    assert prepared.info.gpu_name == "Measured GPU"
+    assert prepared.info.gpu_vram_gb == 12.0
+    assert prepared.info.estimated_max_duration_s == 321

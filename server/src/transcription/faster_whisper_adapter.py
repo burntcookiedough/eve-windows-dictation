@@ -18,6 +18,7 @@ from transcription.contracts import (
     ProgressSink,
     WhisperConfig,
 )
+from transcription.vram import detect_gpu_capabilities, estimate_max_duration_s
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,15 @@ def _to_model_info(engine: Any, config: WhisperConfig) -> ModelInfo:
     if size is None:
         size = getattr(source, "size_gb", 0.0)
     load_time = getattr(source, "load_time_s", None)
+    gpu_name = getattr(source, "gpu_name", None)
+    gpu_vram_gb = getattr(source, "gpu_vram_gb", None)
+    estimated_max_duration_s = getattr(source, "estimated_max_duration_s", None)
+    if gpu_name is None or gpu_vram_gb is None or estimated_max_duration_s is None:
+        capabilities = detect_gpu_capabilities(device)
+        gpu_name = gpu_name or capabilities.name
+        gpu_vram_gb = gpu_vram_gb if gpu_vram_gb is not None else capabilities.total_vram_gb
+        if estimated_max_duration_s is None:
+            estimated_max_duration_s = estimate_max_duration_s("whisper", gpu_vram_gb)
     return ModelInfo(
         model=ModelId(str(getattr(source, "model", config.model))),
         repo_id=getattr(source, "repo_id", None),
@@ -167,9 +177,9 @@ def _to_model_info(engine: Any, config: WhisperConfig) -> ModelInfo:
         cuda_active=bool(getattr(source, "cuda_active", False)),
         load_time_s=float(load_time or 0.0),
         supports_hotwords=bool(getattr(source, "supports_hotwords", True)),
-        gpu_name=getattr(source, "gpu_name", None),
-        gpu_vram_gb=getattr(source, "gpu_vram_gb", None),
-        estimated_max_duration_s=getattr(source, "estimated_max_duration_s", None),
+        gpu_name=gpu_name,
+        gpu_vram_gb=gpu_vram_gb,
+        estimated_max_duration_s=estimated_max_duration_s,
         last_transcription_latency_s=getattr(source, "last_transcription_latency_s", None),
         vram_used_gb=getattr(source, "vram_used_gb", None),
     )

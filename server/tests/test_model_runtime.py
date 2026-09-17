@@ -94,6 +94,8 @@ class _Prepared(PreparedModel):
         self.model = model
         self.shutdown_calls = 0
         self.session = _Session(model)
+        self.shutdown_started: threading.Event | None = None
+        self.shutdown_release: threading.Event | None = None
 
     def open_session(self) -> ModelSession:
         return self.session
@@ -104,6 +106,10 @@ class _Prepared(PreparedModel):
 
     def shutdown(self) -> None:
         self.shutdown_calls += 1
+        if self.shutdown_started is not None:
+            self.shutdown_started.set()
+        if self.shutdown_release is not None:
+            assert self.shutdown_release.wait(timeout=2)
 
 
 class _Adapter:
@@ -163,6 +169,23 @@ async def test_initial_preparation_rejects_sessions_and_replacement_admits_curre
     replacement_lease.close()
     lease.close()
     assert adapter.prepared[0].shutdown_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_start_calls_share_one_initial_preparation() -> None:
+    adapter = _Adapter()
+    adapter.block_model = "one"
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+
+    first = asyncio.create_task(runtime.start())
+    assert await asyncio.to_thread(adapter.started.wait, 2)
+    second = asyncio.create_task(runtime.start())
+    await asyncio.sleep(0)
+    adapter.release.set()
+    await asyncio.gather(first, second)
+
+    assert len(adapter.prepared) == 1
+    assert isinstance(runtime.status(), Ready)
 
 
 @pytest.mark.asyncio
@@ -242,6 +265,89 @@ async def test_replacing_without_leases_shuts_down_old_generation_once() -> None
 
     assert adapter.prepared[0].shutdown_calls == 1
     assert adapter.prepared[1].shutdown_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_same_model_update_runs_persist_and_publish_without_reloading() -> None:
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    await runtime.start()
+    events: list[str] = []
+
+    await runtime.prepare_and_activate(
+        _config("one"),
+        persist=lambda: events.append("persist"),
+        publish=lambda: events.append("publish"),
+    )
+
+    assert events == ["persist", "publish"]
+    assert len(adapter.prepared) == 1
+
+
+@pytest.mark.asyncio
+async def test_scheduled_replacement_reserves_before_background_task_runs() -> None:
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    await runtime.start()
+    adapter.block_model = "two"
+
+    first = runtime.schedule_prepare_and_activate(
+        _config("two"), persist=lambda: None, publish=lambda: None
+    )
+    with pytest.raises(RuntimeError, match="already in progress"):
+        runtime.schedule_prepare_and_activate(
+            _config("three"), persist=lambda: None, publish=lambda: None
+        )
+    adapter.release.set()
+    await first
+
+    assert runtime.status().model.model == ModelId("two")
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_activation_keeps_new_generation_usable() -> None:
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    await runtime.start()
+    old = adapter.prepared[0]
+    old.shutdown_started = threading.Event()
+    old.shutdown_release = threading.Event()
+
+    replacement = asyncio.create_task(
+        runtime.prepare_and_activate(_config("two"), persist=lambda: None, publish=lambda: None)
+    )
+    assert await asyncio.to_thread(old.shutdown_started.wait, 2)
+    replacement.cancel()
+    old.shutdown_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await replacement
+
+    lease = runtime.open_session(SessionId("new"))
+    assert lease.session.transcribe(np.zeros(1, dtype=np.float32)).text == "two"
+    assert adapter.prepared[1].shutdown_calls == 0
+    lease.close()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_joins_lease_triggered_native_shutdown() -> None:
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    await runtime.start()
+    lease = runtime.open_session(SessionId("old"))
+    await runtime.prepare_and_activate(_config("two"), persist=lambda: None, publish=lambda: None)
+    old = adapter.prepared[0]
+    old.shutdown_started = threading.Event()
+    old.shutdown_release = threading.Event()
+
+    close_task = asyncio.create_task(asyncio.to_thread(lease.close))
+    assert await asyncio.to_thread(old.shutdown_started.wait, 2)
+    shutdown_task = asyncio.create_task(runtime.shutdown())
+    await asyncio.sleep(0)
+    assert not shutdown_task.done()
+    old.shutdown_release.set()
+    await asyncio.gather(close_task, shutdown_task)
+
+    assert old.shutdown_calls == 1
 
 
 @pytest.mark.asyncio

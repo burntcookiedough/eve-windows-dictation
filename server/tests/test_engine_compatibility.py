@@ -13,6 +13,7 @@ import app as server_app
 import config
 import engine_compatibility as compatibility
 from engine_compatibility import ComputeCapability, RuntimeCapabilities
+from transcription.contracts import ModelId, ModelInfo, Ready
 
 
 def _capabilities(
@@ -172,11 +173,13 @@ def test_invalid_patch_does_not_persist_or_schedule_a_swap(
     settings_file.write_text(json.dumps(original), encoding="utf-8")
     monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(settings_file))
     monkeypatch.setattr(config, "get_runtime_capabilities", lambda: _capabilities())
-    monkeypatch.setattr(
-        server_app, "discover_engines", lambda: [{"id": "whisper", "available": True}]
-    )
     swaps: list[object] = []
-    monkeypatch.setattr(server_app, "_schedule_engine_swap", lambda *args: swaps.append(args))
+    class ReadyRuntime:
+        def status(self):
+            return Ready(model=ModelInfo(model=ModelId("tiny"), device="cpu", compute_type="int8"))
+
+    monkeypatch.setattr(server_app, "get_model_runtime", lambda: ReadyRuntime())
+    monkeypatch.setattr(server_app, "_schedule_runtime_prepare", lambda *args, **kwargs: swaps.append((args, kwargs)))
     handler = next(
         route.endpoint
         for route in server_app.create_app().routes

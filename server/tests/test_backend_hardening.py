@@ -102,8 +102,7 @@ def test_engine_discovery_uses_lightweight_top_level_specs(
 
     discovered = {entry["id"]: entry for entry in factory.discover_engines()}
 
-    assert calls == ["nemo", "faster_whisper"]
-    assert discovered["nemotron"]["available"] is False
+    assert calls == ["faster_whisper"]
     assert discovered["whisper"]["available"] is True
     assert set(sys.modules) == before
 
@@ -210,44 +209,6 @@ def test_nemotron_session_creation_waits_for_active_inference(
 
     assert not worker.is_alive()
     assert calls == ["disable", "empty", "enable"]
-
-
-@pytest.mark.asyncio
-async def test_engine_finishing_load_during_shutdown_is_discarded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    started = threading.Event()
-    release = threading.Event()
-
-    class FakeEngine:
-        def __init__(self) -> None:
-            self.shutdown_calls = 0
-
-        def shutdown(self) -> None:
-            self.shutdown_calls += 1
-
-    fake_engine = FakeEngine()
-
-    def create_engine(_settings: Settings) -> FakeEngine:
-        started.set()
-        assert release.wait(timeout=1)
-        return fake_engine
-
-    monkeypatch.setattr(factory, "_get_available_engine_ids", lambda: ["whisper"])
-    monkeypatch.setattr(factory, "_create_engine", create_engine)
-    manager = factory.EngineManager(Settings(engine="whisper"))
-
-    swap_task = asyncio.create_task(manager.swap_engine(Settings(engine="whisper")))
-    while not started.is_set():
-        await asyncio.sleep(0.01)
-
-    manager.shutdown()
-    release.set()
-    await swap_task
-
-    assert manager._engine is None
-    assert fake_engine.shutdown_calls == 1
-    assert manager.get_status().status == "loading"
 
 
 @pytest.mark.asyncio

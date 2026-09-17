@@ -8,7 +8,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, TypeVar
 
 from transcription.contracts import (
     Failed,
@@ -30,6 +30,7 @@ from transcription.contracts import (
 )
 
 logger = logging.getLogger(__name__)
+_SnapshotValue = TypeVar("_SnapshotValue")
 
 
 class _Generation:
@@ -42,6 +43,7 @@ class _Generation:
         "leases",
         "retired",
         "shutdown_started",
+        "shutdown_complete",
         "drained",
     )
 
@@ -52,6 +54,7 @@ class _Generation:
         self.leases = 0
         self.retired = False
         self.shutdown_started = False
+        self.shutdown_complete = threading.Event()
         self.drained = threading.Event()
         self.drained.set()
 
@@ -121,6 +124,7 @@ class ModelRuntime:
         self._preparing_generation: int | None = None
         self._preparation_task: asyncio.Task[Any] | None = None
         self._native_prepare_task: asyncio.Task[Any] | None = None
+        self._preparation_reserved = False
         self._shutdown_task: asyncio.Task[Any] | None = None
         self._shutting_down = False
 
@@ -132,9 +136,14 @@ class ModelRuntime:
                 return
             if self._shutting_down:
                 raise RuntimeError("Model runtime is stopping")
+            in_flight = self._preparation_task
             initial = self._initial
             if initial is None:
                 raise ValueError("ModelRuntime requires an initial WhisperConfig")
+
+        if in_flight is not None and in_flight is not asyncio.current_task():
+            await asyncio.shield(in_flight)
+            return
 
         await self._prepare_and_activate(
             initial,
@@ -147,19 +156,37 @@ class ModelRuntime:
         """Return an immutable snapshot safe for health/settings responses."""
 
         with self._state_lock:
-            status = self._status
-            if isinstance(status, Ready):
-                return replace(
-                    status,
-                    active_sessions=self._active.leases if self._active else 0,
-                    draining_sessions=self._draining_session_count_locked(),
-                )
-            if isinstance(status, Preparing):
-                return replace(
-                    status,
-                    active_sessions=self._active.leases if self._active else 0,
-                )
-            return status
+            return self._status_locked()
+
+    def snapshot(
+        self,
+        read_settings: Callable[[], _SnapshotValue],
+    ) -> tuple[RuntimeStatus, _SnapshotValue]:
+        """Read runtime status and a caller-owned settings view atomically.
+
+        Settings publication is supplied by the composition root.  Taking the
+        read callback under the runtime state lock means health, diagnostics,
+        and settings responses cannot combine a newly published Settings
+        object with the previous model generation (or vice versa).
+        """
+
+        with self._state_lock:
+            return self._status_locked(), read_settings()
+
+    def _status_locked(self) -> RuntimeStatus:
+        status = self._status
+        if isinstance(status, Ready):
+            return replace(
+                status,
+                active_sessions=self._active.leases if self._active else 0,
+                draining_sessions=self._draining_session_count_locked(),
+            )
+        if isinstance(status, Preparing):
+            return replace(
+                status,
+                active_sessions=self._active.leases if self._active else 0,
+            )
+        return status
 
     def open_session(self, session_id: SessionId) -> SessionLease:
         """Open a session on the current generation.
@@ -205,6 +232,48 @@ class ModelRuntime:
             initial=False,
         )
 
+    def schedule_prepare_and_activate(
+        self,
+        config: WhisperConfig,
+        *,
+        persist: Callable[[], Any],
+        publish: Callable[[], Any],
+    ) -> asyncio.Task[None]:
+        """Reserve and schedule one replacement on the current event loop."""
+
+        with self._state_lock:
+            if self._shutting_down:
+                raise RuntimeError("Model runtime is stopping")
+            if self._preparation_reserved or self._preparation_task is not None:
+                raise RuntimeError("Model preparation already in progress")
+            self._preparation_reserved = True
+        try:
+            return asyncio.create_task(
+                self._run_reserved_replacement(config, persist=persist, publish=publish)
+            )
+        except BaseException:
+            with self._state_lock:
+                self._preparation_reserved = False
+            raise
+
+    async def _run_reserved_replacement(
+        self,
+        config: WhisperConfig,
+        *,
+        persist: Callable[[], Any],
+        publish: Callable[[], Any],
+    ) -> None:
+        try:
+            await self._prepare_and_activate(
+                config,
+                persist=persist,
+                publish=publish,
+                initial=False,
+            )
+        finally:
+            with self._state_lock:
+                self._preparation_reserved = False
+
     async def _prepare_and_activate(
         self,
         config: WhisperConfig,
@@ -214,37 +283,52 @@ class ModelRuntime:
         initial: bool,
     ) -> None:
         async with self._prepare_lock:
+            same_config = False
             with self._state_lock:
                 if self._shutting_down:
                     if initial:
                         return
                     raise RuntimeError("Model runtime is stopping")
                 current = self._active
-                # Applying the exact active configuration is intentionally a
-                # no-op.  A prior failure is cleared because the old model is
-                # still healthy and remains the source of truth.
-                if not initial and current is not None and current.config == config:
-                    self._status = Ready(
-                        model=current.model.info,
-                        active_sessions=current.leases,
-                        draining_sessions=self._draining_session_count_locked(),
-                    )
+                if initial and current is not None:
                     return
+                if not initial and current is not None and current.config == config:
+                    same_config = True
+                else:
+                    generation = self._next_generation + 1
+                    self._next_generation = generation
+                    candidate = ModelId(str(config.model))
+                    self._status = Preparing(
+                        current=current.model.info if current is not None else None,
+                        candidate=candidate,
+                        progress=None,
+                        active_sessions=current.leases if current is not None else 0,
+                    )
+                    self._preparing_generation = generation
+                    preparation_task = asyncio.current_task()
+                    self._preparation_task = preparation_task
 
-                generation = self._next_generation + 1
-                self._next_generation = generation
-                candidate = ModelId(str(config.model))
-                self._status = Preparing(
-                    current=current.model.info if current is not None else None,
-                    candidate=candidate,
-                    progress=None,
-                    active_sessions=current.leases if current is not None else 0,
-                )
-                self._preparing_generation = generation
-                preparation_task = asyncio.current_task()
-                self._preparation_task = preparation_task
+            if same_config:
+                if persist is not None:
+                    await self._run_hook(persist)
+                with self._state_lock:
+                    if self._shutting_down:
+                        return
+                    if publish is not None:
+                        result = publish()
+                        if inspect.isawaitable(result):
+                            raise TypeError("publish hook must be synchronous")
+                    current = self._active
+                    if current is not None:
+                        self._status = Ready(
+                            model=current.model.info,
+                            active_sessions=current.leases,
+                            draining_sessions=self._draining_session_count_locked(),
+                        )
+                return
 
             prepared: PreparedModel | None = None
+            activated = False
             try:
                 prepared = await self._prepare_native(config, generation)
                 with self._state_lock:
@@ -272,6 +356,7 @@ class ModelRuntime:
                         old = self._active
                         new_generation = _Generation(generation, config, prepared)
                         self._active = new_generation
+                        activated = True
                         self._status = Ready(
                             model=prepared.info,
                             active_sessions=0,
@@ -301,7 +386,7 @@ class ModelRuntime:
                         prepared = None
                     finally:
                         self._clear_native_prepare_task(native_task)
-                if prepared is not None:
+                if prepared is not None and not activated:
                     await self._discard(prepared)
                 with self._state_lock:
                     if not self._shutting_down and self._active is not None:
@@ -312,7 +397,7 @@ class ModelRuntime:
                         )
                 raise
             except BaseException as exc:
-                if prepared is not None:
+                if prepared is not None and not activated:
                     await self._discard(prepared)
                 with self._state_lock:
                     if not self._shutting_down:
@@ -382,11 +467,14 @@ class ModelRuntime:
             logger.exception("Failed to discard an unactivated model")
 
     async def _shutdown_generation(self, generation: _Generation) -> None:
+        owns_shutdown = False
         with self._state_lock:
             if generation.shutdown_started is False:
                 generation.shutdown_started = True
-            else:
-                return
+                owns_shutdown = True
+        if not owns_shutdown:
+            await asyncio.to_thread(generation.shutdown_complete.wait)
+            return
         try:
             await asyncio.to_thread(generation.model.shutdown)
         except Exception:
@@ -395,6 +483,7 @@ class ModelRuntime:
             with self._state_lock:
                 self._draining.pop(generation.generation, None)
                 generation.drained.set()
+                generation.shutdown_complete.set()
 
     def _release(self, generation: _Generation) -> None:
         should_shutdown = False
@@ -418,6 +507,7 @@ class ModelRuntime:
             finally:
                 with self._state_lock:
                     self._draining.pop(generation.generation, None)
+                    generation.shutdown_complete.set()
 
     async def shutdown(self) -> None:
         """Join native preparation, discard candidates, and drain generations."""

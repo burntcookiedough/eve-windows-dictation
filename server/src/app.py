@@ -1,10 +1,11 @@
 """FastAPI application factory."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -18,14 +19,19 @@ from config import (
     commit_settings,
     get_settings,
     get_settings_with_metadata,
+    persist_settings,
+    publish_settings,
 )
 from diagnostics import collect_diagnostics
+from legacy_settings import migrate_raw_settings
 from session.manager import get_session_manager
 from transcription.factory import (
     discover_engines,
-    get_engine_manager,
-    init_engine_manager,
-    shutdown_engine_manager,
+    get_model_runtime,
+    init_model_runtime,
+    runtime_status_to_engine_payload,
+    shutdown_model_runtime,
+    whisper_config_from_settings,
 )
 from transcription.model_download import get_model_download_state
 from transcription.processor import shutdown_executor
@@ -33,12 +39,12 @@ from version import SERVER_VERSION
 from websocket.handler import websocket_handler
 
 logger = logging.getLogger(__name__)
-_engine_tasks: set[asyncio.Task[None]] = set()
-_settings_preparation_pending = False
+_runtime_tasks: set[asyncio.Task[None]] = set()
 
 
 def _safe_settings_validation_detail(error: ValidationError) -> str:
     """Return a concise validation message without echoing submitted values."""
+
     errors = error.errors()
     if not errors:
         return "Invalid settings."
@@ -46,22 +52,112 @@ def _safe_settings_validation_detail(error: ValidationError) -> str:
     return message.removeprefix("Value error, ")
 
 
-def _schedule_engine_swap(
-    engine_mgr: Any, settings: Settings, *, commit_on_success: bool = False
+def _track_runtime_task(task: asyncio.Task[None]) -> asyncio.Task[None]:
+    """Keep a background runtime operation alive and consume its completion."""
+
+    _runtime_tasks.add(task)
+    task.add_done_callback(_consume_runtime_task)
+    return task
+
+
+def _consume_runtime_task(task: asyncio.Task[None]) -> None:
+    """Release a completed task after retrieving any background failure."""
+
+    _runtime_tasks.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "Background model runtime operation failed",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+def _schedule_runtime_start(runtime: Any) -> asyncio.Task[None]:
+    """Start initial model preparation without blocking FastAPI startup."""
+
+    return _track_runtime_task(asyncio.create_task(_start_runtime_background(runtime)))
+
+
+def _schedule_runtime_prepare(
+    runtime: Any,
+    settings: Settings,
+    *,
+    commit_on_success: bool = False,
 ) -> asyncio.Task[None]:
-    """Keep background engine loads alive and observe their completion."""
-    task = asyncio.create_task(
-        _swap_engine_background(
-            engine_mgr, settings, commit_on_success=commit_on_success
+    """Ask ``ModelRuntime`` to reserve and schedule one replacement."""
+
+    if not commit_on_success:
+        return _track_runtime_task(asyncio.create_task(runtime.start()))
+    return _track_runtime_task(
+        runtime.schedule_prepare_and_activate(
+            whisper_config_from_settings(settings),
+            persist=lambda: persist_settings(settings),
+            publish=lambda: publish_settings(settings),
         )
     )
-    _engine_tasks.add(task)
-    task.add_done_callback(_engine_tasks.discard)
-    return task
+
+
+async def _start_runtime_background(runtime: Any) -> None:
+    try:
+        await runtime.start()
+    except Exception:
+        # Runtime.status() retains the bounded public failure; keep native
+        # details in logs only and allow the liveness endpoint to respond.
+        logger.exception("Background Faster-Whisper model preparation failed")
+
+
+async def _prepare_runtime_background(
+    runtime: Any,
+    settings: Settings,
+    *,
+    commit_on_success: bool = False,
+) -> None:
+    """Prepare a model and publish settings only after disk persistence.
+
+    ``ModelRuntime`` invokes ``persist`` off its state lock and invokes
+    ``publish`` while swapping the active generation under the same lock.  The
+    split prevents a candidate Settings object from becoming visible while the
+    previous model is still active.
+    """
+
+    try:
+        if commit_on_success:
+            await runtime.prepare_and_activate(
+                whisper_config_from_settings(settings),
+                persist=lambda: persist_settings(settings),
+                publish=lambda: publish_settings(settings),
+            )
+        else:
+            await runtime.start()
+    except Exception:
+        logger.exception("Background Faster-Whisper model preparation failed")
+
+
+async def _await_runtime_tasks() -> None:
+    """Observe every task created by the lifespan before it returns."""
+
+    tasks = tuple(_runtime_tasks)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _runtime_snapshot(runtime: Any) -> tuple[Any, Settings]:
+    """Read status/settings as one publication snapshot when supported."""
+
+    snapshot = getattr(runtime, "snapshot", None)
+    if callable(snapshot):
+        return await asyncio.to_thread(snapshot, get_settings)
+    # A small fallback keeps bounded compatibility test doubles useful while
+    # production ModelRuntime always takes the atomic path above.
+    status = await asyncio.to_thread(runtime.status)
+    return status, get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    del app
     settings = get_settings()
 
     logging.basicConfig(
@@ -69,37 +165,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # Reduce noise from engine libraries and their transitive dependencies
+    # Reduce noise from model libraries and their transitive dependencies.
     for noisy_logger in [
-        "faster_whisper", "nemo_logger", "matplotlib", "matplotlib.font_manager",
-        "graphviz", "graphviz._tools", "torio", "torio._extension",
-        "datasets", "numexpr", "nv_one_logger",
-        "lhotse", "lhotse.cut", "lhotse.dataset",
-        "nemo", "nemo.collections",
+        "faster_whisper",
+        "nemo_logger",
+        "matplotlib",
+        "matplotlib.font_manager",
+        "graphviz",
+        "graphviz._tools",
+        "torio",
+        "torio._extension",
+        "datasets",
+        "numexpr",
+        "nv_one_logger",
+        "lhotse",
+        "lhotse.cut",
+        "lhotse.dataset",
+        "nemo",
+        "nemo.collections",
     ]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
     logger.info("Starting murmur...")
-    logger.info("Initializing engine manager (engine loads in background)...")
+    logger.info("Initializing Faster-Whisper model runtime (load in background)...")
 
-    engine_mgr = init_engine_manager(settings, load_engine=False)
-    _schedule_engine_swap(engine_mgr, settings)
+    runtime = init_model_runtime(settings)
+    _schedule_runtime_start(runtime)
 
     logger.info("Murmur ready")
-
-    yield
-
-    logger.info("Shutting down murmur...")
-    shutdown_engine_manager()
-    shutdown_executor()
-    if _engine_tasks:
-        _, pending = await asyncio.wait(tuple(_engine_tasks), timeout=1.0)
-        if pending:
-            logger.info(
-                "Waiting for %d background engine load(s) to leave native code",
-                len(pending),
-            )
-    logger.info("Murmur stopped")
+    try:
+        yield
+    finally:
+        logger.info("Shutting down murmur...")
+        # Runtime shutdown joins native preparation and drains every generation
+        # before returning.  No one-second timeout can strand native work.
+        await shutdown_model_runtime()
+        await _await_runtime_tasks()
+        shutdown_executor()
+        logger.info("Murmur stopped")
 
 
 def create_app() -> FastAPI:
@@ -111,27 +214,17 @@ def create_app() -> FastAPI:
     )
 
     def serialize_engine_status(status: Any) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "current": status.current,
-            "status": status.status,
-            "info": asdict(status.info) if status.info else None,
-        }
-        if status.pending:
-            payload["pending"] = status.pending
-        if status.message:
-            payload["message"] = status.message
-        if getattr(status, "recovery", None):
-            payload["recovery"] = status.recovery
-        return payload
+        """Keep the historical transport name while using runtime statuses."""
+
+        return runtime_status_to_engine_payload(status)
 
     @app.get("/health")
     async def health_check() -> dict:
         manager = get_session_manager()
-        engine_mgr = get_engine_manager()
-        settings = get_settings()
-        diagnostics_payload, status, model_download = await asyncio.gather(
+        runtime = get_model_runtime()
+        status, settings = await _runtime_snapshot(runtime)
+        diagnostics_payload, model_download = await asyncio.gather(
             asyncio.to_thread(collect_diagnostics, settings),
-            asyncio.to_thread(engine_mgr.get_status),
             asyncio.to_thread(get_model_download_state),
         )
         return {
@@ -146,11 +239,10 @@ def create_app() -> FastAPI:
 
     @app.get("/diagnostics")
     async def diagnostics() -> dict:
-        settings = get_settings()
-        engine_mgr = get_engine_manager()
-        diagnostics_payload, status, model_download = await asyncio.gather(
+        runtime = get_model_runtime()
+        status, settings = await _runtime_snapshot(runtime)
+        diagnostics_payload, model_download = await asyncio.gather(
             asyncio.to_thread(collect_diagnostics, settings),
-            asyncio.to_thread(engine_mgr.get_status),
             asyncio.to_thread(get_model_download_state),
         )
         return {
@@ -161,10 +253,10 @@ def create_app() -> FastAPI:
 
     @app.get("/settings")
     async def get_server_settings() -> dict:
-        settings = get_settings()
-        engine_mgr = get_engine_manager()
-        status = await asyncio.to_thread(engine_mgr.get_status)
-        available = [e["id"] for e in discover_engines() if e["available"]]
+        runtime = get_model_runtime()
+        status, settings = await _runtime_snapshot(runtime)
+        discovered = discover_engines()
+        available = [entry["id"] for entry in discovered if entry["available"]]
 
         return {
             "settings": get_settings_with_metadata(settings),
@@ -174,90 +266,94 @@ def create_app() -> FastAPI:
 
     @app.patch("/settings")
     async def update_server_settings(body: dict[str, Any]) -> dict:
-        global _settings_preparation_pending
-        # Filter to only API-managed keys
-        patch = {k: v for k, v in body.items() if k in API_KEYS}
+        # Filter to only API-managed keys, then run the legacy selector through
+        # the migration boundary before strict Settings construction.
+        patch = {key: value for key, value in body.items() if key in API_KEYS}
         if not patch:
             raise HTTPException(status_code=400, detail="No valid settings provided")
-        if _settings_preparation_pending:
+        outcome = migrate_raw_settings(patch)
+        patch = {key: value for key, value in outcome.values.items() if key in API_KEYS}
+        if not patch:
+            raise HTTPException(status_code=400, detail="No valid settings provided")
+
+        runtime = get_model_runtime()
+        runtime_status = await asyncio.to_thread(runtime.status)
+        if runtime_status.kind in {"starting", "preparing"}:
             raise HTTPException(
                 status_code=409,
                 detail="A settings change is already being prepared.",
             )
 
-        discovered_engines = discover_engines()
-        available_engines = [e["id"] for e in discovered_engines if e["available"]]
-        discovered_by_id = {e["id"]: e for e in discovered_engines}
+        # The old renderer sends ``engine``.  It is now a bounded compatibility
+        # alias, not an internal selection policy; migration maps legacy values
+        # to the supported Whisper family before this point.
+        if "engine" in patch and "engine_preference_mode" not in patch:
+            patch["engine_preference_mode"] = "manual"
 
-        # Track explicit engine overrides separately from default/auto selection.
-        if "engine" in patch:
-            requested_engine = str(patch["engine"])
-            if requested_engine not in available_engines:
-                detail = f'Engine "{requested_engine}" is not available on this server.'
-                install_hint = discovered_by_id.get(requested_engine, {}).get("install_hint")
-                if install_hint:
-                    detail = f"{detail} Install with: {install_hint}"
-                raise HTTPException(status_code=400, detail=detail)
-            if "engine_preference_mode" not in patch:
-                patch["engine_preference_mode"] = "manual"
-
-        # Check if reload is needed
-        needs_reload = bool(set(patch.keys()) & RELOAD_KEYS)
-
+        needs_reload = bool(set(patch) & RELOAD_KEYS)
         try:
             candidate = build_settings_candidate(patch)
-        except ValidationError as e:
+        except ValidationError as error:
             raise HTTPException(
-                status_code=400, detail=_safe_settings_validation_detail(e)
-            ) from e
-        engine_mgr = get_engine_manager()
+                status_code=400,
+                detail=_safe_settings_validation_detail(error),
+            ) from error
 
         reload_started = False
         if needs_reload:
             reload_started = True
-            _settings_preparation_pending = True
-            _schedule_engine_swap(engine_mgr, candidate, commit_on_success=True)
-            committed_settings = get_settings()
+            try:
+                _schedule_runtime_prepare(runtime, candidate, commit_on_success=True)
+            except RuntimeError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A settings change is already being prepared.",
+                ) from error
         else:
             try:
-                committed_settings = commit_settings(candidate)
+                commit_settings(candidate)
             except OSError:
                 raise HTTPException(
                     status_code=500,
                     detail="Could not save settings. Please try again.",
                 ) from None
 
-        status = await asyncio.to_thread(engine_mgr.get_status)
+        status, committed_settings = await _runtime_snapshot(runtime)
         session_mgr = get_session_manager()
-
         response: dict[str, Any] = {
             "settings": get_settings_with_metadata(committed_settings),
             "engine_status": serialize_engine_status(status),
-            "available_engines": available_engines,
+            "available_engines": [
+                entry["id"] for entry in discover_engines() if entry["available"]
+            ],
             "reload_required": needs_reload,
             "reload_started": reload_started,
         }
-
         if session_mgr.active_count > 0 and needs_reload:
             response["active_sessions"] = session_mgr.active_count
-            response["note"] = "New engine loading in background. Active sessions will finish with current engine."
-
+            response["note"] = (
+                "New model loading in background. Active sessions will finish "
+                "with the current model."
+            )
         return response
 
     @app.get("/engines")
     async def get_available_engines() -> dict:
-        engines = discover_engines()
-        engine_mgr = get_engine_manager()
-        status = await asyncio.to_thread(engine_mgr.get_status)
+        """Deprecated alias retained for one app/server skew window."""
+
+        runtime = get_model_runtime()
+        status = await asyncio.to_thread(runtime.status)
         return {
-            "engines": engines,
-            "current": status.current,
+            "engines": discover_engines(),
+            "current": status_to_current_engine(status),
         }
 
     @app.get("/engine/status")
     async def get_engine_status() -> dict:
-        engine_mgr = get_engine_manager()
-        status = await asyncio.to_thread(engine_mgr.get_status)
+        """Deprecated alias for the runtime status serializer."""
+
+        runtime = get_model_runtime()
+        status = await asyncio.to_thread(runtime.status)
         return serialize_engine_status(status)
 
     @app.websocket("/transcribe")
@@ -277,18 +373,8 @@ def create_app() -> FastAPI:
     return app
 
 
-async def _swap_engine_background(
-    engine_mgr: Any, settings: Settings, *, commit_on_success: bool = False
-) -> None:
-    global _settings_preparation_pending
-    try:
-        def persist_candidate() -> None:
-            commit_settings(settings)
+def status_to_current_engine(status: Any) -> str:
+    """Return the fixed compatibility family ID for any runtime status."""
 
-        before_activate = persist_candidate if commit_on_success else None
-        await engine_mgr.swap_engine(settings, before_activate=before_activate)
-    except Exception as e:
-        logger.error("Background engine swap failed: %s", e)
-    finally:
-        if commit_on_success:
-            _settings_preparation_pending = False
+    del status
+    return "whisper"

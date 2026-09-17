@@ -472,9 +472,29 @@ def build_settings_candidate(patch: dict[str, Any]) -> Settings:
 
 
 def commit_settings(candidate: Settings) -> Settings:
-    """Commit one validated settings candidate to memory and disk."""
-    global _settings
+    """Commit one validated settings candidate to memory and disk.
+
+    Runtime model replacement uses the two explicit helpers below so disk
+    persistence can complete before the runtime publishes its model/settings
+    snapshot under one state transition.  Immediate non-reload updates retain
+    this convenience function.
+    """
+
+    persist_settings(candidate)
+    publish_settings(candidate)
+    return candidate
+
+
+def persist_settings(candidate: Settings) -> None:
+    """Persist a validated candidate without changing the live settings view."""
+
     _persist_settings(candidate)
+
+
+def publish_settings(candidate: Settings) -> Settings:
+    """Publish a previously persisted candidate to in-memory readers."""
+
+    global _settings
     _settings = candidate
     return candidate
 
