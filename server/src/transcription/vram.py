@@ -7,11 +7,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Empirical starting constants from docs/vram-aware-engine-selection.md
-NEMOTRON_BASE_VRAM_GB = 5.0
-NEMOTRON_GROWTH_MB_PER_SEC = 100.0
-NEMOTRON_MIN_VRAM_GB = 8.0
-
+# Empirical starting constants from the historical VRAM measurements.
 WHISPER_BASE_VRAM_GB = 3.1
 WHISPER_GROWTH_MB_PER_SEC = 57.0
 
@@ -20,27 +16,15 @@ _MB_PER_GB = 1024.0
 
 
 @dataclass(frozen=True, slots=True)
-class EngineVramProfile:
-    engine_id: str
+class VramProfile:
     base_vram_gb: float
     growth_mb_per_sec: float
-    min_recommended_vram_gb: float | None = None
 
 
-ENGINE_VRAM_PROFILES: dict[str, EngineVramProfile] = {
-    "nemotron": EngineVramProfile(
-        engine_id="nemotron",
-        base_vram_gb=NEMOTRON_BASE_VRAM_GB,
-        growth_mb_per_sec=NEMOTRON_GROWTH_MB_PER_SEC,
-        min_recommended_vram_gb=NEMOTRON_MIN_VRAM_GB,
-    ),
-    "whisper": EngineVramProfile(
-        engine_id="whisper",
-        base_vram_gb=WHISPER_BASE_VRAM_GB,
-        growth_mb_per_sec=WHISPER_GROWTH_MB_PER_SEC,
-        min_recommended_vram_gb=None,
-    ),
-}
+WHISPER_VRAM_PROFILE = VramProfile(
+    base_vram_gb=WHISPER_BASE_VRAM_GB,
+    growth_mb_per_sec=WHISPER_GROWTH_MB_PER_SEC,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,23 +122,18 @@ def detect_gpu_capabilities(device: str) -> GpuCapabilities:
     )
 
 
-def estimate_max_duration_s(engine_id: str, total_vram_gb: float | None) -> int | None:
+def estimate_max_duration_s(total_vram_gb: float | None) -> int | None:
     """Estimate max single-recording duration from total VRAM.
 
     Returns None when an estimate cannot be produced.
     """
-    profile = ENGINE_VRAM_PROFILES.get(engine_id)
-    if profile is None or total_vram_gb is None:
+    if total_vram_gb is None:
         return None
 
-    growth_budget_gb = total_vram_gb - profile.base_vram_gb
+    growth_budget_gb = total_vram_gb - WHISPER_VRAM_PROFILE.base_vram_gb
     if growth_budget_gb <= 0:
         return 0
 
     growth_budget_mb = growth_budget_gb * _MB_PER_GB
-    duration_s = int(growth_budget_mb / profile.growth_mb_per_sec)
+    duration_s = int(growth_budget_mb / WHISPER_VRAM_PROFILE.growth_mb_per_sec)
     return max(0, duration_s)
-
-
-def get_vram_profile(engine_id: str) -> EngineVramProfile | None:
-    return ENGINE_VRAM_PROFILES.get(engine_id)

@@ -165,14 +165,13 @@ def test_release_sync_pins_python_excludes_dev_and_checks_runtime_abi() -> None:
     assert mismatch_index < replace_index
 
 
-def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
+def test_release_extra_is_the_only_whisper_torch_closure() -> None:
     project = _load_server_pyproject()["project"]
     extras = project["optional-dependencies"]
 
     assert extras["release"] == ["murmur[whisper]", "torch>=2.0"]
-    assert extras["all"] == ["murmur[whisper,nemotron]"]
-    assert "nemo_toolkit[asr]>=2.2.0" in extras["nemotron"]
-    assert "torchaudio>=2.0" in extras["nemotron"]
+    assert set(extras) == {"whisper", "release", "dev", "ui"}
+    assert all("nemotron" not in dependency for values in extras.values() for dependency in values)
 
     murmur = next(
         package
@@ -295,7 +294,7 @@ def test_packaging_includes_relocatable_runtime() -> None:
 
 def test_bundled_defaults_are_hardware_neutral() -> None:
     settings = json.loads((ROOT / "server" / "settings.json").read_text(encoding="utf-8"))
-    assert settings["engine_preference_mode"] == "auto"
+    assert settings["engine"] == "whisper"
     assert settings["whisper_device"] == "auto"
     assert settings["whisper_compute_type"] == "auto"
 

@@ -1,18 +1,12 @@
-"""Engine abstraction protocols and types."""
+"""Engine metadata types used by the legacy transport boundary."""
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
-
-import numpy as np
-from numpy.typing import NDArray
-
-from transcription.types import TranscribeOptions, TranscribeResult
 
 
 @dataclass(frozen=True)
 class EngineInfo:
-    id: str                      # "nemotron" or "whisper"
-    name: str                    # "Nemotron Speech" or "Faster-Whisper"
+    id: str
+    name: str
     model: str                   # Model identifier
     supports_hotwords: bool
     languages: list[str] = field(default_factory=lambda: ["en"])
@@ -28,28 +22,3 @@ class EngineInfo:
     load_time_s: float | None = None
     last_transcription_latency_s: float | None = None
     vram_used_gb: float | None = None
-
-
-@runtime_checkable
-class EngineSession(Protocol):
-    def transcribe(
-        self,
-        audio: NDArray[np.float32],
-        *,
-        hotwords: str | None = None,
-        options: TranscribeOptions | None = None,
-    ) -> TranscribeResult: ...
-
-    def finalize(self) -> TranscribeResult: ...
-
-    def close(self) -> None: ...
-
-
-@runtime_checkable
-class TranscriptionEngine(Protocol):
-    @property
-    def engine_info(self) -> EngineInfo: ...
-
-    def create_session(self) -> EngineSession: ...
-
-    def shutdown(self) -> None: ...

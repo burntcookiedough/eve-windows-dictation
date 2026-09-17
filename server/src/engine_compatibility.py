@@ -16,12 +16,10 @@ class ComputeCapability:
 
 @dataclass(frozen=True)
 class RuntimeCapabilities:
-    """Compatibility facts discovered without loading a model."""
+    """Faster-Whisper compatibility facts discovered without loading a model."""
 
     whisper_cpu: ComputeCapability
     whisper_cuda: ComputeCapability
-    nemotron_cuda_available: bool
-    nemotron_cuda_reason: str | None = None
 
     @property
     def whisper_cuda_available(self) -> bool:
@@ -37,12 +35,6 @@ def _load_ctranslate2() -> Any:
     import ctranslate2
 
     return ctranslate2
-
-
-def _load_torch() -> Any:
-    import torch
-
-    return torch
 
 
 def _probe_compute_types(runtime: Any, device: str) -> ComputeCapability:
@@ -82,22 +74,9 @@ def get_runtime_capabilities() -> RuntimeCapabilities:
             else:
                 whisper_cuda = _probe_compute_types(ctranslate2, "cuda")
 
-    try:
-        torch = _load_torch()
-        nemotron_cuda_available = bool(torch.cuda.is_available())
-    except Exception:
-        nemotron_cuda_available = False
-        nemotron_cuda_reason = "PyTorch CUDA support is unavailable."
-    else:
-        nemotron_cuda_reason = (
-            None if nemotron_cuda_available else "PyTorch did not find a usable CUDA device."
-        )
-
     return RuntimeCapabilities(
         whisper_cpu=whisper_cpu,
         whisper_cuda=whisper_cuda,
-        nemotron_cuda_available=nemotron_cuda_available,
-        nemotron_cuda_reason=nemotron_cuda_reason,
     )
 
 
@@ -127,15 +106,11 @@ def validate_engine_compatibility(
     *,
     whisper_device: str,
     whisper_compute_type: str,
-    nemotron_device: str,
     capabilities: RuntimeCapabilities,
 ) -> None:
     """Reject explicit settings that the currently installed runtimes cannot use."""
     if whisper_device == "cuda" and not capabilities.whisper_cuda_available:
         raise ValueError(capabilities.whisper_cuda.reason or "Whisper CUDA is unavailable.")
-
-    if nemotron_device == "cuda" and not capabilities.nemotron_cuda_available:
-        raise ValueError(capabilities.nemotron_cuda_reason or "Nemotron CUDA is unavailable.")
 
     if whisper_compute_type == "auto":
         return
@@ -167,11 +142,6 @@ def option_compatibility(
         return (
             not capabilities.whisper_cuda_available,
             capabilities.whisper_cuda.reason,
-        )
-    if key == "nemotron_device" and value == "cuda":
-        return (
-            not capabilities.nemotron_cuda_available,
-            capabilities.nemotron_cuda_reason,
         )
     if key != "whisper_compute_type" or value == "auto":
         return False, None

@@ -109,7 +109,7 @@ def test_download_disk_preflight_rejects_insufficient_space_without_cache_mutati
     monkeypatch.setattr(model_download.shutil, "disk_usage", lambda path: SimpleNamespace(free=1))
 
     try:
-        model_download.check_download_disk_space("nvidia/nemotron-speech-streaming-en-0.6b", 2.3)
+        model_download.check_download_disk_space("Systran/faster-whisper-large-v3", 2.9)
     except model_download.DownloadDiskPreflightError as exc:
         assert "Not enough free space" in str(exc)
     else:
@@ -166,30 +166,6 @@ def test_is_repo_cached_returns_false_without_snapshot(tmp_path, monkeypatch) ->
     status = model_download.get_repo_cache_status("Systran/faster-whisper-large-v3-turbo")
     assert status.status == "missing"
     assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is False
-
-
-def test_nemotron_cache_requires_its_downloaded_nemo_artifact(tmp_path, monkeypatch) -> None:
-    cache_dir = tmp_path / "hub"
-    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
-    snapshot_dir = (
-        cache_dir
-        / "models--nvidia--nemotron-speech-streaming-en-0.6b"
-        / "snapshots"
-        / "abc123"
-    )
-    snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "config.json").write_text("{}", encoding="utf-8")
-
-    status = model_download.get_repo_cache_status(
-        "nvidia/nemotron-speech-streaming-en-0.6b"
-    )
-    assert status.cached is False
-    assert status.missing_files == ["nemotron-speech-streaming-en-0.6b.nemo"]
-
-    (snapshot_dir / "nemotron-speech-streaming-en-0.6b.nemo").write_bytes(b"model")
-    assert model_download.is_repo_cached(
-        "nvidia/nemotron-speech-streaming-en-0.6b"
-    ) is True
 
 
 def test_cached_required_bytes_preserves_resume_baseline(tmp_path, monkeypatch) -> None:
@@ -923,28 +899,6 @@ def test_resumed_bytes_do_not_inflate_transfer_rate(monkeypatch) -> None:
     assert state["downloaded_bytes"] == 6_000_000
     assert state["bytes_per_second"] == 200_000
     assert state["eta_seconds"] == 20
-
-
-def test_other_engines_do_not_inherit_whisper_progress(monkeypatch) -> None:
-    monkeypatch.setattr(model_download.time, "monotonic", lambda: 1.0)
-    model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3
-    )
-    model_download.register_model_download_transfer(6, total=100)
-    model_download.report_model_download_bytes(6, 50)
-    model_download.update_model_download_state(
-        model="nemotron",
-        size_gb=2.3,
-        status="downloading",
-        phase="downloading",
-        repo_id="nvidia/nemotron",
-    )
-
-    state = model_download.get_model_download_state()
-    assert state is not None
-    assert state["progress_percent"] is None
-    assert state["downloaded_bytes"] is None
-    assert state["eta_seconds"] is None
 
 
 def test_mark_model_loading_clears_network_eta(monkeypatch) -> None:

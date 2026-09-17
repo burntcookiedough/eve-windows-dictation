@@ -27,6 +27,7 @@ _LEGACY_MODEL_KEY: Final[str] = "nemotron_model"
 _LEGACY_DEVICE_KEY: Final[str] = "nemotron_device"
 _ENGINE_KEY: Final[str] = "engine"
 _LEGACY_ENGINE_PREFERENCE_KEY: Final[str] = "engine_preference_mode"
+_LEGACY_UNLOAD_KEY: Final[str] = "unload_before_swap"
 _LEGACY_COMPUTE_TYPE: Final[str] = "int16"
 
 # Pydantic's OS environment source only returns fields that still exist on the
@@ -37,6 +38,7 @@ LEGACY_ENVIRONMENT_FIELDS: Final[dict[str, str]] = {
     "MURMUR_ENGINE_PREFERENCE_MODE": _LEGACY_ENGINE_PREFERENCE_KEY,
     "MURMUR_NEMOTRON_MODEL": _LEGACY_MODEL_KEY,
     "MURMUR_NEMOTRON_DEVICE": _LEGACY_DEVICE_KEY,
+    "MURMUR_UNLOAD_BEFORE_SWAP": _LEGACY_UNLOAD_KEY,
 }
 
 _LEGACY_ENGINE_NAMES: Final[frozenset[str]] = frozenset(
@@ -62,6 +64,7 @@ def _normalise_key(key: object) -> object:
     aliases = {
         _ENGINE_KEY,
         _LEGACY_ENGINE_PREFERENCE_KEY,
+        _LEGACY_UNLOAD_KEY,
         _LEGACY_MODEL_KEY,
         _LEGACY_DEVICE_KEY,
         "whisper_model",
@@ -142,13 +145,31 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
     engine = _engine_name(values.get(_ENGINE_KEY))
     model_seen = _LEGACY_MODEL_KEY in values
     device_seen = _LEGACY_DEVICE_KEY in values
+    canonical_whisper_model = values.get("whisper_model")
+    has_canonical_whisper_model = (
+        isinstance(canonical_whisper_model, str) and bool(canonical_whisper_model.strip())
+    )
+    removed_fields_seen = bool(
+        original_keys
+        & {
+            _LEGACY_MODEL_KEY,
+            _LEGACY_DEVICE_KEY,
+            _LEGACY_ENGINE_PREFERENCE_KEY,
+            _LEGACY_UNLOAD_KEY,
+        }
+    )
     legacy_model = values.get(_LEGACY_MODEL_KEY)
     migration_kind: str | None = None
 
     # Removed fields must not cross the boundary.  Keep the rest of the raw
     # source intact so unrelated preferences survive validation and rewrite.
-    values.pop(_LEGACY_MODEL_KEY, None)
-    values.pop(_LEGACY_DEVICE_KEY, None)
+    for key in (
+        _LEGACY_MODEL_KEY,
+        _LEGACY_DEVICE_KEY,
+        _LEGACY_ENGINE_PREFERENCE_KEY,
+        _LEGACY_UNLOAD_KEY,
+    ):
+        values.pop(key, None)
 
     named_legacy_engine = engine in _LEGACY_ENGINE_NAMES
     custom_legacy_engine = _has_nemotron_marker(engine) and not named_legacy_engine
@@ -163,8 +184,11 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
         # the caller migration removes it.  It is always the supported value;
         # no Nemotron identifier is handed to Settings or the runtime.
         values[_ENGINE_KEY] = "whisper"
-        values["whisper_model"] = RECOMMENDED_WHISPER_MODEL
-        values.pop(_LEGACY_ENGINE_PREFERENCE_KEY, None)
+        # An explicit canonical model wins when the removed field is merely
+        # stale.  A named legacy engine still represents an intentional old
+        # selection and receives the recommended Whisper replacement.
+        if legacy_engine or not has_canonical_whisper_model:
+            values["whisper_model"] = RECOMMENDED_WHISPER_MODEL
         if custom_legacy_engine or (
             model_seen
             and (
@@ -173,10 +197,11 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
             )
         ):
             migration_kind = "custom"
+        elif inferred_legacy_selection and has_canonical_whisper_model:
+            migration_kind = "stale-field"
         else:
             migration_kind = "legacy"
     elif model_seen:
-        values.pop(_LEGACY_ENGINE_PREFERENCE_KEY, None)
         migration_kind = "custom" if (
             not isinstance(legacy_model, str)
             or legacy_model.strip().casefold() != KNOWN_NEMOTRON_MODEL.casefold()
@@ -187,17 +212,23 @@ def migrate_raw_settings(raw: Mapping[str, Any]) -> MigrationOutcome:
         # of a user's configuration through whole-object fallback.
         values[_ENGINE_KEY] = "whisper"
         values["whisper_model"] = RECOMMENDED_WHISPER_MODEL
-        values.pop(_LEGACY_ENGINE_PREFERENCE_KEY, None)
         migration_kind = "invalid-engine"
     elif device_seen:
-        values.pop(_LEGACY_ENGINE_PREFERENCE_KEY, None)
         migration_kind = "stale-field"
+
+    # Any removed field is canonicalized away even when it accompanies an
+    # already-valid Whisper selection.  Supplying a retired field also makes
+    # the compatibility engine explicit so the strict settings model receives
+    # one stable value instead of inheriting a legacy default.
+    if removed_fields_seen:
+        values[_ENGINE_KEY] = "whisper"
+        migration_kind = migration_kind or "stale-field"
 
     if values.get("whisper_compute_type") == _LEGACY_COMPUTE_TYPE:
         values["whisper_compute_type"] = "auto"
         migration_kind = migration_kind or "precision"
 
-    migrated = bool(migration_kind) or bool(original_keys & {_LEGACY_MODEL_KEY, _LEGACY_DEVICE_KEY})
+    migrated = bool(migration_kind) or removed_fields_seen
     diagnostic = _bounded_diagnostic(migration_kind) if migrated else None
     return MigrationOutcome(values=values, migrated=migrated, diagnostic=diagnostic)
 

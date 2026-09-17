@@ -129,7 +129,7 @@ def test_adapter_restores_gpu_and_duration_telemetry_when_engine_info_is_sparse(
         "detect_gpu_capabilities",
         lambda _device: GpuCapabilities(True, "cuda", 0, "Measured GPU", 12.0),
     )
-    monkeypatch.setattr(adapter_module, "estimate_max_duration_s", lambda _engine, _vram: 321)
+    monkeypatch.setattr(adapter_module, "estimate_max_duration_s", lambda _vram: 321)
 
     prepared = FasterWhisperAdapter().prepare(_config(), lambda _event: None)
 

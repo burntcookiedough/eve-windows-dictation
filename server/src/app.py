@@ -168,21 +168,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Reduce noise from model libraries and their transitive dependencies.
     for noisy_logger in [
         "faster_whisper",
-        "nemo_logger",
-        "matplotlib",
-        "matplotlib.font_manager",
-        "graphviz",
-        "graphviz._tools",
-        "torio",
-        "torio._extension",
-        "datasets",
-        "numexpr",
-        "nv_one_logger",
-        "lhotse",
-        "lhotse.cut",
-        "lhotse.dataset",
-        "nemo",
-        "nemo.collections",
     ]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
@@ -283,12 +268,6 @@ def create_app() -> FastAPI:
                 status_code=409,
                 detail="A settings change is already being prepared.",
             )
-
-        # The old renderer sends ``engine``.  It is now a bounded compatibility
-        # alias, not an internal selection policy; migration maps legacy values
-        # to the supported Whisper family before this point.
-        if "engine" in patch and "engine_preference_mode" not in patch:
-            patch["engine_preference_mode"] = "manual"
 
         needs_reload = bool(set(patch) & RELOAD_KEYS)
         try:

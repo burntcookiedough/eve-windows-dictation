@@ -113,11 +113,9 @@ class Settings(BaseSettings):
     max_sessions: int = 10
     start_timeout: float = 10.0
 
-    # Engine selection (Nemotron is default)
-    engine: Literal["nemotron", "whisper"] = "nemotron"
-    # Internal: whether engine choice should be treated as automatic/default
-    # selection or an explicit user override.
-    engine_preference_mode: Literal["auto", "manual"] = "auto"
+    # ``engine`` remains in the persisted/wire shape for Murmur compatibility.
+    # Faster-Whisper is the only supported family in this release.
+    engine: Literal["whisper"] = "whisper"
 
     # Whisper settings
     whisper_model: str = "large-v3-turbo"
@@ -135,10 +133,6 @@ class Settings(BaseSettings):
     whisper_vad_speech_pad_ms: int = Field(default=200, ge=0, le=2000)
     whisper_vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
-    # Nemotron settings
-    nemotron_model: str = "nvidia/nemotron-speech-streaming-en-0.6b"
-    nemotron_device: Literal["auto", "cpu", "cuda"] = "auto"
-
     # Transcription settings
     partial_emission_interval: float = Field(default=0.25, gt=0.0)
     min_audio_for_transcription: float = 0.15
@@ -147,9 +141,6 @@ class Settings(BaseSettings):
     long_dictation_threshold_s: float = Field(default=30.0, gt=0.0)
     long_dictation_chunk_s: float = Field(default=25.0, gt=1.0)
     long_dictation_overlap_s: float = Field(default=0.75, ge=0.0, le=5.0)
-
-    # Hot-swap
-    unload_before_swap: bool = False
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -167,7 +158,6 @@ class Settings(BaseSettings):
         validate_engine_compatibility(
             whisper_device=self.whisper_device,
             whisper_compute_type=self.whisper_compute_type,
-            nemotron_device=self.nemotron_device,
             capabilities=get_runtime_capabilities(),
         )
         return self
@@ -180,32 +170,10 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "The speech recognition engine to use",
         "type": "select",
         "options": [
-            {"value": "nemotron", "label": "Nemotron Speech", "description": "Fast batch retranscribe, ~93x real-time. English. ~2.3 GB model."},
-            {"value": "whisper", "label": "Faster-Whisper", "description": "Batch retranscribe mode. 25+ languages. ~1.5 GB model."},
+            {"value": "whisper", "label": "Faster-Whisper", "description": "Batch retranscribe mode. 25+ languages."},
         ],
         "requires_reload": True,
         "category": "engine",
-    },
-    "nemotron_model": {
-        "label": "Nemotron Model",
-        "description": "Model name or path for Nemotron engine",
-        "type": "text",
-        "requires_reload": True,
-        "category": "engine",
-        "visible_when": {"engine": "nemotron"},
-    },
-    "nemotron_device": {
-        "label": "Device",
-        "description": "Compute device for Nemotron engine",
-        "type": "select",
-        "options": [
-            {"value": "auto", "label": "Auto (recommended)"},
-            {"value": "cuda", "label": "CUDA"},
-            {"value": "cpu", "label": "CPU"},
-        ],
-        "requires_reload": True,
-        "category": "engine",
-        "visible_when": {"engine": "nemotron"},
     },
     "whisper_model": {
         "label": "Whisper Model",
@@ -373,24 +341,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "range": [0, 5],
         "requires_reload": False,
         "category": "transcription",
-    },
-    "unload_before_swap": {
-        "label": "Unload Before Swap",
-        "description": "Free VRAM before loading new engine (for low-VRAM GPUs)",
-        "type": "bool",
-        "requires_reload": False,
-        "category": "engine",
-    },
-    "engine_preference_mode": {
-        "label": "Engine Selection Mode",
-        "description": "Whether the engine was chosen automatically or manually overridden",
-        "type": "select",
-        "options": [
-            {"value": "auto", "label": "Auto"},
-            {"value": "manual", "label": "Manual"},
-        ],
-        "requires_reload": True,
-        "category": "engine",
     },
 }
 

@@ -165,7 +165,7 @@ def _to_model_info(engine: Any, config: WhisperConfig) -> ModelInfo:
         gpu_name = gpu_name or capabilities.name
         gpu_vram_gb = gpu_vram_gb if gpu_vram_gb is not None else capabilities.total_vram_gb
         if estimated_max_duration_s is None:
-            estimated_max_duration_s = estimate_max_duration_s("whisper", gpu_vram_gb)
+            estimated_max_duration_s = estimate_max_duration_s(gpu_vram_gb)
     return ModelInfo(
         model=ModelId(str(getattr(source, "model", config.model))),
         repo_id=getattr(source, "repo_id", None),

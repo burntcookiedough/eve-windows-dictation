@@ -22,15 +22,10 @@ def _capabilities(
     cuda: frozenset[str] | None = None,
     cpu_reason: str | None = None,
     cuda_reason: str | None = "CTranslate2 did not find a usable CUDA device.",
-    nemotron_cuda: bool = False,
 ) -> RuntimeCapabilities:
     return RuntimeCapabilities(
         whisper_cpu=ComputeCapability(cpu, cpu_reason),
         whisper_cuda=ComputeCapability(cuda, cuda_reason),
-        nemotron_cuda_available=nemotron_cuda,
-        nemotron_cuda_reason=(
-            None if nemotron_cuda else "PyTorch did not find a usable CUDA device."
-        ),
     )
 
 
@@ -58,7 +53,6 @@ def test_cpu_precision_uses_ctranslate2_capabilities(
     kwargs = {
         "whisper_device": "cpu",
         "whisper_compute_type": compute_type,
-        "nemotron_device": "cpu",
         "capabilities": capabilities,
     }
 
@@ -73,13 +67,11 @@ def test_cuda_device_and_precision_follow_available_capabilities() -> None:
     capabilities = _capabilities(
         cuda=frozenset({"int8", "float16", "int8_float16", "float32"}),
         cuda_reason=None,
-        nemotron_cuda=True,
     )
 
     compatibility.validate_engine_compatibility(
         whisper_device="cuda",
         whisper_compute_type="float16",
-        nemotron_device="cuda",
         capabilities=capabilities,
     )
 
@@ -88,14 +80,6 @@ def test_cuda_device_and_precision_follow_available_capabilities() -> None:
         compatibility.validate_engine_compatibility(
             whisper_device="cuda",
             whisper_compute_type="auto",
-            nemotron_device="cpu",
-            capabilities=unavailable,
-        )
-    with pytest.raises(ValueError, match="PyTorch did not find a usable CUDA device"):
-        compatibility.validate_engine_compatibility(
-            whisper_device="cpu",
-            whisper_compute_type="auto",
-            nemotron_device="cuda",
             capabilities=unavailable,
         )
 
@@ -108,8 +92,6 @@ def test_probe_failure_disables_explicit_precision_with_a_clean_reason(
         get_cuda_device_count=lambda: 0,
     )
     monkeypatch.setattr(compatibility, "_load_ctranslate2", lambda: failed_runtime)
-    monkeypatch.setattr(compatibility, "_load_torch", lambda: SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
-
     capabilities = compatibility.get_runtime_capabilities()
     disabled, reason = compatibility.option_compatibility(
         "whisper_compute_type", "int8", capabilities, SimpleNamespace(whisper_device="cpu")
@@ -121,7 +103,6 @@ def test_probe_failure_disables_explicit_precision_with_a_clean_reason(
         compatibility.validate_engine_compatibility(
             whisper_device="cpu",
             whisper_compute_type="int8",
-            nemotron_device="cpu",
             capabilities=capabilities,
         )
 
@@ -203,7 +184,7 @@ def test_metadata_marks_the_same_cpu_precision_as_disabled(
 ) -> None:
     monkeypatch.setattr(config, "get_runtime_capabilities", lambda: _capabilities())
     settings = config.Settings(
-        whisper_device="cpu", whisper_compute_type="int8", nemotron_device="cpu"
+        whisper_device="cpu", whisper_compute_type="int8"
     )
 
     metadata = config.get_settings_with_metadata(settings)

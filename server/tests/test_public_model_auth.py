@@ -1,55 +1,10 @@
 """Regression coverage for public model authentication and safe preparation errors."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from config import Settings
-from transcription.engines.nemotron import _public_model_anonymous_access
 import transcription.engines.whisper as whisper
 from transcription.errors import safe_engine_preparation_message
-
-
-def test_curated_public_model_forces_anonymous_access_and_restores_token_resolver() -> None:
-    def original() -> str:
-        return "stale-saved-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with _public_model_anonymous_access(
-        "nvidia/nemotron-speech-streaming-en-0.6b", hf_common
-    ):
-        assert hf_common.get_hf_token() is False
-
-    assert hf_common.get_hf_token is original
-
-
-def test_custom_model_preserves_existing_hugging_face_authentication() -> None:
-    def original() -> str:
-        return "private-model-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with _public_model_anonymous_access("private-org/custom-asr", hf_common):
-        assert hf_common.get_hf_token() == "private-model-token"
-
-    assert hf_common.get_hf_token is original
-
-
-def test_public_model_token_override_is_restored_after_failure() -> None:
-    def original() -> str:
-        return "stale-saved-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with pytest.raises(RuntimeError, match="download failed"):
-        with _public_model_anonymous_access(
-            "nvidia/nemotron-speech-streaming-en-0.6b", hf_common
-        ):
-            assert hf_common.get_hf_token() is False
-            raise RuntimeError("download failed")
-
-    assert hf_common.get_hf_token is original
 
 
 @pytest.mark.parametrize(
@@ -218,11 +173,3 @@ def test_whisper_cuda_marker_does_not_receive_nemotron_wording() -> None:
 
     assert "selected model could not initialize the packaged CUDA runtime" in message
     assert "Nemotron" not in message
-
-
-def test_nemotron_cuda_preflight_error_keeps_engine_specific_wording() -> None:
-    from transcription.errors import NemotronCudaPreflightError
-
-    message = safe_engine_preparation_message(NemotronCudaPreflightError("cudnn failure"))
-
-    assert "Nemotron could not initialize" in message

@@ -44,9 +44,9 @@ _runtime_lock = threading.Lock()
 def whisper_config_from_settings(settings: Settings) -> WhisperConfig:
     """Translate the complete validated settings object at one seam.
 
-    ``engine`` and the legacy Nemotron fields are intentionally ignored here.
-    They remain in the settings schema only as a migration-release compatibility
-    surface; the runtime always prepares the supported Faster-Whisper family.
+    ``engine`` remains a frozen transport/settings key, while retired family
+    fields are removed by ``legacy_settings`` before this seam.  The runtime
+    always prepares the supported Faster-Whisper family.
     """
 
     return WhisperConfig(

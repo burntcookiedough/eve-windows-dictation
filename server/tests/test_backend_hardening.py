@@ -6,7 +6,6 @@ import asyncio
 import json
 from pathlib import Path
 import sys
-import threading
 import time
 from types import SimpleNamespace
 
@@ -85,7 +84,7 @@ def test_invalid_json_falls_back_to_builtin_defaults(
 
     settings = config.get_settings()
 
-    assert settings.engine == "nemotron"
+    assert settings.engine == "whisper"
 
 
 def test_engine_discovery_uses_lightweight_top_level_specs(
@@ -174,41 +173,6 @@ def test_pid_path_platform_matrix(
     path = pidfile.get_pid_file_path()
 
     assert str(path).replace("\\", "/").endswith(str(expected_suffix).replace("\\", "/"))
-
-
-def test_nemotron_session_creation_waits_for_active_inference(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from transcription.engines.nemotron import NemotronEngine
-
-    calls: list[str] = []
-    model = SimpleNamespace(
-        disable_cuda_graphs=lambda: calls.append("disable"),
-        maybe_enable_cuda_graphs=lambda: calls.append("enable"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: calls.append("empty"))),
-    )
-
-    engine = NemotronEngine.__new__(NemotronEngine)
-    engine._use_cuda = True
-    engine._model = model
-    engine._device = "cuda"
-    engine._model_lock = threading.Lock()
-    engine._model_lock.acquire()
-
-    worker = threading.Thread(target=engine.create_session)
-    worker.start()
-    time.sleep(0.05)
-    assert calls == []
-
-    engine._model_lock.release()
-    worker.join(timeout=1)
-
-    assert not worker.is_alive()
-    assert calls == ["disable", "empty", "enable"]
 
 
 @pytest.mark.asyncio
