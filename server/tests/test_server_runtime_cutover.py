@@ -47,8 +47,8 @@ def _settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "engine": "whisper",
         "whisper_model": "medium",
-        "whisper_device": "cuda",
-        "whisper_compute_type": "float16",
+        "whisper_device": "cpu",
+        "whisper_compute_type": "int8",
         "whisper_language": "de",
         "whisper_beam_size": 3,
         "whisper_temperature": 0.2,
@@ -88,8 +88,8 @@ def test_settings_map_to_complete_whisper_config() -> None:
 
     assert config_value == WhisperConfig(
         model=ModelId("medium"),
-        device="cuda",
-        compute_type="float16",
+        device="cpu",
+        compute_type="int8",
         language="de",
         beam_size=3,
         temperature=0.2,
