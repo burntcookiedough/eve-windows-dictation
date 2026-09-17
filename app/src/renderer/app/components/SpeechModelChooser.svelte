@@ -1,12 +1,10 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { EngineStatus, ModelDownloadState } from '$shared/types';
-  import { SPEECH_MODEL_PRESETS, presetMatchesCurrentEngine, type SpeechModelPreset } from '../speech-model-presets';
+  import { SPEECH_MODEL_PRESETS, presetIsPreparing, presetMatchesCurrentEngine, presetMatchesPreparationTarget, type SpeechModelPreset } from '../speech-model-presets';
 
   interface Props {
     selected: SpeechModelPreset | null;
-    availableEngines: string[];
-    availabilityKnown: boolean;
     engineStatus: EngineStatus | null;
     modelDownload?: ModelDownloadState;
     preparationFailed: boolean;
@@ -16,8 +14,6 @@
 
   let {
     selected,
-    availableEngines,
-    availabilityKnown,
     engineStatus,
     modelDownload,
     preparationFailed,
@@ -31,10 +27,6 @@
     return `speech-model-${componentId}-${presetId}-detail`;
   }
 
-  function unavailable(preset: SpeechModelPreset): boolean {
-    return availabilityKnown && !availableEngines.includes(preset.engine);
-  }
-
   function isCurrent(preset: SpeechModelPreset): boolean {
     return presetMatchesCurrentEngine(preset, engineStatus);
   }
@@ -44,17 +36,11 @@
   }
 
   function isTargeted(preset: SpeechModelPreset): boolean {
-    return modelDownload?.model === preset.model;
+    return presetMatchesPreparationTarget(preset, engineStatus, modelDownload);
   }
 
   function isPreparing(preset: SpeechModelPreset): boolean {
-    if (!isTargeted(preset)) return false;
-    return modelDownload?.status === 'partial'
-      || modelDownload?.status === 'downloading'
-      || modelDownload?.phase === 'checking'
-      || modelDownload?.phase === 'downloading'
-      || modelDownload?.phase === 'loading'
-      || engineStatus?.pending?.engine === preset.engine;
+    return presetIsPreparing(preset, engineStatus, modelDownload);
   }
 
   function isError(preset: SpeechModelPreset): boolean {
@@ -62,7 +48,6 @@
   }
 
   function stateLabel(preset: SpeechModelPreset): string {
-    if (unavailable(preset)) return 'Unavailable';
     if (isError(preset)) return isSelected(preset) ? 'Selected · Error' : 'Error';
     if (isCurrent(preset)) return 'Current';
     if (isSelected(preset)) return isPreparing(preset) ? 'Selected · Preparing' : 'Selected';
@@ -82,8 +67,6 @@
       case 'Selected · Error':
       case 'Error':
         return 'text-red-300';
-      case 'Unavailable':
-        return 'text-zinc-500';
       default:
         return 'text-zinc-400';
     }
@@ -99,20 +82,17 @@
 
     <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
       {#each SPEECH_MODEL_PRESETS as preset}
-        {@const disabled = unavailable(preset)}
         {@const checked = selected?.id === preset.id}
         {@const label = stateLabel(preset)}
         <label
           data-speech-model-option
-          class="flex min-w-0 items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100
-            {disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}"
+          class="flex min-w-0 cursor-pointer items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100"
         >
           <input
             class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100 disabled:cursor-not-allowed"
             type="radio"
             name={`speech-model-preset-${componentId}`}
             checked={checked}
-            disabled={disabled}
             onchange={() => onSelect(preset)}
             aria-label={`${preset.label}, ${label}`}
             aria-describedby={detailId(preset.id)}
@@ -125,9 +105,7 @@
             <span id={detailId(preset.id)} class="mt-1 block text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">
               {preset.language} · approx. {preset.sizeGb} GB. {preset.summary}
             </span>
-            {#if disabled}
-              <span class="mt-1 block text-xs text-amber-300">This server does not have the required {preset.engine} runtime.</span>
-            {:else if isError(preset)}
+            {#if isError(preset)}
               <span class="mt-1 block text-xs text-red-300">Preparation failed. Use Retry preparation or Revert below.</span>
             {/if}
           </span>

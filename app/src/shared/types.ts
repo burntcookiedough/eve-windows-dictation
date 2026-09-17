@@ -353,6 +353,7 @@ export interface EngineStatus {
   message?: string;
   pending?: {
     engine: string;
+    model?: string;
     status: 'loading' | 'ready' | 'error';
     message?: string;
   };

@@ -6,7 +6,7 @@ describe('Engine settings transaction UI', () => {
   test('keeps a curated candidate staged through failure for Retry or Revert', () => {
     const pending = { engine: 'whisper', whisper_model: 'medium' };
     expect(shouldRefreshCommittedSettings(pending, true, true, true, {
-      current: 'nemotron', status: 'error', message: 'Preparation failed.',
+      current: 'whisper', status: 'error', message: 'Preparation failed.',
     })).toBeFalse();
     expect(shouldDisableEngineRevert(true)).toBeTrue();
     expect(shouldDisableEngineRevert(false)).toBeFalse();

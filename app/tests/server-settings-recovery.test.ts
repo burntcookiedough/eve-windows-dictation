@@ -44,7 +44,7 @@ describe('Settings server-state recovery', () => {
 
   test('clears an interrupted managed preparation after the server stops', () => {
     const lifecycle = {
-      pending: { engine: 'nemotron', nemotron_model: 'nvidia/canary-qwen-2.5b' },
+      pending: { engine: 'whisper', whisper_model: 'large-v3' },
       requested: true,
       active: true,
       observed: true,
