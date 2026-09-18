@@ -142,6 +142,14 @@ if ($env:OS -ne "Windows_NT") {
     throw "This script must be run on Windows."
 }
 
+$PidFilePath = [System.IO.Path]::GetFullPath($PidFilePath)
+$qaUserDataRoot = Split-Path -Parent $PidFilePath
+if ((Split-Path -Leaf $qaUserDataRoot) -ne "Eve") {
+    throw "PidFilePath must be inside an Eve QA profile directory: $PidFilePath"
+}
+$qaAppDataRoot = Split-Path -Parent $qaUserDataRoot
+New-Item -ItemType Directory -Path $qaAppDataRoot -Force | Out-Null
+
 $resolvedInstaller = Resolve-InstallerPath -ExplicitPath $InstallerPath
 if (-not $resolvedInstaller) {
     throw "Installer not found. Pass -InstallerPath or ensure app/release has an Eve Setup*.exe."
@@ -201,7 +209,11 @@ if (-not (Test-Path $exePath)) {
 $launchStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 Write-Step "Launching Eve"
 $launchTimeUtc = (Get-Date).ToUniversalTime()
-$process = Start-Process -FilePath $exePath -WorkingDirectory $InstallDir -PassThru
+$launchArguments = @(
+    "--eve-qa-isolation",
+    "--eve-qa-user-data-root=`"$qaUserDataRoot`""
+)
+$process = Start-Process -FilePath $exePath -ArgumentList $launchArguments -WorkingDirectory $InstallDir -PassThru
 
 try {
     Write-Step "Waiting for server PID file at $PidFilePath"

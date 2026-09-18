@@ -34,3 +34,7 @@ def test_installer_smoke_script_exists_and_targets_health() -> None:
     assert "Assert-ExitCode -Process $uninstallProc" in contents
     assert '"Eve.exe"' in contents
     assert 'Get-Process -Name "Eve","Murmur"' in contents
+    assert '$qaUserDataRoot = Split-Path -Parent $PidFilePath' in contents
+    assert '"--eve-qa-isolation"' in contents
+    assert '--eve-qa-user-data-root=`"$qaUserDataRoot`"' in contents
+    assert 'Start-Process -FilePath $exePath -ArgumentList $launchArguments' in contents
