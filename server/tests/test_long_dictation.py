@@ -63,15 +63,12 @@ class _RecordingSession:
         return
 
 
-class _RecordingManager:
+class _RecordingRuntime:
     def __init__(self, session: _RecordingSession) -> None:
         self._session = session
 
-    def create_session(self, _session_id: str) -> _RecordingSession:
-        return self._session
-
-    def release_session(self, _session_id: str) -> None:
-        return
+    def open_session(self, _session_id: str) -> SimpleNamespace:
+        return SimpleNamespace(session=self._session, close=lambda: None)
 
 
 class _LowConfidenceFirstSession(_RecordingSession):
@@ -152,7 +149,7 @@ def test_stitch_text_removes_word_overlap() -> None:
 @pytest.mark.asyncio
 async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _RecordingSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     audio = np.zeros(int(10 * 16000), dtype=np.float32)
     context = SimpleNamespace(
         session_id="short",
@@ -161,7 +158,7 @@ async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.Monkey
     )
 
     monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_final()
@@ -177,7 +174,7 @@ async def test_long_partial_uses_tail_window_for_speech_timing_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _RecordingSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     first_chunk = np.full(3 * 16000, 100, dtype=np.int16)
     last_chunk = np.linspace(-1000, 1000, 16000, dtype=np.int16)
     audio_buffer = AudioBuffer()
@@ -200,7 +197,7 @@ async def test_long_partial_uses_tail_window_for_speech_timing_only(
         "get_settings",
         lambda: _settings(long_dictation_threshold_s=3.0, long_dictation_chunk_s=2.0),
     )
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_partial()
@@ -224,7 +221,7 @@ async def test_final_uses_chunked_long_path_and_reports_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _RecordingSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     audio = np.zeros(int(62.8 * 16000), dtype=np.float32)
     context = SimpleNamespace(
         session_id="long",
@@ -237,7 +234,7 @@ async def test_final_uses_chunked_long_path_and_reports_progress(
         progress.append((index, total))
 
     monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_final(progress_callback=_progress)
@@ -254,12 +251,12 @@ async def test_long_final_skips_oom_chunk_and_keeps_latest_speech_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _OverlappingOomSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     audio = np.zeros(int(62.8 * 16000), dtype=np.float32)
     context = SimpleNamespace(session_id="oom", audio_buffer=_FakeAudioBuffer(audio), hotwords=None)
 
     monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     result = await processor_module.TranscriptionProcessor(context).transcribe_final()
 
@@ -272,7 +269,7 @@ async def test_low_confidence_long_chunk_retries_with_safer_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _LowConfidenceFirstSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     audio = np.zeros(int(31 * 16000), dtype=np.float32)
     context = SimpleNamespace(
         session_id="retry",
@@ -285,7 +282,7 @@ async def test_low_confidence_long_chunk_retries_with_safer_options(
         "get_settings",
         lambda: _settings(long_dictation_chunk_s=30.0),
     )
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_final()
@@ -301,7 +298,7 @@ async def test_low_confidence_retry_oom_keeps_first_chunk_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _RetryOomSession()
-    manager = _RecordingManager(session)
+    runtime = _RecordingRuntime(session)
     audio = np.zeros(int(31 * 16000), dtype=np.float32)
     context = SimpleNamespace(
         session_id="retry-oom",
@@ -314,7 +311,7 @@ async def test_low_confidence_retry_oom_keeps_first_chunk_result(
         "get_settings",
         lambda: _settings(long_dictation_chunk_s=30.0),
     )
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_final()

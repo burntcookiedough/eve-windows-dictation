@@ -7,6 +7,10 @@
 - Proposed release: Eve `v0.7.0`
 - Last updated: 2026-07-28 (Asia/Calcutta)
 
+This is the frozen historical v0.7.0 gate record. References to runtimes supported by
+that release describe its accepted state; the current Faster-Whisper-only alpha is
+governed by `eve-v0.8-release-preparation.md` and does not rewrite this evidence.
+
 ## Purpose and outcome
 
 Gate 6 prepares and, through separately approved stages, publishes the first Eve-branded

@@ -6,7 +6,6 @@ import asyncio
 import json
 from pathlib import Path
 import sys
-import threading
 import time
 from types import SimpleNamespace
 
@@ -85,7 +84,7 @@ def test_invalid_json_falls_back_to_builtin_defaults(
 
     settings = config.get_settings()
 
-    assert settings.engine == "nemotron"
+    assert settings.engine == "whisper"
 
 
 def test_engine_discovery_uses_lightweight_top_level_specs(
@@ -102,8 +101,7 @@ def test_engine_discovery_uses_lightweight_top_level_specs(
 
     discovered = {entry["id"]: entry for entry in factory.discover_engines()}
 
-    assert calls == ["nemo", "faster_whisper"]
-    assert discovered["nemotron"]["available"] is False
+    assert calls == ["faster_whisper"]
     assert discovered["whisper"]["available"] is True
     assert set(sys.modules) == before
 
@@ -175,79 +173,6 @@ def test_pid_path_platform_matrix(
     path = pidfile.get_pid_file_path()
 
     assert str(path).replace("\\", "/").endswith(str(expected_suffix).replace("\\", "/"))
-
-
-def test_nemotron_session_creation_waits_for_active_inference(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from transcription.engines.nemotron import NemotronEngine
-
-    calls: list[str] = []
-    model = SimpleNamespace(
-        disable_cuda_graphs=lambda: calls.append("disable"),
-        maybe_enable_cuda_graphs=lambda: calls.append("enable"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: calls.append("empty"))),
-    )
-
-    engine = NemotronEngine.__new__(NemotronEngine)
-    engine._use_cuda = True
-    engine._model = model
-    engine._device = "cuda"
-    engine._model_lock = threading.Lock()
-    engine._model_lock.acquire()
-
-    worker = threading.Thread(target=engine.create_session)
-    worker.start()
-    time.sleep(0.05)
-    assert calls == []
-
-    engine._model_lock.release()
-    worker.join(timeout=1)
-
-    assert not worker.is_alive()
-    assert calls == ["disable", "empty", "enable"]
-
-
-@pytest.mark.asyncio
-async def test_engine_finishing_load_during_shutdown_is_discarded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    started = threading.Event()
-    release = threading.Event()
-
-    class FakeEngine:
-        def __init__(self) -> None:
-            self.shutdown_calls = 0
-
-        def shutdown(self) -> None:
-            self.shutdown_calls += 1
-
-    fake_engine = FakeEngine()
-
-    def create_engine(_settings: Settings) -> FakeEngine:
-        started.set()
-        assert release.wait(timeout=1)
-        return fake_engine
-
-    monkeypatch.setattr(factory, "_get_available_engine_ids", lambda: ["whisper"])
-    monkeypatch.setattr(factory, "_create_engine", create_engine)
-    manager = factory.EngineManager(Settings(engine="whisper"))
-
-    swap_task = asyncio.create_task(manager.swap_engine(Settings(engine="whisper")))
-    while not started.is_set():
-        await asyncio.sleep(0.01)
-
-    manager.shutdown()
-    release.set()
-    await swap_task
-
-    assert manager._engine is None
-    assert fake_engine.shutdown_calls == 1
-    assert manager.get_status().status == "loading"
 
 
 @pytest.mark.asyncio

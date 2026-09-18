@@ -21,23 +21,29 @@ from diagnostics import (
 from fastapi import FastAPI, WebSocketDisconnect
 import pytest
 from session.context import SessionContext
-from transcription.base import EngineInfo
+from transcription.contracts import ModelId, ModelInfo, Preparing, Ready
 from transcription import model_download
 import websocket.handler as websocket_handler_module
 from websocket.handler import _wait_for_start, websocket_handler
 
 
-class _DummyEngineStatus:
-    current = "whisper"
-    status = "ready"
-    info = None
-    pending = None
-    message = None
+def _model_info(model: str = "tiny") -> ModelInfo:
+    return ModelInfo(
+        model=ModelId(model),
+        device="cpu",
+        compute_type="int8",
+        languages=("en",),
+    )
 
 
-class _DummyEngineManager:
-    def get_status(self) -> _DummyEngineStatus:
-        return _DummyEngineStatus()
+class _DummyRuntime:
+    def __init__(self, status: str = "ready") -> None:
+        self._status = status
+
+    def status(self):
+        if self._status == "ready":
+            return Ready(model=_model_info())
+        return Preparing(current=None, candidate=ModelId("tiny"))
 
 
 class _DummySessionManager:
@@ -103,7 +109,7 @@ def test_download_disk_preflight_rejects_insufficient_space_without_cache_mutati
     monkeypatch.setattr(model_download.shutil, "disk_usage", lambda path: SimpleNamespace(free=1))
 
     try:
-        model_download.check_download_disk_space("nvidia/nemotron-speech-streaming-en-0.6b", 2.3)
+        model_download.check_download_disk_space("Systran/faster-whisper-large-v3", 2.9)
     except model_download.DownloadDiskPreflightError as exc:
         assert "Not enough free space" in str(exc)
     else:
@@ -162,30 +168,6 @@ def test_is_repo_cached_returns_false_without_snapshot(tmp_path, monkeypatch) ->
     assert model_download.is_repo_cached("Systran/faster-whisper-large-v3-turbo") is False
 
 
-def test_nemotron_cache_requires_its_downloaded_nemo_artifact(tmp_path, monkeypatch) -> None:
-    cache_dir = tmp_path / "hub"
-    monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
-    snapshot_dir = (
-        cache_dir
-        / "models--nvidia--nemotron-speech-streaming-en-0.6b"
-        / "snapshots"
-        / "abc123"
-    )
-    snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "config.json").write_text("{}", encoding="utf-8")
-
-    status = model_download.get_repo_cache_status(
-        "nvidia/nemotron-speech-streaming-en-0.6b"
-    )
-    assert status.cached is False
-    assert status.missing_files == ["nemotron-speech-streaming-en-0.6b.nemo"]
-
-    (snapshot_dir / "nemotron-speech-streaming-en-0.6b.nemo").write_bytes(b"model")
-    assert model_download.is_repo_cached(
-        "nvidia/nemotron-speech-streaming-en-0.6b"
-    ) is True
-
-
 def test_cached_required_bytes_preserves_resume_baseline(tmp_path, monkeypatch) -> None:
     cache_dir = tmp_path / "hub"
     monkeypatch.setenv("HF_HUB_CACHE", str(cache_dir))
@@ -221,7 +203,7 @@ def test_cached_required_bytes_preserves_resume_baseline(tmp_path, monkeypatch) 
 
 def test_health_includes_model_download(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "get_session_manager", lambda: _DummySessionManager())
-    monkeypatch.setattr(app_module, "get_engine_manager", lambda: _DummyEngineManager())
+    monkeypatch.setattr(app_module, "get_model_runtime", lambda: _DummyRuntime())
     monkeypatch.setattr(app_module, "get_settings", lambda: Settings())
     monkeypatch.setattr(app_module, "collect_diagnostics", lambda settings: {"warnings": []})
 
@@ -245,16 +227,8 @@ def test_health_liveness_is_separate_from_engine_readiness(monkeypatch) -> None:
     monkeypatch.setattr(app_module, "get_session_manager", lambda: _DummySessionManager())
     monkeypatch.setattr(
         app_module,
-        "get_engine_manager",
-        lambda: SimpleNamespace(
-            get_status=lambda: SimpleNamespace(
-                current="nemotron",
-                status="loading",
-                info=None,
-                pending={"engine": "nemotron", "status": "loading"},
-                message=None,
-            )
-        ),
+        "get_model_runtime",
+        lambda: _DummyRuntime("loading"),
     )
     monkeypatch.setattr(app_module, "get_settings", lambda: Settings())
     monkeypatch.setattr(app_module, "collect_diagnostics", lambda settings: {"warnings": []})
@@ -278,17 +252,17 @@ async def test_diagnostic_endpoints_keep_event_loop_responsive(path, monkeypatch
         release.wait()
         return {"warnings": []}
 
-    class SlowEngineManager:
-        def get_status(self) -> _DummyEngineStatus:
+    class SlowRuntime:
+        def status(self):
             release.wait()
-            return _DummyEngineStatus()
+            return Ready(model=_model_info())
 
     def slow_model_download_state():
         release.wait()
         return {"status": "ready"}
 
     monkeypatch.setattr(app_module, "get_session_manager", lambda: _DummySessionManager())
-    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_model_runtime", lambda: SlowRuntime())
     monkeypatch.setattr(app_module, "get_settings", lambda: settings)
     monkeypatch.setattr(app_module, "collect_diagnostics", slow_diagnostics)
     monkeypatch.setattr(app_module, "get_model_download_state", slow_model_download_state)
@@ -324,12 +298,12 @@ async def test_status_endpoints_keep_event_loop_responsive(path, monkeypatch) ->
     release = threading.Event()
     released = threading.Event()
 
-    class SlowEngineManager:
-        def get_status(self) -> _DummyEngineStatus:
+    class SlowRuntime:
+        def status(self):
             release.wait()
-            return _DummyEngineStatus()
+            return Ready(model=_model_info())
 
-    monkeypatch.setattr(app_module, "get_engine_manager", lambda: SlowEngineManager())
+    monkeypatch.setattr(app_module, "get_model_runtime", lambda: SlowRuntime())
     monkeypatch.setattr(app_module, "get_settings", lambda: settings)
     monkeypatch.setattr(
         app_module,
@@ -376,16 +350,10 @@ async def test_websocket_engine_probes_keep_event_loop_responsive(monkeypatch) -
     release = threading.Event()
     released = threading.Event()
 
-    class SlowEngineManager:
-        @property
-        def engine_info(self) -> EngineInfo:
+    class SlowRuntime:
+        def status(self):
             release.wait()
-            return EngineInfo(
-                id="whisper",
-                name="Faster-Whisper",
-                model="tiny",
-                supports_hotwords=True,
-            )
+            return Ready(model=_model_info())
 
     class FakeWebSocket:
         async def receive(self) -> dict[str, str]:
@@ -400,8 +368,8 @@ async def test_websocket_engine_probes_keep_event_loop_responsive(monkeypatch) -
             self.engine_info = engine_info
 
     monkeypatch.setattr(
-        "websocket.handler.get_engine_manager",
-        lambda: SlowEngineManager(),
+        "websocket.handler.get_model_runtime",
+        lambda: SlowRuntime(),
     )
 
     def release_probe() -> None:
@@ -499,9 +467,9 @@ def test_stalled_diagnostics_refresh_does_not_starve_websocket_admission(
             return
 
     session_manager = AdmissionSessionManager()
-    engine_manager = _DummyEngineManager()
+    runtime = _DummyRuntime()
     monkeypatch.setattr(app_module, "get_session_manager", lambda: session_manager)
-    monkeypatch.setattr(app_module, "get_engine_manager", lambda: engine_manager)
+    monkeypatch.setattr(app_module, "get_model_runtime", lambda: runtime)
     monkeypatch.setattr(app_module, "get_settings", lambda: settings)
     monkeypatch.setattr(app_module, "get_model_download_state", lambda: None)
     monkeypatch.setattr(
@@ -511,8 +479,8 @@ def test_stalled_diagnostics_refresh_does_not_starve_websocket_admission(
     )
     monkeypatch.setattr(
         websocket_handler_module,
-        "get_engine_manager",
-        lambda: engine_manager,
+        "get_model_runtime",
+        lambda: runtime,
     )
     monkeypatch.setattr(websocket_handler_module, "get_settings", lambda: settings)
 
@@ -931,28 +899,6 @@ def test_resumed_bytes_do_not_inflate_transfer_rate(monkeypatch) -> None:
     assert state["downloaded_bytes"] == 6_000_000
     assert state["bytes_per_second"] == 200_000
     assert state["eta_seconds"] == 20
-
-
-def test_other_engines_do_not_inherit_whisper_progress(monkeypatch) -> None:
-    monkeypatch.setattr(model_download.time, "monotonic", lambda: 1.0)
-    model_download.begin_model_download_progress(
-        model="tiny", repo_id="example/tiny", size_gb=100 / 1024**3
-    )
-    model_download.register_model_download_transfer(6, total=100)
-    model_download.report_model_download_bytes(6, 50)
-    model_download.update_model_download_state(
-        model="nemotron",
-        size_gb=2.3,
-        status="downloading",
-        phase="downloading",
-        repo_id="nvidia/nemotron",
-    )
-
-    state = model_download.get_model_download_state()
-    assert state is not None
-    assert state["progress_percent"] is None
-    assert state["downloaded_bytes"] is None
-    assert state["eta_seconds"] is None
 
 
 def test_mark_model_loading_clears_network_eta(monkeypatch) -> None:

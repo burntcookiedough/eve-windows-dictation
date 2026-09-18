@@ -1,4 +1,4 @@
-import type { ServerSettingsResponse, EngineStatus, AvailableEngine } from '../../shared/types.js';
+import type { ServerSettingsResponse, EngineStatus, AvailableEngine, ModelCatalogItem } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('ServerSettings');
@@ -46,17 +46,27 @@ async function fetchJson<T>(path: string, options: RequestInit | undefined, serv
 }
 
 export async function getServerSettings(serverUrl: string): Promise<ServerSettingsResponse> {
-  return fetchJson<ServerSettingsResponse>('/settings', undefined, serverUrl);
+  const response = await fetchJson<ServerSettingsResponse>('/settings', undefined, serverUrl);
+  return {
+    ...response,
+    // Older servers omit this field.  Normalize it to an empty list so callers
+    // can render raw compatibility controls without inventing model metadata.
+    model_catalog: normalizeModelCatalog(response.model_catalog),
+  };
 }
 
 export async function updateServerSettings(
   patch: Record<string, unknown>,
   serverUrl: string,
 ): Promise<ServerSettingsResponse> {
-  return fetchJson<ServerSettingsResponse>('/settings', {
+  const response = await fetchJson<ServerSettingsResponse>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(patch),
   }, serverUrl);
+  return {
+    ...response,
+    model_catalog: normalizeModelCatalog(response.model_catalog),
+  };
 }
 
 export async function getEngineStatus(serverUrl: string): Promise<EngineStatus> {
@@ -66,4 +76,56 @@ export async function getEngineStatus(serverUrl: string): Promise<EngineStatus> 
 export async function getAvailableEngines(serverUrl: string): Promise<AvailableEngine[]> {
   const data = await fetchJson<{ engines: AvailableEngine[] }>('/engines', undefined, serverUrl);
   return data.engines;
+}
+
+/**
+ * Parse the optional server catalog at the transport seam.
+ *
+ * The function accepts unknown input because a renderer can be paired with a
+ * previous server build.  Invalid entries are ignored rather than becoming
+ * guessed choices; the raw settings editor remains available for custom/local
+ * models in that case.
+ */
+export function normalizeModelCatalog(value: unknown): ModelCatalogItem[] {
+  const entries = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && Array.isArray((value as { models?: unknown }).models)
+      ? (value as { models: unknown[] }).models
+      : [];
+
+  const result: ModelCatalogItem[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const raw = entry as Record<string, unknown>;
+    const languages = raw.languages;
+    if (
+      typeof raw.model !== 'string' || raw.model.trim().length === 0
+      || typeof raw.label !== 'string' || raw.label.trim().length === 0
+      || typeof raw.repo_id !== 'string' || raw.repo_id.trim().length === 0
+      || typeof raw.size_gb !== 'number' || !Number.isFinite(raw.size_gb) || raw.size_gb <= 0
+      || !Array.isArray(languages) || languages.some((language) => typeof language !== 'string')
+      || typeof raw.supports_hotwords !== 'boolean'
+    ) {
+      continue;
+    }
+
+    const normalizedLanguages = languages.map((language) => language.trim()).filter(Boolean);
+    if (normalizedLanguages.length === 0) continue;
+
+    const languageLabel = typeof raw.language_label === 'string' && raw.language_label.trim().length > 0
+      ? raw.language_label.trim()
+      : normalizedLanguages.join(', ');
+    const summary = typeof raw.summary === 'string' ? raw.summary : '';
+    result.push({
+      model: raw.model.trim(),
+      label: raw.label.trim(),
+      summary,
+      repo_id: raw.repo_id.trim(),
+      size_gb: raw.size_gb,
+      language_label: languageLabel,
+      languages: normalizedLanguages,
+      supports_hotwords: raw.supports_hotwords,
+    });
+  }
+  return result;
 }

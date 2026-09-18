@@ -1,6 +1,6 @@
 # Eve for Windows
 
-<p><img src="https://img.shields.io/badge/v0.8.2-alpha.3-orange?style=flat-square" alt="v0.8.2-alpha.3"> <strong>Source status: v0.8.2-alpha.3 stabilization alpha · prerelease</strong></p>
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.4-orange?style=flat-square" alt="v0.8.2-alpha.4"> <strong>Source status: v0.8.2-alpha.4 Faster-Whisper-only alpha · prerelease</strong></p>
 
 ## Local-first dictation that stays in your flow
 
@@ -31,16 +31,16 @@ The desktop client captures 16 kHz mono audio and sends it over a local WebSocke
 
 Models are downloaded from their public Hugging Face repositories the first time you use them; they are not embedded in the installer. The catalog below reflects the built-in choices exposed by Eve.
 
-| Choice | Best for | Engine and model |
+| Choice | Best for | Adapter and model |
 | --- | --- | --- |
 | **Large V3 Turbo — Recommended Multilingual** | A balanced everyday multilingual option | [faster-whisper-large-v3-turbo](https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo) |
 | **Large V3 — Maximum Multilingual Accuracy** | Quality-first multilingual work | [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3) |
 | **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
-| **Medium / Tiny — Advanced** | Raw engine choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
+| **Medium / Tiny — Advanced** | Additional model choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
 
-The v0.8.2-alpha.3 alpha ships Faster-Whisper as its sole selectable engine. Nemotron
-remains in the source tree and optional `nemotron` dependency for deferred
-repair work; it is not shipped or user-selectable in this alpha.
+The v0.8.2-alpha.4 alpha supports one model family: Faster-Whisper through the
+CTranslate2 adapter. A future model family must arrive through its own adapter after
+it has passed the same accuracy, latency, memory, packaging, and recovery gates.
 
 Eve derives device and precision availability from the installed PyTorch and CTranslate2 runtimes. `auto` is the safest starting point; a particular device/precision/model combination still depends on the local driver, VRAM, and runtime capabilities. The catalog is not a promise of every device-by-precision combination.
 
@@ -52,7 +52,14 @@ Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private 
 
 ## Installation and release status
 
-The current public release is **Eve v0.7.0**. [Download Eve v0.7.0](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.7.0). It is published and available from GitHub. The `nsis-web` installer downloads the application payload during installation, and internet access is required again if an engine needs its model. The release is unsigned and may trigger Windows reputation warnings.
+The current release candidate is **Eve v0.8.2-alpha.4**. After its gated publication,
+the release and exact asset hashes will be available from the
+[v0.8.2-alpha.4 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.4).
+The `nsis-web` installer downloads the application payload during installation, and
+internet access is required again if a selected model needs its weights. The alpha is
+unsigned and may trigger Windows reputation warnings. Until alpha.4 passes those gates,
+[v0.8.2-alpha.3](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.3)
+remains the latest published prerelease.
 
 ### v0.7.0 integrity evidence
 
@@ -64,7 +71,9 @@ The [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dict
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-The current source tree also contains **Eve v0.8.2-alpha.3 pre-alpha work**. It is unreleased source work, not a published version or downloadable artifact; use the [development setup](#development) below to run it locally.
+The source tree is the **Eve v0.8.2-alpha.4 release candidate**. A commit is not a
+downloadable release: only artifacts attached to the matching GitHub prerelease have
+passed the repository's package, lifecycle, manifest, and promotion gates.
 
 ## Development
 
@@ -84,7 +93,7 @@ bun install
 bun run dev
 ```
 
-Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
+Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the Faster-Whisper-only shipped alpha runtime. See [the Windows build guide](docs/development/building.md), [docs/protocol.md](docs/protocol.md), and [contributing](.github/CONTRIBUTING.md).
 
 ## Compatibility and provenance
 

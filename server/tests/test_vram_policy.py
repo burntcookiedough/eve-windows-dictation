@@ -5,99 +5,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from config import Settings
-from transcription.base import EngineInfo
 from transcription.errors import VramExhaustedError
 from transcription.types import TranscribeResult
-from transcription.vram import GpuCapabilities
-import transcription.factory as factory_module
 import transcription.processor as processor_module
-
-
-class _DummyEngine:
-    def __init__(self, engine_id: str) -> None:
-        self._engine_id = engine_id
-
-    @property
-    def engine_info(self) -> EngineInfo:
-        return EngineInfo(
-            id=self._engine_id,
-            name=self._engine_id.title(),
-            model=f"{self._engine_id}-model",
-            supports_hotwords=self._engine_id == "whisper",
-        )
-
-    def create_session(self) -> object:
-        raise NotImplementedError
-
-    def shutdown(self) -> None:
-        return
-
-
-def test_factory_auto_falls_back_to_whisper_on_low_vram(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(engine="nemotron", engine_preference_mode="auto")
-    created_engine_ids: list[str] = []
-
-    monkeypatch.setattr(factory_module, "_get_available_engine_ids", lambda: ["nemotron", "whisper"])
-    monkeypatch.setattr(
-        factory_module,
-        "detect_gpu_capabilities",
-        lambda _device: GpuCapabilities(
-            cuda_available=True,
-            device="cuda",
-            device_index=0,
-            name="Test GPU",
-            total_vram_gb=6.0,
-        ),
-    )
-
-    def _fake_create_engine(current_settings: Settings) -> _DummyEngine:
-        created_engine_ids.append(current_settings.engine)
-        return _DummyEngine(current_settings.engine)
-
-    monkeypatch.setattr(factory_module, "_create_engine", _fake_create_engine)
-
-    manager = factory_module.EngineManager(settings)
-    manager.load_initial_engine()
-
-    assert settings.engine == "whisper"
-    assert created_engine_ids == ["whisper"]
-    assert manager.engine_info.id == "whisper"
-    assert manager.engine_info.gpu_vram_gb == pytest.approx(6.0)
-    assert manager.engine_info.estimated_max_duration_s is not None
-
-
-def test_factory_respects_manual_nemotron_on_low_vram(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(engine="nemotron", engine_preference_mode="manual")
-    created_engine_ids: list[str] = []
-
-    monkeypatch.setattr(factory_module, "_get_available_engine_ids", lambda: ["nemotron", "whisper"])
-    monkeypatch.setattr(
-        factory_module,
-        "detect_gpu_capabilities",
-        lambda _device: GpuCapabilities(
-            cuda_available=True,
-            device="cuda",
-            device_index=0,
-            name="Test GPU",
-            total_vram_gb=6.0,
-        ),
-    )
-
-    def _fake_create_engine(current_settings: Settings) -> _DummyEngine:
-        created_engine_ids.append(current_settings.engine)
-        return _DummyEngine(current_settings.engine)
-
-    monkeypatch.setattr(factory_module, "_create_engine", _fake_create_engine)
-
-    manager = factory_module.EngineManager(settings)
-    manager.load_initial_engine()
-
-    assert settings.engine == "nemotron"
-    assert created_engine_ids == ["nemotron"]
-    assert manager.engine_info.id == "nemotron"
-    assert manager.engine_info.gpu_vram_gb == pytest.approx(6.0)
-    assert manager.engine_info.estimated_max_duration_s is not None
 
 
 class _FakeAudioBuffer:
@@ -126,15 +36,12 @@ class _FakeSession:
         return
 
 
-class _FakeManager:
+class _FakeRuntime:
     def __init__(self, session: _FakeSession) -> None:
         self._session = session
 
-    def create_session(self, _session_id: str) -> _FakeSession:
-        return self._session
-
-    def release_session(self, _session_id: str) -> None:
-        return
+    def open_session(self, _session_id: str) -> SimpleNamespace:
+        return SimpleNamespace(session=self._session, close=lambda: None)
 
 
 @pytest.mark.asyncio
@@ -142,10 +49,10 @@ async def test_transcribe_final_returns_last_result_after_vram_oom(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_session = _FakeSession()
-    fake_manager = _FakeManager(fake_session)
+    fake_runtime = _FakeRuntime(fake_session)
 
     monkeypatch.setattr(processor_module, "get_settings", lambda: SimpleNamespace(min_audio_for_transcription=0.1))
-    monkeypatch.setattr(processor_module, "get_engine_manager", lambda: fake_manager)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: fake_runtime)
 
     context = SimpleNamespace(
         session_id="test-session",

@@ -16,6 +16,6 @@ NVIDIA Attachment A for the final DLL inventory; an SPDX-like metadata label alo
 treated as authority.
 
 Models are downloaded separately and are not installer payloads. Final validation records
-the exact model revision and governing terms for `nvidia/nemotron-speech-streaming-en-0.6b`
-and `mobiuslabsgmbh/faster-whisper-large-v3-turbo`. Those terms may change upstream and
-must be authoritatively rechecked before publication.
+the exact model revision and governing terms for each Faster-Whisper repository used by
+the accepted build, including `mobiuslabsgmbh/faster-whisper-large-v3-turbo`. Those terms
+may change upstream and must be authoritatively rechecked before publication.

@@ -23,7 +23,7 @@ _DIAGNOSTICS_CACHE_TTL_S = 30.0
 _NVIDIA_SMI_TIMEOUT_S = 2.0
 _last_diagnostics: dict[str, Any] | None = None
 _last_collected_at: float | None = None
-_last_signature: tuple[str, str, str] | None = None
+_last_signature: tuple[str] | None = None
 _diagnostics_cache_lock = threading.Lock()
 _diagnostics_refresh_lock = threading.Lock()
 
@@ -131,8 +131,8 @@ def _version_tuple(version: str) -> tuple[int, int, int] | None:
     return _parse_driver_version(version)
 
 
-def _get_engine_device(settings: Settings) -> str:
-    return settings.nemotron_device if settings.engine == "nemotron" else settings.whisper_device
+def _get_whisper_device(settings: Settings) -> str:
+    return settings.whisper_device
 
 
 def check_cuda_capability(device: str) -> CudaDiagnostics:
@@ -301,7 +301,7 @@ def build_warnings(
 
 
 def _get_cached_diagnostics(
-    signature: tuple[str, str, str],
+    signature: tuple[str],
     *,
     fresh_only: bool,
 ) -> dict[str, Any] | None:
@@ -323,7 +323,7 @@ def _diagnostics_refreshing_payload(settings: Settings) -> dict[str, Any]:
         generated_at=datetime.now(timezone.utc).isoformat(),
         cuda=CudaDiagnostics(
             available=False,
-            device=_get_engine_device(settings),
+            device=_get_whisper_device(settings),
             reason=detail,
         ),
         cuda_dlls=CudaDllDiagnostics(available=False, detail=detail),
@@ -361,7 +361,7 @@ def _diagnostics_refreshing_payload(settings: Settings) -> dict[str, Any]:
 def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str, Any]:
     global _last_diagnostics, _last_collected_at, _last_signature
 
-    signature = (settings.engine, settings.whisper_device, settings.nemotron_device)
+    signature = (settings.whisper_device,)
 
     if not force:
         cached = _get_cached_diagnostics(signature, fresh_only=True)
@@ -379,7 +379,7 @@ def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str,
                 return cached
 
         now = time.time()
-        device = _get_engine_device(settings)
+        device = _get_whisper_device(settings)
         cuda = check_cuda_capability(device)
         cuda_dlls = check_ctranslate2_cuda_dlls()
         driver = check_nvidia_driver()

@@ -11,8 +11,8 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
 - For app work: `Set-Location app; bun run <script>`.
 - For server work: `Set-Location server; uv sync --extra whisper --group dev --frozen; uv run pytest`.
 - Use `uv sync --python 3.11 --no-dev --extra release --frozen` for release-runtime
-  preparation. The `nemotron` extra remains available for deferred repair work
-  and is not part of the shipped alpha.
+  preparation. The release extra is the only shipped model-runtime closure; future
+  model families require a separately reviewed adapter and dependency closure.
 
 ## Product and privacy boundaries
 
@@ -30,7 +30,8 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
   applicable release plan and explicit authorization. Do not tag, upload, or publish
   without it.
 - Keep versions and locks unchanged unless the task explicitly authorizes them;
-  verify with `python scripts/version.py check --tag v0.8.0` when relevant.
+  verify with `python scripts/version.py check` and pass the exact candidate tag when
+  preparing a release.
 
 ## Workflow
 

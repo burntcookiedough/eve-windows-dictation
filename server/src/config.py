@@ -18,6 +18,7 @@ from engine_compatibility import (
     option_compatibility,
     validate_engine_compatibility,
 )
+import legacy_settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,47 @@ def _load_settings_json() -> dict[str, Any]:
             if not isinstance(values, dict):
                 logger.warning("Settings file must contain a JSON object")
                 return {}
-            if values.get("whisper_compute_type") == "int16":
-                values["whisper_compute_type"] = "auto"
-                logger.warning("Migrated legacy Whisper int16 precision setting to auto")
-            return values
+            outcome = legacy_settings.migrate_persisted_settings(values)
+            if outcome.migrated:
+                if outcome.diagnostic:
+                    logger.warning("Settings migration: %s", outcome.diagnostic)
+                try:
+                    legacy_settings.rewrite_settings_file(settings_file, outcome.values)
+                except OSError:
+                    # Migration is best effort: the validated in-memory values
+                    # remain usable and the original file is retried next start.
+                    logger.warning(
+                        "Could not persist migrated settings; continuing with in-memory values."
+                    )
+            return outcome.values
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read settings.json: %s", e)
     return {}
+
+
+def _load_environment_settings(env_settings: Any) -> dict[str, Any]:
+    """Migrate process and dotenv environment values before validation.
+
+    ``EnvSettingsSource`` omits unknown fields after a schema removal, so the
+    compatibility boundary supplements it with the frozen MURMUR_* names that
+    the launcher and existing users may still provide.
+    """
+
+    values = dict(env_settings())
+    values.update(legacy_settings.legacy_environment_values())
+    outcome = legacy_settings.migrate_raw_settings(values)
+    if outcome.migrated and outcome.diagnostic:
+        logger.warning("Environment settings migration: %s", outcome.diagnostic)
+    return outcome.values
+
+
+def _load_dotenv_settings(dotenv_settings: Any) -> dict[str, Any]:
+    """Apply the same raw migration to values loaded from the supported .env file."""
+
+    outcome = legacy_settings.migrate_raw_settings(dict(dotenv_settings()))
+    if outcome.migrated and outcome.diagnostic:
+        logger.warning("Dotenv settings migration: %s", outcome.diagnostic)
+    return outcome.values
 
 
 class Settings(BaseSettings):
@@ -66,8 +101,8 @@ class Settings(BaseSettings):
         """Load persisted values below explicit environment configuration."""
         return (
             init_settings,
-            env_settings,
-            dotenv_settings,
+            lambda: _load_environment_settings(env_settings),
+            lambda: _load_dotenv_settings(dotenv_settings),
             file_secret_settings,
             _load_settings_json,
         )
@@ -78,11 +113,9 @@ class Settings(BaseSettings):
     max_sessions: int = 10
     start_timeout: float = 10.0
 
-    # Engine selection (Nemotron is default)
-    engine: Literal["nemotron", "whisper"] = "nemotron"
-    # Internal: whether engine choice should be treated as automatic/default
-    # selection or an explicit user override.
-    engine_preference_mode: Literal["auto", "manual"] = "auto"
+    # ``engine`` remains in the persisted/wire shape for Murmur compatibility.
+    # Faster-Whisper is the only supported family in this release.
+    engine: Literal["whisper"] = "whisper"
 
     # Whisper settings
     whisper_model: str = "large-v3-turbo"
@@ -100,10 +133,6 @@ class Settings(BaseSettings):
     whisper_vad_speech_pad_ms: int = Field(default=200, ge=0, le=2000)
     whisper_vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
-    # Nemotron settings
-    nemotron_model: str = "nvidia/nemotron-speech-streaming-en-0.6b"
-    nemotron_device: Literal["auto", "cpu", "cuda"] = "auto"
-
     # Transcription settings
     partial_emission_interval: float = Field(default=0.25, gt=0.0)
     min_audio_for_transcription: float = 0.15
@@ -112,9 +141,6 @@ class Settings(BaseSettings):
     long_dictation_threshold_s: float = Field(default=30.0, gt=0.0)
     long_dictation_chunk_s: float = Field(default=25.0, gt=1.0)
     long_dictation_overlap_s: float = Field(default=0.75, ge=0.0, le=5.0)
-
-    # Hot-swap
-    unload_before_swap: bool = False
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -132,7 +158,6 @@ class Settings(BaseSettings):
         validate_engine_compatibility(
             whisper_device=self.whisper_device,
             whisper_compute_type=self.whisper_compute_type,
-            nemotron_device=self.nemotron_device,
             capabilities=get_runtime_capabilities(),
         )
         return self
@@ -145,44 +170,15 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "The speech recognition engine to use",
         "type": "select",
         "options": [
-            {"value": "nemotron", "label": "Nemotron Speech", "description": "Fast batch retranscribe, ~93x real-time. English. ~2.3 GB model."},
-            {"value": "whisper", "label": "Faster-Whisper", "description": "Batch retranscribe mode. 25+ languages. ~1.5 GB model."},
+            {"value": "whisper", "label": "Faster-Whisper", "description": "Batch retranscribe mode. 25+ languages."},
         ],
         "requires_reload": True,
         "category": "engine",
-    },
-    "nemotron_model": {
-        "label": "Nemotron Model",
-        "description": "Model name or path for Nemotron engine",
-        "type": "text",
-        "requires_reload": True,
-        "category": "engine",
-        "visible_when": {"engine": "nemotron"},
-    },
-    "nemotron_device": {
-        "label": "Device",
-        "description": "Compute device for Nemotron engine",
-        "type": "select",
-        "options": [
-            {"value": "auto", "label": "Auto (recommended)"},
-            {"value": "cuda", "label": "CUDA"},
-            {"value": "cpu", "label": "CPU"},
-        ],
-        "requires_reload": True,
-        "category": "engine",
-        "visible_when": {"engine": "nemotron"},
     },
     "whisper_model": {
         "label": "Whisper Model",
         "description": "Model size. Larger = better quality, more VRAM.",
         "type": "select",
-        "options": [
-            {"value": "large-v3-turbo", "label": "Large V3 Turbo", "description": "Best speed/quality balance (~1.5 GB model)"},
-            {"value": "large-v3", "label": "Large V3", "description": "Highest quality, slower"},
-            {"value": "medium", "label": "Medium", "description": "~1.4 GB model"},
-            {"value": "small", "label": "Small", "description": "~0.5 GB model"},
-            {"value": "tiny", "label": "Tiny", "description": "Fastest, lowest quality"},
-        ],
         "requires_reload": True,
         "category": "engine",
         "visible_when": {"engine": "whisper"},
@@ -339,24 +335,6 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "requires_reload": False,
         "category": "transcription",
     },
-    "unload_before_swap": {
-        "label": "Unload Before Swap",
-        "description": "Free VRAM before loading new engine (for low-VRAM GPUs)",
-        "type": "bool",
-        "requires_reload": False,
-        "category": "engine",
-    },
-    "engine_preference_mode": {
-        "label": "Engine Selection Mode",
-        "description": "Whether the engine was chosen automatically or manually overridden",
-        "type": "select",
-        "options": [
-            {"value": "auto", "label": "Auto"},
-            {"value": "manual", "label": "Manual"},
-        ],
-        "requires_reload": True,
-        "category": "engine",
-    },
 }
 
 # Keys that trigger engine reload when changed
@@ -372,8 +350,18 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
     result = {}
     capabilities = get_runtime_capabilities()
     for key, meta in SETTINGS_METADATA.items():
+        # Import lazily: ``transcription`` still exposes historical package
+        # exports, and loading it while this configuration module is being
+        # initialized would create a cycle.  The catalog remains the sole
+        # owner; this only defers reading it until the API seam is called.
+        if key == "whisper_model":
+            from transcription.catalog import model_setting_options
+
+            source_options = model_setting_options()
+        else:
+            source_options = meta.get("options", [])
         options = []
-        for option in meta.get("options", []):
+        for option in source_options:
             option_data = dict(option)
             disabled, reason = option_compatibility(
                 key, str(option["value"]), capabilities, settings
@@ -399,7 +387,7 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
         result[key] = {
             "value": values[key],
             **meta,
-            **({"options": options} if "options" in meta else {}),
+            **({"options": options} if "options" in meta or key == "whisper_model" else {}),
         }
     return result
 
@@ -437,9 +425,29 @@ def build_settings_candidate(patch: dict[str, Any]) -> Settings:
 
 
 def commit_settings(candidate: Settings) -> Settings:
-    """Commit one validated settings candidate to memory and disk."""
-    global _settings
+    """Commit one validated settings candidate to memory and disk.
+
+    Runtime model replacement uses the two explicit helpers below so disk
+    persistence can complete before the runtime publishes its model/settings
+    snapshot under one state transition.  Immediate non-reload updates retain
+    this convenience function.
+    """
+
+    persist_settings(candidate)
+    publish_settings(candidate)
+    return candidate
+
+
+def persist_settings(candidate: Settings) -> None:
+    """Persist a validated candidate without changing the live settings view."""
+
     _persist_settings(candidate)
+
+
+def publish_settings(candidate: Settings) -> Settings:
+    """Publish a previously persisted candidate to in-memory readers."""
+
+    global _settings
     _settings = candidate
     return candidate
 

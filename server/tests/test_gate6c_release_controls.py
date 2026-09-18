@@ -287,7 +287,11 @@ def test_packaged_resource_and_runtime_harness_guards() -> None:
     assert ".runtime\\python.exe" in verify
     assert "import faster_whisper, torch" in verify
     assert "nemo.collections.asr" not in verify
-    assert "Deferred Nemotron packages" in verify
+    assert "Unsupported model-runtime packages" in verify
+    assert 'src\\transcription\\engines\\nemotron.py' in verify
+    assert 'src\\transcription\\nemotron_runtime.py' in verify
+    assert "discover_models" in verify
+    assert "discover_engines" not in verify
     assert 'Remove-Item -Path "env:$key"' in verify
 
 

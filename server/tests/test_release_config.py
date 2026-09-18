@@ -165,14 +165,13 @@ def test_release_sync_pins_python_excludes_dev_and_checks_runtime_abi() -> None:
     assert mismatch_index < replace_index
 
 
-def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
+def test_release_extra_is_the_only_whisper_torch_closure() -> None:
     project = _load_server_pyproject()["project"]
     extras = project["optional-dependencies"]
 
     assert extras["release"] == ["murmur[whisper]", "torch>=2.0"]
-    assert extras["all"] == ["murmur[whisper,nemotron]"]
-    assert "nemo_toolkit[asr]>=2.2.0" in extras["nemotron"]
-    assert "torchaudio>=2.0" in extras["nemotron"]
+    assert set(extras) == {"whisper", "release", "dev", "ui"}
+    assert all("nemotron" not in dependency for values in extras.values() for dependency in values)
 
     murmur = next(
         package
@@ -195,38 +194,46 @@ def test_release_extra_is_whisper_torch_only_and_all_keeps_nemotron() -> None:
     }
 
 
-def test_release_verification_requires_only_the_shipped_engine_closure() -> None:
+def test_release_verification_requires_only_the_shipped_model_closure() -> None:
     contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
         encoding="utf-8"
     )
     assert 'Join-Path $sitePackages "faster_whisper"' in contents
     assert 'Join-Path $sitePackages "torch"' in contents
     assert "import faster_whisper, torch" in contents
-    assert "discover_engines" in contents
-    assert "Deferred Nemotron packages" in contents
+    assert "discover_models" in contents
+    assert "Assert-NoPath" in contents
+    assert 'src\\transcription\\engines\\nemotron.py' in contents
+    assert 'src\\transcription\\nemotron_runtime.py' in contents
+    assert "Unsupported model-runtime packages" in contents
     assert "torchaudio" in contents
     assert "nemo.collections.asr" not in contents
 
 
-def test_release_verification_requires_both_engine_discovery_properties() -> None:
+def test_release_verification_requires_one_supported_model_catalog_entry() -> None:
     contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
         encoding="utf-8"
     )
-    required_properties = '$requiredEngineProperties = @("whisper", "nemotron")'
-    missing_properties = "$missingEngineProperties"
-    missing_guard = "if ($missingEngineProperties.Count -gt 0) {"
-    missing_throw = 'throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join \', \')"'
-    whisper_availability = "$whisperAvailable = [bool]$discovery.whisper"
+    assert 'from transcription.factory import discover_models' in contents
+    assert 'if len(models) != 1 or models[0]["id"] != "whisper"' in contents
+    assert 'throw "Packaged Faster-Whisper catalog mismatch:' in contents
+    assert 'Write-Step "Checking packaged Faster-Whisper catalog"' in contents
+    assert "discover_engines" not in contents
+    assert '$requiredEngineProperties = @("whisper", "nemotron")' not in contents
+    assert "$env:MURMUR_ENGINE_PREFERENCE_MODE" not in contents
 
-    assert required_properties in contents
-    assert missing_properties in contents
-    assert missing_guard in contents
-    assert missing_throw in contents
-    missing_properties_index = contents.index(missing_properties)
-    missing_guard_index = contents.index(missing_guard, missing_properties_index)
-    missing_throw_index = contents.index(missing_throw, missing_guard_index)
-    whisper_availability_index = contents.index(whisper_availability)
-    assert missing_properties_index < missing_guard_index < missing_throw_index < whisper_availability_index
+
+def test_release_verification_waits_for_the_packaged_model_runtime() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Wait-For-ReadyHealth" in contents
+    assert '$health.engine.status -eq "ready"' in contents
+    assert '$health.engine.info.model -eq $ExpectedModel' in contents
+    assert '$health.model_download.status -eq "ready"' in contents
+    assert 'throw "Packaged model preparation failed:' in contents
+    assert 'throw "Packaged model download failed:' in contents
 
 
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
@@ -295,7 +302,7 @@ def test_packaging_includes_relocatable_runtime() -> None:
 
 def test_bundled_defaults_are_hardware_neutral() -> None:
     settings = json.loads((ROOT / "server" / "settings.json").read_text(encoding="utf-8"))
-    assert settings["engine_preference_mode"] == "auto"
+    assert settings["engine"] == "whisper"
     assert settings["whisper_device"] == "auto"
     assert settings["whisper_compute_type"] == "auto"
 

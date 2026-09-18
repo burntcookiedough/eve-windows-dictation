@@ -42,7 +42,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(chooser).toContain('if (isSelected(preset)) return isPreparing(preset)');
     expect(chooser).toContain("'Selected'");
     expect(chooser).toContain("return 'Available'");
-    expect(chooser).toContain("return 'Unavailable'");
+    expect(chooser).not.toContain("return 'Unavailable'");
     expect(chooser).toContain('preparationFailed: boolean');
     expect(settingsView).toContain('preparationFailed={preparationFailed}');
   });
@@ -54,7 +54,7 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('>Revert</button>');
     expect(settingsView).toContain('current engine remains active until the selected model is ready');
     expect(settingsView).toContain('selectPreset');
-    expect(settingsView).toContain('if (!isEngineAvailable(preset.engine)) return;');
+    expect(settingsView).not.toContain('isEngineAvailable');
     expect(settingsView).not.toContain('async function pollEngineStatus');
     expect(settingsView).toContain('void loadServerSettings()');
   });
@@ -66,12 +66,12 @@ describe('Phase 2 General and Speech cohesion contracts', () => {
     expect(settingsView).toContain('id="compatibility-controls"');
     expect(settingsView).toContain('hidden={!compatibilityControlsOpen}');
     expect(settingsView).toContain('hasPendingCompatibilityChanges(pendingEngine, stagedPreset)');
-    expect(chooser).toContain('const disabled = unavailable(preset)');
     expect(settingsView).toContain("'whisper_compute_type'");
     expect(settingsView).toContain("'whisper_language'");
     expect(settingsView).not.toContain("'nemotron_device'");
     expect(settingsView).toContain("'whisper_device'");
-    expect(settingsView).toContain("'unload_before_swap'");
+    expect(settingsView).not.toContain("'unload_before_swap'");
+    expect(settingsView).not.toContain('Unload before swap');
     expect(settingsView).toContain('data-compatibility-footer');
     expect(settingsView).toContain('Apply compatibility changes');
     expect(settingsView).toContain('data-engine-status');

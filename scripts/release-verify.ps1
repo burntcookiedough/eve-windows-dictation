@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ExpectedVersion = "0.8.2-alpha.3",
+    [string]$ExpectedVersion = "0.8.2-alpha.4",
     [string]$InstallerDir = "E:\EveRelease\release-prep\full-nsis-web\nsis-web",
     [string]$InstallDir = "E:\EveRelease\release-prep\smoke-install\Eve",
     [string]$BaseBranch = "trunk",
@@ -34,6 +34,13 @@ function Assert-NoPackage {
         })
     if ($forbidden.Count -gt 0) {
         throw "$Description found: $($forbidden.Name -join ', ')"
+    }
+}
+
+function Assert-NoPath {
+    param([string]$Path, [string]$Description)
+    if (Test-Path -LiteralPath $Path) {
+        throw "$Description found at $Path"
     }
 }
 
@@ -88,17 +95,38 @@ function Invoke-Native {
     }
 }
 
-function Wait-For-Health {
-    param([string]$Url, [int]$TimeoutSec)
+function Wait-For-ReadyHealth {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec,
+        [string]$ExpectedModel
+    )
+
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         try {
-            return Invoke-RestMethod -Uri $Url -TimeoutSec 2
+            $health = Invoke-RestMethod -Uri $Url -TimeoutSec 2
         } catch {
             Start-Sleep -Milliseconds 500
+            continue
         }
+
+        if ($health.engine.status -eq "error") {
+            throw "Packaged model preparation failed: $($health.engine.message)"
+        }
+        if ($health.model_download.status -eq "error") {
+            throw "Packaged model download failed: $($health.model_download.detail)"
+        }
+        if (
+            $health.engine.status -eq "ready" -and
+            $health.engine.info.model -eq $ExpectedModel -and
+            $health.model_download.status -eq "ready"
+        ) {
+            return $health
+        }
+        Start-Sleep -Milliseconds 500
     }
-    throw "Server did not become healthy within ${TimeoutSec}s at $Url"
+    throw "Packaged model did not become ready within ${TimeoutSec}s at $Url"
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -145,7 +173,13 @@ Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $sitePackages "faster_whisper") "faster-whisper package"
 Assert-Path (Join-Path $sitePackages "torch") "torch package"
-Assert-NoPackage -SitePackages $sitePackages -Description "Deferred Nemotron packages"
+Assert-NoPackage -SitePackages $sitePackages -Description "Unsupported model-runtime packages"
+foreach ($relativePath in @(
+    "src\transcription\engines\nemotron.py",
+    "src\transcription\nemotron_runtime.py"
+)) {
+    Assert-NoPath -Path (Join-Path $serverRoot $relativePath) -Description "Retired model-runtime source"
+}
 Assert-SelfContainedRuntime -RuntimePath (Join-Path $serverRoot ".runtime") -PythonExe $pythonExe
 
 Write-Step "Checking installed server health/version"
@@ -159,7 +193,6 @@ $oldEnv = @{
     MURMUR_SETTINGS_FILE = $env:MURMUR_SETTINGS_FILE
     MURMUR_PORT = $env:MURMUR_PORT
     MURMUR_ENGINE = $env:MURMUR_ENGINE
-    MURMUR_ENGINE_PREFERENCE_MODE = $env:MURMUR_ENGINE_PREFERENCE_MODE
     MURMUR_WHISPER_MODEL = $env:MURMUR_WHISPER_MODEL
     MURMUR_WHISPER_DEVICE = $env:MURMUR_WHISPER_DEVICE
     MURMUR_WHISPER_COMPUTE_TYPE = $env:MURMUR_WHISPER_COMPUTE_TYPE
@@ -172,7 +205,6 @@ $env:MURMUR_PID_FILE = $pidFile
 $env:MURMUR_SETTINGS_FILE = Join-Path (Split-Path $InstallDir -Parent) "release-verify-server-settings.json"
 $env:MURMUR_PORT = [string]$HealthPort
 $env:MURMUR_ENGINE = "whisper"
-$env:MURMUR_ENGINE_PREFERENCE_MODE = "manual"
 $env:MURMUR_WHISPER_MODEL = "tiny"
 $env:MURMUR_WHISPER_DEVICE = "cpu"
 $env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
@@ -181,34 +213,26 @@ $env:PYTHONNOUSERSITE = "1"
 $env:PYTHONPATH = $sitePackages
 Invoke-Native $pythonExe -c "import faster_whisper, torch"
 
-Write-Step "Checking packaged engine discovery"
-$discoveryProbe = @"
+Write-Step "Checking packaged Faster-Whisper catalog"
+$catalogProbe = @"
 import json
 import sys
 
 sys.path.insert(0, r"$serverRoot\src")
-from transcription.factory import discover_engines
+from transcription.factory import discover_models
 
-engines = {entry["id"]: bool(entry["available"]) for entry in discover_engines()}
-print(json.dumps(engines, sort_keys=True))
+models = discover_models()
+if len(models) != 1 or models[0]["id"] != "whisper" or not models[0]["available"]:
+    raise SystemExit(f"Unexpected Faster-Whisper catalog: {models!r}")
+print(json.dumps({"id": models[0]["id"], "available": bool(models[0]["available"])}, sort_keys=True))
 "@
-$discoveryOutput = & $pythonExe -c $discoveryProbe
+$catalogOutput = & $pythonExe -c $catalogProbe
 if ($LASTEXITCODE -ne 0) {
-    throw "Packaged engine discovery probe failed with exit code $LASTEXITCODE"
+    throw "Packaged Faster-Whisper catalog probe failed with exit code $LASTEXITCODE"
 }
-$discovery = $discoveryOutput | ConvertFrom-Json
-$requiredEngineProperties = @("whisper", "nemotron")
-$discoveryPropertyNames = @($discovery.PSObject.Properties.Name)
-$missingEngineProperties = @(
-    $requiredEngineProperties | Where-Object { $_ -notin $discoveryPropertyNames }
-)
-if ($missingEngineProperties.Count -gt 0) {
-    throw "Packaged engine discovery omitted required properties: $($missingEngineProperties -join ', ')"
-}
-$whisperAvailable = [bool]$discovery.whisper
-$nemotronAvailable = [bool]$discovery.nemotron
-if (-not $whisperAvailable -or $nemotronAvailable) {
-    throw "Packaged engine discovery mismatch: whisper=$whisperAvailable nemotron=$nemotronAvailable"
+$catalog = $catalogOutput | ConvertFrom-Json
+if ($catalog.id -ne "whisper" -or -not [bool]$catalog.available) {
+    throw "Packaged Faster-Whisper catalog mismatch: id=$($catalog.id) available=$($catalog.available)"
 }
 
 $process = Start-Process -FilePath $pythonExe `
@@ -220,11 +244,14 @@ $process = Start-Process -FilePath $pythonExe `
     -RedirectStandardError $errLog
 
 try {
-    $health = Wait-For-Health -Url "http://127.0.0.1:$HealthPort/health" -TimeoutSec $HealthTimeoutSec
+    $health = Wait-For-ReadyHealth `
+        -Url "http://127.0.0.1:$HealthPort/health" `
+        -TimeoutSec $HealthTimeoutSec `
+        -ExpectedModel $env:MURMUR_WHISPER_MODEL
     if ($health.version -ne $ExpectedVersion) {
         throw "Health version mismatch: expected $ExpectedVersion, got $($health.version)"
     }
-    Write-Step "Health OK: version=$($health.version) status=$($health.status)"
+    Write-Step "Health OK: version=$($health.version) engine=$($health.engine.status) model=$($health.engine.info.model)"
 } finally {
     if ($process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue

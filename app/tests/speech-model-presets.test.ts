@@ -1,22 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetDownloadLabel, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
+import type { ModelCatalogItem } from '../src/shared/types';
+import { hasPendingCompatibilityChanges, presetDownloadLabel, presetIsPreparing, presetMatchesCurrentEngine, presetMatchesReadyEngine, presetPatch, speechModelPresetsFromCatalog, stagedPresetFromPending } from '../src/renderer/app/speech-model-presets';
+
+const MODEL_CATALOG: ModelCatalogItem[] = [
+  { model: 'large-v3-turbo', label: 'Recommended Multilingual', summary: 'A balanced multilingual option.', repo_id: 'example/large-v3-turbo', size_gb: 1.5, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+  { model: 'large-v3', label: 'Maximum Multilingual Accuracy', summary: 'A larger multilingual option for quality-focused use.', repo_id: 'example/large-v3', size_gb: 2.9, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+  { model: 'small', label: 'Lightweight', summary: 'A smaller option for constrained hardware.', repo_id: 'example/small', size_gb: 0.5, language_label: 'Multilingual', languages: ['en', 'de'], supports_hotwords: true },
+];
+const SPEECH_MODEL_PRESETS = speechModelPresetsFromCatalog(MODEL_CATALOG);
 
 describe('speech model presets', () => {
   test('keeps the three exact shipped mappings and factual established sizes', () => {
     expect(SPEECH_MODEL_PRESETS.map(({ id }) => id)).toEqual([
-      'recommended-multilingual',
-      'maximum-multilingual-accuracy',
-      'lightweight',
+      'large-v3-turbo',
+      'large-v3',
+      'small',
     ]);
-    expect(SPEECH_MODEL_PRESETS.map(({ label, engine, model, sizeGb }) => ({ label, engine, model, sizeGb }))).toEqual([
-      { label: 'Recommended Multilingual', engine: 'whisper', model: 'large-v3-turbo', sizeGb: 1.5 },
-      { label: 'Maximum Multilingual Accuracy', engine: 'whisper', model: 'large-v3', sizeGb: 2.9 },
-      { label: 'Lightweight', engine: 'whisper', model: 'small', sizeGb: 0.5 },
+    expect(SPEECH_MODEL_PRESETS.map(({ label, model, sizeGb }) => ({ label, model, sizeGb }))).toEqual([
+      { label: 'Recommended Multilingual', model: 'large-v3-turbo', sizeGb: 1.5 },
+      { label: 'Maximum Multilingual Accuracy', model: 'large-v3', sizeGb: 2.9 },
+      { label: 'Lightweight', model: 'small', sizeGb: 0.5 },
     ]);
-    expect(SPEECH_MODEL_PRESETS.every((preset) => preset.engine === 'whisper')).toBeTrue();
-    expect(presetPatch(SPEECH_MODEL_PRESETS[0])).toEqual({ engine: 'whisper', whisper_model: 'large-v3-turbo' });
-    expect(presetPatch(SPEECH_MODEL_PRESETS[1])).toEqual({ engine: 'whisper', whisper_model: 'large-v3' });
+    expect(presetPatch(SPEECH_MODEL_PRESETS[0]!)).toEqual({ whisper_model: 'large-v3-turbo' });
+    expect(presetPatch(SPEECH_MODEL_PRESETS[1]!)).toEqual({ whisper_model: 'large-v3' });
   });
 
   test('does not warn for a pure staged preset patch but warns for an additional pending model', () => {
@@ -34,14 +41,39 @@ describe('speech model presets', () => {
 
   test('promotes a selected preset only when its actual engine status is ready', () => {
     const preset = SPEECH_MODEL_PRESETS[0];
-    const oldWhisperDuringCrossEngineSwap = { current: 'whisper', status: 'loading', pending: { engine: 'nemotron' }, info: { id: 'whisper', name: 'Faster-Whisper', model: 'large-v3-turbo', languages: [], model_size_gb: 1.5 } };
-    const oldTurboDuringSameEngineSwap = { current: 'whisper', status: 'loading', pending: { engine: 'whisper' }, info: { id: 'whisper', name: 'Faster-Whisper', model: 'large-v3-turbo', languages: [], model_size_gb: 1.5 } };
-    expect(presetMatchesCurrentEngine(preset, oldWhisperDuringCrossEngineSwap)).toBeTrue();
-    expect(presetMatchesReadyEngine(preset, oldWhisperDuringCrossEngineSwap)).toBeFalse();
-    expect(presetMatchesCurrentEngine(preset, oldTurboDuringSameEngineSwap)).toBeTrue();
-    expect(presetMatchesReadyEngine(preset, oldTurboDuringSameEngineSwap)).toBeFalse();
+    const previousModelDuringReplacement = { current: 'whisper', status: 'loading', pending: { engine: 'whisper' }, info: { id: 'whisper', name: 'Faster-Whisper', model: 'large-v3-turbo', languages: [], model_size_gb: 1.5 } };
+    expect(presetMatchesCurrentEngine(preset, previousModelDuringReplacement)).toBeTrue();
+    expect(presetMatchesReadyEngine(preset, previousModelDuringReplacement)).toBeFalse();
     expect(presetMatchesReadyEngine(preset, { current: 'whisper', status: 'ready', info: { id: 'whisper', name: 'Faster-Whisper', model: 'large-v3-turbo', languages: [], model_size_gb: 1.5 } })).toBeTrue();
     expect(presetDownloadLabel({ model: 'large-v3-turbo', size_gb: 1.5, status: 'partial' }, preset)).toBe('Partial download');
+  });
+
+  test('attributes preparation to the pending model and ignores stale download state', () => {
+    const previous = SPEECH_MODEL_PRESETS[0]!;
+    const target = SPEECH_MODEL_PRESETS[1]!;
+    const replacing = {
+      current: 'whisper' as const,
+      status: 'loading' as const,
+      pending: { engine: 'whisper', model: target.model, status: 'loading' as const },
+    };
+    const staleDownload = { model: previous.model, size_gb: previous.sizeGb, status: 'downloading' as const };
+
+    expect(presetIsPreparing(target, replacing, staleDownload)).toBeTrue();
+    expect(presetIsPreparing(previous, replacing, staleDownload)).toBeFalse();
+  });
+
+  test('uses the download target only as a scoped fallback for older servers', () => {
+    const target = SPEECH_MODEL_PRESETS[1]!;
+    const loadingWithoutModel = {
+      current: 'whisper' as const,
+      status: 'loading' as const,
+      pending: { engine: 'whisper', status: 'loading' as const },
+    };
+    const staleDownload = { model: SPEECH_MODEL_PRESETS[0]!.model, size_gb: 1.5, status: 'downloading' as const };
+    const targetDownload = { model: target.model, size_gb: target.sizeGb, status: 'downloading' as const };
+
+    expect(presetIsPreparing(target, loadingWithoutModel, staleDownload)).toBeFalse();
+    expect(presetIsPreparing(target, loadingWithoutModel, targetDownload)).toBeTrue();
   });
 
   test('keeps selection and preparation explicit in the Settings surface', () => {
@@ -53,7 +85,7 @@ describe('speech model presets', () => {
     expect(chooser).toContain('name={`speech-model-preset-${componentId}`}');
     expect(chooser).toContain('Apply and prepare model confirms the change.');
     expect(settings).toContain('Apply and prepare model');
-    expect(settings).toContain("getSettingValue<string>('engine') ?? 'whisper'");
+    expect(settings).toContain("getSettingValue<string>('whisper_model') === preset.model");
     expect(settings).toContain('serverStatusState');
     expect(settings).toContain('shouldRetryServerSettings');
     expect(settings).toContain('shouldClearServerSettings');
@@ -66,10 +98,12 @@ describe('speech model presets', () => {
     expect(settingsMarkup).not.toContain('Nemotron');
     expect(settingsMarkup).not.toContain('nemotron_model');
     expect(settingsMarkup).not.toContain('nemotron_device');
+    expect(settingsMarkup).not.toContain('unload_before_swap');
     expect(settings).toContain("'whisper_language'");
     const config = readFileSync(new URL('../../server/src/config.py', import.meta.url), 'utf8');
-    expect(config).toContain('"medium"');
-    expect(config).toContain('"tiny"');
+    expect(config).toContain('model_setting_options');
+    expect(config).not.toContain('"medium"');
+    expect(config).not.toContain('"tiny"');
     expect(settings).toContain('whisper_compute_type');
     expect(settings).toContain('Raw Whisper compatibility model, including Medium and Tiny');
     expect(settings).toContain('!stagedPreset');
@@ -78,9 +112,9 @@ describe('speech model presets', () => {
   });
 
   test('routes only an actual staged preset through model preparation and clears the full candidate on revert', () => {
-    expect(stagedPresetFromPending({ whisper_compute_type: 'int8' })).toBeNull();
-    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'medium' })).toBeNull();
-    expect(stagedPresetFromPending({ engine: 'whisper', whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' })?.id).toBe('recommended-multilingual');
-    expect(stagedPresetFromPending({ engine: 'nemotron', nemotron_model: 'nvidia/nemotron-speech-streaming-en-0.6b', nemotron_device: 'cuda' })).toBeNull();
+    expect(stagedPresetFromPending({ whisper_compute_type: 'int8' }, SPEECH_MODEL_PRESETS)).toBeNull();
+    expect(stagedPresetFromPending({ whisper_model: 'medium' }, SPEECH_MODEL_PRESETS)).toBeNull();
+    expect(stagedPresetFromPending({ whisper_model: 'large-v3-turbo', whisper_compute_type: 'int8' }, SPEECH_MODEL_PRESETS)?.id).toBe('large-v3-turbo');
+    expect(stagedPresetFromPending({ whisper_model: 'custom/local-model', whisper_device: 'cuda' }, SPEECH_MODEL_PRESETS)).toBeNull();
   });
 });

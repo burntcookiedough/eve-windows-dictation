@@ -10,7 +10,7 @@
   import SettingsSkeleton from '../components/SettingsSkeleton.svelte';
   import ServerView from './ServerView.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
-  import { SPEECH_MODEL_PRESETS, hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, stagedPresetFromPending } from '../speech-model-presets';
+  import { hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, speechModelPresetsFromCatalog, stagedPresetFromPending, type SpeechModelPreset } from '../speech-model-presets';
   import { serverStatusState } from '../server-status';
   import {
     recoverInterruptedManagedPreparation,
@@ -21,7 +21,7 @@
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
   import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
-  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ServerSetting, type ServerSettingOption } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DICTATION_MODE_OPTIONS: EveDropdownOption[] = [
@@ -87,6 +87,7 @@
 
   // Server/engine settings state
   let serverSettings = $state<Record<string, ServerSetting<unknown>> | null>(null);
+  let modelCatalog = $state<ModelCatalogItem[]>([]);
   let engineStatus = $state<EngineStatus | null>(null);
   let serverConnected = $state(false);
   let serverSettingsLoading = $state(false);
@@ -97,13 +98,13 @@
   let enginePreparationActive = $state(false);
   let enginePreparationObserved = $state(false);
   let refreshingCommittedSettings = $state(false);
-  let availableEngines = $state<string[]>([]);
   let engineApplyError = $state('');
 
   // Local engine settings (track pending changes before apply)
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(engineStatus ?? sharedServerState?.engineStatus ?? null);
+  let speechModelPresets = $derived(speechModelPresetsFromCatalog(modelCatalog));
 
   // Derive current values (server value overridden by pending)
   function getSettingValue<T>(key: string): T | undefined {
@@ -112,12 +113,11 @@
     return setting?.value as T | undefined;
   }
 
-  let selectedEngine = $derived(getSettingValue<string>('engine') ?? 'whisper');
   let draftWhisperDevice = $derived(getSettingValue<string>('whisper_device') ?? 'auto');
-  let selectedPreset = $derived(SPEECH_MODEL_PRESETS.find((preset) =>
-    getSettingValue<string>('engine') === preset.engine && getSettingValue<string>(preset.setting) === preset.model
+  let selectedPreset = $derived(speechModelPresets.find((preset) =>
+    getSettingValue<string>('whisper_model') === preset.model
   ) ?? null);
-  let stagedPreset = $derived(stagedPresetFromPending(pendingEngine));
+  let stagedPreset = $derived(stagedPresetFromPending(pendingEngine, speechModelPresets));
   let preparationFailed = $derived(
     enginePreparationPhase(sharedEngineStatus) === 'failed' ||
     (!enginePreparationActive && stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
@@ -163,13 +163,6 @@
       disabled: option.disabled,
       description: option.reason,
     }));
-  }
-
-  function isEngineAvailable(engineId: unknown): boolean {
-    if (typeof engineId !== 'string') return true;
-    // Backward compatibility with older servers that do not return availability metadata.
-    if (availableEngines.length === 0) return true;
-    return availableEngines.includes(engineId);
   }
 
   function formatEstimatedDuration(seconds: number): string {
@@ -225,14 +218,14 @@
     try {
       const serverData = await window.murmurMain.getServerSettings();
       serverSettings = serverData.settings;
+      modelCatalog = serverData.model_catalog ?? [];
       engineStatus = serverData.engine_status;
-      availableEngines = serverData.available_engines ?? [];
       serverConnected = true;
       return true;
     } catch {
       serverSettings = null;
+      modelCatalog = [];
       engineStatus = null;
-      availableEngines = [];
       serverConnected = false;
       return false;
     } finally {
@@ -288,8 +281,8 @@
         applying: engineApplying,
       });
       serverSettings = null;
+      modelCatalog = [];
       engineStatus = null;
-      availableEngines = [];
       serverConnected = false;
       lastServerSettingsAttemptKey = null;
       if (recovery) {
@@ -395,8 +388,7 @@
     pendingEngine = { ...pendingEngine, [key]: value };
   }
 
-  function selectPreset(preset: typeof SPEECH_MODEL_PRESETS[number]): void {
-    if (!isEngineAvailable(preset.engine)) return;
+  function selectPreset(preset: SpeechModelPreset): void {
     pendingEngine = { ...pendingEngine, ...presetPatch(preset) };
     engineApplyError = '';
   }
@@ -421,8 +413,8 @@
       const patch = Object.fromEntries(Object.entries(pendingEngine));
       const response = await window.murmurMain.updateServerSettings(patch);
       serverSettings = response.settings;
+      modelCatalog = response.model_catalog ?? [];
       engineStatus = response.engine_status;
-      availableEngines = response.available_engines ?? availableEngines;
       if (response.reload_started) {
         enginePreparationRequested = true;
         enginePreparationActive = true;
@@ -648,8 +640,8 @@
                 <path d="M12 8h.01"/>
               </svg>
               <div>
-                <p class="text-zinc-300">Hotwords are not supported by the current engine.</p>
-                <p class="mt-1 text-xs text-zinc-500">Choose a compatible engine to enable hotwords.</p>
+                <p class="text-zinc-300">Hotwords are unavailable in the current Faster-Whisper configuration.</p>
+                <p class="mt-1 text-xs text-zinc-500">Adjust the model or device settings, then try again.</p>
               </div>
             </div>
           {/if}
@@ -778,9 +770,8 @@
         </div>
       {:else}
         <SpeechModelChooser
+          presets={speechModelPresets}
           selected={selectedPreset}
-          availableEngines={availableEngines}
-          availabilityKnown={availableEngines.length > 0}
           engineStatus={sharedEngineStatus}
           modelDownload={sharedServerState?.modelDownload}
           preparationFailed={preparationFailed}
@@ -815,7 +806,7 @@
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
               <h3 class="text-sm font-medium text-zinc-100">Compatibility controls</h3>
-              <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Raw model, precision, language, device, and unload-before-swap settings.</p>
+              <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Raw model, precision, language, and device settings.</p>
             </div>
             {#if serverConnected && serverSettings}
               <button
@@ -891,15 +882,6 @@
             {#each disabledOptionReasons(getOptions('whisper_device')) as reason}
               <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
             {/each}
-          </SettingsRow>
-        {/if}
-        {#if serverSettings.unload_before_swap}
-          <SettingsRow label="Unload before swap" description="Free VRAM before loading a new engine on low-VRAM GPUs">
-            <Toggle
-              enabled={!!getSettingValue('unload_before_swap')}
-              onchange={(v) => updateEngineSetting('unload_before_swap', v)}
-              label="Unload before swap"
-            />
           </SettingsRow>
         {/if}
         </div>

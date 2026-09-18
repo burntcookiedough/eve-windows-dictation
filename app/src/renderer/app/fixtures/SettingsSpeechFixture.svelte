@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { EngineStatus, ModelDownloadState } from '$shared/types';
-  import { SPEECH_MODEL_PRESETS, type SpeechModelPreset } from '../speech-model-presets';
+  import type { EngineStatus, ModelCatalogItem, ModelDownloadState } from '$shared/types';
+  import { speechModelPresetsFromCatalog, type SpeechModelPreset } from '../speech-model-presets';
   import SettingsGroup from '../components/SettingsGroup.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
@@ -14,19 +14,52 @@
   const fixtureState = (params.get('state') ?? 'ready') as FixtureState;
   const fixtureView = params.get('view') ?? 'all';
   let compatibilityOpen = $state(params.get('compatibility') === 'expanded');
+  const fixtureCatalog: ModelCatalogItem[] = [
+    {
+      model: 'large-v3-turbo',
+      label: 'Recommended Multilingual',
+      summary: 'A balanced multilingual option.',
+      repo_id: 'example/large-v3-turbo',
+      size_gb: 1.5,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+    {
+      model: 'large-v3',
+      label: 'Maximum Multilingual Accuracy',
+      summary: 'A larger multilingual option for quality-focused use.',
+      repo_id: 'example/large-v3',
+      size_gb: 2.9,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+    {
+      model: 'small',
+      label: 'Lightweight',
+      summary: 'A smaller option for constrained hardware.',
+      repo_id: 'example/small',
+      size_gb: 0.5,
+      language_label: 'Multilingual',
+      languages: ['en', 'fr', 'de'],
+      supports_hotwords: true,
+    },
+  ];
+  const fixturePresets = speechModelPresetsFromCatalog(fixtureCatalog);
   let selectedPreset = $state<SpeechModelPreset>(
     fixtureState === 'ready'
-      ? SPEECH_MODEL_PRESETS[0]!
-      : SPEECH_MODEL_PRESETS[1]!,
+      ? fixturePresets[0]!
+      : fixturePresets[1]!,
   );
 
-  const currentPreset = SPEECH_MODEL_PRESETS[0]!;
-  const targetPreset = SPEECH_MODEL_PRESETS[1]!;
+  const currentPreset = fixturePresets[0]!;
+  const targetPreset = fixturePresets[1]!;
   const currentEngineStatus: EngineStatus = {
-    current: currentPreset.engine,
+    current: 'whisper',
     status: 'ready',
     info: {
-      id: currentPreset.engine,
+      id: 'whisper',
       name: 'Faster-Whisper',
       model: currentPreset.model,
       supports_hotwords: true,
@@ -38,9 +71,9 @@
   };
 
   const engineStatus: EngineStatus = fixtureState === 'preparing'
-    ? { ...currentEngineStatus, pending: { engine: targetPreset.engine, status: 'loading', message: 'Loading selected model' } }
+    ? { ...currentEngineStatus, pending: { engine: 'whisper', model: targetPreset.model, status: 'loading', message: 'Loading selected model' } }
     : fixtureState === 'error'
-      ? { ...currentEngineStatus, pending: { engine: targetPreset.engine, status: 'error', message: 'Selected model could not be prepared' } }
+      ? { ...currentEngineStatus, pending: { engine: 'whisper', model: targetPreset.model, status: 'error', message: 'Selected model could not be prepared' } }
       : currentEngineStatus;
 
   const modelDownload: ModelDownloadState = fixtureState === 'preparing'
@@ -124,7 +157,7 @@
                   <div data-fixture-hotwords-editor class="p-4">
                     <label for="fixture-hotwords" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
                     <p id="fixture-hotwords-help" class="mt-1 text-xs leading-5 text-zinc-500">Add product names, acronyms, and proper nouns that are often transcribed incorrectly.</p>
-                    <textarea id="fixture-hotwords" aria-describedby="fixture-hotwords-help" class="mt-3 min-h-24 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" rows="3">Eve, Murmur, Svelte, Nemotron</textarea>
+                    <textarea id="fixture-hotwords" aria-describedby="fixture-hotwords-help" class="mt-3 min-h-24 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" rows="3">Eve, Murmur, Svelte, Whisper</textarea>
                     <div class="mt-3 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p class="min-w-0 text-xs text-amber-300">4 terms · Recognition quality may degrade with very long lists.</p>
                       <div class="flex min-w-0 flex-wrap gap-2">
@@ -147,9 +180,8 @@
           {#if fixtureView === 'speech' || fixtureView === 'all'}
             <SettingsSection title="Speech model" variant="content">
               <SpeechModelChooser
+                presets={fixturePresets}
                 selected={selectedPreset}
-                availableEngines={['nemotron', 'whisper']}
-                availabilityKnown
                 engineStatus={engineStatus}
                 modelDownload={modelDownload}
                 preparationFailed={fixtureState === 'error'}
@@ -202,7 +234,6 @@
                     <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><EveDropdown label="Compute type" value="int8" options={[{ value: 'int8', label: 'int8' }, { value: 'float16', label: 'float16' }]} onchange={() => undefined} /></SettingsRow>
                     <SettingsRow label="Language" description="Language hint for compatibility"><input aria-label="Whisper language" value="auto" class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-28" /></SettingsRow>
                     <SettingsRow label="Device" description="Hardware device for inference"><EveDropdown label="Whisper device" value="cuda" options={[{ value: 'cuda', label: 'cuda' }, { value: 'cpu', label: 'cpu' }]} onchange={() => undefined} /></SettingsRow>
-                    <SettingsRow label="Unload before swap" description="Free VRAM before loading a new engine"><Toggle enabled label="Unload before swap" /></SettingsRow>
                 </div>
                 <div data-fixture-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">

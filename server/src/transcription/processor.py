@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -9,9 +10,9 @@ from typing import Awaitable, Callable, TYPE_CHECKING
 
 from config import get_settings
 from protocol.constants import AUDIO_SAMPLE_RATE
-from transcription.base import EngineSession
+from transcription.contracts import ModelSession, SessionId
 from transcription.errors import VramExhaustedError
-from transcription.factory import get_engine_manager
+from transcription.factory import get_model_runtime
 from transcription.long_dictation import plan_chunks, stitch_text
 from transcription.types import TranscribeOptions, TranscribeResult
 
@@ -75,10 +76,12 @@ class TranscriptionProcessor:
     def __init__(self, context: "SessionContext") -> None:
         self._context = context
         self._settings = get_settings()
-
-        manager = get_engine_manager()
-        self._session: EngineSession = manager.create_session(context.session_id)
+        runtime = get_model_runtime()
+        self._lease = runtime.open_session(SessionId(context.session_id))
+        self._session: ModelSession = self._lease.session
         self._session_id = context.session_id
+        self._close_lock = threading.Lock()
+        self._closed = False
 
     @property
     def _allow_overlapping_inference(self) -> bool:
@@ -379,8 +382,13 @@ class TranscriptionProcessor:
         return result.confidence < 0.35
 
     def close(self) -> None:
-        self._session.close()
-        get_engine_manager().release_session(self._session_id)
+        """Release the generation lease exactly once."""
+
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._lease.close()
 
 
 def shutdown_executor() -> None:

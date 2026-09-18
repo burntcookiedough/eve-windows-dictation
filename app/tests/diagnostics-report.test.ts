@@ -17,10 +17,10 @@ describe('privacy-safe diagnostics report', () => {
       managed: true,
       version: '0.6.2',
       engineStatus: {
-        current: 'nemotron',
+        current: 'whisper',
         status: 'ready',
         info: {
-          model: 'nvidia/nemotron-speech-streaming-en-0.6b',
+          model: 'large-v3-turbo',
           device: 'cuda',
           compute_type: 'float16',
           cuda_active: true,
@@ -38,9 +38,9 @@ Windows: 10.0.26100 (x64)
 Server mode: managed
 Server status: running
 Server version: 0.6.2
-Engine: nemotron
+Engine: whisper
 Engine status: ready
-Model: nvidia/nemotron-speech-streaming-en-0.6b
+Model: large-v3-turbo
 Device: cuda
 Compute type: float16
 CUDA active: yes
@@ -185,6 +185,22 @@ VC++ runtime installed: yes
     expect(output).not.toContain('GPU:');
     expect(output).not.toContain('NVIDIA driver:');
     expect(output).not.toContain('Missing runtime files:');
+  });
+
+  test('does not advertise retired engine or model identifiers', () => {
+    const output = report({
+      status: 'running',
+      managed: true,
+      engineStatus: {
+        current: 'nemotron',
+        status: 'ready',
+        info: { model: 'nvidia/nemotron-speech-streaming-en-0.6b' },
+      },
+    });
+
+    expect(output).not.toContain('Engine: nemotron');
+    expect(output).toContain('Model: custom/local model');
+    expect(output).not.toContain('nvidia/nemotron-speech-streaming-en-0.6b');
   });
 
   test('bounds the inspected missing-runtime prefix', () => {

@@ -19,9 +19,6 @@ ModelDownloadPhase = Literal["checking", "downloading", "loading", "ready", "err
 
 _TEMP_FILE_MARKERS = (".incomplete", ".lock", ".tmp", ".temp", ".partial")
 _REQUIRED_FILES_BY_REPO: dict[str, tuple[str, ...]] = {
-    "nvidia/nemotron-speech-streaming-en-0.6b": (
-        "nemotron-speech-streaming-en-0.6b.nemo",
-    ),
     "mobiuslabsgmbh/faster-whisper-large-v3-turbo": (
         "config.json",
         "model.bin",

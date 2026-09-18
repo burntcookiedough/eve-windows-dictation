@@ -1,66 +1,16 @@
 """Regression coverage for public model authentication and safe preparation errors."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from config import Settings
-from transcription.engines.nemotron import _public_model_anonymous_access
 import transcription.engines.whisper as whisper
+from transcription.catalog import FASTER_WHISPER_CATALOG
 from transcription.errors import safe_engine_preparation_message
-
-
-def test_curated_public_model_forces_anonymous_access_and_restores_token_resolver() -> None:
-    def original() -> str:
-        return "stale-saved-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with _public_model_anonymous_access(
-        "nvidia/nemotron-speech-streaming-en-0.6b", hf_common
-    ):
-        assert hf_common.get_hf_token() is False
-
-    assert hf_common.get_hf_token is original
-
-
-def test_custom_model_preserves_existing_hugging_face_authentication() -> None:
-    def original() -> str:
-        return "private-model-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with _public_model_anonymous_access("private-org/custom-asr", hf_common):
-        assert hf_common.get_hf_token() == "private-model-token"
-
-    assert hf_common.get_hf_token is original
-
-
-def test_public_model_token_override_is_restored_after_failure() -> None:
-    def original() -> str:
-        return "stale-saved-token"
-
-    hf_common = SimpleNamespace(get_hf_token=original)
-
-    with pytest.raises(RuntimeError, match="download failed"):
-        with _public_model_anonymous_access(
-            "nvidia/nemotron-speech-streaming-en-0.6b", hf_common
-        ):
-            assert hf_common.get_hf_token() is False
-            raise RuntimeError("download failed")
-
-    assert hf_common.get_hf_token is original
 
 
 @pytest.mark.parametrize(
     ("model", "repo_id"),
-    [
-        ("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
-        ("large-v3", "Systran/faster-whisper-large-v3"),
-        ("medium", "Systran/faster-whisper-medium"),
-        ("small", "Systran/faster-whisper-small"),
-        ("tiny", "Systran/faster-whisper-tiny"),
-    ],
+    [(str(item.model), item.repo_id) for item in FASTER_WHISPER_CATALOG],
 )
 def test_public_whisper_builtin_models_resolve_to_registered_upstreams(
     model: str, repo_id: str
@@ -70,13 +20,7 @@ def test_public_whisper_builtin_models_resolve_to_registered_upstreams(
 
 @pytest.mark.parametrize(
     "repo_id",
-    [
-        "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
-        "Systran/faster-whisper-large-v3",
-        "Systran/faster-whisper-medium",
-        "Systran/faster-whisper-small",
-        "Systran/faster-whisper-tiny",
-    ],
+    [item.repo_id for item in FASTER_WHISPER_CATALOG],
 )
 def test_curated_whisper_presets_force_anonymous_download(
     repo_id: str, monkeypatch: pytest.MonkeyPatch
@@ -106,6 +50,13 @@ def test_curated_whisper_presets_force_anonymous_download(
             },
         )
     ]
+
+
+def test_curated_whisper_sizes_derive_from_the_server_catalog() -> None:
+    assert {
+        str(item.model): whisper._MODEL_SIZES[str(item.model)]
+        for item in FASTER_WHISPER_CATALOG
+    } == {str(item.model): item.size_gb for item in FASTER_WHISPER_CATALOG}
 
 
 def test_custom_whisper_model_preserves_existing_authentication(
@@ -218,11 +169,3 @@ def test_whisper_cuda_marker_does_not_receive_nemotron_wording() -> None:
 
     assert "selected model could not initialize the packaged CUDA runtime" in message
     assert "Nemotron" not in message
-
-
-def test_nemotron_cuda_preflight_error_keeps_engine_specific_wording() -> None:
-    from transcription.errors import NemotronCudaPreflightError
-
-    message = safe_engine_preparation_message(NemotronCudaPreflightError("cudnn failure"))
-
-    assert "Nemotron could not initialize" in message

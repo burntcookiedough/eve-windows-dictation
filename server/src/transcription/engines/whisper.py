@@ -21,6 +21,7 @@ import numpy as np
 
 from config import Settings
 from transcription.base import EngineInfo
+from transcription.catalog import FASTER_WHISPER_CATALOG
 from transcription.model_download import (
     begin_model_download_progress,
     check_download_disk_space,
@@ -38,14 +39,8 @@ logger = logging.getLogger(__name__)
 _NETWORK_ERROR_MARKERS = ("TLS", "SSL", "certificate", "ConnectionError", "urlopen")
 _CUDA_DLL_ERROR_MARKERS = ("cublas", "cudart", "cufft", "cudnn", "cuda")
 _MODEL_REPO_PREFIX = "Systran/faster-whisper-"
-# This is the authoritative catalog for every built-in Whisper choice exposed
-# through Settings. The values are Eve's known-public upstream repositories.
 _PUBLIC_BUILTIN_MODELS = {
-    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
-    "large-v3": "Systran/faster-whisper-large-v3",
-    "medium": "Systran/faster-whisper-medium",
-    "small": "Systran/faster-whisper-small",
-    "tiny": "Systran/faster-whisper-tiny",
+    str(item.model): item.repo_id for item in FASTER_WHISPER_CATALOG
 }
 _WHISPER_MODEL_ALLOW_PATTERNS = (
     "config.json",
@@ -189,15 +184,12 @@ def _build_options(settings: Settings) -> WhisperTranscribeOptions:
     )
 
 
-# Approximate on-disk model sizes in GB
+# Approximate on-disk sizes for advanced built-in names that are intentionally
+# outside the curated presentation catalog.
 _MODEL_SIZES: dict[str, float] = {
-    "large-v3-turbo": 1.5,
-    "large-v3": 2.9,
+    **{str(item.model): item.size_gb for item in FASTER_WHISPER_CATALOG},
     "large-v2": 2.9,
-    "medium": 1.4,
-    "small": 0.5,
     "base": 0.1,
-    "tiny": 0.07,
 }
 
 

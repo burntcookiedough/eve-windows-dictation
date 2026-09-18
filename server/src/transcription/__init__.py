@@ -1,17 +1,24 @@
-"""Transcription engine and processing utilities."""
+"""Transcription runtime and processing utilities."""
 
-from transcription.base import EngineInfo, TranscriptionEngine
-from transcription.factory import get_engine_manager, init_engine_manager, shutdown_engine_manager
+from transcription.contracts import ModelInfo
+from transcription.factory import (
+    create_model_runtime,
+    get_model_runtime,
+    init_model_runtime,
+    shutdown_model_runtime,
+)
+from transcription.model_runtime import ModelRuntime
 from transcription.processor import TranscriptionProcessor, TranscriptionResult
 from transcription.types import TranscribeResult
 
 __all__ = [
-    "EngineInfo",
+    "ModelInfo",
+    "ModelRuntime",
     "TranscribeResult",
-    "TranscriptionEngine",
     "TranscriptionProcessor",
     "TranscriptionResult",
-    "get_engine_manager",
-    "init_engine_manager",
-    "shutdown_engine_manager",
+    "create_model_runtime",
+    "get_model_runtime",
+    "init_model_runtime",
+    "shutdown_model_runtime",
 ]

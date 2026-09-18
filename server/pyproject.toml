@@ -1,6 +1,6 @@
 [project]
 name = "murmur"
-version = "0.8.2-alpha.3"
+version = "0.8.2-alpha.4"
 description = "WebSocket-based live voice transcription server"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,13 +15,6 @@ dependencies = [
 
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.1.0"]
-nemotron = [
-    "nemo_toolkit[asr]>=2.2.0",
-    "torch>=2.0",
-    "torchaudio>=2.0",
-    "python-dateutil>=2.9.0.post0",
-]
-all = ["murmur[whisper,nemotron]"]
 release = [
     "murmur[whisper]",
     "torch>=2.0",
@@ -82,8 +75,6 @@ explicit = true
 [tool.uv.sources]
 murmur-testui = { path = "tests/ui", editable = true }
 torch = { index = "pytorch-cu124" }
-torchaudio = { index = "pytorch-cu124" }
-torchvision = { index = "pytorch-cu124" }
 
 [project.scripts]
 murmur = "main:main"

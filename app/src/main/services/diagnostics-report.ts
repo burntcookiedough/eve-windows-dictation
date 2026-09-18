@@ -10,9 +10,8 @@ export interface DiagnosticsReportInput {
 const SERVER_STATUSES = new Set(['idle', 'starting', 'running', 'stopping', 'stopped', 'error']);
 const ENGINE_STATUSES = new Set(['loading', 'ready', 'error']);
 const MODEL_PHASES = new Set(['checking', 'downloading', 'loading', 'ready', 'error']);
-const ENGINE_IDS = new Set(['nemotron', 'whisper']);
+const ENGINE_IDS = new Set(['whisper']);
 const MODEL_IDS = new Set([
-  'nvidia/nemotron-speech-streaming-en-0.6b',
   'large-v3-turbo',
   'large-v3',
   'medium',

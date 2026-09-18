@@ -326,6 +326,24 @@ export interface ServerSetting<T> {
   readonly?: boolean;
 }
 
+/**
+ * Presentation metadata supplied by the server-owned model catalog.
+ *
+ * The renderer treats this as optional metadata, not an allowlist: raw model
+ * and local/custom repository settings remain usable when an older server does
+ * not return a catalog entry.
+ */
+export interface ModelCatalogItem {
+  model: string;
+  label: string;
+  summary: string;
+  repo_id: string;
+  size_gb: number;
+  language_label: string;
+  languages: string[];
+  supports_hotwords: boolean;
+}
+
 export interface EngineInfo {
   id: string;
   name: string;
@@ -353,6 +371,7 @@ export interface EngineStatus {
   message?: string;
   pending?: {
     engine: string;
+    model?: string;
     status: 'loading' | 'ready' | 'error';
     message?: string;
   };
@@ -365,6 +384,7 @@ export interface EngineStatus {
 export interface ServerSettingsResponse {
   settings: Record<string, ServerSetting<unknown>>;
   engine_status: EngineStatus;
+  model_catalog?: ModelCatalogItem[];
   available_engines?: string[];
   reload_required?: boolean;
   reload_started?: boolean;

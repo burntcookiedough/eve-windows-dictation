@@ -7,6 +7,21 @@ on:
       - trunk
 
 jobs:
+  merge-target:
+    name: Trunk Integration Target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require trunk integration target
+        run: python scripts/merge_target_policy.py
+
   version-consistency:
     name: Version Consistency
     runs-on: ubuntu-latest

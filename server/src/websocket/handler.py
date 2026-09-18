@@ -5,8 +5,6 @@ import json
 import logging
 import time
 
-from dataclasses import asdict
-
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -18,7 +16,11 @@ from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
 from transcription.errors import VramExhaustedError
-from transcription.factory import get_engine_manager
+from transcription.factory import (
+    get_model_runtime,
+    model_info_to_engine_payload,
+    runtime_accepts_sessions,
+)
 from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
 
@@ -50,17 +52,21 @@ async def websocket_handler(websocket: WebSocket) -> None:
         logger.info("[%s] WebSocket connected", context.session_id)
 
         try:
-            engine_status = await asyncio.to_thread(get_engine_manager().get_status)
+            runtime = get_model_runtime()
+            runtime_status = await asyncio.to_thread(runtime.status)
         except Exception as e:
-            logger.exception("[%s] Engine manager unavailable: %s", context.session_id, e)
-            await sender.send_error(ErrorCode.INTERNAL, "Engine manager unavailable")
+            logger.exception("[%s] Model runtime unavailable: %s", context.session_id, e)
+            await sender.send_error(ErrorCode.INTERNAL, "Model runtime unavailable")
             await websocket.close()
             return
 
-        if engine_status.status != "ready":
+        # Replacement preparation keeps the current generation available to
+        # new sessions.  Initial preparation (no current model), failure, and
+        # shutdown remain unavailable.
+        if not runtime_accepts_sessions(runtime_status):
             await sender.send_error(
                 ErrorCode.INTERNAL,
-                "Transcription engine is still loading. Try again shortly.",
+                "Transcription model is still loading. Try again shortly.",
             )
             await websocket.close()
             return
@@ -188,11 +194,18 @@ async def _wait_for_start(
     context.mark_started()
     context.state_machine.transition_to(SessionState.STARTED)
 
-    # Send ready with engine info
+    # Send ready with the bounded legacy ``engine`` payload.  Internally the
+    # runtime is model-oriented; the wire field remains for app/client skew.
     try:
-        engine_mgr = get_engine_manager()
-        engine_info = await asyncio.to_thread(lambda: engine_mgr.engine_info)
-        engine_info_dict = asdict(engine_info)
+        runtime = get_model_runtime()
+        runtime_status = await asyncio.to_thread(runtime.status)
+        if hasattr(runtime_status, "model"):
+            model_info = runtime_status.model
+        else:
+            model_info = getattr(runtime_status, "current", None)
+        engine_info_dict = (
+            model_info_to_engine_payload(model_info) if model_info is not None else None
+        )
     except Exception:
         engine_info_dict = None
     await sender.send_ready(engine_info=engine_info_dict)
