@@ -31,6 +31,7 @@ from transcription.contracts import (
 
 logger = logging.getLogger(__name__)
 _SnapshotValue = TypeVar("_SnapshotValue")
+_DEFAULT_DRAIN_TIMEOUT_S = 30.0
 
 
 class _Generation:
@@ -127,6 +128,7 @@ class ModelRuntime:
         self._preparation_reserved = False
         self._shutdown_task: asyncio.Task[Any] | None = None
         self._shutting_down = False
+        self._drain_timeout_s = _DEFAULT_DRAIN_TIMEOUT_S
 
     async def start(self) -> None:
         """Prepare the initial model once; retry is allowed after failure."""
@@ -547,7 +549,19 @@ class ModelRuntime:
             with self._state_lock:
                 generations = tuple(self._draining.values())
             for generation in generations:
-                await asyncio.to_thread(generation.drained.wait)
+                drained = await asyncio.to_thread(
+                    generation.drained.wait,
+                    self._drain_timeout_s,
+                )
+                if not drained:
+                    with self._state_lock:
+                        leases = generation.leases
+                    logger.warning(
+                        "Generation %s still has %s lease(s) after %.1fs; forcing shutdown",
+                        generation.generation,
+                        leases,
+                        self._drain_timeout_s,
+                    )
                 await self._shutdown_generation(generation)
         finally:
             with self._state_lock:

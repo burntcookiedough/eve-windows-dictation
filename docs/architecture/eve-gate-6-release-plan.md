@@ -7,6 +7,10 @@
 - Proposed release: Eve `v0.7.0`
 - Last updated: 2026-07-28 (Asia/Calcutta)
 
+This is the frozen historical v0.7.0 gate record. References to runtimes supported by
+that release describe its accepted state; the current Faster-Whisper-only alpha is
+governed by `eve-v0.8-release-preparation.md` and does not rewrite this evidence.
+
 ## Purpose and outcome
 
 Gate 6 prepares and, through separately approved stages, publishes the first Eve-branded
@@ -99,8 +103,8 @@ approved architecture decision explicitly changes them:
 - shared Hugging Face/model-cache behavior and locations;
 - IPC, WebSocket protocol, `window.murmurMain`, `window.murmur`, `MURMUR_*`, Python
   package/CLI names, and other internal compatibility surfaces;
-- packaged Python, Faster-Whisper, PyTorch, CUDA, CTranslate2, ONNX Runtime, model
-  selection, and runtime behavior;
+- packaged Python, Faster-Whisper, NeMo, PyTorch, CUDA, CTranslate2, ONNX Runtime, model
+  selection, and engine behavior;
 - repository/publish target `burntcookiedough/eve-windows-dictation`;
 - updater and release behavior unless a later stage explicitly authorizes a focused
   publication-procedure change; and
@@ -209,8 +213,8 @@ The `v0.7.0` notes may describe:
   accessibility system;
 - the noninteractive waveform/transcript overlay behavior;
 - the original cactus application and Windows resource family;
-- existing local Faster-Whisper, CUDA, diagnostics, singleton, and installer continuity
-  where supported by merged evidence; and
+- existing local Faster-Whisper/Nemotron, CUDA, diagnostics, singleton, and installer
+  continuity where supported by merged evidence; and
 - the unsigned-release warning and known large download/model-download behavior.
 
 They must state that Eve does not automatically import Murmur personal data. They must

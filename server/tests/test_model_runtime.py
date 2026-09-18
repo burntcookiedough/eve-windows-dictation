@@ -351,6 +351,27 @@ async def test_shutdown_joins_lease_triggered_native_shutdown() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_bounds_a_generation_with_a_stuck_lease(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    runtime._drain_timeout_s = 0.01
+    await runtime.start()
+    lease = runtime.open_session(SessionId("stuck"))
+    shutdown_task = asyncio.create_task(runtime.shutdown())
+
+    try:
+        await asyncio.wait_for(asyncio.shield(shutdown_task), timeout=0.5)
+    finally:
+        lease.close()
+        await shutdown_task
+
+    assert adapter.prepared[0].shutdown_calls == 1
+    assert "forcing shutdown" in caplog.text.casefold()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_replacement_joins_native_prepare_and_discards_candidate() -> None:
     adapter = _Adapter()
     runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
