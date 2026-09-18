@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-from config import API_KEYS
+import app as server_app
 from transcription.types import TranscribeResult
 import transcription.processor as processor_module
 
@@ -89,14 +89,17 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     processor.close()
 
 
-def test_invalid_settings_returns_400() -> None:
+@pytest.mark.asyncio
+async def test_invalid_settings_returns_400() -> None:
     """PATCH /settings with no API-managed keys is rejected at the seam."""
 
-    patch = {key: value for key, value in {"invalid_key": "value"}.items() if key in API_KEYS}
-    assert not patch
+    handler = next(
+        route.endpoint
+        for route in server_app.create_app().routes
+        if getattr(route, "path", None) == "/settings" and "PATCH" in route.methods
+    )
 
     with pytest.raises(HTTPException) as exc_info:
-        if not patch:
-            raise HTTPException(status_code=400, detail="No valid settings provided")
+        await handler({"invalid_key": "value"})
     assert exc_info.value.status_code == 400
     assert "No valid settings" in exc_info.value.detail
