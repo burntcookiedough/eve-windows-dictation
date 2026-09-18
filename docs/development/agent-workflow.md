@@ -4,6 +4,16 @@ Use a focused branch and a concise local task contract. Inspect the relevant cod
 docs, and release controls before editing. Keep local task contracts, logs, screenshots, and
 handoffs out of public diffs and free of private data.
 
+## Final integration
+
+Stacked feature branches may use incremental pull requests for review, but the
+final integration pull request must target `trunk`. A green check on a pull
+request targeting another feature branch does not prove that the complete
+reviewed stack will land on `trunk`; do not treat that pull request as the
+integration merge. Confirm the `Trunk Integration Target` check passes on the
+final pull request before merging, and keep that check required in `trunk`
+branch protection.
+
 Before handoff, inspect the complete diff, run `git diff --check`, and run the
 smallest relevant Windows PowerShell validation. Release-critical work also requires
 the applicable Gate plan/runbook and independent artifact/lifecycle verification.
