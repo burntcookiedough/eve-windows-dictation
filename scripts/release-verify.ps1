@@ -95,17 +95,38 @@ function Invoke-Native {
     }
 }
 
-function Wait-For-Health {
-    param([string]$Url, [int]$TimeoutSec)
+function Wait-For-ReadyHealth {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec,
+        [string]$ExpectedModel
+    )
+
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         try {
-            return Invoke-RestMethod -Uri $Url -TimeoutSec 2
+            $health = Invoke-RestMethod -Uri $Url -TimeoutSec 2
         } catch {
             Start-Sleep -Milliseconds 500
+            continue
         }
+
+        if ($health.engine.status -eq "error") {
+            throw "Packaged model preparation failed: $($health.engine.message)"
+        }
+        if ($health.model_download.status -eq "error") {
+            throw "Packaged model download failed: $($health.model_download.detail)"
+        }
+        if (
+            $health.engine.status -eq "ready" -and
+            $health.engine.info.model -eq $ExpectedModel -and
+            $health.model_download.status -eq "ready"
+        ) {
+            return $health
+        }
+        Start-Sleep -Milliseconds 500
     }
-    throw "Server did not become healthy within ${TimeoutSec}s at $Url"
+    throw "Packaged model did not become ready within ${TimeoutSec}s at $Url"
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -223,11 +244,14 @@ $process = Start-Process -FilePath $pythonExe `
     -RedirectStandardError $errLog
 
 try {
-    $health = Wait-For-Health -Url "http://127.0.0.1:$HealthPort/health" -TimeoutSec $HealthTimeoutSec
+    $health = Wait-For-ReadyHealth `
+        -Url "http://127.0.0.1:$HealthPort/health" `
+        -TimeoutSec $HealthTimeoutSec `
+        -ExpectedModel $env:MURMUR_WHISPER_MODEL
     if ($health.version -ne $ExpectedVersion) {
         throw "Health version mismatch: expected $ExpectedVersion, got $($health.version)"
     }
-    Write-Step "Health OK: version=$($health.version) status=$($health.status)"
+    Write-Step "Health OK: version=$($health.version) engine=$($health.engine.status) model=$($health.engine.info.model)"
 } finally {
     if ($process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue

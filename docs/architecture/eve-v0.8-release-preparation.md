@@ -29,8 +29,9 @@ thin-client/engine packs, a single-file installer, or cache migration/deletion.
    Incremental stack PRs are review aids and are never merged as release integration.
 2. Freeze the exact resulting `trunk` commit and build one fresh `nsis-web` package from
    it in a clean alpha.4 output directory.
-3. Run the full installed lifecycle and packaged Faster-Whisper verification in
-   `scripts/release-verify.ps1`; stop on any failure.
+3. Run `scripts/installer-smoke.ps1` for the install/uninstall lifecycle and
+   `scripts/release-verify.ps1` for the installed package and Faster-Whisper runtime;
+   stop on any failure.
 4. Generate the exact seven-asset manifest/checksum set, independently reverify it, and
    create the annotated tag and matching draft without moving or replacing either later.
 5. Dispatch the protected verification/promotion workflow from `trunk` with prerelease,

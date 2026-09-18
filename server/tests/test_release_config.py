@@ -223,6 +223,19 @@ def test_release_verification_requires_one_supported_model_catalog_entry() -> No
     assert "$env:MURMUR_ENGINE_PREFERENCE_MODE" not in contents
 
 
+def test_release_verification_waits_for_the_packaged_model_runtime() -> None:
+    contents = (ROOT / "scripts" / "release-verify.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Wait-For-ReadyHealth" in contents
+    assert '$health.engine.status -eq "ready"' in contents
+    assert '$health.engine.info.model -eq $ExpectedModel' in contents
+    assert '$health.model_download.status -eq "ready"' in contents
+    assert 'throw "Packaged model preparation failed:' in contents
+    assert 'throw "Packaged model download failed:' in contents
+
+
 def test_release_workflow_verifies_existing_draft_without_rebuilding() -> None:
     workflow_path = ROOT / ".github" / "workflows" / "release.yml"
     contents = workflow_path.read_text(encoding="utf-8")

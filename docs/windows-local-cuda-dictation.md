@@ -3,9 +3,7 @@
 This document is the historical, machine-specific recovery record for the published
 v0.6.3 Murmur release. Its Murmur paths are intentionally unchanged. Current source
 builds are visibly named Eve and use `%APPDATA%\Eve`; use [the build guide](development/building.md) for current
-build instructions. The current source supports Faster-Whisper through one model
-adapter; the compatibility `engine` field below is retained only for older settings
-and ready-frame readers.
+build instructions.
 
 It captures a reproducible Windows 11 setup for running the published Murmur release
 as a fully local, GPU-accelerated push-to-talk dictation assistant.
@@ -75,7 +73,8 @@ Set `resources/server/settings.json` to:
 
 ```json
 {
-   "engine": "whisper",
+  "engine": "whisper",
+  "engine_preference_mode": "manual",
   "whisper_model": "large-v3-turbo",
   "whisper_device": "cuda",
   "whisper_compute_type": "float16",
@@ -90,7 +89,8 @@ Set `resources/server/settings.json` to:
   "whisper_vad_threshold": 0.5,
   "transcription_max_workers": 1,
   "allow_overlapping_inference": false,
-   "partial_emission_interval": 0.1
+  "partial_emission_interval": 0.1,
+  "unload_before_swap": true
 }
 ```
 
@@ -101,6 +101,7 @@ $serverSettings = "$env:LOCALAPPDATA\Programs\murmur\resources\server\settings.j
 @'
 {
   "engine": "whisper",
+  "engine_preference_mode": "manual",
   "whisper_model": "large-v3-turbo",
   "whisper_device": "cuda",
   "whisper_compute_type": "float16",
@@ -115,7 +116,8 @@ $serverSettings = "$env:LOCALAPPDATA\Programs\murmur\resources\server\settings.j
   "whisper_vad_threshold": 0.5,
   "transcription_max_workers": 1,
   "allow_overlapping_inference": false,
-  "partial_emission_interval": 0.1
+  "partial_emission_interval": 0.1,
+  "unload_before_swap": true
 }
 '@ | Set-Content -LiteralPath $serverSettings -Encoding UTF8
 ```
@@ -206,12 +208,11 @@ py -3.11 -m venv "$serverDir\.venv"
   fastapi uvicorn websockets numpy soundfile huggingface_hub `
   faster-whisper==1.2.1 ctranslate2==4.8.0
 & "$serverDir\.venv\Scripts\python.exe" -m pip install `
-  torch==2.6.0+cu124 `
+  torch==2.6.0+cu124 torchaudio==2.6.0+cu124 `
   --index-url https://download.pytorch.org/whl/cu124
 ```
 
-If CTranslate2 cannot find CUDA DLLs, ensure the Faster-Whisper adapter's runtime
-loads the bundled PyTorch DLL directory before CTranslate2 initializes.
+If CTranslate2 cannot find CUDA DLLs, import `torch` before `faster_whisper` in the Whisper engine module so the CUDA runtime DLL directories are registered before CTranslate2 initializes.
 
 ## Model download
 
@@ -417,7 +418,7 @@ The fixed source is in:
 - `app/src/main/services/hotkey.ts`
 - `app/src/main/services/clipboard.ts`
 - `app/src/main/services/pipeline.ts`
-  - `server/src/transcription/engines/whisper.py` (the retained Faster-Whisper implementation)
+- `server/src/transcription/engines/whisper.py`
 - `server/src/transcription/model_download.py`
 - `server/src/transcription/processor.py`
 

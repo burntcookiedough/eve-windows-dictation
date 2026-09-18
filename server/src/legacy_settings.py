@@ -62,16 +62,25 @@ def _normalise_key(key: object) -> object:
         return key
     lowered = key.casefold()
     aliases = {
-        _ENGINE_KEY,
-        _LEGACY_ENGINE_PREFERENCE_KEY,
-        _LEGACY_UNLOAD_KEY,
-        _LEGACY_MODEL_KEY,
-        _LEGACY_DEVICE_KEY,
-        "whisper_model",
-        "whisper_device",
-        "whisper_compute_type",
+        name: name
+        for name in (
+            _ENGINE_KEY,
+            _LEGACY_ENGINE_PREFERENCE_KEY,
+            _LEGACY_UNLOAD_KEY,
+            _LEGACY_MODEL_KEY,
+            _LEGACY_DEVICE_KEY,
+            "whisper_model",
+            "whisper_device",
+            "whisper_compute_type",
+        )
     }
-    return lowered if lowered in aliases else key
+    aliases.update(
+        {
+            environment_name.casefold(): field_name
+            for environment_name, field_name in LEGACY_ENVIRONMENT_FIELDS.items()
+        }
+    )
+    return aliases.get(lowered, key)
 
 
 def _normalise_source_values(raw: Mapping[str, Any]) -> dict[str, Any]:

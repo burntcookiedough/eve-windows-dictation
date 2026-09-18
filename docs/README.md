@@ -14,7 +14,7 @@
 - [v0.8 release preparation](architecture/eve-v0.8-release-preparation.md)
 - [Gate 6 release plan](architecture/eve-gate-6-release-plan.md)
 - [Gate 6C publication runbook](architecture/eve-gate-6c-publication-runbook.md)
-- [v0.8 release notes](releases/eve-v0.8.0-release-notes.md)
+- [v0.8.2-alpha.4 release notes](releases/eve-v0.8.2-alpha.4-release-notes.md)
 
 ## Development reference
 

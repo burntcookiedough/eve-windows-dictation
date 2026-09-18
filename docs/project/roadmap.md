@@ -32,12 +32,13 @@ Murmur History, settings, hotwords, browser storage, credentials, or external-se
 configuration. Gate 6 completed the public v0.7.0 lifecycle without changing those
 privacy boundaries.
 
-## In preparation: model-management clarity
+## Current alpha: Faster-Whisper-only model runtime
 
-Eve v0.8.0 release preparation covers curated model choices and explicit first-use
-preparation while keeping the bundled runtime separate from downloaded model weights.
-It is not yet published. It does not add engine packs, an updater, cache management,
-signing, or thin-client distribution.
+Eve v0.8.2-alpha.4 narrows the supported runtime to Faster-Whisper, removes the retired
+Nemotron implementation and dependencies, and retains curated model choices with explicit
+first-use preparation. The bundled runtime remains separate from downloaded model weights.
+It does not add engine packs, an updater, cache management, signing, or thin-client
+distribution.
 
 ## Later: component-based distribution
 

@@ -56,7 +56,7 @@ release actions each require their applicable authorization and release plan.
 
 ```powershell
 Set-Location ..
-python scripts/version.py check --tag v0.8.0
+python scripts/version.py check --tag v0.8.2-alpha.4
 git diff --check
 ```
 

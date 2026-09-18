@@ -4,18 +4,13 @@ import pytest
 
 from config import Settings
 import transcription.engines.whisper as whisper
+from transcription.catalog import FASTER_WHISPER_CATALOG
 from transcription.errors import safe_engine_preparation_message
 
 
 @pytest.mark.parametrize(
     ("model", "repo_id"),
-    [
-        ("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
-        ("large-v3", "Systran/faster-whisper-large-v3"),
-        ("medium", "Systran/faster-whisper-medium"),
-        ("small", "Systran/faster-whisper-small"),
-        ("tiny", "Systran/faster-whisper-tiny"),
-    ],
+    [(str(item.model), item.repo_id) for item in FASTER_WHISPER_CATALOG],
 )
 def test_public_whisper_builtin_models_resolve_to_registered_upstreams(
     model: str, repo_id: str
@@ -25,13 +20,7 @@ def test_public_whisper_builtin_models_resolve_to_registered_upstreams(
 
 @pytest.mark.parametrize(
     "repo_id",
-    [
-        "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
-        "Systran/faster-whisper-large-v3",
-        "Systran/faster-whisper-medium",
-        "Systran/faster-whisper-small",
-        "Systran/faster-whisper-tiny",
-    ],
+    [item.repo_id for item in FASTER_WHISPER_CATALOG],
 )
 def test_curated_whisper_presets_force_anonymous_download(
     repo_id: str, monkeypatch: pytest.MonkeyPatch
@@ -61,6 +50,13 @@ def test_curated_whisper_presets_force_anonymous_download(
             },
         )
     ]
+
+
+def test_curated_whisper_sizes_derive_from_the_server_catalog() -> None:
+    assert {
+        str(item.model): whisper._MODEL_SIZES[str(item.model)]
+        for item in FASTER_WHISPER_CATALOG
+    } == {str(item.model): item.size_gb for item in FASTER_WHISPER_CATALOG}
 
 
 def test_custom_whisper_model_preserves_existing_authentication(

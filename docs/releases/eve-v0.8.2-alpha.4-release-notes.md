@@ -25,5 +25,6 @@ unchanged.
 
 This Windows alpha is intentionally unsigned, so Windows may show a security warning.
 The web installer payload is large, and selected speech-model weights may require a
-separate first-use download. Only artifacts attached to the matching GitHub prerelease
-have passed the exact-head package, lifecycle, manifest, and promotion gates.
+separate first-use download. Publication is conditional on the exact-head package,
+installed lifecycle, manifest, and protected promotion gates passing. After publication,
+the matching GitHub prerelease is the only supported source for those verified artifacts.

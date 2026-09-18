@@ -301,6 +301,39 @@ def test_legacy_environment_override_is_migrated_before_settings_validation(
     assert json.loads(settings_file.read_text(encoding="utf-8"))["whisper_model"] == "small"
 
 
+def test_legacy_dotenv_selection_is_migrated_before_settings_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(tmp_path / "missing-settings.json"))
+    for name in (
+        "MURMUR_ENGINE",
+        "MURMUR_NEMOTRON_MODEL",
+        "MURMUR_NEMOTRON_DEVICE",
+        "MURMUR_WHISPER_LANGUAGE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            (
+                "MURMUR_ENGINE=nemotron",
+                f"MURMUR_NEMOTRON_MODEL={LEGACY_NEMOTRON_MODEL}",
+                "MURMUR_NEMOTRON_DEVICE=cpu",
+                "MURMUR_WHISPER_LANGUAGE=fr",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    settings = config.get_settings()
+
+    assert settings.engine == "whisper"
+    assert settings.whisper_model == "large-v3-turbo"
+    assert settings.whisper_language == "fr"
+    assert not hasattr(settings, "nemotron_model")
+    assert not hasattr(settings, "nemotron_device")
+
+
 def test_persisted_whisper_settings_are_canonicalized_without_semantic_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

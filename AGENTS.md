@@ -30,7 +30,8 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
   applicable release plan and explicit authorization. Do not tag, upload, or publish
   without it.
 - Keep versions and locks unchanged unless the task explicitly authorizes them;
-  verify with `python scripts/version.py check --tag v0.8.0` when relevant.
+  verify with `python scripts/version.py check` and pass the exact candidate tag when
+  preparing a release.
 
 ## Workflow
 
