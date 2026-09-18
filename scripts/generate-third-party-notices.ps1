@@ -75,7 +75,7 @@ if($PackagedServerRoot){
   $packed=(Resolve-Path -LiteralPath $PackagedServerRoot).Path
   $dlls=@(Get-ChildItem -LiteralPath $packed -Recurse -File -Filter '*.dll' | ForEach-Object Name)
   if(!$dlls.Count){throw 'Packaged native DLL inventory is empty.'}
-  $nativePatterns=@{ctranslate2='(?i)ctranslate2';onnxruntime='(?i)onnxruntime';cuda='(?i)(cuda|cudart|cublas|cudnn)'}
+  $nativePatterns=@{ctranslate2='(?i)ctranslate2';onnx='(?i)onnx';onnxruntime='(?i)onnxruntime';cuda='(?i)(cuda|cudart|cublas|cudnn)'}
   foreach($nativeName in $overrides.native.psobject.Properties.Name){if(!$nativePatterns.ContainsKey($nativeName)){throw "Native notice has no DLL inventory rule: $nativeName"};if(-not ($dlls -match $nativePatterns[$nativeName])){throw "Configured native notice absent from packaged DLL inventory: $nativeName"}}
 }
 foreach($native in $overrides.native.psobject.Properties){ Add-Component $native.Name '' 'native' 'packaged runtime (verified post-package)' ([string]$native.Value.license) ([string]$native.Value.source) }

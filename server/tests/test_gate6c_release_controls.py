@@ -201,6 +201,7 @@ def test_release_asset_contract_and_notice_generator_are_tracked() -> None:
     assert "Get-StableSource" in notices
     assert "Packaged native DLL inventory is empty." in notices
     assert "Configured native notice absent from packaged DLL inventory" in notices
+    assert "onnx='(?i)onnx'" in notices
 
 
 def test_release_workflow_maps_inputs_and_preserves_release_boundaries() -> None:
