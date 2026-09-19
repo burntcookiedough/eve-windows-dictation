@@ -49,6 +49,11 @@ interface HistoryQuery {
   params: Record<string, unknown>;
 }
 
+export interface HistoryExportSnapshot {
+  iterateExportEntries(ids?: readonly string[]): IterableIterator<TranscriptionEntry>;
+  close(): void;
+}
+
 function buildHistoryQuery(filters?: HistoryFilters): HistoryQuery {
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
@@ -230,7 +235,7 @@ export class HistoryService {
         originalText
       FROM transcriptions
       ${whereClause}
-      ORDER BY timestamp DESC
+      ORDER BY timestamp DESC, id DESC
       LIMIT @limit OFFSET @offset
     `;
 
@@ -263,7 +268,7 @@ export class HistoryService {
       SELECT id
       FROM transcriptions
       ${whereClause}
-      ORDER BY timestamp DESC
+      ORDER BY timestamp DESC, id DESC
     `).all(params) as Array<{ id: string }>;
     return rows.map((row) => row.id);
   }
@@ -339,6 +344,11 @@ export class HistoryService {
 
     const row = stmt.get({ id });
     return row ? mapTranscriptionEntry(row) : null;
+  }
+
+  createExportSnapshot(): HistoryExportSnapshot {
+    if (!this.db) throw new Error('Database not initialized');
+    return new SqliteHistoryExportSnapshot(this.dbPath);
   }
 
   private getEntriesByIds(ids: string[]): TranscriptionEntry[] {
@@ -874,6 +884,61 @@ export class HistoryService {
         transcriptionTime DESC
       LIMIT @limit
     `).all({ rangeStart, limit }).map(mapInsightSourceEntry).map(toEntryStat);
+  }
+}
+
+class SqliteHistoryExportSnapshot implements HistoryExportSnapshot {
+  private readonly db: Database.Database;
+  private closed = false;
+
+  constructor(dbPath: string) {
+    this.db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      this.db.exec('BEGIN');
+      this.db.prepare('SELECT 1 FROM transcriptions LIMIT 1').get();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
+  }
+
+  *iterateExportEntries(ids?: readonly string[]): IterableIterator<TranscriptionEntry> {
+    const requestedIds = ids === undefined ? undefined : new Set(ids);
+    const rows = this.db.prepare(`
+      SELECT
+        id,
+        timestamp,
+        text,
+        confidence,
+        audioDuration,
+        transcriptionTime,
+        wordCount,
+        sessionMode,
+        engine,
+        model,
+        device,
+        computeType,
+        cudaActive,
+        editedAt,
+        originalText
+      FROM transcriptions
+      ORDER BY timestamp DESC, id DESC
+    `).iterate();
+
+    for (const row of rows) {
+      const entry = mapTranscriptionEntry(row);
+      if (!requestedIds || requestedIds.has(entry.id)) yield entry;
+    }
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    try {
+      this.db.exec('ROLLBACK');
+    } finally {
+      this.db.close();
+    }
   }
 }
 

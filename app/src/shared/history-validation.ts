@@ -1,4 +1,4 @@
-import type { HistoryFilters } from './types.js';
+import type { HistoryExportRequest, HistoryFilters } from './types.js';
 
 const HISTORY_FILTER_KEYS = new Set([
   'text',
@@ -18,6 +18,8 @@ const NUMERIC_HISTORY_FILTER_KEYS = [
   'minConfidence',
 ] as const;
 
+const MAX_HISTORY_EXPORT_SELECTED_IDS = 100_000;
+
 export function isHistoryFilters(value: unknown): value is HistoryFilters | undefined {
   if (value === undefined) return true;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -31,4 +33,24 @@ export function isHistoryFilters(value: unknown): value is HistoryFilters | unde
     const candidate = filters[key];
     return candidate === undefined || (typeof candidate === 'number' && Number.isFinite(candidate));
   });
+}
+
+export function isHistoryExportRequest(value: unknown): value is HistoryExportRequest {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const request = value as Record<string, unknown>;
+  if (request.format !== 'json' && request.format !== 'csv') return false;
+
+  if (request.scope === 'all') {
+    return Object.keys(request).every((key) => key === 'format' || key === 'scope');
+  }
+
+  if (request.scope !== 'selected') return false;
+  if (Object.keys(request).some((key) => !['format', 'scope', 'ids'].includes(key))) return false;
+  return Array.isArray(request.ids)
+    && request.ids.length > 0
+    && request.ids.length <= MAX_HISTORY_EXPORT_SELECTED_IDS
+    && request.ids.every(
+      (id) => typeof id === 'string' && id.trim() === id && id.length > 0 && id.length <= 512,
+    );
 }

@@ -3,6 +3,8 @@ import { IPC_CHANNELS } from '../../shared/constants.js';
 import type {
   HistoryFilters,
   HistoryDeleteResult,
+  HistoryExportRequest,
+  HistoryExportResult,
   HistoryResponse,
   HistoryEntryWithGroup,
   InsightsRange,
@@ -76,6 +78,10 @@ const murmurMainAPI = {
 
   getHistoryEntryIds: (filters?: HistoryFilters): Promise<string[]> => {
     return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_ENTRY_IDS, filters);
+  },
+
+  exportHistory: (request: HistoryExportRequest): Promise<HistoryExportResult> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.HISTORY_EXPORT, request);
   },
 
   deleteHistoryEntry: (id: string): Promise<void> => {

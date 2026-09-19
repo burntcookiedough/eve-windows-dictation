@@ -195,6 +195,19 @@ export interface HistoryDeleteResult {
   missingIds: string[];
 }
 
+export type HistoryExportFormat = 'json' | 'csv';
+
+export type HistoryExportRequest =
+  | { format: HistoryExportFormat; scope: 'all' }
+  | { format: HistoryExportFormat; scope: 'selected'; ids: string[] };
+
+export interface HistoryExportResult {
+  status: 'saved' | 'cancelled';
+  requestedCount: number;
+  exportedCount: number;
+  missingCount: number;
+}
+
 export interface InsightSourceEntry {
   id: string;
   timestamp: number;

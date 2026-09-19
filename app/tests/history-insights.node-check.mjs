@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const workDir = mkdtempSync(join(testDir, '.history-check-'));
 const bundlePath = join(workDir, 'history-service.mjs');
+const exportBundlePath = join(workDir, 'history-export.mjs');
 
 await build({
   entryPoints: [fileURLToPath(new URL('../src/main/services/history.ts', import.meta.url))],
@@ -34,7 +35,17 @@ await build({
   ],
 });
 
+await build({
+  entryPoints: [fileURLToPath(new URL('../src/main/services/history-export.ts', import.meta.url))],
+  outfile: exportBundlePath,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node20',
+});
+
 const { HistoryService } = await import(pathToFileURL(bundlePath).href);
+const { exportHistoryToFile } = await import(pathToFileURL(exportBundlePath).href);
 
 function transcription(id, timestamp, text, audioDuration, transcriptionTime) {
   return {
@@ -244,6 +255,65 @@ try {
   });
   assert.equal(chunkService.getInsights('all').summary.totalDictations, 0);
   chunkService.close();
+
+  const exportDbPath = join(workDir, 'export-history.db');
+  const exportService = new HistoryService(exportDbPath);
+  exportService.initialize();
+  exportService.save({
+    ...transcription('export-a', now + 7000, '=formula text', 3, 300),
+    originalText: 'original text',
+    editedAt: now + 8000,
+  });
+  exportService.save(transcription('export-b', now + 7000, 'Same timestamp B', 4, 400));
+  exportService.save(transcription('export-c', now + 6000, 'Older entry', 5, 500));
+
+  const exportDb = new Database(exportDbPath, { readonly: true });
+  const snapshot = () => ({
+    transcriptions: exportDb.prepare('SELECT * FROM transcriptions ORDER BY id').all(),
+    daily: exportDb.prepare('SELECT * FROM insights_daily_rollups ORDER BY day').all(),
+    words: exportDb.prepare('SELECT * FROM insights_word_counts ORDER BY day, word').all(),
+    processed: exportDb.prepare('SELECT * FROM insights_processed_entries ORDER BY id').all(),
+  });
+  const exportSnapshot = exportService.createExportSnapshot();
+  exportService.save(transcription('export-after-snapshot', now + 9000, 'Saved after snapshot', 6, 600));
+  const beforeExport = snapshot();
+
+  try {
+    const allExportPath = join(workDir, 'all-history.csv');
+    assert.deepEqual(
+      await exportHistoryToFile(
+        exportSnapshot,
+        { format: 'csv', scope: 'all' },
+        allExportPath,
+        new Date('2026-09-18T12:00:00.000Z'),
+      ),
+      { status: 'saved', requestedCount: 3, exportedCount: 3, missingCount: 0 },
+    );
+    const allCsv = readFileSync(allExportPath, 'utf8');
+    assert.ok(allCsv.indexOf('"export-b"') < allCsv.indexOf('"export-a"'));
+    assert.ok(allCsv.indexOf('"export-a"') < allCsv.indexOf('"export-c"'));
+    assert.ok(allCsv.includes('"\'=formula text"'));
+
+    const selectedExportPath = join(workDir, 'selected-history.json');
+    assert.deepEqual(
+      await exportHistoryToFile(
+        exportSnapshot,
+        { format: 'json', scope: 'selected', ids: ['export-c', 'missing', 'export-b', 'export-c'] },
+        selectedExportPath,
+        new Date('2026-09-18T12:00:00.000Z'),
+      ),
+      { status: 'saved', requestedCount: 3, exportedCount: 2, missingCount: 1 },
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(selectedExportPath, 'utf8')).entries.map(({ id }) => id),
+      ['export-b', 'export-c'],
+    );
+  } finally {
+    exportSnapshot.close();
+  }
+  assert.deepEqual(snapshot(), beforeExport);
+  exportDb.close();
+  exportService.close();
 
   const migrationDbPath = join(workDir, 'migration-history.db');
   const migrationDb = new Database(migrationDbPath);

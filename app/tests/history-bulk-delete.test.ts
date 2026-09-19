@@ -87,7 +87,7 @@ describe('History selection and bulk deletion contracts', () => {
     expect(historyViewFlat).toContain('result.deletedCount');
     expect(historyViewFlat).toContain('result.missingIds.length');
     expect(historyViewFlat).toContain('await loadEntries(true);');
-    expect(historyViewFlat).toContain('if (bulkDeleting || !hasSelection) return;');
+    expect(historyViewFlat).toContain('if (bulkDeleting || exporting || !hasSelection) return;');
     expect(historyViewFlat).toContain('selectionFeedback = \'History could not be deleted. Nothing was removed. Try again.\';');
     expect(historyViewFlat).toContain('{#if selectionFeedback && !bulkDeleteConfirmOpen}');
     expect(historyViewFlat).toContain('function cancelBulkDelete(): void { exitSelectionMode(); closeBulkDeleteDialog(); }');
