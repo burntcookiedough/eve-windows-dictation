@@ -18,6 +18,8 @@ const NUMERIC_HISTORY_FILTER_KEYS = [
   'minConfidence',
 ] as const;
 
+const MAX_HISTORY_EXPORT_SELECTED_IDS = 100_000;
+
 export function isHistoryFilters(value: unknown): value is HistoryFilters | undefined {
   if (value === undefined) return true;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -47,6 +49,7 @@ export function isHistoryExportRequest(value: unknown): value is HistoryExportRe
   if (Object.keys(request).some((key) => !['format', 'scope', 'ids'].includes(key))) return false;
   return Array.isArray(request.ids)
     && request.ids.length > 0
+    && request.ids.length <= MAX_HISTORY_EXPORT_SELECTED_IDS
     && request.ids.every(
       (id) => typeof id === 'string' && id.trim() === id && id.length > 0 && id.length <= 512,
     );

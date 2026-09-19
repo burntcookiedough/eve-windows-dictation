@@ -52,6 +52,11 @@ describe('History export request validation', () => {
     expect(isHistoryExportRequest({ format: 'json', scope: 'selected', ids: ['   '] })).toBe(false);
     expect(isHistoryExportRequest({ format: 'json', scope: 'selected', ids: [' padded '] })).toBe(false);
     expect(isHistoryExportRequest({ format: 'json', scope: 'selected', ids: ['a'.repeat(513)] })).toBe(false);
+    expect(isHistoryExportRequest({
+      format: 'json',
+      scope: 'selected',
+      ids: Array.from({ length: 100_001 }, (_, index) => `entry-${index}`),
+    })).toBe(false);
     expect(isHistoryExportRequest({ format: 'json', scope: 'all', ids: ['a'] })).toBe(false);
     expect(isHistoryExportRequest({ format: 'json', scope: 'all', extra: true })).toBe(false);
   });
