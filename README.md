@@ -1,6 +1,6 @@
 # Eve for Windows
 
-<p><img src="https://img.shields.io/badge/v0.8.2-alpha.4-orange?style=flat-square" alt="v0.8.2-alpha.4"> <strong>Source status: v0.8.2-alpha.4 Faster-Whisper-only alpha · prerelease</strong></p>
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.5-orange?style=flat-square" alt="v0.8.2-alpha.5"> <strong>Source status: v0.8.2-alpha.4 Faster-Whisper-only alpha · prerelease</strong></p>
 
 ## Local-first dictation that stays in your flow
 
