@@ -3,12 +3,13 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { arch, release } from 'node:os';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
-import { isHistoryFilters } from '../../shared/history-validation.js';
+import { isHistoryExportRequest, isHistoryFilters } from '../../shared/history-validation.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { isInsightsRange } from '../../shared/insights.js';
 import { copyToClipboard } from '../services/clipboard.js';
 import { formatDiagnosticsReport } from '../services/diagnostics-report.js';
 import type { HistoryService } from '../services/history.js';
+import { exportHistoryToFile } from '../services/history-export.js';
 import type { ServerManager } from '../services/server-manager.js';
 import { getSettings, updateSetting } from '../services/settings.js';
 import {
@@ -164,6 +165,39 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       return historyServiceRef.getEntryIds(filters);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_EXPORT, async (_event, request: unknown) => {
+    if (!isHistoryExportRequest(request)) {
+      throw new TypeError('Invalid history export request');
+    }
+    if (!historyServiceRef) {
+      throw new Error('History service is unavailable; try again.');
+    }
+
+    const extension = request.format;
+    const result = await dialog.showSaveDialog({
+      title: 'Export History',
+      defaultPath: `eve-history-${new Date().toISOString().slice(0, 10)}.${extension}`,
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
+    });
+
+    if (result.canceled || !result.filePath) {
+      const requestedCount = request.scope === 'selected' ? new Set(request.ids).size : 0;
+      return {
+        status: 'cancelled',
+        requestedCount,
+        exportedCount: 0,
+        missingCount: 0,
+      };
+    }
+
+    const snapshot = historyServiceRef.createExportSnapshot();
+    try {
+      return await exportHistoryToFile(snapshot, request, result.filePath);
+    } finally {
+      snapshot.close();
+    }
+  });
 
   // Handle history delete
   ipcMain.handle(IPC_CHANNELS.HISTORY_DELETE, (_event, id: string) => {

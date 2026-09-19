@@ -3,10 +3,20 @@
   import { slide } from 'svelte/transition';
   import { quintOut } from 'svelte/easing';
   import { toast } from '$lib/toast.svelte';
-  import type { HistoryEntryWithGroup, HistoryFilters } from '$shared/types';
+  import type {
+    HistoryEntryWithGroup,
+    HistoryExportFormat,
+    HistoryExportRequest,
+    HistoryFilters,
+  } from '$shared/types';
+  import EveDropdown from '../components/EveDropdown.svelte';
   import PrimaryPage from '../components/PrimaryPage.svelte';
 
   const BATCH_SIZE = 30;
+  const HISTORY_EXPORT_FORMATS = [
+    { value: 'json', label: 'JSON' },
+    { value: 'csv', label: 'CSV' },
+  ];
 
   // State
   let history: HistoryEntryWithGroup[] = $state([]);
@@ -41,6 +51,8 @@
   let selectedIds = $state<Set<string>>(new Set());
   let selectingAll = $state(false);
   let bulkDeleting = $state(false);
+  let exporting = $state(false);
+  let exportFormat: HistoryExportFormat = $state('json');
   let selectionFeedback = $state('');
   let selectionGeneration = 0;
   let selectedCount = $derived(selectedIds.size);
@@ -138,7 +150,7 @@
   }
 
   async function selectAllCurrentFilter(): Promise<void> {
-    if (selectingAll || bulkDeleting) return;
+    if (selectingAll || bulkDeleting || exporting) return;
     const generation = ++selectionGeneration;
     selectingAll = true;
     selectionFeedback = '';
@@ -299,7 +311,7 @@
   }
 
   function openBulkDeleteDialog(): void {
-    if (!hasSelection || bulkDeleting) return;
+    if (!hasSelection || bulkDeleting || exporting) return;
     bulkDeleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     selectionFeedback = '';
     bulkDeleteConfirmOpen = true;
@@ -321,7 +333,7 @@
   }
 
   async function confirmBulkDelete(): Promise<void> {
-    if (bulkDeleting || !hasSelection) return;
+    if (bulkDeleting || exporting || !hasSelection) return;
     const ids = [...selectedIds];
     const requestedCount = ids.length;
     bulkDeleting = true;
@@ -342,6 +354,42 @@
       toast('Failed to delete selected entries', 'error');
     } finally {
       bulkDeleting = false;
+    }
+  }
+
+  function changeExportFormat(value: string): void {
+    if (value === 'json' || value === 'csv') exportFormat = value;
+  }
+
+  async function exportHistory(scope: 'all' | 'selected'): Promise<void> {
+    if (exporting || bulkDeleting || selectingAll || (scope === 'selected' && !hasSelection)) return;
+
+    const request: HistoryExportRequest = scope === 'selected'
+      ? { format: exportFormat, scope, ids: [...selectedIds] }
+      : { format: exportFormat, scope };
+    exporting = true;
+    selectionFeedback = '';
+    try {
+      const result = await window.murmurMain.exportHistory(request);
+      if (result.status === 'cancelled') return;
+
+      const format = exportFormat.toUpperCase();
+      if (result.missingCount > 0) {
+        toast(
+          `Exported ${result.exportedCount} of ${result.requestedCount} selected entries as ${format}; ${result.missingCount} were no longer available.`,
+          'info',
+        );
+      } else {
+        toast(
+          `Exported ${result.exportedCount} ${result.exportedCount === 1 ? 'entry' : 'entries'} as ${format}.`,
+        );
+      }
+    } catch (err) {
+      console.error('Failed to export history:', err);
+      selectionFeedback = 'History could not be exported. Nothing was written. Try again.';
+      toast('Failed to export history', 'error');
+    } finally {
+      exporting = false;
     }
   }
 
@@ -371,6 +419,7 @@
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
@@ -645,7 +694,7 @@
           <p data-history-selection-count class="text-xs text-zinc-200" aria-live="polite">{selectedCount} selected</p>
           <p class="mt-1 text-[11px] text-zinc-500">Selection applies to the current filters.</p>
         {:else}
-          <p class="text-xs text-zinc-500">Select entries to delete more than one at a time.</p>
+          <p class="text-xs text-zinc-500">Export all history, or select entries to export a filtered subset.</p>
         {/if}
         {#if selectionFeedback && !bulkDeleteConfirmOpen}
           <p data-history-selection-feedback class="mt-1 text-xs text-red-300" role="alert">{selectionFeedback}</p>
@@ -657,8 +706,9 @@
           data-history-selection-toggle
           bind:this={selectionToggle}
           aria-pressed={selectionMode}
+          disabled={exporting}
           onclick={toggleSelectionMode}
-          class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+          class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {selectionMode ? 'Exit selection' : 'Select entries'}
         </button>
@@ -668,7 +718,7 @@
             data-history-select-all
             aria-label="Select all entries in the current filter"
             aria-busy={selectingAll}
-            disabled={selectingAll || bulkDeleting}
+            disabled={selectingAll || bulkDeleting || exporting}
             onclick={selectAllCurrentFilter}
             class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -677,21 +727,57 @@
           <button
             type="button"
             data-history-clear-selection
-            disabled={!hasSelection || selectingAll || bulkDeleting}
+            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
             onclick={clearSelection}
             class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Clear selection
           </button>
+          <EveDropdown
+            label="History export format"
+            value={exportFormat}
+            options={HISTORY_EXPORT_FORMATS}
+            onchange={changeExportFormat}
+            disabled={exporting || bulkDeleting || selectingAll}
+          />
+          <button
+            type="button"
+            data-history-export-selected
+            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
+            aria-busy={exporting}
+            onclick={() => exportHistory('selected')}
+            class="min-h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? 'Exporting…' : 'Export selected'}
+          </button>
           <button
             type="button"
             data-history-delete-selected
-            disabled={!hasSelection || selectingAll || bulkDeleting}
+            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
             aria-busy={bulkDeleting}
             onclick={openBulkDeleteDialog}
             class="min-h-9 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-950 transition-colors hover:bg-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {bulkDeleting ? 'Deleting…' : 'Delete selected'}
+          </button>
+        {:else}
+          <EveDropdown
+            label="History export format"
+            value={exportFormat}
+            options={HISTORY_EXPORT_FORMATS}
+            onchange={changeExportFormat}
+            disabled={exporting}
+          />
+          <button
+            type="button"
+            data-history-export-all
+            aria-label="Export all history"
+            aria-busy={exporting}
+            disabled={exporting}
+            onclick={() => exportHistory('all')}
+            class="min-h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? 'Exporting…' : 'Export all'}
           </button>
         {/if}
       </div>
@@ -752,7 +838,7 @@
                     <input
                       type="checkbox"
                       checked={selectedIds.has(item.id)}
-                      disabled={selectingAll || bulkDeleting}
+                      disabled={selectingAll || bulkDeleting || exporting}
                       aria-label={`Select transcription from ${formatFullDate(item.timestamp)}`}
                       onchange={(event) => toggleEntrySelection(item.id, event.currentTarget.checked)}
                       class="h-4 w-4 cursor-pointer rounded border-zinc-700 bg-zinc-800 text-zinc-200 focus:ring-2 focus:ring-zinc-200 focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"

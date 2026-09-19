@@ -5,6 +5,8 @@ import type {
   EngineStatus,
   HistoryEntryWithGroup,
   HistoryDeleteResult,
+  HistoryExportRequest,
+  HistoryExportResult,
   HistoryFilters,
   HistoryResponse,
   Hotkey,
@@ -37,6 +39,7 @@ declare global {
       getHotkeyDisplayName: (hotkey: Hotkey) => Promise<string>;
       getHistoryEntries: (offset: number, limit: number, filters?: HistoryFilters) => Promise<HistoryResponse>;
       getHistoryEntryIds: (filters?: HistoryFilters) => Promise<string[]>;
+      exportHistory: (request: HistoryExportRequest) => Promise<HistoryExportResult>;
       deleteHistoryEntry: (id: string) => Promise<void>;
       deleteHistoryEntries: (ids: string[]) => Promise<HistoryDeleteResult>;
       getInsights: (range: InsightsRange) => Promise<InsightsResponse | null>;
