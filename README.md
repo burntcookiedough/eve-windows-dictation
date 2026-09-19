@@ -1,6 +1,6 @@
 # Eve for Windows
 
-<p><img src="https://img.shields.io/badge/v0.8.2-alpha.4-orange?style=flat-square" alt="v0.8.2-alpha.4"> <strong>Source status: v0.8.2-alpha.4 Faster-Whisper-only alpha · prerelease</strong></p>
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.5-orange?style=flat-square" alt="v0.8.2-alpha.5"> <strong>Source status: v0.8.2-alpha.5 Faster-Whisper-only alpha · prerelease</strong></p>
 
 ## Local-first dictation that stays in your flow
 
@@ -38,7 +38,7 @@ Models are downloaded from their public Hugging Face repositories the first time
 | **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
 | **Medium / Tiny — Advanced** | Additional model choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
 
-The v0.8.2-alpha.4 alpha supports one model family: Faster-Whisper through the
+The v0.8.2-alpha.5 alpha supports one model family: Faster-Whisper through the
 CTranslate2 adapter. A future model family must arrive through its own adapter after
 it has passed the same accuracy, latency, memory, packaging, and recovery gates.
 
@@ -52,13 +52,13 @@ Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private 
 
 ## Installation and release status
 
-The current release candidate is **Eve v0.8.2-alpha.4**. After its gated publication,
+The current release candidate is **Eve v0.8.2-alpha.5**. After its gated publication,
 the release and exact asset hashes will be available from the
-[v0.8.2-alpha.4 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.4).
+[v0.8.2-alpha.5 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.5).
 The `nsis-web` installer downloads the application payload during installation, and
 internet access is required again if a selected model needs its weights. The alpha is
-unsigned and may trigger Windows reputation warnings. Until alpha.4 passes those gates,
-[v0.8.2-alpha.3](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.3)
+unsigned and may trigger Windows reputation warnings. Until alpha.5 passes those gates,
+[v0.8.2-alpha.4](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.4)
 remains the latest published prerelease.
 
 ### v0.7.0 integrity evidence
@@ -71,7 +71,7 @@ The [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dict
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-The source tree is the **Eve v0.8.2-alpha.4 release candidate**. A commit is not a
+The source tree is the **Eve v0.8.2-alpha.5 release candidate**. A commit is not a
 downloadable release: only artifacts attached to the matching GitHub prerelease have
 passed the repository's package, lifecycle, manifest, and promotion gates.
 
