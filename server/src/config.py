@@ -551,12 +551,9 @@ def _persist_settings(settings: Settings) -> None:
     # Persist API values that differ from defaults. An API patch changes only
     # its named keys, so saved choices shadowed by OS or dotenv settings stay.
     for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
-        if (
-            key in stored
-            and settings._explicit_patch_keys is not None
-            and key not in settings._explicit_patch_keys
-        ):
-            diff[key] = stored[key]
+        if settings._explicit_patch_keys is not None and key not in settings._explicit_patch_keys:
+            if key in stored:
+                diff[key] = stored[key]
             continue
         if key in current_dict and current_dict[key] != default_dict.get(key):
             diff[key] = current_dict[key]

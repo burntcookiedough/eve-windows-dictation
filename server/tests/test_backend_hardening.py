@@ -72,6 +72,22 @@ def test_unrelated_patch_preserves_model_shadowed_by_environment(
     }
 
 
+def test_unrelated_patch_does_not_persist_environment_only_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(settings_file))
+    monkeypatch.setenv("MURMUR_WHISPER_MODEL", "small")
+
+    assert config.get_settings().whisper_model == "small"
+    config.update_settings({"partial_emission_interval": 0.5})
+
+    persisted = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert "whisper_model" not in persisted
+    assert persisted["partial_emission_interval"] == 0.5
+
+
 def test_unrelated_patch_preserves_model_shadowed_by_dotenv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
