@@ -50,6 +50,7 @@ export class ServerManager {
 
   private status: ServerStatus = 'idle';
   private startInFlight: Promise<void> | null = null;
+  private stopInFlight: Promise<void> | null = null;
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
   private logs: ServerLogEntry[] = [];
@@ -580,6 +581,9 @@ export class ServerManager {
    * Start the server (production mode only).
    */
   start(): Promise<void> {
+    if (this.stopInFlight) {
+      return this.stopInFlight.then(() => this.start());
+    }
     if (this.startInFlight) return this.startInFlight;
     const attempt = this.startOnce().finally(() => {
       this.startInFlight = null;
@@ -843,7 +847,16 @@ export class ServerManager {
   /**
    * Stop the server.
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopInFlight) return this.stopInFlight;
+    const attempt = this.stopOnce().finally(() => {
+      this.stopInFlight = null;
+    });
+    this.stopInFlight = attempt;
+    return attempt;
+  }
+
+  private async stopOnce(): Promise<void> {
     // Let an in-progress startup settle before changing process state. Otherwise
     // a restart can reuse the old start promise after stop() has finished.
     if (this.startInFlight) {
