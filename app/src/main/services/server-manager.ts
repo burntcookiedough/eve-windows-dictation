@@ -12,13 +12,16 @@ import type {
   ServerDiagnostics,
   ModelDownloadState,
   EngineStatus,
+  ServerRuntimeFingerprint,
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 import {
   isOwnedMurmurServerProcess,
   parseServerPidFile,
   parseHealthyResponse,
+  matchesExpectedRuntime,
   type HealthState,
+  type ExpectedRuntimeIdentity,
   type ServerProcessSnapshot,
 } from './server-health.js';
 import {
@@ -28,6 +31,7 @@ import {
 } from './server-startup.js';
 import { buildChildEnvironment } from './server-environment.js';
 import { BoundedLogDeliveryQueue, ServerLogFramer } from './server-log-transport.js';
+import type { GpuPackManager, ValidatedGpuRuntime } from './gpu-pack-manager.js';
 
 const log = createLogger('ServerManager');
 
@@ -42,6 +46,8 @@ const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
 export class ServerManager {
+  constructor(private readonly gpuPackManager?: GpuPackManager) {}
+
   private status: ServerStatus = 'idle';
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
@@ -57,6 +63,20 @@ export class ServerManager {
   private diagnostics: ServerDiagnostics | null = null;
   private modelDownload: ModelDownloadState | null = null;
   private engineStatus: EngineStatus | null = null;
+  private runtime: ServerRuntimeFingerprint | null = null;
+  private runningRuntimeIdentity: ExpectedRuntimeIdentity | null = null;
+
+  private async expectedRuntime(): Promise<{
+    identity: ExpectedRuntimeIdentity;
+    gpuRuntime: ValidatedGpuRuntime | null;
+  }> {
+    const gpuRuntime = await this.gpuPackManager?.getValidatedRuntime() ?? null;
+    const build = app.getVersion();
+    return {
+      identity: { app_build: build, server_build: build, pack_id: gpuRuntime?.packId ?? null },
+      gpuRuntime,
+    };
+  }
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
@@ -142,8 +162,19 @@ export class ServerManager {
           this.setDiagnostics(undefined);
           this.setModelDownload(undefined);
           this.setEngineStatus(undefined);
+          this.setRuntime(undefined);
           this.updateStatus('error', 'Health check failed');
         }
+        return;
+      }
+
+      if (
+        app.isPackaged
+        && this.runningRuntimeIdentity
+        && !matchesExpectedRuntime(health.runtime, this.runningRuntimeIdentity)
+      ) {
+        log.warn('Server runtime identity changed during health polling');
+        this.updateStatus('error', 'Server runtime identity changed');
         return;
       }
 
@@ -154,7 +185,8 @@ export class ServerManager {
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
       const downloadChanged = this.setModelDownload(health.modelDownload);
       const engineChanged = this.setEngineStatus(health.engineStatus);
-      let shouldBroadcast = recovered || diagnosticsChanged || downloadChanged || engineChanged;
+      const runtimeChanged = this.setRuntime(health.runtime);
+      let shouldBroadcast = recovered || diagnosticsChanged || downloadChanged || engineChanged || runtimeChanged;
 
       if (health.version && health.version !== this.serverVersion) {
         this.serverVersion = health.version;
@@ -175,6 +207,13 @@ export class ServerManager {
       return false;
     }
     this.diagnostics = nextValue;
+    return true;
+  }
+
+  private setRuntime(next?: ServerRuntimeFingerprint): boolean {
+    const value = next ?? null;
+    if (JSON.stringify(this.runtime) === JSON.stringify(value)) return false;
+    this.runtime = value;
     return true;
   }
 
@@ -359,6 +398,7 @@ export class ServerManager {
       engineStatus: this.engineStatus ?? undefined,
       diagnostics: this.diagnostics ?? undefined,
       modelDownload: this.modelDownload ?? undefined,
+      runtime: this.runtime ?? undefined,
     };
   }
 
@@ -383,6 +423,7 @@ export class ServerManager {
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
       this.setEngineStatus(undefined);
+      this.setRuntime(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -395,6 +436,7 @@ export class ServerManager {
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
       this.setEngineStatus(undefined);
+      this.setRuntime(undefined);
       this.updateStatus('stopped');
       return false;
     }
@@ -415,7 +457,15 @@ export class ServerManager {
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
       this.setEngineStatus(undefined);
+      this.setRuntime(undefined);
       this.updateStatus('error', 'Server not responding');
+      return false;
+    }
+
+    const expected = app.isPackaged ? (await this.expectedRuntime()).identity : null;
+    if (expected && !matchesExpectedRuntime(health.runtime, expected)) {
+      log.warn('Detected server runtime does not match this Eve build');
+      this.updateStatus('error', 'Existing server uses a different runtime; start Eve server to replace it');
       return false;
     }
 
@@ -426,6 +476,8 @@ export class ServerManager {
     this.setDiagnostics(health.diagnostics);
     this.setModelDownload(health.modelDownload);
     this.setEngineStatus(health.engineStatus);
+    this.setRuntime(health.runtime);
+    this.runningRuntimeIdentity = expected;
     this.managed = false; // The server was detected rather than spawned by Eve.
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
@@ -453,7 +505,7 @@ export class ServerManager {
    * Get the command and arguments to spawn the server.
    * Returns null if server path cannot be determined.
    */
-  private getServerCommand(): {
+  private getServerCommand(gpuRuntime: ValidatedGpuRuntime | null): {
     command: string;
     args: string[];
     cwd: string;
@@ -472,7 +524,6 @@ export class ServerManager {
       const runtimePython = path.join(serverDir, '.runtime', 'python.exe');
       const legacyPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
       const sitePackages = path.join(serverDir, '.venv', 'Lib', 'site-packages');
-      const torchLib = path.join(sitePackages, 'torch', 'lib');
       const mainPy = path.join(serverDir, 'src', 'main.py');
 
       let pythonExe = runtimePython;
@@ -496,8 +547,8 @@ export class ServerManager {
       const systemPath = Object.entries(process.env).find(
         ([key]) => key.toLowerCase() === 'path',
       )?.[1];
-      const bundledRuntimePath = fs.existsSync(torchLib)
-        ? [torchLib, systemPath].filter(Boolean).join(path.delimiter)
+      const bundledRuntimePath = gpuRuntime
+        ? [gpuRuntime.directory, systemPath].filter(Boolean).join(path.delimiter)
         : systemPath;
 
       return {
@@ -511,6 +562,9 @@ export class ServerManager {
             ? [sitePackages, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)
             : process.env.PYTHONPATH,
           PATH: bundledRuntimePath,
+          MURMUR_APP_BUILD_ID: app.getVersion(),
+          MURMUR_GPU_RUNTIME_DIR: gpuRuntime?.directory,
+          MURMUR_GPU_PACK_ID: gpuRuntime?.packId,
         },
       };
     } else {
@@ -530,6 +584,8 @@ export class ServerManager {
       return;
     }
 
+    const expectedRuntime = app.isPackaged ? await this.expectedRuntime() : null;
+
     // Check for existing server first
     const existingPid = this.readPidFile();
     if (existingPid && this.isProcessAlive(existingPid.pid)) {
@@ -542,7 +598,10 @@ export class ServerManager {
       }
 
       const health = await this.getHealthState(existingPid.port);
-      if (health.healthy) {
+      if (
+        health.healthy
+        && (!expectedRuntime || matchesExpectedRuntime(health.runtime, expectedRuntime.identity))
+      ) {
         log.info('Found existing healthy server, adopting');
         this.pidFile = existingPid;
         this.startedAt = existingPid.startedAt;
@@ -550,12 +609,14 @@ export class ServerManager {
         this.setDiagnostics(health.diagnostics);
         this.setModelDownload(health.modelDownload);
         this.setEngineStatus(health.engineStatus);
+        this.setRuntime(health.runtime);
+        this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
         this.managed = false;
         this.updateStatus('running');
         this.startHealthPolling(existingPid.port);
         return;
       }
-      log.warn('Existing owned Murmur server is not responding; terminating it');
+      log.warn('Existing owned Murmur server is unhealthy or uses a different runtime; terminating it');
       try {
         process.kill(existingPid.pid, 'SIGTERM');
         if (!(await this.waitForProcessExit(existingPid.pid, 5000))) {
@@ -571,7 +632,7 @@ export class ServerManager {
       this.cleanupStalePidFile();
     }
 
-    const serverCmd = this.getServerCommand();
+    const serverCmd = this.getServerCommand(expectedRuntime?.gpuRuntime ?? null);
     if (!serverCmd) {
       this.updateStatus('error', 'Cannot find server executable');
       return;
@@ -584,6 +645,7 @@ export class ServerManager {
     this.setDiagnostics(undefined);
     this.setModelDownload(undefined);
     this.setEngineStatus(undefined);
+    this.setRuntime(undefined);
     this.clearPendingLogDelivery();
     this.logs = []; // Clear logs for new session
 
@@ -594,6 +656,11 @@ export class ServerManager {
         MURMUR_SETTINGS_FILE: path.join(app.getPath('userData'), 'server-settings.json'),
         MURMUR_PORT: '0',
       });
+      if (!expectedRuntime?.gpuRuntime) {
+        // Never inherit a user-supplied DLL path or pack ID into the CPU server.
+        delete childEnv.MURMUR_GPU_RUNTIME_DIR;
+        delete childEnv.MURMUR_GPU_PACK_ID;
+      }
       // Transformers v5 removes this deprecated variable. HF_HOME and the
       // standard Hugging Face cache discovery continue to work normally.
       delete childEnv.TRANSFORMERS_CACHE;
@@ -646,6 +713,7 @@ export class ServerManager {
         this.setDiagnostics(undefined);
         this.setModelDownload(undefined);
         this.setEngineStatus(undefined);
+        this.setRuntime(undefined);
 
         if (this.status !== 'stopping') {
           // Preserve explicit startup/runtime errors already set by start()/stop() logic.
@@ -685,6 +753,9 @@ export class ServerManager {
       if (!health) {
         throw new Error('Server health check did not pass within timeout');
       }
+      if (expectedRuntime && !matchesExpectedRuntime(health.runtime, expectedRuntime.identity)) {
+        throw new Error('Server runtime identity did not match this Eve build');
+      }
 
       this.pidFile = pidData;
       this.startedAt = pidData.startedAt;
@@ -692,6 +763,8 @@ export class ServerManager {
       this.setDiagnostics(health.diagnostics);
       this.setModelDownload(health.modelDownload);
       this.setEngineStatus(health.engineStatus);
+      this.setRuntime(health.runtime);
+      this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
@@ -799,6 +872,7 @@ export class ServerManager {
               this.setDiagnostics(undefined);
               this.setModelDownload(undefined);
               this.setEngineStatus(undefined);
+              this.setRuntime(undefined);
               this.updateStatus('stopped');
               return;
             }
@@ -840,6 +914,7 @@ export class ServerManager {
       this.setDiagnostics(undefined);
       this.setModelDownload(undefined);
       this.setEngineStatus(undefined);
+      this.setRuntime(undefined);
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });

@@ -286,7 +286,7 @@ def test_packaged_resource_and_runtime_harness_guards() -> None:
     assert '"package": "bun run notices:generate && bun run build && electron-builder"' in package
     assert '"to": "legal"' in package
     assert ".runtime\\python.exe" in verify
-    assert "import faster_whisper, torch" in verify
+    assert "import faster_whisper, ctranslate2" in verify
     assert "nemo.collections.asr" not in verify
     assert "Unsupported model-runtime packages" in verify
     assert 'src\\transcription\\engines\\nemotron.py' in verify

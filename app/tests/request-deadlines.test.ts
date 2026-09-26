@@ -44,7 +44,11 @@ describe('Electron request deadlines', () => {
     let poll: (() => Promise<void>) | undefined;
     const healthStates: HealthState[] = [
       { healthy: false },
-      { healthy: true, engineStatus: { current: 'whisper', status: 'ready' } },
+      {
+        healthy: true,
+        engineStatus: { current: 'whisper', status: 'ready' },
+        runtime: { app_build: null, server_build: '0.8.2-alpha.5', pack_id: null, effective_device: 'cpu' },
+      },
     ];
 
     Object.defineProperty(globalThis, 'setInterval', {
@@ -68,6 +72,7 @@ describe('Electron request deadlines', () => {
       expect(manager.getState()).toMatchObject({
         status: 'running',
         engineStatus: { current: 'whisper', status: 'ready' },
+        runtime: { effective_device: 'cpu', pack_id: null },
       });
     } finally {
       manager.stopHealthPolling();

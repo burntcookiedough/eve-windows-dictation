@@ -8,6 +8,27 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'err
 // Server management states
 export type ServerStatus = 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
 
+/** Runtime identity reported by the Python health endpoint. */
+export interface ServerRuntimeFingerprint {
+  app_build: string | null;
+  server_build: string;
+  pack_id: string | null;
+  effective_device: string;
+}
+
+/** GPU pack state safe to serialize over IPC. Never includes a URL or path. */
+export type GpuPackState =
+  | { status: 'unavailable'; code: 'descriptor_missing' | 'invalid_descriptor' | 'incompatible_build' }
+  | { status: 'missing'; packId: string; downloadBytes: number }
+  | { status: 'downloading'; packId: string; receivedBytes: number; totalBytes: number }
+  | { status: 'validating'; packId: string }
+  | { status: 'ready'; packId: string; restartRequired: true }
+  | {
+      status: 'failed';
+      code: 'download_failed' | 'integrity_failed' | 'pack_invalid' | 'storage_failed';
+      retryable: boolean;
+    };
+
 export interface ServerPidFile {
   pid: number;
   port: number;
@@ -26,6 +47,7 @@ export interface ServerStatePayload {
   engineStatus?: EngineStatus;
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
+  runtime?: ServerRuntimeFingerprint;
 }
 
 export interface ServerLogEntry {

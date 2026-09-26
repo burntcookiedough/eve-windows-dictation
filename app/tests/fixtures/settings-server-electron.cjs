@@ -31,6 +31,7 @@ function fixtureUrl(state) {
 }
 
 async function loadFixture(window, state, logsExpanded) {
+  await window.webContents.setZoomFactor(1);
   await window.loadURL(fixtureUrl(state));
   await wait(300);
   if (logsExpanded) {
@@ -42,6 +43,8 @@ async function loadFixture(window, state, logsExpanded) {
 async function measure(window, state, logsExpanded, zoom) {
   await window.webContents.setZoomFactor(zoom);
   await wait(80);
+  window.focus();
+  window.webContents.focus();
   const serialized = JSON.stringify({ state, logsExpanded, zoom });
   return window.webContents.executeJavaScript(`(() => {
     const meta = ${serialized};
@@ -157,6 +160,7 @@ async function main() {
       if (filename) screenshots.push(await capture(window, state, logsExpanded, filename));
 
       for (const [width, height] of [[960, 900], [320, 700]]) {
+        await window.webContents.setZoomFactor(1);
         await window.setContentSize(width, height);
         await wait(100);
         for (const zoom of [1, 1.5, 2]) {

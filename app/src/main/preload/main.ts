@@ -20,6 +20,7 @@ import type {
   ServerSettingsResponse,
   EngineStatus,
   AvailableEngine,
+  GpuPackState,
 } from '../../shared/types.js';
 
 // Define the API exposed to the main window renderer
@@ -185,6 +186,23 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.SERVER_GET_LOGS);
   },
 
+  // Optional GPU runtime pack (independent from Python server state)
+  getGpuPackState: (): Promise<GpuPackState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GPU_PACK_GET_STATE);
+  },
+
+  installGpuPack: (): Promise<GpuPackState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GPU_PACK_INSTALL);
+  },
+
+  onGpuPackStateChange: (callback: (state: GpuPackState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: GpuPackState) => {
+      callback(state);
+    };
+    ipcRenderer.on(IPC_CHANNELS.GPU_PACK_STATE_CHANGE, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.GPU_PACK_STATE_CHANGE, handler);
+  },
+
   onServerStateChange: (callback: (state: ServerStatePayload) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: ServerStatePayload) => {
       callback(state);
@@ -204,6 +222,7 @@ const murmurMainAPI = {
   removeServerListeners: (): void => {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.GPU_PACK_STATE_CHANGE);
   },
 
   // Server settings (REST API proxy)

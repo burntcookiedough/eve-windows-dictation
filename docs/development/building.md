@@ -56,10 +56,11 @@ release actions each require their applicable authorization and release plan.
 
 ```powershell
 Set-Location ..
-python scripts/version.py check --tag v0.8.2-alpha.4
+python scripts/version.py check
 git diff --check
 ```
 
 See [installer dependencies](../installer-dependencies.md), the
-[protocol](../protocol.md), and the [Gate 6 release plan](../architecture/eve-gate-6-release-plan.md)
-for release-specific requirements.
+[protocol](../protocol.md), and the [lean-runtime release plan](../architecture/eve-lean-runtime-release-plan.md)
+for this candidate's release-specific requirements. Historical Gate 6 evidence remains
+in [its release plan](../architecture/eve-gate-6-release-plan.md).

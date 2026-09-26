@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import builtins
 import math
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 from config import Settings
 import diagnostics
+from transcription.vram import GpuCapabilities
 from diagnostics import (
     CudaDiagnostics,
     CudaDllDiagnostics,
@@ -16,6 +19,7 @@ from diagnostics import (
     VcRedistDiagnostics,
     build_warnings,
 )
+import transcription.vram as vram
 
 
 def test_parse_driver_version_handles_patch() -> None:
@@ -29,13 +33,47 @@ def test_run_nvidia_smi_timeout_returns_unavailable(monkeypatch) -> None:
         calls.update(kwargs)
         raise subprocess.TimeoutExpired(args[0], timeout=kwargs["timeout"])
 
-    monkeypatch.setattr(diagnostics.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_at", None)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_output", None)
+    monkeypatch.setattr(vram.subprocess, "run", raise_timeout)
 
     assert diagnostics._run_nvidia_smi() is None
     timeout = calls.get("timeout")
     assert isinstance(timeout, (int, float))
     assert math.isfinite(timeout)
     assert timeout > 0
+
+
+def test_gpu_metadata_and_driver_diagnostics_share_one_nvidia_smi_call(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run_nvidia_smi(args, **_kwargs):
+        calls.append(args)
+        return SimpleNamespace(stdout="0, 551.86, Test GPU, 8192\n")
+
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_at", None)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_output", None)
+    monkeypatch.setattr(vram.subprocess, "run", run_nvidia_smi)
+    monkeypatch.setitem(
+        sys.modules,
+        "ctranslate2",
+        SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device, _index=0: {"float16"},
+        ),
+    )
+
+    capabilities = vram.detect_gpu_capabilities("cuda")
+    driver = diagnostics.check_nvidia_driver()
+
+    assert capabilities.name == "Test GPU"
+    assert capabilities.total_vram_gb == 8.0
+    assert driver.version == "551.86"
+    assert calls == [[
+        "nvidia-smi",
+        "--query-gpu=index,driver_version,name,memory.total",
+        "--format=csv,noheader,nounits",
+    ]]
 
 
 def test_check_vc_redist_reports_missing_dlls(monkeypatch) -> None:
@@ -121,6 +159,80 @@ def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
     assert "nvidia_driver" in payload
     assert "vc_redist" in payload
     assert isinstance(payload["warnings"], list)
+
+
+def test_check_cuda_capability_never_imports_torch(monkeypatch) -> None:
+    torch_imports: list[str] = []
+    original_import = builtins.__import__
+
+    def import_without_torch(name, *args, **kwargs):
+        if name == "torch" or name.startswith("torch."):
+            torch_imports.append(name)
+            raise AssertionError("diagnostics must not require PyTorch")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_torch)
+    monkeypatch.setattr(
+        diagnostics,
+        "detect_gpu_capabilities",
+        lambda device: GpuCapabilities(True, device, 0, "Test GPU", 8.0),
+    )
+
+    result = diagnostics.check_cuda_capability("cuda")
+
+    assert result.available is True
+    assert result.name == "Test GPU"
+    assert result.compute_capability is None
+    assert torch_imports == []
+
+
+def test_check_ctranslate2_cuda_dlls_requires_compute_types(monkeypatch) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device: set(),
+        ),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is False
+    assert result.detail == "CTranslate2 reports no supported CUDA compute types."
+
+
+def test_packaged_cpu_diagnostics_do_not_probe_ambient_cuda(monkeypatch) -> None:
+    monkeypatch.setattr(diagnostics, "gpu_runtime_allowed", lambda: False)
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: (_ for _ in ()).throw(AssertionError("CUDA was probed")),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is False
+    assert result.detail == "The optional GPU runtime is not installed."
+
+
+def test_check_ctranslate2_cuda_dlls_discloses_that_it_did_not_test_inference(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device: {"float16"},
+        ),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is True
+    assert result.detail is not None
+    assert "did not test Whisper model loading or transcription" in result.detail
 
 
 def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monkeypatch) -> None:

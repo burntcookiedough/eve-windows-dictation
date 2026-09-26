@@ -30,7 +30,11 @@ function Assert-NoPackage {
             $_.Name -eq "nemo" -or
             $_.Name -like "nemo_toolkit-*.dist-info" -or
             $_.Name -eq "torchaudio" -or
-            $_.Name -like "torchaudio-*.dist-info"
+            $_.Name -like "torchaudio-*.dist-info" -or
+            $_.Name -eq "torch" -or
+            $_.Name -like "torch-*.dist-info" -or
+            $_.Name -eq "nvidia" -or
+            $_.Name -like "nvidia_*-*.dist-info"
         })
     if ($forbidden.Count -gt 0) {
         throw "$Description found: $($forbidden.Name -join ', ')"
@@ -172,8 +176,23 @@ $sitePackages = Join-Path $serverRoot ".venv\Lib\site-packages"
 Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
 Assert-Path (Join-Path $sitePackages "faster_whisper") "faster-whisper package"
-Assert-Path (Join-Path $sitePackages "torch") "torch package"
 Assert-NoPackage -SitePackages $sitePackages -Description "Unsupported model-runtime packages"
+$cudnnDispatcher = Join-Path $sitePackages "ctranslate2\cudnn64_9.dll"
+Assert-Path $cudnnDispatcher "Pinned CTranslate2 cuDNN dispatcher"
+$dispatcherFile = Get-Item -LiteralPath $cudnnDispatcher
+$dispatcherHash = (Get-FileHash -LiteralPath $cudnnDispatcher -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($dispatcherFile.Length -ne 266288 -or
+    $dispatcherHash -ne "9edbcdff73b0af070eb160b2ce66e59feca04aa017351d8eedcc5e8e149967d2") {
+    throw "Pinned CTranslate2 cuDNN dispatcher differs from the reviewed wheel."
+}
+$cudaRuntimeDlls = @(Get-ChildItem -LiteralPath $sitePackages -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -match '^(cublas|cudnn|cudart|cufft|curand|cusolver|cusparse|nvrtc|nvjitlink).*\.dll$' -and
+        -not $_.FullName.Equals($cudnnDispatcher, [System.StringComparison]::OrdinalIgnoreCase)
+    })
+if ($cudaRuntimeDlls.Count -gt 0) {
+    throw "CUDA runtime DLLs found in CPU base: $($cudaRuntimeDlls.FullName -join ', ')"
+}
 foreach ($relativePath in @(
     "src\transcription\engines\nemotron.py",
     "src\transcription\nemotron_runtime.py"
@@ -211,7 +230,7 @@ $env:MURMUR_WHISPER_COMPUTE_TYPE = "int8"
 $env:MURMUR_LOG_LEVEL = "INFO"
 $env:PYTHONNOUSERSITE = "1"
 $env:PYTHONPATH = $sitePackages
-Invoke-Native $pythonExe -c "import faster_whisper, torch"
+Invoke-Native $pythonExe -c "import faster_whisper, ctranslate2; import importlib.util; assert importlib.util.find_spec('torch') is None"
 
 Write-Step "Checking packaged Faster-Whisper catalog"
 $catalogProbe = @"

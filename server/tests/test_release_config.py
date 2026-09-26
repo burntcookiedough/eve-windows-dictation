@@ -165,11 +165,11 @@ def test_release_sync_pins_python_excludes_dev_and_checks_runtime_abi() -> None:
     assert mismatch_index < replace_index
 
 
-def test_release_extra_is_the_only_whisper_torch_closure() -> None:
+def test_release_extra_is_cpu_whisper_closure() -> None:
     project = _load_server_pyproject()["project"]
     extras = project["optional-dependencies"]
 
-    assert extras["release"] == ["murmur[whisper]", "torch>=2.0"]
+    assert extras["release"] == ["murmur[whisper]"]
     assert set(extras) == {"whisper", "release", "dev", "ui"}
     assert all("nemotron" not in dependency for values in extras.values() for dependency in values)
 
@@ -180,7 +180,6 @@ def test_release_extra_is_the_only_whisper_torch_closure() -> None:
     )
     assert murmur["optional-dependencies"]["release"] == [
         {"name": "faster-whisper"},
-        {"name": "torch"},
     ]
 
     locked_versions = {
@@ -190,7 +189,6 @@ def test_release_extra_is_the_only_whisper_torch_closure() -> None:
     }
     assert locked_versions == {
         "faster-whisper": "1.2.1",
-        "torch": "2.6.0+cu124",
     }
 
 
@@ -199,8 +197,10 @@ def test_release_verification_requires_only_the_shipped_model_closure() -> None:
         encoding="utf-8"
     )
     assert 'Join-Path $sitePackages "faster_whisper"' in contents
-    assert 'Join-Path $sitePackages "torch"' in contents
-    assert "import faster_whisper, torch" in contents
+    assert '$_.Name -eq "torch"' in contents
+    assert "import faster_whisper, ctranslate2" in contents
+    assert "find_spec('torch') is None" in contents
+    assert "CUDA runtime DLLs found in CPU base" in contents
     assert "discover_models" in contents
     assert "Assert-NoPath" in contents
     assert 'src\\transcription\\engines\\nemotron.py' in contents
@@ -296,7 +296,7 @@ def test_packaging_includes_relocatable_runtime() -> None:
     assert "!.venv/Lib/site-packages/**/test/**" in filters
     assert "!.venv/Lib/site-packages/**/tests/**" in filters
     assert "!.venv/Lib/site-packages/**/*.lib" in filters
-    assert "!.venv/Lib/site-packages/torch/include/**" in filters
+    assert "!.venv/Lib/site-packages/torch/include/**" not in filters
     assert "!.runtime/Lib/test/**" in filters
 
 
