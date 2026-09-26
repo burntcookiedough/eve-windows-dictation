@@ -74,12 +74,13 @@ def _runtime_fingerprint(engine_status: dict[str, Any], settings: Settings) -> d
     if engine_status.get("status") == "ready" and isinstance(info, dict):
         effective_device = supported_device(info.get("device"))
 
-    if effective_device is None:
+    engine_failed = engine_status.get("status") == "error"
+    if effective_device is None and not engine_failed:
         effective_config = getattr(settings, "effective_whisper_config", None)
         effective_device = supported_device(
             getattr(effective_config, "effective_device", None)
         )
-    if effective_device is None:
+    if effective_device is None and not engine_failed:
         effective_device = supported_device(getattr(settings, "whisper_device", None))
 
     return {

@@ -49,6 +49,7 @@ export class ServerManager {
   constructor(private readonly gpuPackManager?: GpuPackManager) {}
 
   private status: ServerStatus = 'idle';
+  private startInFlight: Promise<void> | null = null;
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
   private logs: ServerLogEntry[] = [];
@@ -578,7 +579,16 @@ export class ServerManager {
   /**
    * Start the server (production mode only).
    */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    if (this.startInFlight) return this.startInFlight;
+    const attempt = this.startOnce().finally(() => {
+      this.startInFlight = null;
+    });
+    this.startInFlight = attempt;
+    return attempt;
+  }
+
+  private async startOnce(): Promise<void> {
     if (this.status === 'running' || this.status === 'starting') {
       log.info('Server already running or starting');
       return;

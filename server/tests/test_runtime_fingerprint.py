@@ -90,3 +90,14 @@ def test_health_pack_identity_does_not_claim_gpu_inference(
         "effective_device": "cpu",
     }
     assert "gpu_ready" not in payload["runtime"]
+
+
+def test_failed_engine_does_not_claim_settings_gpu_device() -> None:
+    settings = SimpleNamespace(
+        whisper_device="cuda",
+        effective_whisper_config=SimpleNamespace(effective_device="cuda"),
+    )
+
+    fingerprint = app_module._runtime_fingerprint({"status": "error"}, settings)
+
+    assert fingerprint["effective_device"] is None

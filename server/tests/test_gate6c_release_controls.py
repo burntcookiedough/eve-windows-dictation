@@ -144,6 +144,27 @@ def _create_release_fixture(directory: Path) -> subprocess.CompletedProcess[str]
     )
 
 
+def test_explicit_empty_measurement_directory_fails(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh, "PowerShell 7 is required for release-control tests."
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(ROOT / "scripts" / "measure-package-footprint.ps1"),
+            "-ArtifactDir",
+            str(tmp_path),
+            "-AsJson",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "No .7z or .exe installer artifacts" in result.stderr
+
+
 def test_release_workflow_is_manual_and_never_builds_or_uploads() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     dispatch_block = workflow.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]

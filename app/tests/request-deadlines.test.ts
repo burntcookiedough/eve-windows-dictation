@@ -4,11 +4,13 @@ import type { HealthState } from '../src/main/services/server-health';
 mock.module('electron', () => ({
   app: {
     getPath: () => process.cwd(),
+    getVersion: () => 'test-build',
   },
   BrowserWindow: class {},
 }));
 
 const { ServerManager } = await import('../src/main/services/server-manager');
+const { app: electronApp } = await import('electron');
 const { getServerSettings } = await import('../src/main/services/server-settings');
 
 type PrivateServerManager = {
@@ -37,6 +39,40 @@ function restoreGlobalProperty(
 }
 
 describe('Electron request deadlines', () => {
+  test('coalesces starts while packaged GPU runtime validation is pending', async () => {
+    const packagedApp = electronApp as unknown as { isPackaged: boolean };
+    const previousPackaged = packagedApp.isPackaged;
+    let finishValidation: ((value: null) => void) | undefined;
+    let validations = 0;
+    const validation = new Promise<null>((resolve) => { finishValidation = resolve; });
+    const manager = new ServerManager({
+      getValidatedRuntime: () => { validations++; return validation; },
+    } as unknown as ConstructorParameters<typeof ServerManager>[0]);
+    const privateManager = manager as unknown as {
+      readPidFile: () => null;
+      getServerCommand: () => null;
+    };
+    let commandChecks = 0;
+    privateManager.readPidFile = () => null;
+    privateManager.getServerCommand = () => { commandChecks++; return null; };
+    packagedApp.isPackaged = true;
+
+    try {
+      const first = manager.start();
+      const second = manager.start();
+      expect(second).toBe(first);
+      expect(validations).toBe(1);
+      finishValidation?.(null);
+      await Promise.all([first, second]);
+      expect(commandChecks).toBe(1);
+
+      await manager.start();
+      expect(validations).toBe(2);
+    } finally {
+      packagedApp.isPackaged = previousPackaged;
+    }
+  });
+
   test('restores running state after a transient health-check failure', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');

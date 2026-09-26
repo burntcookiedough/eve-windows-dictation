@@ -542,7 +542,7 @@ def _persist_settings(settings: Settings) -> None:
     diff = {
         key: value
         for key, value in _load_settings_json().items()
-        if key not in API_KEYS
+        if key not in API_KEYS and key not in PERSISTED_INTERNAL_KEYS
     }
     # Only persist API values that differ from defaults.
     for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
