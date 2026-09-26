@@ -25,6 +25,8 @@ This is a CPU usability improvement, not a claim that CPU Eve now feels instant.
 
 The rebuilt package measured 178,040,192 bytes for the NSIS web payload and 685,812,939 bytes fresh unpacked: 830 and 6,642 bytes above the source-matched PR 87 package respectively. In isolated packaged-app launches, an empty profile gained `whisper_model=small`, while a profile with an existing history database did not gain a model setting. These checks used offline model access and did not exercise an initial model download.
 
+The final packaged Python runtime also transcribed a short clip on CPU and, separately, on CUDA using the installed optional pack. Its health report and runtime fingerprint identified CPU without an active GPU pack in the first run, and CUDA with the expected pack ID in the second. Windows module enumeration returned `WinError 234` for this deeply nested checkout, so those final smokes do not independently prove DLL origins. The earlier, shorter-path PR 87 package did verify loaded DLL origins; this change does not modify the GPU loader or bundled native libraries. These two single-run smokes are functional validation, not additions to the latency sample above.
+
 The task-local JSONL records live outside the repository under `cpu-benchmark/human-eval-librispeech-dev-other`. This follow-up does not establish physical-microphone accuracy, paste latency, multi-hour thermal behavior, a clean-machine GPU download, or the accuracy of untested model candidates.
 
 ## Model adapter scope
