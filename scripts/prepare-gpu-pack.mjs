@@ -24,6 +24,9 @@ const NVIDIA_EULA_URL = 'https://developer.download.nvidia.com/compute/cuda/redi
 const NVIDIA_EULA_PAGE = 'https://docs.nvidia.com/cuda/archive/12.9.1/eula/index.html';
 const PLATFORM = 'win32-x64';
 const SCHEMA_VERSION = 1;
+const PINNED_NODE_VERSION = 'v24.15.0';
+const PINNED_ZLIB_VERSION = '1.3.1-e00f703';
+const PINNED_BROTLI_VERSION = '1.2.0';
 
 const assets = [
   {
@@ -78,13 +81,30 @@ function isPathInside(parent, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-function assertOutsideSensitiveRoots(label, candidatePath, repositoryRoot) {
+function assertOutsideSensitiveRoots(label, candidatePath, sensitiveRoots) {
   const normalized = path.resolve(candidatePath);
-  const roots = [repositoryRoot, os.homedir()].map((root) => path.resolve(root));
-  for (const root of roots) {
+  for (const root of sensitiveRoots) {
     if (isPathInside(root, normalized)) {
       throw new Error(`${label} must be outside the repository and the user profile`);
     }
+  }
+}
+
+async function getSensitiveRoots(repositoryRoot) {
+  const roots = [repositoryRoot, os.homedir()].map((root) => path.resolve(root));
+  const canonicalRoots = await Promise.all(roots.map((root) => fs.realpath(root)));
+  return [...new Set([...roots, ...canonicalRoots])];
+}
+
+function assertPinnedCompressionToolchain() {
+  if (
+    process.version !== PINNED_NODE_VERSION ||
+    process.versions.zlib !== PINNED_ZLIB_VERSION ||
+    process.versions.brotli !== PINNED_BROTLI_VERSION
+  ) {
+    throw new Error(
+      `Compression toolchain mismatch; expected Node ${PINNED_NODE_VERSION}, zlib ${PINNED_ZLIB_VERSION}, Brotli ${PINNED_BROTLI_VERSION}; got Node ${process.version}, zlib ${process.versions.zlib}, Brotli ${process.versions.brotli}`,
+    );
   }
 }
 
@@ -235,6 +255,8 @@ function candidateManifest(appBuildId, ctranslate2BuildId, generatedAssets) {
     },
     generatedBy: {
       node: process.version,
+      zlib: process.versions.zlib,
+      brotli: process.versions.brotli,
       brotliQuality: 5,
       brotliMode: 'generic',
     },
@@ -258,6 +280,7 @@ This draft does not decide whether a separately hosted, user-requested pack meet
 
 async function buildCandidate(options) {
   if (process.platform !== 'win32') throw new Error('Run this Windows-only pack preparation script from Windows PowerShell');
+  assertPinnedCompressionToolchain();
   for (const [label, value] of [['--archive', options.archive], ['--output', options.output], ['--app-build-id', options.appBuildId], ['--ctranslate2-build-id', options.ctranslate2BuildId]]) {
     if (!value) throw new Error(`Required argument missing: ${label}`);
   }
@@ -268,12 +291,20 @@ async function buildCandidate(options) {
     throw new Error('--archive and --output must be absolute paths');
   }
 
-  const archivePath = path.resolve(options.archive);
-  const outputDir = path.resolve(options.output);
+  const requestedArchivePath = path.resolve(options.archive);
+  const requestedOutputDir = path.resolve(options.output);
   const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  assertOutsideSensitiveRoots('The archive', archivePath, repositoryRoot);
-  assertOutsideSensitiveRoots('The output directory', outputDir, repositoryRoot);
-  await assertRegularFile(archivePath, 'The CUDA archive');
+  const sensitiveRoots = await getSensitiveRoots(repositoryRoot);
+  assertOutsideSensitiveRoots('The archive', requestedArchivePath, sensitiveRoots);
+  assertOutsideSensitiveRoots('The output directory', requestedOutputDir, sensitiveRoots);
+  await assertRegularFile(requestedArchivePath, 'The CUDA archive');
+  const archivePath = await fs.realpath(requestedArchivePath);
+  assertOutsideSensitiveRoots('The archive', archivePath, sensitiveRoots);
+
+  await assertFreshOutputLocation(requestedOutputDir);
+  const outputParent = await fs.realpath(path.dirname(requestedOutputDir));
+  const outputDir = path.join(outputParent, path.basename(requestedOutputDir));
+  assertOutsideSensitiveRoots('The output directory', outputDir, sensitiveRoots);
   await assertFreshOutputLocation(outputDir);
 
   const archiveDigest = await sha256File(archivePath);
@@ -281,7 +312,6 @@ async function buildCandidate(options) {
     throw new Error('CUDA archive size or SHA-256 does not match NVIDIA CUDA 12.9.1 manifest');
   }
 
-  const outputParent = path.dirname(outputDir);
   const stageDir = path.join(outputParent, `.${path.basename(outputDir)}.staging-${randomUUID()}`);
   const expectedStagePrefix = `.${path.basename(outputDir)}.staging-`;
   if (path.dirname(stageDir).toLowerCase() !== outputParent.toLowerCase() || !path.basename(stageDir).startsWith(expectedStagePrefix)) {
@@ -338,11 +368,37 @@ async function buildCandidate(options) {
     }
   } catch (error) {
     if (stageCreated) {
-      const currentStage = await fs.lstat(stageDir).catch(() => null);
+      let currentStage;
+      try {
+        currentStage = await fs.lstat(stageDir);
+      } catch (inspectionError) {
+        if (inspectionError?.code === 'ENOENT') throw error;
+        const primaryMessage = error instanceof Error ? error.message : String(error);
+        const cleanupMessage = inspectionError instanceof Error ? inspectionError.message : String(inspectionError);
+        throw new Error(
+          `${primaryMessage}; also could not inspect failed staging directory ${stageDir}: ${cleanupMessage}`,
+          { cause: error },
+        );
+      }
       if (currentStage?.isDirectory() && !currentStage.isSymbolicLink()
         && path.dirname(stageDir).toLowerCase() === outputParent.toLowerCase()
         && path.basename(stageDir).startsWith(expectedStagePrefix)) {
-        await fs.rm(stageDir, { recursive: true, force: false }).catch(() => {});
+        try {
+          await fs.rm(stageDir, { recursive: true, force: false });
+        } catch (cleanupError) {
+          const primaryMessage = error instanceof Error ? error.message : String(error);
+          const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          throw new Error(
+            `${primaryMessage}; also failed to remove staging directory ${stageDir}: ${cleanupMessage}`,
+            { cause: error },
+          );
+        }
+      } else {
+        const primaryMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `${primaryMessage}; staging directory ${stageDir} was left in place because it failed safe cleanup checks`,
+          { cause: error },
+        );
       }
     }
     throw error;

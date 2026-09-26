@@ -13,6 +13,8 @@ The source is NVIDIA's [CUDA 12.9.1 redistributable manifest](https://developer.
 
 The pair is **771,188,224 raw bytes** and **494,950,029 bytes** in two locally generated Brotli files. These are candidate pack bytes, not a GitHub release asset or complete installed-app size. The official ZIP also includes `nvblas64_12.dll`; it was not present in the functional load path and is excluded from this Whisper-specific candidate. The installed CTranslate2 4.6.3 wheel supplies `cudnn64_9.dll` as a small dispatcher. Its optional cuDNN component DLLs were absent; this probe loaded the dispatcher but did not load those components.
 
+The compressed candidate files were generated with Node.js v24.15.0, zlib 1.3.1-e00f703, and Brotli 1.2.0 in generic mode at quality 5. `scripts/prepare-gpu-pack.mjs` pins that encoder toolchain and rejects other versions before reading the archive.
+
 ## Functional probe
 
 Using the pinned local Python 3.11 CPU closure, Faster-Whisper 1.2.1, and CTranslate2 4.6.3, a test process loaded the public `tiny` model into an isolated test directory and transcribed a synthetic Windows speech sample on `device='cuda'`, `compute_type='float16'`. CTranslate2 reported `model.model.device == 'cuda'`, and the generated sentence was transcribed. Windows `GetModuleFileNameW` confirmed that both cuBLAS DLLs loaded from the isolated candidate directory, while `nvcuda.dll` loaded from Windows System32. The test process was launched with a clean `PATH` that excluded the installed CUDA Toolkit, and CUDA Toolkit environment hints were removed before launch. No existing user model cache, recording, transcript, or profile was read.
@@ -25,4 +27,4 @@ On the same date, the app's actual pack manager installed the two locally genera
 
 ## Distribution boundary
 
-NVIDIA's [CUDA 12.9 EULA](https://docs.nvidia.com/cuda/archive/12.9.0/eula/index.html) lists Windows cuBLAS/cuBLASLt runtime files as redistributable under conditions on application use and non-standalone distribution. The final Eve-specific download, notices, download URL, and access pattern need review against those terms. The candidate pack manager must pin each compressed and decompressed hash in the base app; a manifest downloaded beside the assets is not a trust root.
+NVIDIA's [CUDA 12.9.1 EULA](https://docs.nvidia.com/cuda/archive/12.9.1/eula/index.html) lists Windows cuBLAS/cuBLASLt runtime files as redistributable under conditions on application use and non-standalone distribution. The final Eve-specific download, notices, download URL, and access pattern need review against those terms. The candidate pack manager must pin each compressed and decompressed hash in the base app; a manifest downloaded beside the assets is not a trust root.
