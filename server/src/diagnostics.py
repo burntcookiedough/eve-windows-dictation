@@ -115,6 +115,9 @@ def _version_tuple(version: str) -> tuple[int, int, int] | None:
 
 
 def _get_whisper_device(settings: Settings) -> str:
+    effective = getattr(settings, "effective_whisper_config", None)
+    if effective is not None:
+        return effective.requested_device
     return settings.whisper_device
 
 
@@ -377,7 +380,7 @@ def _diagnostics_refreshing_payload(settings: Settings) -> dict[str, Any]:
 def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str, Any]:
     global _last_diagnostics, _last_collected_at, _last_signature
 
-    signature = (settings.whisper_device,)
+    signature = (_get_whisper_device(settings),)
 
     if not force:
         cached = _get_cached_diagnostics(signature, fresh_only=True)

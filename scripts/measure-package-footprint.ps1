@@ -55,10 +55,10 @@ if (Test-Path -LiteralPath $sitePackages -PathType Container) {
     } | Sort-Object bytes -Descending | Select-Object -First $Top)
 }
 
-$releaseDir = if ($ArtifactDir) { (Resolve-Path -LiteralPath $ArtifactDir).Path } else { Join-Path $app "release" }
+$releaseDir = if ($ArtifactDir) { (Resolve-Path -LiteralPath $ArtifactDir).Path } else { Join-Path $app "release\nsis-web" }
 $artifacts = @()
 if (Test-Path -LiteralPath $releaseDir -PathType Container) {
-    $artifacts = @(Get-ChildItem -LiteralPath $releaseDir -File -Recurse |
+    $artifacts = @(Get-ChildItem -LiteralPath $releaseDir -File |
         Where-Object { $_.Extension -in @(".7z", ".exe") } |
         ForEach-Object { [pscustomobject]@{ name = $_.Name; bytes = [long]$_.Length } } |
         Sort-Object bytes -Descending)
