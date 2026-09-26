@@ -63,7 +63,7 @@ if (Test-Path -LiteralPath $releaseDir -PathType Container) {
         ForEach-Object { [pscustomobject]@{ name = $_.Name; bytes = [long]$_.Length } } |
         Sort-Object bytes -Descending)
 }
-if ($ArtifactDir -and $artifacts.Count -eq 0) {
+if ($artifacts.Count -eq 0) {
     throw "No .7z or .exe installer artifacts found in $releaseDir"
 }
 
