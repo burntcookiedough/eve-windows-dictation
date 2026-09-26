@@ -13,7 +13,7 @@ export interface ServerRuntimeFingerprint {
   app_build: string | null;
   server_build: string;
   pack_id: string | null;
-  effective_device: string;
+  effective_device: string | null;
 }
 
 /** GPU pack state safe to serialize over IPC. Never includes a URL or path. */

@@ -620,7 +620,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
   const downloadAsset = async (
     asset: GpuPackAssetDescriptor,
     targetPath: string,
-    signal: AbortSignal,
+    controller: AbortController,
     receivedBefore: number,
     totalBytes: number,
     onProgress: (receivedBytes: number, force?: boolean) => void,
@@ -628,6 +628,11 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     let received = 0;
     const hash = createHash('sha256');
     let lastProgressAt = 0;
+    let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+    const resetIdleTimeout = () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      idleTimeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+    };
     const verifier = new Transform({
       transform(chunk: Buffer | Uint8Array, _encoding, callback) {
         const bytes = toBuffer(chunk);
@@ -638,6 +643,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         }
         received = next;
         hash.update(bytes);
+        resetIdleTimeout();
         const now = Date.now();
         if (now - lastProgressAt >= MAX_PROGRESS_INTERVAL_MS) {
           lastProgressAt = now;
@@ -648,7 +654,8 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     });
 
     try {
-      const chunks = await source(asset.url, signal);
+      resetIdleTimeout();
+      const chunks = await source(asset.url, controller.signal);
       await pipeline(
         Readable.from(chunks),
         verifier,
@@ -657,6 +664,8 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     } catch (error) {
       if (error instanceof GpuPackError) throw error;
       throw new GpuPackError('download_failed', 'GPU asset download was interrupted');
+    } finally {
+      if (idleTimeout) clearTimeout(idleTimeout);
     }
 
     const actualHash = hash.digest('hex');
@@ -706,7 +715,6 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
     let stagePath: string | null = null;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
     try {
       await ensureRoot();
       const existing = await verifyPackDirectory(packDirectory());
@@ -739,7 +747,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         const downloaded = await downloadAsset(
           asset,
           compressedPath,
-          controller.signal,
+          controller,
           receivedBytes,
           descriptor!.downloadBytes,
           (next, force = false) => {
@@ -828,7 +836,6 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
       const retryable = error instanceof GpuPackError ? error.retryable : true;
       return setState({ status: 'failed', code, retryable });
     } finally {
-      clearTimeout(timeout);
       controller.abort();
       if (stagePath) {
         try {

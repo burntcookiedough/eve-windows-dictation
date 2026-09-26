@@ -18,7 +18,7 @@ export interface ServerRuntimeFingerprint {
   app_build: string | null;
   server_build: string;
   pack_id: string | null;
-  effective_device: string;
+  effective_device: string | null;
 }
 
 export interface ExpectedRuntimeIdentity {
@@ -82,7 +82,7 @@ function parseRuntimeFingerprint(value: unknown): ServerRuntimeFingerprint | und
     || typeof runtime.server_build !== 'string'
     || runtime.server_build.length === 0
     || !(runtime.pack_id === null || typeof runtime.pack_id === 'string')
-    || typeof runtime.effective_device !== 'string'
+    || !(runtime.effective_device === null || typeof runtime.effective_device === 'string')
   ) return undefined;
   return {
     app_build: runtime.app_build,

@@ -99,6 +99,14 @@ function Invoke-Native {
     }
 }
 
+function Get-OptionalProperty {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function Wait-For-ReadyHealth {
     param(
         [string]$Url,
@@ -115,16 +123,22 @@ function Wait-For-ReadyHealth {
             continue
         }
 
-        if ($health.engine.status -eq "error") {
-            throw "Packaged model preparation failed: $($health.engine.message)"
+        $engine = Get-OptionalProperty $health "engine"
+        $engineStatus = Get-OptionalProperty $engine "status"
+        $engineInfo = Get-OptionalProperty $engine "info"
+        $modelDownload = Get-OptionalProperty $health "model_download"
+        $downloadStatus = Get-OptionalProperty $modelDownload "status"
+
+        if ($engineStatus -eq "error") {
+            throw "Packaged model preparation failed: $(Get-OptionalProperty $engine 'message')"
         }
-        if ($health.model_download.status -eq "error") {
-            throw "Packaged model download failed: $($health.model_download.detail)"
+        if ($downloadStatus -eq "error") {
+            throw "Packaged model download failed: $(Get-OptionalProperty $modelDownload 'detail')"
         }
         if (
-            $health.engine.status -eq "ready" -and
-            $health.engine.info.model -eq $ExpectedModel -and
-            $health.model_download.status -eq "ready"
+            $engineStatus -eq "ready" -and
+            (Get-OptionalProperty $engineInfo "model") -eq $ExpectedModel -and
+            $downloadStatus -eq "ready"
         ) {
             return $health
         }

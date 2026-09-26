@@ -97,6 +97,13 @@ describe('server health parsing', () => {
     expect(matchesExpectedRuntime(matchingHealth.runtime, expected)).toBe(true);
     expect(matchesExpectedRuntime(matchingHealth.runtime, { ...expected, pack_id: null })).toBe(false);
     expect(matchesExpectedRuntime(matchingHealth.runtime, { ...expected, app_build: 'older' })).toBe(false);
+
+    const loadingHealth = parseHealthyResponse({
+      status: 'healthy',
+      runtime: { ...expected, effective_device: null },
+    });
+    expect(loadingHealth.runtime?.effective_device).toBeNull();
+    expect(matchesExpectedRuntime(loadingHealth.runtime, expected)).toBe(true);
   });
 });
 
