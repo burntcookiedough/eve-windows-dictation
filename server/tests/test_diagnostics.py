@@ -289,7 +289,8 @@ def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monke
         ),
     )
 
-    settings = Settings()
+    # Cache-key behavior must not depend on whether the CI host has a GPU.
+    settings = Settings.model_construct(whisper_device="auto")
     cached = diagnostics.collect_diagnostics(settings, force=True)
     stall_probe = True
     first = threading.Thread(
@@ -302,7 +303,7 @@ def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monke
         results["compatible"] = diagnostics.collect_diagnostics(
             settings, force=True
         )
-        incompatible_settings = Settings(whisper_device="cpu")
+        incompatible_settings = Settings.model_construct(whisper_device="cpu")
         results["incompatible"] = diagnostics.collect_diagnostics(
             incompatible_settings, force=True
         )

@@ -46,7 +46,7 @@ def test_whisper_shutdown_unloads_ctranslate2_model_and_reports_actual_device(
     monkeypatch.setattr(whisper, "WhisperModel", FakeWhisperModel)
     monkeypatch.setattr(whisper, "_get_vram_used_gb", lambda: None)
     engine = whisper.WhisperEngine(
-        Settings(
+        Settings.model_construct(
             whisper_model=str(model_path),
             whisper_device="cuda",
             whisper_compute_type="float16",

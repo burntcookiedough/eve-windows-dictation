@@ -229,9 +229,10 @@ def test_release_verification_waits_for_the_packaged_model_runtime() -> None:
     )
 
     assert "function Wait-For-ReadyHealth" in contents
-    assert '$health.engine.status -eq "ready"' in contents
-    assert '$health.engine.info.model -eq $ExpectedModel' in contents
-    assert '$health.model_download.status -eq "ready"' in contents
+    assert 'function Get-OptionalProperty' in contents
+    assert '$engineStatus -eq "ready"' in contents
+    assert '(Get-OptionalProperty $engineInfo "model") -eq $ExpectedModel' in contents
+    assert '$downloadStatus -eq "ready"' in contents
     assert 'throw "Packaged model preparation failed:' in contents
     assert 'throw "Packaged model download failed:' in contents
 
