@@ -10,8 +10,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$InstallerDir = [System.IO.Path]::GetFullPath($InstallerDir)
-$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
+$InstallerDir = (Resolve-Path -LiteralPath $InstallerDir -ErrorAction Stop).ProviderPath
+$InstallDir = (Resolve-Path -LiteralPath $InstallDir -ErrorAction Stop).ProviderPath
 
 function Write-Step {
     param([string]$Message)
