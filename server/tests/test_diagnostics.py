@@ -175,11 +175,12 @@ def test_collect_diagnostics_warns_when_saved_cuda_preference_falls_back_to_cpu(
 
     def check_cuda(device: str) -> CudaDiagnostics:
         checked_devices.append(device)
+        available = device == "cuda" and capabilities.whisper_cuda_available
         return CudaDiagnostics(
-            available=False,
+            available=available,
             device=device,
-            reason="The optional GPU runtime is not installed.",
-            name=None,
+            reason=None if available else "The optional GPU runtime is not installed.",
+            name="Test GPU" if available else None,
             compute_capability=None,
         )
 
@@ -214,10 +215,24 @@ def test_collect_diagnostics_warns_when_saved_cuda_preference_falls_back_to_cpu(
     assert checked_devices == ["cuda"]
     assert any(warning["code"] == "cuda_unavailable" for warning in payload["warnings"])
 
+    capabilities = RuntimeCapabilities(
+        whisper_cpu=ComputeCapability(frozenset({"int8", "float32"})),
+        whisper_cuda=ComputeCapability(frozenset({"float16"})),
+    )
+    cuda_settings = Settings(whisper_device="cuda")
+    cuda_payload = diagnostics.collect_diagnostics(cuda_settings)
+
+    assert cuda_settings.whisper_device == "cuda"
+    assert checked_devices == ["cuda", "cuda"]
+    assert cuda_payload["cuda"]["available"] is True
+    assert not any(
+        warning["code"] == "cuda_unavailable" for warning in cuda_payload["warnings"]
+    )
+
     cpu_settings = Settings(whisper_device="cpu")
     cpu_payload = diagnostics.collect_diagnostics(cpu_settings)
 
-    assert checked_devices == ["cuda", "cpu"]
+    assert checked_devices == ["cuda", "cuda", "cpu"]
     assert not any(
         warning["code"] == "cuda_unavailable" for warning in cpu_payload["warnings"]
     )
