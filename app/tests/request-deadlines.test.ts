@@ -101,6 +101,55 @@ describe('Electron request deadlines', () => {
     expect(manager.getState().status).toBe('running');
   });
 
+  test('restarts and starts wait for one shutdown before starting a replacement', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    let stopEntered: (() => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    const shutdownStarted = new Promise<void>((resolve) => { stopEntered = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => {
+      stopEntered?.();
+      return processExit;
+    };
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const first = manager.restart();
+      const second = manager.restart();
+      const directStart = manager.start();
+      await shutdownStarted;
+      expect(starts).toBe(0);
+      finishExit?.(true);
+      await Promise.all([first, second, directStart]);
+      expect(starts).toBe(1);
+      expect(manager.getState().status).toBe('running');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
   test('restores running state after a transient health-check failure', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
