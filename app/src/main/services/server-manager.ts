@@ -50,8 +50,8 @@ export class ServerManager {
 
   private status: ServerStatus = 'idle';
   private startInFlight: Promise<void> | null = null;
-  private stopInFlight: Promise<void> | null = null;
-  private startAfterStop: Promise<void> | null = null;
+  private lifecycleTail: Promise<void> = Promise.resolve();
+  private lastLifecycleRequest: { kind: 'start' | 'stop' | 'restart' | 'cleanup'; promise: Promise<void> } | null = null;
   private cleaningUp = false;
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
@@ -584,22 +584,31 @@ export class ServerManager {
    */
   start(): Promise<void> {
     if (this.cleaningUp) return Promise.resolve();
-    if (this.stopInFlight) {
-      if (!this.startAfterStop) {
-        const queuedStart = this.stopInFlight.then(() => this.start());
-        this.startAfterStop = queuedStart;
-        const clearQueuedStart = () => {
-          if (this.startAfterStop === queuedStart) this.startAfterStop = null;
-        };
-        void queuedStart.then(clearQueuedStart, clearQueuedStart);
-      }
-      return this.startAfterStop;
-    }
-    if (this.startInFlight) return this.startInFlight;
-    const attempt = this.startOnce().finally(() => {
-      this.startInFlight = null;
+    const attempt = this.enqueueLifecycle('start', async () => {
+      if (!this.cleaningUp) await this.startOnce();
     });
     this.startInFlight = attempt;
+    const clearStart = () => {
+      if (this.startInFlight === attempt) this.startInFlight = null;
+    };
+    void attempt.then(clearStart, clearStart);
+    return attempt;
+  }
+
+  private enqueueLifecycle(
+    kind: 'start' | 'stop' | 'restart' | 'cleanup',
+    action: () => Promise<void>,
+  ): Promise<void> {
+    if (kind !== 'cleanup' && this.lastLifecycleRequest?.kind === kind) {
+      return this.lastLifecycleRequest.promise;
+    }
+    const attempt = this.lifecycleTail.then(action);
+    this.lastLifecycleRequest = { kind, promise: attempt };
+    this.lifecycleTail = attempt.then(() => {}, () => {});
+    const clearLast = () => {
+      if (this.lastLifecycleRequest?.promise === attempt) this.lastLifecycleRequest = null;
+    };
+    void attempt.then(clearLast, clearLast);
     return attempt;
   }
 
@@ -869,30 +878,10 @@ export class ServerManager {
    * Stop the server.
    */
   stop(): Promise<void> {
-    if (this.stopInFlight) {
-      if (this.startAfterStop) {
-        return this.startAfterStop.then(() => this.stop(), () => this.stop());
-      }
-      return this.stopInFlight;
-    }
-    const attempt = this.stopOnce().finally(() => {
-      this.stopInFlight = null;
-    });
-    this.stopInFlight = attempt;
-    return attempt;
+    return this.enqueueLifecycle('stop', () => this.stopOnce());
   }
 
   private async stopOnce(): Promise<void> {
-    // Let an in-progress startup settle before changing process state. Otherwise
-    // a restart can reuse the old start promise after stop() has finished.
-    if (this.startInFlight) {
-      try {
-        await this.startInFlight;
-      } catch (error) {
-        log.warn('Pending server startup failed before stop', { error: error as Error });
-      }
-    }
-
     if (this.status === 'stopped' || this.status === 'idle' || this.status === 'stopping') {
       return;
     }
@@ -984,15 +973,17 @@ export class ServerManager {
   /**
    * Restart the server.
    */
-  async restart(): Promise<void> {
+  restart(): Promise<void> {
     if (!this.managed && !this.startInFlight) {
       log.info('Server is not managed, cannot restart a detected process');
-      return;
+      return Promise.resolve();
     }
 
     log.info('Restarting server');
-    await this.stop();
-    await this.start();
+    return this.enqueueLifecycle('restart', async () => {
+      await this.stopOnce();
+      if (!this.cleaningUp) await this.startOnce();
+    });
   }
 
   /**
@@ -1002,9 +993,9 @@ export class ServerManager {
     this.cleaningUp = true;
     this.stopHealthPolling();
 
-    if (this.childProcess || this.startAfterStop || this.startInFlight) {
+    if (this.childProcess || this.startInFlight || this.lastLifecycleRequest) {
       log.info('Cleaning up server on app quit');
-      await this.stop();
+      await this.enqueueLifecycle('cleanup', () => this.stopOnce());
     }
 
     this.clearPendingLogDelivery();

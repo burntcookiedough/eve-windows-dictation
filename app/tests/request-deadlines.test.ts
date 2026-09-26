@@ -61,6 +61,7 @@ describe('Electron request deadlines', () => {
       const first = manager.start();
       const second = manager.start();
       expect(second).toBe(first);
+      await Promise.resolve();
       expect(validations).toBe(1);
       finishValidation?.(null);
       await Promise.all([first, second]);
@@ -151,6 +152,7 @@ describe('Electron request deadlines', () => {
 
     const first = manager.start();
     const restarted = manager.restart();
+    await Promise.resolve();
     expect(starts).toBe(1);
 
     finishFirstStart?.();
@@ -182,6 +184,7 @@ describe('Electron request deadlines', () => {
       return processExit;
     };
     privateManager.startOnce = async () => {
+      if (manager.getState().status === 'running') return;
       starts++;
       privateManager.updateStatus('running');
     };
@@ -250,6 +253,65 @@ describe('Electron request deadlines', () => {
     }
   });
 
+  test('preserves an alternating stop-start-stop-start request order', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const firstStart = manager.start();
+      const secondStop = manager.stop();
+      const lastStart = manager.start();
+      finishExit?.(true);
+      await Promise.all([firstStop, firstStart, secondStop, lastStart]);
+      expect(starts).toBe(2);
+      expect(manager.getState().status).toBe('running');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('a failed startup does not block a following stop', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      startOnce: () => Promise<void>;
+      stopOnce: () => Promise<void>;
+    };
+    let stops = 0;
+    privateManager.startOnce = async () => { throw new Error('startup failed'); };
+    privateManager.stopOnce = async () => { stops++; };
+
+    const [startResult, stopResult] = await Promise.allSettled([manager.start(), manager.stop()]);
+    expect(startResult.status).toBe('rejected');
+    expect(stopResult.status).toBe('fulfilled');
+    expect(stops).toBe(1);
+  });
+
   test('cleanup cancels a start queued behind shutdown', async () => {
     const manager = new ServerManager();
     const privateManager = manager as unknown as {
@@ -307,6 +369,7 @@ describe('Electron request deadlines', () => {
     };
 
     const starting = manager.start();
+    await Promise.resolve();
     const cleanup = manager.cleanup();
     finishStart?.();
     await Promise.all([starting, cleanup]);
