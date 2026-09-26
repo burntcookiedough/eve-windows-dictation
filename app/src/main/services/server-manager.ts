@@ -610,11 +610,14 @@ export class ServerManager {
     }
 
     const expectedRuntime = app.isPackaged ? await this.expectedRuntime() : null;
+    if (this.cleaningUp) return;
 
     // Check for existing server first
     const existingPid = this.readPidFile();
     if (existingPid && this.isProcessAlive(existingPid.pid)) {
-      if (!(await this.isOwnedServerProcess(existingPid.pid, existingPid.startedAt))) {
+      const owned = await this.isOwnedServerProcess(existingPid.pid, existingPid.startedAt);
+      if (this.cleaningUp) return;
+      if (!owned) {
         log.warn('PID file belongs to an unverified process; refusing replacement', {
           pid: existingPid.pid,
         });
@@ -623,6 +626,7 @@ export class ServerManager {
       }
 
       const health = await this.getHealthState(existingPid.port);
+      if (this.cleaningUp) return;
       if (
         health.healthy
         && (!expectedRuntime || matchesExpectedRuntime(health.runtime, expectedRuntime.identity))
@@ -644,7 +648,9 @@ export class ServerManager {
       log.warn('Existing owned Murmur server is unhealthy or uses a different runtime; terminating it');
       try {
         process.kill(existingPid.pid, 'SIGTERM');
-        if (!(await this.waitForProcessExit(existingPid.pid, 5000))) {
+        const exited = await this.waitForProcessExit(existingPid.pid, 5000);
+        if (this.cleaningUp) return;
+        if (!exited) {
           this.updateStatus('error', 'Existing server did not stop');
           return;
         }
@@ -656,6 +662,10 @@ export class ServerManager {
     } else if (existingPid) {
       this.cleanupStalePidFile();
     }
+
+    // Cleanup can begin while runtime validation or an existing-server probe awaits.
+    // No asynchronous work remains between this check and spawn().
+    if (this.cleaningUp) return;
 
     const serverCmd = this.getServerCommand(expectedRuntime?.gpuRuntime ?? null);
     if (!serverCmd) {

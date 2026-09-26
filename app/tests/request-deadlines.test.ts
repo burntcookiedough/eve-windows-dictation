@@ -73,6 +73,64 @@ describe('Electron request deadlines', () => {
     }
   });
 
+  test('cleanup during runtime validation prevents a late server spawn', async () => {
+    const packagedApp = electronApp as unknown as { isPackaged: boolean };
+    const previousPackaged = packagedApp.isPackaged;
+    let finishValidation: ((value: null) => void) | undefined;
+    const validation = new Promise<null>((resolve) => { finishValidation = resolve; });
+    const manager = new ServerManager({
+      getValidatedRuntime: () => validation,
+    } as unknown as ConstructorParameters<typeof ServerManager>[0]);
+    const privateManager = manager as unknown as {
+      readPidFile: () => null;
+      getServerCommand: () => null;
+    };
+    let commandChecks = 0;
+    privateManager.readPidFile = () => null;
+    privateManager.getServerCommand = () => { commandChecks++; return null; };
+    packagedApp.isPackaged = true;
+
+    try {
+      const starting = manager.start();
+      const cleanup = manager.cleanup();
+      finishValidation?.(null);
+      await Promise.all([starting, cleanup]);
+      expect(commandChecks).toBe(0);
+      expect(manager.getState().status).toBe('idle');
+    } finally {
+      finishValidation?.(null);
+      packagedApp.isPackaged = previousPackaged;
+    }
+  });
+
+  test('cleanup during an existing-server probe prevents late adoption', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      readPidFile: () => { pid: number; port: number; startedAt: number };
+      isProcessAlive: () => boolean;
+      isOwnedServerProcess: () => Promise<boolean>;
+      getHealthState: () => Promise<HealthState>;
+    };
+    let finishHealth: ((health: HealthState) => void) | undefined;
+    let healthProbeStarted: (() => void) | undefined;
+    const health = new Promise<HealthState>((resolve) => { finishHealth = resolve; });
+    const probeStarted = new Promise<void>((resolve) => { healthProbeStarted = resolve; });
+    privateManager.readPidFile = () => ({ pid: 1234, port: 51717, startedAt: Date.now() });
+    privateManager.isProcessAlive = () => true;
+    privateManager.isOwnedServerProcess = async () => true;
+    privateManager.getHealthState = () => {
+      healthProbeStarted?.();
+      return health;
+    };
+
+    const starting = manager.start();
+    await probeStarted;
+    const cleanup = manager.cleanup();
+    finishHealth?.({ healthy: true, version: 'test' });
+    await Promise.all([starting, cleanup]);
+    expect(manager.getState().status).toBe('idle');
+  });
+
   test('restart waits for a pending startup before launching a replacement', async () => {
     const manager = new ServerManager();
     const privateManager = manager as unknown as {
