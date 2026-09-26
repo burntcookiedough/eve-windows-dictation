@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron';
+import path from 'node:path';
 import { createOverlayWindow, showOverlay, hideOverlay, positionOverlayOnActiveDisplay } from './windows/overlay.js';
 import { createMainWindow, showMainWindow } from './windows/main.js';
 import { setupHotkeyService } from './services/hotkey.js';
@@ -10,12 +11,13 @@ import {
 } from './services/transcription.js';
 import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
+import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
 import { getForegroundWindowHandle } from './services/clipboard.js';
 import { getSettings, getSetting } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
-import { IPC_CHANNELS } from '../shared/constants.js';
+import { GPU_PACK_CTRANSLATE2_BUILD_ID, IPC_CHANNELS } from '../shared/constants.js';
 import { buildHotwordsPrompt } from '../shared/hotwords.js';
 import { getModelProgressShortSummary } from '../shared/model-progress.js';
 import type {
@@ -36,6 +38,7 @@ let mainWindow: BrowserWindow | null = null;
 let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
+let gpuPackManager: ReturnType<typeof createGpuPackManager> | null = null;
 let isRecording = false;
 let recordingSource: 'lab' | 'normal' | null = null;
 let recordingSessionMode: DictationSessionMode = 'quick';
@@ -53,6 +56,12 @@ let overlayHideTimer: ReturnType<typeof setTimeout> | null = null;
 const OVERLAY_SUCCESS_DWELL_MS = 900;
 const OVERLAY_ERROR_DWELL_MS = 2200;
 const OVERLAY_EXIT_ANIMATION_MS = 200;
+
+function resolveGpuPackStorageRoot(): string {
+  const localAppData = process.env.LOCALAPPDATA?.trim();
+  const basePath = localAppData || app.getPath('userData');
+  return path.join(basePath, ...(localAppData ? ['Eve', 'gpu-packs'] : ['gpu-packs']));
+}
 
 function clearOverlayDismissTimers(): void {
   if (overlayExitTimer) {
@@ -526,12 +535,24 @@ async function startApplication(): Promise<void> {
   historyService.initialize();
   log.info('History service initialized');
 
+  // GPU-pack identity and storage are machine-local. The descriptor remains null until its
+  // exact binaries and redistribution terms have passed review.
+  gpuPackManager = createGpuPackManager({
+    descriptor: PINNED_GPU_PACK_DESCRIPTOR,
+    root: resolveGpuPackStorageRoot(),
+    identity: {
+      appBuildId: app.getVersion(),
+      ctranslate2BuildId: GPU_PACK_CTRANSLATE2_BUILD_ID,
+      platform: 'win32-x64',
+    },
+  });
+
   // Initialize server manager
-  serverManager = new ServerManager();
+  serverManager = new ServerManager(gpuPackManager);
   log.info('Server manager initialized');
 
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
-  setupIpcHandlers(historyService, serverManager);
+  setupIpcHandlers(historyService, serverManager, gpuPackManager);
   setupAudioHandler();
   setupMainWindowHandlers();
   setupDisplayChangeHandlers();

@@ -124,7 +124,7 @@ def test_local_whisper_path_skips_hub_resolution_and_download(
     monkeypatch.setattr(whisper, "get_repo_cache_status", unexpected_hub_access)
     monkeypatch.setattr(whisper, "snapshot_download", unexpected_hub_access)
     monkeypatch.setattr(whisper, "WhisperModel", FakeWhisperModel)
-    monkeypatch.setattr(whisper, "_get_cuda_active", lambda _device: False)
+    monkeypatch.setattr(whisper, "_get_cuda_active", lambda _device, _model: False)
 
     whisper.WhisperEngine(
         Settings(

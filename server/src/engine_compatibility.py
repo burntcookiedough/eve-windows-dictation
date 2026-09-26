@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from runtime_paths import gpu_runtime_allowed
+
 
 @dataclass(frozen=True)
 class ComputeCapability:
@@ -29,6 +31,17 @@ class RuntimeCapabilities:
         if requested_device == "auto" and self.whisper_cuda_available:
             return "cuda"
         return "cpu" if requested_device == "auto" else requested_device
+
+
+@dataclass(frozen=True)
+class EffectiveWhisperConfig:
+    """Requested engine preferences and the compatible runtime projection."""
+
+    requested_device: str
+    requested_compute_type: str
+    effective_device: str
+    effective_compute_type: str
+    unavailable_reason: str | None = None
 
 
 def _load_ctranslate2() -> Any:
@@ -60,19 +73,24 @@ def get_runtime_capabilities() -> RuntimeCapabilities:
         whisper_cuda = ComputeCapability(None, "CTranslate2 runtime is unavailable.")
     else:
         whisper_cpu = _probe_compute_types(ctranslate2, "cpu")
-        try:
-            cuda_count = ctranslate2.get_cuda_device_count()
-        except Exception:
+        if not gpu_runtime_allowed():
             whisper_cuda = ComputeCapability(
-                None, "CTranslate2 CUDA capability check failed."
+                None, "The optional GPU runtime is not installed."
             )
         else:
-            if cuda_count < 1:
+            try:
+                cuda_count = ctranslate2.get_cuda_device_count()
+            except Exception:
                 whisper_cuda = ComputeCapability(
-                    None, "CTranslate2 did not find a usable CUDA device."
+                    None, "CTranslate2 CUDA capability check failed."
                 )
             else:
-                whisper_cuda = _probe_compute_types(ctranslate2, "cuda")
+                if cuda_count < 1:
+                    whisper_cuda = ComputeCapability(
+                        None, "CTranslate2 did not find a usable CUDA device."
+                    )
+                else:
+                    whisper_cuda = _probe_compute_types(ctranslate2, "cuda")
 
     return RuntimeCapabilities(
         whisper_cpu=whisper_cpu,
@@ -127,6 +145,77 @@ def validate_engine_compatibility(
         raise ValueError(
             f"Whisper precision {whisper_compute_type} is not supported on {effective_device}."
         )
+
+
+def resolve_effective_whisper_config(
+    *,
+    whisper_device: str,
+    whisper_compute_type: str,
+    capabilities: RuntimeCapabilities,
+) -> EffectiveWhisperConfig:
+    """Resolve a safe runtime configuration without changing user preferences.
+
+    Persisted preferences may describe a runtime that is not installed on this
+    machine. Keep those preferences separately and project them to a usable CPU
+    configuration until the requested device and precision are available.
+    """
+
+    requested_device = whisper_device
+    requested_compute_type = whisper_compute_type
+    effective_device = capabilities.whisper_device_for(requested_device)
+    reasons: list[str] = []
+
+    if requested_device == "cuda" and not capabilities.whisper_cuda_available:
+        effective_device = "cpu"
+        reasons.append(
+            capabilities.whisper_cuda.reason or "Whisper CUDA is unavailable."
+        )
+
+    if requested_compute_type == "auto":
+        effective_compute_type = "auto"
+    else:
+        capability = (
+            capabilities.whisper_cuda
+            if effective_device == "cuda"
+            else capabilities.whisper_cpu
+        )
+        if capability.compute_types is not None and requested_compute_type in capability.compute_types:
+            effective_compute_type = requested_compute_type
+        else:
+            if capability.compute_types is None:
+                reasons.append(
+                    capability.reason
+                    or f"CTranslate2 precision capability is unavailable on {effective_device}."
+                )
+            else:
+                reasons.append(
+                    f"Whisper precision {requested_compute_type} is not supported on {effective_device}."
+                )
+
+            # CPU is the safe fallback when the chosen accelerator cannot honor
+            # the requested precision. Preserve the requested precision only if
+            # CTranslate2 explicitly reports it as supported on CPU.
+            if effective_device != "cpu":
+                effective_device = "cpu"
+            cpu_types = capabilities.whisper_cpu.compute_types
+            if cpu_types is not None and requested_compute_type in cpu_types:
+                effective_compute_type = requested_compute_type
+            else:
+                if cpu_types is not None and requested_compute_type not in cpu_types:
+                    reasons.append(
+                        f"Whisper precision {requested_compute_type} is not supported on cpu."
+                    )
+                elif capabilities.whisper_cpu.reason:
+                    reasons.append(capabilities.whisper_cpu.reason)
+                effective_compute_type = "auto"
+
+    return EffectiveWhisperConfig(
+        requested_device=requested_device,
+        requested_compute_type=requested_compute_type,
+        effective_device=effective_device,
+        effective_compute_type=effective_compute_type,
+        unavailable_reason=" ".join(dict.fromkeys(reasons)) or None,
+    )
 
 
 def option_compatibility(

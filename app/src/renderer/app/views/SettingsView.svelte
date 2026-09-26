@@ -21,7 +21,7 @@
   import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
   import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
-  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
+  import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type GpuPackState, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
 
   const DICTATION_MODE_OPTIONS: EveDropdownOption[] = [
@@ -80,6 +80,9 @@
   let settingsLoaded = $state(false);
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
+  let gpuPackState = $state<GpuPackState | null>(null);
+  let gpuPackInstalling = $state(false);
+  let gpuPackActionError = $state('');
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
   let hotwordCount = $derived(hotwordEntries.length);
@@ -104,6 +107,15 @@
   let pendingEngine = $state<Record<string, unknown>>({});
   let sharedServerState = $derived($serverStatusState.state);
   let sharedEngineStatus = $derived(engineStatus ?? sharedServerState?.engineStatus ?? null);
+  let currentRuntimeSummary = $derived(
+    sharedServerState?.status === 'running' && sharedServerState.runtime
+      ? sharedServerState.runtime.effective_device === 'cuda'
+        ? 'GPU acceleration is active.'
+        : sharedServerState.runtime.effective_device === 'cpu'
+          ? 'CPU inference is active.'
+          : 'The server has not reported an active device.'
+      : 'GPU capability is reported when the server is running.'
+  );
   let speechModelPresets = $derived(speechModelPresetsFromCatalog(modelCatalog));
 
   // Derive current values (server value overridden by pending)
@@ -189,6 +201,30 @@
     ].join('\n');
   }
 
+  function formatGpuPackSize(bytes: number): string {
+    const mib = bytes / (1024 * 1024);
+    return `${bytes.toLocaleString()} bytes (${mib.toFixed(0)} MiB)`;
+  }
+
+  function getGpuPackProgress(state: Extract<GpuPackState, { status: 'downloading' }>): number {
+    if (state.totalBytes <= 0) return 0;
+    return Math.max(0, Math.min(100, Math.round((state.receivedBytes / state.totalBytes) * 100)));
+  }
+
+  async function installGpuPack(): Promise<void> {
+    if (gpuPackInstalling) return;
+    gpuPackInstalling = true;
+    gpuPackActionError = '';
+    try {
+      gpuPackState = await window.murmurMain.installGpuPack();
+    } catch {
+      gpuPackState = { status: 'failed', code: 'storage_failed', retryable: true };
+      gpuPackActionError = 'GPU support could not be installed. Try again.';
+    } finally {
+      gpuPackInstalling = false;
+    }
+  }
+
   async function loadCoreSettings() {
     try {
       const loadedSettings = await window.murmurMain.getSettings();
@@ -262,12 +298,37 @@
   }
 
   onMount(() => {
+    let active = true;
+    let gpuPackEventRevision = 0;
+    const removeGpuPackListener = window.murmurMain.onGpuPackStateChange((state) => {
+      if (!active) return;
+      gpuPackEventRevision += 1;
+      gpuPackState = state;
+    });
+    const initialGpuPackEventRevision = gpuPackEventRevision;
+    void window.murmurMain.getGpuPackState()
+      .then((state) => {
+        if (active && gpuPackEventRevision === initialGpuPackEventRevision) {
+          gpuPackState = state;
+        }
+      })
+      .catch(() => {
+        if (active && gpuPackEventRevision === initialGpuPackEventRevision) {
+          gpuPackState = { status: 'failed', code: 'storage_failed', retryable: true };
+        }
+      });
+
     void loadCoreSettings();
     void loadServerSettings();
     void loadAudioDevices();
     void window.murmurMain.getAppVersion()
       .then((version) => (appVersion = version))
       .catch((error) => console.error('Failed to load app version:', error));
+
+    return () => {
+      active = false;
+      removeGpuPackListener();
+    };
   });
 
   $effect(() => {
@@ -962,6 +1023,81 @@
         {/if}
       {/if}
         </div>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection
+      title="Optional GPU support"
+      description="Download CUDA support only if you want GPU inference. CPU inference remains available without an NVIDIA GPU."
+      variant="content"
+    >
+      <div data-gpu-pack-card class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h3 class="text-sm font-medium text-zinc-100">NVIDIA GPU runtime</h3>
+            <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">
+              Pack installation is separate from the Python server. Eve verifies the files before making them available to a managed server.
+            </p>
+          </div>
+          <div data-gpu-pack-status class="min-w-0 text-xs leading-5 text-zinc-300">
+            {#if !gpuPackState}
+              Checking GPU support…
+            {:else if gpuPackState.status === 'unavailable'}
+              The optional GPU pack is unavailable in this Eve build.
+            {:else if gpuPackState.status === 'missing'}
+              <span>Not installed · {formatGpuPackSize(gpuPackState.downloadBytes)} download</span>
+            {:else if gpuPackState.status === 'downloading'}
+              <div class="min-w-40 space-y-1">
+                <span>Downloading · {getGpuPackProgress(gpuPackState)}%</span>
+                <progress
+                  class="block h-1.5 w-full accent-zinc-200"
+                  value={getGpuPackProgress(gpuPackState)}
+                  max="100"
+                  aria-label="GPU support download progress"
+                ></progress>
+              </div>
+            {:else if gpuPackState.status === 'validating'}
+              Verifying downloaded GPU files…
+            {:else if gpuPackState.status === 'ready'}
+              {sharedServerState?.runtime?.pack_id === gpuPackState.packId
+                ? 'Installed · active for this server.'
+                : 'Installed · restart Eve to use GPU support.'}
+            {:else if gpuPackState.code === 'integrity_failed' || gpuPackState.code === 'pack_invalid'}
+              GPU files did not pass integrity checks.
+            {:else if gpuPackState.code === 'download_failed'}
+              The GPU support download was interrupted.
+            {:else}
+              Eve could not verify GPU support.
+            {/if}
+          </div>
+        </div>
+
+        {#if gpuPackActionError}
+          <p role="alert" class="mt-3 text-xs leading-5 text-red-300">{gpuPackActionError}</p>
+        {/if}
+
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-4">
+          <div class="min-w-0 text-xs leading-5 text-zinc-500">
+            <span class="text-zinc-400">Current server runtime:</span> {currentRuntimeSummary}
+          </div>
+          {#if gpuPackState?.status === 'missing' || (gpuPackState?.status === 'failed' && gpuPackState.retryable)}
+            <button
+              type="button"
+              onclick={installGpuPack}
+              disabled={gpuPackInstalling}
+              aria-busy={gpuPackInstalling}
+              class="min-h-9 shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100
+                {gpuPackInstalling
+                  ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                  : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
+            >
+              {gpuPackInstalling ? 'Starting…' : gpuPackState.status === 'missing' ? 'Download GPU support' : 'Try again'}
+            </button>
+          {/if}
+        </div>
+        <p class="mt-3 text-[11px] leading-4 text-zinc-600">
+          The server reports whether CUDA is active after its own capability check. Installing this pack does not change your selected device.
+        </p>
       </div>
     </SettingsSection>
 

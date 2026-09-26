@@ -5,17 +5,26 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextvars import ContextVar
 from pathlib import Path
 import tempfile
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from engine_compatibility import (
+    EffectiveWhisperConfig,
     get_runtime_capabilities,
     normalize_whisper_language,
     option_compatibility,
+    resolve_effective_whisper_config,
     validate_engine_compatibility,
 )
 import legacy_settings
@@ -23,6 +32,9 @@ import legacy_settings
 logger = logging.getLogger(__name__)
 
 SETTINGS_FILE = Path(__file__).parent.parent / "settings.json"
+_ENGINE_PATCH_KEYS: ContextVar[frozenset[str]] = ContextVar(
+    "engine_patch_keys", default=frozenset()
+)
 
 
 def get_settings_file_path() -> Path:
@@ -146,6 +158,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_binary: bool = False
 
+    _requested_whisper_device: str = PrivateAttr(default="auto")
+    _requested_whisper_compute_type: str = PrivateAttr(default="auto")
+    _effective_whisper_config: EffectiveWhisperConfig | None = PrivateAttr(default=None)
+
     @field_validator("whisper_language", mode="before")
     @classmethod
     def normalize_language(cls, value: Any) -> str | None:
@@ -154,13 +170,68 @@ class Settings(BaseSettings):
         return normalize_whisper_language(value)
 
     @model_validator(mode="after")
-    def validate_runtime_compatibility(self) -> Settings:
-        validate_engine_compatibility(
-            whisper_device=self.whisper_device,
-            whisper_compute_type=self.whisper_compute_type,
-            capabilities=get_runtime_capabilities(),
+    def resolve_runtime_compatibility(self) -> Settings:
+        requested_device = self.whisper_device
+        requested_compute_type = self.whisper_compute_type
+        capabilities = get_runtime_capabilities()
+
+        # Explicit UI patches retain the existing contract: a newly selected
+        # unavailable device or unsupported precision is rejected. Existing
+        # persisted preferences are still accepted and safely projected below.
+        changed_engine_keys = _ENGINE_PATCH_KEYS.get()
+        if "whisper_device" in changed_engine_keys and requested_device == "cuda":
+            validate_engine_compatibility(
+                whisper_device="cuda",
+                whisper_compute_type="auto",
+                capabilities=capabilities,
+            )
+        if "whisper_compute_type" in changed_engine_keys:
+            requested_device_projection = resolve_effective_whisper_config(
+                whisper_device=requested_device,
+                whisper_compute_type="auto",
+                capabilities=capabilities,
+            )
+            validate_engine_compatibility(
+                whisper_device=requested_device_projection.effective_device,
+                whisper_compute_type=requested_compute_type,
+                capabilities=capabilities,
+            )
+
+        effective = resolve_effective_whisper_config(
+            whisper_device=requested_device,
+            whisper_compute_type=requested_compute_type,
+            capabilities=capabilities,
         )
+        self._requested_whisper_device = requested_device
+        self._requested_whisper_compute_type = requested_compute_type
+        self._effective_whisper_config = effective
+        # Runtime consumers continue reading the familiar fields and therefore
+        # receive only a compatible configuration. Serialization below exposes
+        # the user's request so later partial updates cannot erase it.
+        self.whisper_device = effective.effective_device
+        self.whisper_compute_type = effective.effective_compute_type
         return self
+
+    @property
+    def requested_whisper_device(self) -> str:
+        return self._requested_whisper_device
+
+    @property
+    def requested_whisper_compute_type(self) -> str:
+        return self._requested_whisper_compute_type
+
+    @property
+    def effective_whisper_config(self) -> EffectiveWhisperConfig | None:
+        return self._effective_whisper_config
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Serialize saved preferences while attributes expose runtime values."""
+        values = super().model_dump(*args, **kwargs)
+        if "whisper_device" in values:
+            values["whisper_device"] = self._requested_whisper_device
+        if "whisper_compute_type" in values:
+            values["whisper_compute_type"] = self._requested_whisper_compute_type
+        return values
 
 
 # Settings metadata for dynamic UI rendering
@@ -417,11 +488,16 @@ def build_settings_candidate(patch: dict[str, Any]) -> Settings:
     current = get_settings()
     current_dict = current.model_dump()
     current_dict.update(patch)
+    context_token = _ENGINE_PATCH_KEYS.set(
+        frozenset(patch) & {"whisper_device", "whisper_compute_type"}
+    )
     try:
         return Settings(**current_dict)
     except ValidationError as e:
         logger.warning("Rejected invalid settings update: %s", e)
         raise
+    finally:
+        _ENGINE_PATCH_KEYS.reset(context_token)
 
 
 def commit_settings(candidate: Settings) -> Settings:
@@ -461,8 +537,14 @@ def _persist_settings(settings: Settings) -> None:
     defaults = _default_settings()
     default_dict = defaults.model_dump()
     current_dict = settings.model_dump()
-    # Only persist values that differ from defaults
-    diff: dict[str, Any] = {}
+    # Preserve settings written by older versions or managed outside the
+    # Settings API. API-managed values below are replaced from the candidate.
+    diff = {
+        key: value
+        for key, value in _load_settings_json().items()
+        if key not in API_KEYS and key not in PERSISTED_INTERNAL_KEYS
+    }
+    # Only persist API values that differ from defaults.
     for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
         if key in current_dict and current_dict[key] != default_dict.get(key):
             diff[key] = current_dict[key]

@@ -1,8 +1,8 @@
-import { app, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { arch, release } from 'node:os';
 import { IPC_CHANNELS } from '../../shared/constants.js';
-import type { HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
+import type { GpuPackState, HistoryFilters, Settings, Hotkey } from '../../shared/types.js';
 import { isHistoryExportRequest, isHistoryFilters } from '../../shared/history-validation.js';
 import { formatHotwordsCsl, parseHotwordsCsl } from '../../shared/hotwords.js';
 import { isInsightsRange } from '../../shared/insights.js';
@@ -11,6 +11,7 @@ import { formatDiagnosticsReport } from '../services/diagnostics-report.js';
 import type { HistoryService } from '../services/history.js';
 import { exportHistoryToFile } from '../services/history-export.js';
 import type { ServerManager } from '../services/server-manager.js';
+import type { GpuPackManager } from '../services/gpu-pack-manager.js';
 import { getSettings, updateSetting } from '../services/settings.js';
 import {
   getServerSettings,
@@ -30,6 +31,12 @@ import {
 const log = createLogger('IpcHandlers');
 let historyServiceRef: HistoryService | null = null;
 let serverManagerRef: ServerManager | null = null;
+let gpuPackManagerRef: GpuPackManager | null = null;
+
+const GPU_PACK_UNAVAILABLE_STATE: GpuPackState = {
+  status: 'unavailable',
+  code: 'descriptor_missing',
+};
 
 function getServerApiUrl(): string {
   const configuredUrl = app.isPackaged ? undefined : LOCAL_SERVER_URL;
@@ -40,13 +47,27 @@ function getServerApiUrl(): string {
   return serverUrl;
 }
 
-export function setupIpcHandlers(historyService?: HistoryService, serverManager?: ServerManager): void {
+export function setupIpcHandlers(
+  historyService?: HistoryService,
+  serverManager?: ServerManager,
+  gpuPackManager?: GpuPackManager
+): void {
   // Store references to services
   if (historyService) {
     historyServiceRef = historyService;
   }
   if (serverManager) {
     serverManagerRef = serverManager;
+  }
+  if (gpuPackManager) {
+    gpuPackManagerRef = gpuPackManager;
+    gpuPackManager.onStateChange((state) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.GPU_PACK_STATE_CHANGE, state);
+        }
+      }
+    });
   }
 
   try {
@@ -285,6 +306,15 @@ export function setupIpcHandlers(historyService?: HistoryService, serverManager?
       return [];
     }
     return serverManagerRef.getLogs();
+  });
+
+  // GPU-pack controls are local to Electron main and remain available while the server is down.
+  ipcMain.handle(IPC_CHANNELS.GPU_PACK_GET_STATE, async () => {
+    return gpuPackManagerRef?.getState() ?? GPU_PACK_UNAVAILABLE_STATE;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GPU_PACK_INSTALL, async () => {
+    return gpuPackManagerRef?.install() ?? GPU_PACK_UNAVAILABLE_STATE;
   });
 
   // Server settings (REST API proxy)

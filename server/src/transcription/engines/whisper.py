@@ -7,13 +7,6 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-# Import torch first when available so its CUDA DLL directories are registered
-# before CTranslate2 initializes inside faster-whisper.
-try:
-    import torch  # noqa: F401
-except ImportError:
-    pass
-
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download
 from numpy.typing import NDArray
@@ -129,15 +122,17 @@ def _download_repo(repo_id: str) -> str:
     return snapshot_download(repo_id, **kwargs)
 
 
-def _get_cuda_active(device: str) -> bool:
+def _get_cuda_active(device: str, model: object) -> bool:
+    """Report the device selected by the successfully created CT2 model.
+
+    A device-count probe is not evidence that a model loaded on CUDA. This
+    checks the underlying CTranslate2 model after construction instead.
+    """
     if device == "cpu":
         return False
-    try:
-        import ctranslate2
-
-        return ctranslate2.get_cuda_device_count() > 0
-    except Exception:
-        return False
+    ctranslate2_model = getattr(model, "model", None)
+    active_device = getattr(ctranslate2_model, "device", None)
+    return isinstance(active_device, str) and active_device.casefold().startswith("cuda")
 
 
 def _get_vram_used_gb() -> float | None:
@@ -344,7 +339,7 @@ class WhisperEngine:
         )
         self._device = device
         self._compute_type = compute_type
-        self._cuda_active = _get_cuda_active(device)
+        self._cuda_active = _get_cuda_active(device, self._model)
         self._options = _build_options(settings)
         self._last_transcription_latency_s: float | None = None
         if preflight_cached is False:
@@ -399,13 +394,16 @@ class WhisperEngine:
 
     def shutdown(self) -> None:
         logger.info("Shutting down Whisper engine")
+        model = self._model
+        ctranslate2_model = getattr(model, "model", None)
+        unload_model = getattr(ctranslate2_model, "unload_model", None)
+        if callable(unload_model):
+            try:
+                unload_model()
+            except Exception:
+                # Dropping the wrapper still releases its native references.
+                logger.warning("CTranslate2 model unload failed during shutdown")
         del self._model
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
 
 
 class WhisperSession:

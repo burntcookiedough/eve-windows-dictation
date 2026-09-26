@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   isOwnedMurmurServerProcess,
   isMurmurServerCommandLine,
+  matchesExpectedRuntime,
   parseHealthyResponse,
   parseServerPidFile,
 } from '../src/main/services/server-health';
@@ -77,6 +78,32 @@ describe('server health parsing', () => {
 
   test('rejects a non-object response', () => {
     expect(parseHealthyResponse(null)).toEqual({ healthy: false });
+  });
+
+  test('requires exact build and pack identity before adopting a healthy server', () => {
+    const expected = {
+      app_build: '0.8.2-alpha.5',
+      server_build: '0.8.2-alpha.5',
+      pack_id: 'pack-hash',
+    };
+    const oldHealth = parseHealthyResponse({ status: 'healthy', version: expected.server_build });
+    expect(oldHealth.healthy).toBe(true);
+    expect(matchesExpectedRuntime(oldHealth.runtime, expected)).toBe(false);
+
+    const matchingHealth = parseHealthyResponse({
+      status: 'healthy',
+      runtime: { ...expected, effective_device: 'cuda' },
+    });
+    expect(matchesExpectedRuntime(matchingHealth.runtime, expected)).toBe(true);
+    expect(matchesExpectedRuntime(matchingHealth.runtime, { ...expected, pack_id: null })).toBe(false);
+    expect(matchesExpectedRuntime(matchingHealth.runtime, { ...expected, app_build: 'older' })).toBe(false);
+
+    const loadingHealth = parseHealthyResponse({
+      status: 'healthy',
+      runtime: { ...expected, effective_device: null },
+    });
+    expect(loadingHealth.runtime?.effective_device).toBeNull();
+    expect(matchesExpectedRuntime(loadingHealth.runtime, expected)).toBe(true);
   });
 });
 
