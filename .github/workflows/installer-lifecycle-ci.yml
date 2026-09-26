@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   lifecycle:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'codex/eve-alpha6-candidate'
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/eve-alpha6-candidate')
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
