@@ -51,6 +51,8 @@ export class ServerManager {
   private status: ServerStatus = 'idle';
   private startInFlight: Promise<void> | null = null;
   private stopInFlight: Promise<void> | null = null;
+  private startAfterStop: Promise<void> | null = null;
+  private cleaningUp = false;
   private childProcess: ChildProcess | null = null;
   private pidFile: ServerPidFile | null = null;
   private logs: ServerLogEntry[] = [];
@@ -581,8 +583,17 @@ export class ServerManager {
    * Start the server (production mode only).
    */
   start(): Promise<void> {
+    if (this.cleaningUp) return Promise.resolve();
     if (this.stopInFlight) {
-      return this.stopInFlight.then(() => this.start());
+      if (!this.startAfterStop) {
+        const queuedStart = this.stopInFlight.then(() => this.start());
+        this.startAfterStop = queuedStart;
+        const clearQueuedStart = () => {
+          if (this.startAfterStop === queuedStart) this.startAfterStop = null;
+        };
+        void queuedStart.then(clearQueuedStart, clearQueuedStart);
+      }
+      return this.startAfterStop;
     }
     if (this.startInFlight) return this.startInFlight;
     const attempt = this.startOnce().finally(() => {
@@ -848,7 +859,12 @@ export class ServerManager {
    * Stop the server.
    */
   stop(): Promise<void> {
-    if (this.stopInFlight) return this.stopInFlight;
+    if (this.stopInFlight) {
+      if (this.startAfterStop) {
+        return this.startAfterStop.then(() => this.stop(), () => this.stop());
+      }
+      return this.stopInFlight;
+    }
     const attempt = this.stopOnce().finally(() => {
       this.stopInFlight = null;
     });
@@ -973,9 +989,10 @@ export class ServerManager {
    * Cleanup on app quit.
    */
   async cleanup(): Promise<void> {
+    this.cleaningUp = true;
     this.stopHealthPolling();
 
-    if (this.managed && this.childProcess) {
+    if (this.childProcess || this.startAfterStop || this.startInFlight) {
       log.info('Cleaning up server on app quit');
       await this.stop();
     }
