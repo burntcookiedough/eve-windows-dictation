@@ -26,6 +26,38 @@ app.commandLine.appendSwitch('force-device-scale-factor', '1');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitForViewport(window, expectedWidth, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  let actualWidth = null;
+
+  while (Date.now() < deadline) {
+    const queryTimeoutMs = Math.min(500, deadline - Date.now());
+    let queryTimer;
+    try {
+      actualWidth = await Promise.race([
+        window.webContents.executeJavaScript('window.innerWidth'),
+        new Promise((_, reject) => {
+          queryTimer = setTimeout(
+            () => reject(new Error('Renderer viewport query timed out')),
+            queryTimeoutMs
+          );
+        }),
+      ]);
+    } catch {
+      // The renderer may still be applying the resize.
+    } finally {
+      clearTimeout(queryTimer);
+    }
+
+    if (actualWidth === expectedWidth) return;
+    await wait(Math.min(20, Math.max(0, deadline - Date.now())));
+  }
+
+  throw new Error(
+    `Renderer viewport did not reach ${expectedWidth}px within ${timeoutMs}ms (last observed ${actualWidth}px).`
+  );
+}
+
 function fixtureUrl(state) {
   return `${baseUrl}?${new URLSearchParams({ state })}`;
 }
@@ -162,7 +194,7 @@ async function main() {
       for (const [width, height] of [[960, 900], [320, 700]]) {
         await window.webContents.setZoomFactor(1);
         await window.setContentSize(width, height);
-        await wait(100);
+        await waitForViewport(window, width);
         for (const zoom of [1, 1.5, 2]) {
           measurements.push(await measure(window, state, logsExpanded, zoom));
         }
