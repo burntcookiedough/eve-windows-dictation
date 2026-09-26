@@ -150,6 +150,113 @@ describe('Electron request deadlines', () => {
     }
   });
 
+  test('a stop requested after a queued start waits for that start and stops it', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const queuedStart = manager.start();
+      const finalStop = manager.stop();
+      finishExit?.(true);
+      await Promise.all([firstStop, queuedStart, finalStop]);
+      expect(starts).toBe(1);
+      expect(manager.getState().status).toBe('stopped');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('cleanup cancels a start queued behind shutdown', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => { starts++; };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const queuedStart = manager.start();
+      const cleanup = manager.cleanup();
+      finishExit?.(true);
+      await Promise.all([firstStop, queuedStart, cleanup]);
+      expect(starts).toBe(0);
+      expect(manager.getState().status).toBe('stopped');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('cleanup waits for an unmanaged startup before shutting it down', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+    };
+    let finishStart: (() => void) | undefined;
+    const startup = new Promise<void>((resolve) => { finishStart = resolve; });
+    let starts = 0;
+    privateManager.startOnce = async () => {
+      starts++;
+      await startup;
+      privateManager.managed = true;
+      privateManager.updateStatus('running');
+    };
+
+    const starting = manager.start();
+    const cleanup = manager.cleanup();
+    finishStart?.();
+    await Promise.all([starting, cleanup]);
+    await manager.start();
+    expect(starts).toBe(1);
+    expect(manager.getState().status).toBe('stopped');
+  });
+
   test('restores running state after a transient health-check failure', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
