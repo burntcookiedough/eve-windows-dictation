@@ -844,6 +844,16 @@ export class ServerManager {
    * Stop the server.
    */
   async stop(): Promise<void> {
+    // Let an in-progress startup settle before changing process state. Otherwise
+    // a restart can reuse the old start promise after stop() has finished.
+    if (this.startInFlight) {
+      try {
+        await this.startInFlight;
+      } catch (error) {
+        log.warn('Pending server startup failed before stop', { error: error as Error });
+      }
+    }
+
     if (this.status === 'stopped' || this.status === 'idle' || this.status === 'stopping') {
       return;
     }
@@ -936,7 +946,7 @@ export class ServerManager {
    * Restart the server.
    */
   async restart(): Promise<void> {
-    if (!this.managed) {
+    if (!this.managed && !this.startInFlight) {
       log.info('Server is not managed, cannot restart a detected process');
       return;
     }

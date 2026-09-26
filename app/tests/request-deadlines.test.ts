@@ -73,6 +73,34 @@ describe('Electron request deadlines', () => {
     }
   });
 
+  test('restart waits for a pending startup before launching a replacement', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'starting' | 'running') => void;
+    };
+    let finishFirstStart: (() => void) | undefined;
+    const firstStartup = new Promise<void>((resolve) => { finishFirstStart = resolve; });
+    let starts = 0;
+    privateManager.managed = true;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('starting');
+      if (starts === 1) await firstStartup;
+      privateManager.updateStatus('running');
+    };
+
+    const first = manager.start();
+    const restarted = manager.restart();
+    expect(starts).toBe(1);
+
+    finishFirstStart?.();
+    await Promise.all([first, restarted]);
+    expect(starts).toBe(2);
+    expect(manager.getState().status).toBe('running');
+  });
+
   test('restores running state after a transient health-check failure', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
