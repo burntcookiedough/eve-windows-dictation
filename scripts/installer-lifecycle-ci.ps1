@@ -280,6 +280,14 @@ function Stop-TestProcesses {
     }
 }
 
+function Get-OptionalProperty {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function Wait-ForServerPidFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][long]$StartedAfter, [int]$TimeoutSeconds = 180)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -290,7 +298,14 @@ function Wait-ForServerPidFile {
         if (Test-Path -LiteralPath $Path) {
             try {
                 $pidData = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-                if ([int]$pidData.pid -gt 0 -and [int]$pidData.port -gt 0 -and [long]$pidData.startedAt -ge $StartedAfter) { return $pidData }
+                $serverPid = [int](Get-OptionalProperty $pidData 'pid')
+                $port = [int](Get-OptionalProperty $pidData 'port')
+                $startedAt = Get-OptionalProperty $pidData 'startedAt'
+                if ($null -eq $startedAt) {
+                    $lastWriteTimeUtc = (Get-Item -LiteralPath $Path).LastWriteTimeUtc
+                    $startedAt = [DateTimeOffset]::new($lastWriteTimeUtc).ToUnixTimeMilliseconds()
+                }
+                if ($serverPid -gt 0 -and $port -gt 0 -and [long]$startedAt -ge $StartedAfter) { return $pidData }
             } catch {
                 Start-Sleep -Milliseconds 250
             }
@@ -301,18 +316,33 @@ function Wait-ForServerPidFile {
 }
 
 function Wait-ForModelReady {
-    param([Parameter(Mandatory)][string]$Url, [int]$TimeoutSeconds = 1500)
+    param([Parameter(Mandatory)][string]$Url, [switch]$RequireRuntimeFingerprint, [int]$TimeoutSeconds = 1500)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
             $health = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec 8
-            if ($health.engine.status -eq 'error') { throw "Packaged model preparation failed: $($health.engine.message)" }
-            if ($health.model_download.status -eq 'error') { throw "Packaged model download failed: $($health.model_download.detail)" }
-            if ($health.engine.status -eq 'ready' -and $health.engine.info.model -eq 'tiny' -and $health.model_download.status -eq 'ready') {
-                if ($health.runtime.effective_device -ne 'cpu' -or $health.engine.info.device -ne 'cpu') {
-                    throw "Packaged server did not report CPU inference: effective=$($health.runtime.effective_device), engine=$($health.engine.info.device)"
+            $engine = Get-OptionalProperty $health 'engine'
+            $engineInfo = Get-OptionalProperty $engine 'info'
+            $engineStatus = Get-OptionalProperty $engine 'status'
+            $engineMessage = Get-OptionalProperty $engine 'message'
+            $engineModel = Get-OptionalProperty $engineInfo 'model'
+            $engineDevice = Get-OptionalProperty $engineInfo 'device'
+            $download = Get-OptionalProperty $health 'model_download'
+            $downloadStatus = Get-OptionalProperty $download 'status'
+            $downloadDetail = Get-OptionalProperty $download 'detail'
+            $runtime = Get-OptionalProperty $health 'runtime'
+            $effectiveDevice = Get-OptionalProperty $runtime 'effective_device'
+            $diagnostics = Get-OptionalProperty $health 'diagnostics'
+            $cuda = Get-OptionalProperty $diagnostics 'cuda'
+            $cudaAvailable = Get-OptionalProperty $cuda 'available'
+
+            if ($engineStatus -eq 'error') { throw "Packaged model preparation failed: $engineMessage" }
+            if ($downloadStatus -eq 'error') { throw "Packaged model download failed: $downloadDetail" }
+            if ($engineStatus -eq 'ready' -and $engineModel -eq 'tiny' -and $downloadStatus -eq 'ready') {
+                if (($RequireRuntimeFingerprint -and $effectiveDevice -ne 'cpu') -or $engineDevice -ne 'cpu') {
+                    throw "Packaged server did not report CPU inference: effective=$effectiveDevice, engine=$engineDevice"
                 }
-                if ($health.diagnostics.cuda.available -eq $true) { throw 'CUDA unexpectedly became available on the required no-NVIDIA runner.' }
+                if ($cudaAvailable -eq $true) { throw 'CUDA unexpectedly became available on the required no-NVIDIA runner.' }
                 return $health
             }
         } catch {
@@ -397,7 +427,8 @@ function Launch-And-Verify {
             throw 'PID file does not identify a server process inside the current Eve installation.'
         }
         $script:OwnedServerPid = [int]$pidData.pid
-        $health = Wait-ForModelReady -Url "http://127.0.0.1:$([int]$pidData.port)/health"
+        $requireRuntimeFingerprint = $Version -eq $script:CandidateVersion
+        $health = Wait-ForModelReady -Url "http://127.0.0.1:$([int]$pidData.port)/health" -RequireRuntimeFingerprint:$requireRuntimeFingerprint
         if ($health.version -ne $Version) { throw "Packaged server version mismatch: expected $Version, got $($health.version)." }
         Write-Step "Eve $Version server is healthy and Whisper tiny is ready on CPU."
         return $health
