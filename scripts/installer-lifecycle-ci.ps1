@@ -186,23 +186,55 @@ function Invoke-Installer {
 }
 
 function Get-UninstallKeyPath {
-    return "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{$script:ProductGuid}_is1"
+    return "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$script:ProductGuid"
+}
+
+function Resolve-RegistryUninstallerPath {
+    param(
+        [Parameter(Mandatory)]$Entry,
+        [Parameter(Mandatory)][string]$ExpectedVersion,
+        [Parameter(Mandatory)][string]$InstallDir
+    )
+
+    $displayNameProperty = $Entry.PSObject.Properties['DisplayName']
+    $displayVersionProperty = $Entry.PSObject.Properties['DisplayVersion']
+    $uninstallStringProperty = $Entry.PSObject.Properties['UninstallString']
+    $installLocationProperty = $Entry.PSObject.Properties['InstallLocation']
+    $displayName = if ($displayNameProperty) { [string]$displayNameProperty.Value } else { '' }
+    $displayVersion = if ($displayVersionProperty) { [string]$displayVersionProperty.Value } else { '' }
+    $uninstallString = if ($uninstallStringProperty) { [string]$uninstallStringProperty.Value } else { '' }
+    $installLocation = if ($installLocationProperty) { [string]$installLocationProperty.Value } else { '' }
+
+    if ($displayName -ne "Eve $ExpectedVersion" -or $displayVersion -ne $ExpectedVersion) {
+        throw "Eve registry display identity mismatch for version $ExpectedVersion."
+    }
+    if ($uninstallString -notmatch '^\s*"(?<path>[^"\r\n]+\\Uninstall Eve\.exe)"\s+/currentuser\s*$') {
+        throw 'Eve registry uninstall command is not the expected quoted per-user NSIS command.'
+    }
+
+    $expectedInstallDir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([char[]]@('\', '/'))
+    $uninstallerPath = [System.IO.Path]::GetFullPath($Matches['path'])
+    $expectedUninstaller = [System.IO.Path]::GetFullPath((Join-Path $expectedInstallDir 'Uninstall Eve.exe'))
+    if (-not $uninstallerPath.Equals($expectedUninstaller, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Eve registry uninstall command points outside the test-owned install directory.'
+    }
+    if ($installLocation -and -not [System.IO.Path]::GetFullPath($installLocation).TrimEnd([char[]]@('\', '/')).Equals($expectedInstallDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Eve registry InstallLocation points outside the test-owned install directory.'
+    }
+    return $uninstallerPath
 }
 
 function Assert-RegistryState {
     param([string]$ExpectedVersion)
     $keyPath = Get-UninstallKeyPath
-    $machineKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{$script:ProductGuid}_is1"
+    $machineKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$script:ProductGuid"
     if (-not $ExpectedVersion) {
         if ((Test-Path -LiteralPath $keyPath) -or (Test-Path -LiteralPath $machineKey)) { throw 'Eve uninstall registry entry remains after uninstall.' }
         return
     }
     if (-not (Test-Path -LiteralPath $keyPath) -or (Test-Path -LiteralPath $machineKey)) { throw 'Expected only the per-user Eve uninstall entry.' }
     $key = Get-ItemProperty -LiteralPath $keyPath
-    if ([string]$key.DisplayVersion -ne $ExpectedVersion -or [string]$key.DisplayName -ne "Eve $ExpectedVersion" -or
-        -not ([System.IO.Path]::GetFullPath([string]$key.InstallLocation).TrimEnd('\').Equals([System.IO.Path]::GetFullPath($script:CurrentInstallDir).TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase))) {
-        throw "Eve registry install identity mismatch for version $ExpectedVersion."
-    }
+    $null = Resolve-RegistryUninstallerPath -Entry $key -ExpectedVersion $ExpectedVersion -InstallDir $script:CurrentInstallDir
 }
 
 function Get-ProcessById {
@@ -459,9 +491,11 @@ print(json.dumps({
 function Uninstall-Current {
     param([Parameter(Mandatory)][string]$Version)
     Stop-TestProcesses
-    $uninstaller = Join-Path $script:CurrentInstallDir 'Uninstall Eve.exe'
+    Assert-RegistryState -ExpectedVersion $Version
+    $key = Get-ItemProperty -LiteralPath (Get-UninstallKeyPath)
+    $uninstaller = Resolve-RegistryUninstallerPath -Entry $key -ExpectedVersion $Version -InstallDir $script:CurrentInstallDir
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "Eve $Version uninstaller is missing." }
-    $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S') -WorkingDirectory $script:CurrentInstallDir -WindowStyle Hidden -Wait -PassThru
+    $process = Start-Process -FilePath $uninstaller -ArgumentList @('/S', '/currentuser') -WorkingDirectory $script:CurrentInstallDir -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Eve $Version uninstaller failed with exit code $($process.ExitCode)." }
     Assert-RegistryState -ExpectedVersion ''
     if (Test-Path -LiteralPath (Join-Path $script:CurrentInstallDir 'Eve.exe')) { throw "Eve $Version executable remains after uninstall." }
