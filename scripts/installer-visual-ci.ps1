@@ -375,10 +375,27 @@ function Save-ShortcutIcon {
 function Stop-ProcessesWithin {
     param([Parameter(Mandatory)][string]$Root)
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return }
-    foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
-        $path = [string]$process.ExecutablePath
-        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-PathWithin -Path $path -Root $Root)) { continue }
-        try { Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction Stop } catch { }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ($true) {
+        $ownedProcesses = @(
+            Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $path = [string]$_.ExecutablePath
+                    -not [string]::IsNullOrWhiteSpace($path) -and (Test-PathWithin -Path $path -Root $Root)
+                }
+        )
+        if ($ownedProcesses.Count -eq 0) { return }
+
+        foreach ($process in $ownedProcesses) {
+            try { Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction Stop } catch { }
+        }
+
+        if ([DateTime]::UtcNow -ge $deadline) {
+            $remainingIds = @($ownedProcesses.ProcessId | ForEach-Object { [string]$_ }) -join ', '
+            throw "Timed out waiting for isolated process(es) to exit under '$Root' (PIDs: $remainingIds)."
+        }
+        Start-Sleep -Milliseconds 250
     }
 }
 

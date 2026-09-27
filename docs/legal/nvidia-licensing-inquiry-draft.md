@@ -3,11 +3,11 @@
 **Status: UNSENT DRAFT — for review only. Do not send without authorization.**
 
 **To (suggested):** nvidia-compute-license-questions@nvidia.com
-**Subject:** CUDA 12.9.1.4 cuBLAS redistribution in Eve Windows application
+**Subject:** CUDA 12.9.1 (cuBLAS 12.9.1.4) redistribution in Eve Windows application
 
 Hello NVIDIA licensing team,
 
-We are evaluating an optional Windows x64 GPU feature in Eve, a Windows dictation application. Eve provides material functionality beyond cuBLAS. The feature would use only `cublas64_12.dll` and `cublasLt64_12.dll` from NVIDIA's CUDA 12.9.1.4 Windows x64 cuBLAS redistributable. Eve would install the DLLs in Eve-controlled application storage and load them only for Eve's GPU transcription service. The official redistributable manifest identifies the component as `CUDA Toolkit` and lists `libcublas/LICENSE.txt` as its license path.
+We are evaluating an optional Windows x64 GPU feature in Eve, a Windows dictation application. Eve provides material functionality beyond cuBLAS. The feature would use only `cublas64_12.dll` and `cublasLt64_12.dll` from NVIDIA's cuBLAS 12.9.1.4 Windows x64 redistributable, part of CUDA 12.9.1. Eve would install the DLLs in Eve-controlled application storage and load them only for Eve's GPU transcription service. The official redistributable manifest identifies the component as `CUDA Toolkit` and lists `libcublas/LICENSE.txt` as its license path.
 
 We read CUDA 12.9.1 EULA §§1.1.1–1.1.2, §1.2(2), §2.5, and Attachment A §2.6. The EULA allows specified portions to be distributed as object code incorporated into an application, subject to its distribution requirements; it lists Windows `cublas.dll` and `cublasLt.dll`, including filename variants. Before enabling distribution, could you please answer the following for these two DLLs and the delivery flows below?
 
