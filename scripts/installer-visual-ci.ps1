@@ -399,6 +399,32 @@ function Stop-ProcessesWithin {
     }
 }
 
+function Get-VisualUninstallerArguments {
+    param([Parameter(Mandatory)][string]$InstallDir)
+    $installPath = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([char[]]@('\', '/'))
+    if (-not (Test-PathWithin -Path $installPath -Root (Join-Path (Get-RunRoot) 'install'))) {
+        throw "Visual uninstaller target is outside this run's isolated install directory."
+    }
+    return @('/S', '/currentuser', "_?=$installPath")
+}
+
+function Test-VisualUninstallerArgumentsRule {
+    $installDir = Join-Path (Get-RunRoot) 'install\Programs\Eve'
+    $arguments = @(Get-VisualUninstallerArguments -InstallDir $installDir)
+    if ($arguments.Count -ne 3 -or $arguments[0] -ne '/S' -or $arguments[1] -ne '/currentuser' -or
+        $arguments[2] -ne "_?=$([System.IO.Path]::GetFullPath($installDir))") {
+        throw 'Synthetic test failed: NSIS _?= install-directory argument must be last.'
+    }
+    $rejected = $false
+    try { $null = Get-VisualUninstallerArguments -InstallDir (Join-Path (Get-RunRoot) 'outside\Programs\Eve') } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Synthetic test failed: an unowned NSIS _?= target was not rejected.' }
+    $spacePath = Join-Path (Get-RunRoot) 'install\Programs\Eve With Spaces'
+    $spaceArguments = @(Get-VisualUninstallerArguments -InstallDir $spacePath)
+    if ($spaceArguments.Count -ne 3 -or $spaceArguments[2] -ne "_?=$([System.IO.Path]::GetFullPath($spacePath))") {
+        throw 'Synthetic test failed: the final NSIS _?= argument must preserve a path containing spaces.'
+    }
+}
+
 function Invoke-SilentUninstall {
     param([Parameter(Mandatory)][string]$InstallDir)
     $uninstaller = Join-Path $InstallDir 'Uninstall Eve.exe'
@@ -409,11 +435,31 @@ function Invoke-SilentUninstall {
     $entry = Get-ItemProperty -LiteralPath $keyPath
     $ownedUninstaller = Resolve-VisualUninstallerPath -Entry $entry -InstallDir $InstallDir
     if (-not (Test-Path -LiteralPath $ownedUninstaller -PathType Leaf)) { throw 'The registry-owned uninstaller is missing.' }
-    $startInfo = New-SanitizedStartInfo -FilePath $ownedUninstaller -WorkingDirectory $InstallDir -Arguments @('/S', '/currentuser')
+    $runRoot = Get-RunRoot
+    if (-not (Test-PathWithin -Path $runRoot -Root $env:RUNNER_TEMP)) { throw 'Visual uninstaller scratch directory escaped RUNNER_TEMP.' }
+    $uninstallerScratch = Join-Path (Join-Path $runRoot 'temp') 'uninstaller'
+    if (-not (Test-PathWithin -Path $uninstallerScratch -Root $runRoot)) { throw "Temporary uninstaller copy is outside this run's RUNNER_TEMP ownership." }
+    New-Item -ItemType Directory -Path $uninstallerScratch -Force | Out-Null
+    $temporaryUninstaller = Join-Path $uninstallerScratch 'Uninstall Eve.exe'
+    Copy-Item -LiteralPath $ownedUninstaller -Destination $temporaryUninstaller -ErrorAction Stop
+    if (-not (Test-Path -LiteralPath $temporaryUninstaller -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $ownedUninstaller -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $temporaryUninstaller -Algorithm SHA256).Hash) {
+        throw 'Temporary uninstaller copy does not match the registry-owned uninstaller.'
+    }
+    $arguments = @(Get-VisualUninstallerArguments -InstallDir $InstallDir)
+    $startInfo = New-SanitizedStartInfo -FilePath $temporaryUninstaller -WorkingDirectory $InstallDir -Arguments @('/S', '/currentuser')
+    $startInfo.ArgumentList.Clear()
+    # NSIS requires _?= to be the last raw, unquoted argument, including when the path contains spaces.
+    $startInfo.Arguments = $arguments -join ' '
     $process = [System.Diagnostics.Process]::Start($startInfo)
-    if (-not $process.WaitForExit(180000)) { try { $process.Kill($true) } catch { }; throw 'Uninstaller timed out after 180 seconds.' }
-    if ($process.ExitCode -ne 0) { throw "Uninstaller exited with code $($process.ExitCode)." }
-    return $true
+    try {
+        if (-not $process.WaitForExit(180000)) { try { $process.Kill($true) } catch { }; throw 'Uninstaller timed out after 180 seconds.' }
+        if ($process.ExitCode -ne 0) { throw "Uninstaller exited with code $($process.ExitCode)." }
+        if (Test-Path -LiteralPath (Join-Path $InstallDir 'Eve.exe')) { throw 'Eve.exe remains after visual uninstall.' }
+        return $true
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Initialize-Run {
@@ -442,6 +488,7 @@ function Initialize-Run {
     try {
         $head = Assert-CandidateHead
         Test-VisualUninstallerOwnershipRule
+        Test-VisualUninstallerArgumentsRule
         Test-DesktopShortcutEvidenceRules
         Test-VisualBuildSettingsRule
         $package = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'app\package.json') -Raw | ConvertFrom-Json -Depth 16
