@@ -1,6 +1,6 @@
 # Eve GPU pack candidate: provenance and functional proof
 
-Status: the exact alpha.6 two-file pack is hosted as a separate public GPU-pack prerelease and pinned in the app descriptor. The public HTTP manager install has passed in an isolated profile on an NVIDIA Windows host. A test on a separate clean Windows machine is still pending.
+Status: the exact alpha.6 two-file pack is hosted as a separate public GPU-pack prerelease and pinned in the app descriptor. Public HTTP install and unpacked packaged-app preflight passed in isolated profiles on an NVIDIA Windows host. The unpacked app was built from a working tree containing the descriptor change before commit `dda2b9d`; it was not installed through the NSIS wrapper or rebuilt from that exact commit. A test on a separate clean Windows GPU machine is still pending.
 
 ## Source and exact files
 
@@ -27,7 +27,7 @@ The result proves that this pair works for one small synthetic transcription on 
 
 The app's manager installed the two local Brotli streams using its pinned compressed and raw size/hash checks. That run recorded pack ID `0b916158ee267fa5b30765e3d998c6e7ea47ca42ecb59e0bddb6112b960b4061` in an isolated test root and revalidated it. The evidence did not record the descriptor's `appBuildId`, so this historical ID cannot be attributed to the exact PR89 alpha.6 descriptor below. The first install and second verification took 16 seconds locally. The unpacked CPU candidate's bundled Python then registered that managed directory before importing CTranslate2 and transcribed the same synthetic sample on CUDA in 1.62 seconds including model load. Windows reported both cuBLAS DLLs loading from the manager's installed directory. The process PATH was sanitized before launch and excluded the installed CUDA Toolkit. This is local manager-to-packaged-Python evidence, not a clean-machine installer or public download test.
 
-### Exact PR89 alpha.6 candidate check (2026-09-27)
+### Alpha.6 pack identity and packaged-app preflight (2026-09-27)
 
 The verified NVIDIA source ZIP used for this check was **549,755,186 bytes** with SHA-256 `d534d98b0b453a98914dbf3adf47d7e84b55037abf02f87466439e1dcef581ed`. The current `scripts/prepare-gpu-pack.mjs` validated that archive, extracted the two named DLLs, checked their raw sizes and hashes, generated the pinned Brotli files, and verified each decompression round trip. The run used Node.js v24.15.0, zlib 1.3.1-e00f703, and Brotli 1.2.0 in generic mode at quality 5. The generated asset sizes and four raw/compressed SHA-256 values are the ones in the table above.
 

@@ -18,11 +18,13 @@ The first release-verifier invocation used relative `-InstallDir` and failed its
 
 The packaged Python runtime transcribed the repository's 47.33-second test WAV using public `tiny` weights in a task-local model cache. It reported `device=cpu`, 12 segments, nonempty text, and no loaded `cublas64_12.dll` or `nvcuda.dll`. This host has an NVIDIA driver; the result is not a clean no-driver machine test. No microphone, overlay, clipboard insertion, installer upgrade, or rollback was exercised in this local preflight.
 
-The full server suite passed 294 tests. The first full app run had one failure and one error; a captured repeat passed 312 tests. The initial failure was not diagnosed, so the candidate PR's independent CI run remains a required check.
+The full server suite passed 294 tests. The first full app run had one failure and one error; a captured repeat passed 312 tests. Later alpha.6 CI runs passed the server, app, and Windows installer lifecycle jobs. The first local failure was an Electron rendered-settings viewport fixture; the latest local app run passed 306 tests and failed only that viewport transition, while the latest GitHub app CI passed.
+
+The optional GPU-pack preflight used a later unpacked Eve package built from a working tree based on `3e7a44e` with the production descriptor change subsequently committed at `dda2b9d`. Its public Settings download, restart, CUDA transcription, and no-pack CPU fallback passed in isolated profiles. That unpacked package was not installed through NSIS or rebuilt from the exact `dda2b9d` commit. See [GPU-pack provenance](eve-gpu-pack-provenance.md).
 
 ## Remaining gates
 
-- Rebuild the final package from the accepted exact source head after release-preparation changes are reviewed.
-- Run clean Windows without an NVIDIA driver, using a disposable runner and the published alpha.5 baseline for install, upgrade, rollback, uninstall, CPU transcription, and profile preservation.
+- Rebuild the final Eve app package from the accepted exact source head before an app release decision.
+- The hosted no-NVIDIA-driver lifecycle CI passed install, upgrade, rollback, uninstall, CPU transcription, and profile preservation against the published alpha.5 baseline. A separate clean Windows GPU machine without a CUDA Toolkit remains untested.
 - The reproducible GPU pack is now published as a public prerelease and pinned by the alpha.6 candidate descriptor. The Eve app release remains unpublished.
 - Review the final package footprint, installer visuals, artifact manifest, checksums, CI, and CodeRabbit results before any Eve app merge, tag, upload, or publication decision.
