@@ -9,7 +9,7 @@ Eve v0.8.2-alpha.6 focuses on usable CPU-first installs and a leaner packaged ru
 - New packaged Windows profiles start with the **Small** model for CPU use. Existing profiles, saved model choices, and explicit environment overrides keep their current behavior.
 - The packaged base runtime removes PyTorch and the full CUDA runtime closure. Model weights remain separate downloads and are not embedded in the installer.
 - Eve checks that a packaged server matches the expected application build and runtime before adopting it. Unsupported GPU or precision preferences fall back to a compatible CPU configuration; explicitly selecting unavailable CUDA settings is rejected.
-- Settings report optional NVIDIA pack availability. The production GPU-pack descriptor remains unset in this candidate, so Eve cannot download or activate a GPU pack.
+- Settings report optional NVIDIA pack availability. This alpha.6 candidate pins the public optional NVIDIA pack; download and activation remain opt-in.
 - Server start, stop, and restart handling is more reliable when requests overlap. Environment-only model choices are not written into saved settings by unrelated settings updates.
 
 ## Compatibility and privacy

@@ -24,5 +24,5 @@ The full server suite passed 294 tests. The first full app run had one failure a
 
 - Rebuild the final package from the accepted exact source head after release-preparation changes are reviewed.
 - Run clean Windows without an NVIDIA driver, using a disposable runner and the published alpha.5 baseline for install, upgrade, rollback, uninstall, CPU transcription, and profile preservation.
-- Resolve NVIDIA redistribution method and notices before enabling a production GPU-pack descriptor. The reproducible local GPU pack remains an unpublished candidate.
-- Review the final package footprint, installer visuals, artifact manifest, checksums, CI, and CodeRabbit results before any merge, tag, upload, or publication decision.
+- The reproducible GPU pack is now published as a public prerelease and pinned by the alpha.6 candidate descriptor. The Eve app release remains unpublished.
+- Review the final package footprint, installer visuals, artifact manifest, checksums, CI, and CodeRabbit results before any Eve app merge, tag, upload, or publication decision.

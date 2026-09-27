@@ -44,13 +44,14 @@ it has passed the same accuracy, latency, memory, packaging, and recovery gates.
 
 New packaged Windows profiles start with the **Small** model for CPU use. Existing
 profiles and explicit model overrides keep their current choice. The packaged CPU
-runtime does not include PyTorch or a full CUDA runtime. Eve's optional NVIDIA pack
-manager is present, but no GPU pack is available to download in this candidate; unsupported
-GPU preferences fall back to CPU, while explicitly selecting unavailable CUDA is rejected.
+runtime does not include PyTorch or a full CUDA runtime. On supported NVIDIA systems,
+Settings can download the optional, separately hosted 495 MB GPU pack. Eve verifies
+both compressed assets and installed DLLs before enabling CUDA. Without a valid pack,
+automatic GPU preferences fall back to CPU, while explicitly selecting unavailable CUDA is rejected.
 
 ## Local-first, with clear network boundaries
 
-The packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. During development, Eve may connect to a separately started localhost speech service; packaged builds use the bundled local service only.
+The packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload, for the selected model's first-use download from Hugging Face, and only when requested to fetch optional NVIDIA GPU support from GitHub Releases. The GPU download sends no audio or transcripts. During development, Eve may connect to a separately started localhost speech service; packaged builds use the bundled local service only.
 
 Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
 

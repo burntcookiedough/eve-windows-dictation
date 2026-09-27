@@ -21,11 +21,32 @@ export interface GpuPackAssetDescriptor {
   readonly sha256: string;
 }
 
-/**
- * The production trust root. Keep this null until the exact two-file pack has
- * passed native GPU, integrity, and redistribution review.
- */
-export const PINNED_GPU_PACK_DESCRIPTOR: GpuPackDescriptor | null = null;
+/** The production trust root for the optional alpha.6 Windows x64 GPU pack. */
+export const PINNED_GPU_PACK_DESCRIPTOR: GpuPackDescriptor = {
+  schemaVersion: 1,
+  appBuildId: '0.8.2-alpha.6',
+  ctranslate2BuildId:
+    'ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc',
+  platform: 'win32-x64',
+  assets: [
+    {
+      url: 'https://github.com/burntcookiedough/eve-windows-dictation/releases/download/gpu-pack-v0.8.2-alpha.6-c19a9ccabb3051651e77d1fe2f3432bfdbf0bc679dadad51ed012e36a14fd6bf/cublas64_12.dll.br',
+      compressedBytes: 68190827,
+      compressedSha256: 'bf44b669968ee3e660579fb0a8e436b809e075f07d3b296b017f4ca559752528',
+      fileName: 'cublas64_12.dll',
+      bytes: 102518272,
+      sha256: '90052a83efd1b57a8e3616a6590b335855f81b814a4f16eecb7b5bf6d1b1d4eb',
+    },
+    {
+      url: 'https://github.com/burntcookiedough/eve-windows-dictation/releases/download/gpu-pack-v0.8.2-alpha.6-c19a9ccabb3051651e77d1fe2f3432bfdbf0bc679dadad51ed012e36a14fd6bf/cublasLt64_12.dll.br',
+      compressedBytes: 426759202,
+      compressedSha256: '6b73b5a5125812b4b0be61ce2dfa183baac6451097ebd07466c9d264e01a446d',
+      fileName: 'cublasLt64_12.dll',
+      bytes: 668669952,
+      sha256: 'c3a05ea244c937314afec09f87b91f814c7e27977681f6c67eb51bb06ced3a4a',
+    },
+  ],
+};
 
 export interface GpuPackDescriptor {
   readonly schemaVersion: 1;
