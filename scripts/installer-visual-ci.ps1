@@ -120,6 +120,35 @@ function Get-DesktopShortcutExpected {
     return $configuredValue -ne $false
 }
 
+function Resolve-VisualBuildSettings {
+    param([Parameter(Mandatory)]$Package)
+    $buildProperty = $Package.PSObject.Properties['build']
+    if (-not $buildProperty -or $null -eq $buildProperty.Value) { throw 'Visual package config is missing its nested build object.' }
+    $build = $buildProperty.Value
+    $winProperty = $build.PSObject.Properties['win']
+    $nsisWebProperty = $build.PSObject.Properties['nsisWeb']
+    if (-not $winProperty -or -not $nsisWebProperty) { throw 'Visual package config is missing build.win or build.nsisWeb.' }
+    return [pscustomobject]@{ Win = $winProperty.Value; NsisWeb = $nsisWebProperty.Value }
+}
+
+function Test-VisualBuildSettingsRule {
+    $expectedWin = [pscustomobject]@{ icon = 'resources/icon.ico' }
+    $expectedNsisWeb = [pscustomobject]@{ oneClick = $true; createDesktopShortcut = $true }
+    $package = [pscustomobject]@{
+        build = [pscustomobject]@{ win = $expectedWin; nsisWeb = $expectedNsisWeb }
+        win = [pscustomobject]@{ icon = 'wrong-top-level-icon.ico' }
+        nsisWeb = [pscustomobject]@{ oneClick = $false; createDesktopShortcut = $false }
+    }
+    $settings = Resolve-VisualBuildSettings -Package $package
+    if ($settings.Win.icon -ne $expectedWin.icon -or -not $settings.NsisWeb.oneClick -or -not (Get-DesktopShortcutExpected -NsisOptions $settings.NsisWeb)) {
+        throw 'Synthetic test failed: visual settings must come from package.build.win and package.build.nsisWeb.'
+    }
+    $topLevelOnly = [pscustomobject]@{ win = $expectedWin; nsisWeb = $expectedNsisWeb }
+    $rejected = $false
+    try { $null = Resolve-VisualBuildSettings -Package $topLevelOnly } catch { $rejected = $_.Exception.Message -match 'nested build object' }
+    if (-not $rejected) { throw 'Synthetic test failed: top-level-only installer settings were not rejected.' }
+}
+
 function Assert-DesktopShortcutEvidence {
     param([Parameter(Mandatory)][bool]$Exists, [Parameter(Mandatory)][bool]$Expected, [Parameter(Mandatory)][string]$Path)
     if ($Exists) { return 'present' }
@@ -397,10 +426,12 @@ function Initialize-Run {
         $head = Assert-CandidateHead
         Test-VisualUninstallerOwnershipRule
         Test-DesktopShortcutEvidenceRules
+        Test-VisualBuildSettingsRule
         $package = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'app\package.json') -Raw | ConvertFrom-Json -Depth 16
-        $desktopShortcutExpected = Get-DesktopShortcutExpected -NsisOptions $package.nsisWeb
-        if ($head -ne $state.candidateSha -or $package.version -ne $script:ProductVersion -or -not $package.nsisWeb.oneClick -or
-            $package.win.icon -ne 'resources/icon.ico' -or -not $desktopShortcutExpected) {
+        $buildSettings = Resolve-VisualBuildSettings -Package $package
+        $desktopShortcutExpected = Get-DesktopShortcutExpected -NsisOptions $buildSettings.NsisWeb
+        if ($head -ne $state.candidateSha -or $package.version -ne $script:ProductVersion -or -not $buildSettings.NsisWeb.oneClick -or
+            $buildSettings.Win.icon -ne 'resources/icon.ico' -or -not $desktopShortcutExpected) {
             throw 'Candidate SHA, alpha.6 version, one-click UI, installer icon, or fresh-install Desktop shortcut setting did not match this probe.'
         }
         $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$script:ProductGuid"
@@ -428,6 +459,8 @@ function Invoke-Capture {
     $cleanupError = $null
     try {
         if ((Assert-CandidateHead) -ne [string]$state.candidateSha) { throw 'Candidate changed after initialization.' }
+        $package = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'app\package.json') -Raw | ConvertFrom-Json -Depth 16
+        $buildSettings = Resolve-VisualBuildSettings -Package $package
         if (Test-Path -LiteralPath $installDir) { throw 'Fixed install path already exists.' }
         $releaseDir = Join-Path $script:RepoRoot 'app\release\nsis-web'
         $names = @("Eve.Web.Setup.$script:ProductVersion.exe", "murmur-$script:ProductVersion-x64.nsis.7z")
@@ -495,7 +528,7 @@ function Invoke-Capture {
         $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::DesktopDirectory)
         $desktopLink = Join-Path $desktop 'Eve.lnk'
         Save-ShortcutIcon -LinkPath $startMenuLinks[0].FullName -Kind 'start-menu' -InstallDir $installDir -State $state
-        $desktopExpected = Get-DesktopShortcutExpected -NsisOptions $package.nsisWeb
+        $desktopExpected = Get-DesktopShortcutExpected -NsisOptions $buildSettings.NsisWeb
         if (Test-Path -LiteralPath $desktopLink -PathType Leaf) {
             $null = Assert-DesktopShortcutEvidence -Exists $true -Expected $desktopExpected -Path 'Desktop\Eve.lnk'
             Save-ShortcutIcon -LinkPath $desktopLink -Kind 'desktop' -InstallDir $installDir -State $state -ExpectedByPackageConfig $desktopExpected
