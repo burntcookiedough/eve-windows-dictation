@@ -1,6 +1,6 @@
 # Eve GPU pack candidate: provenance and functional proof
 
-Status: local candidate, 2026-09-25. No binary is committed, hosted, or released. This record does not by itself clear redistribution or replace a clean-machine installer test.
+Status: local candidate, updated 2026-09-27 with an exact PR89 alpha.6 preparation and manager check. No binary is committed, hosted, or released. This record does not by itself clear redistribution or replace a clean-machine installer test.
 
 ## Source and exact files
 
@@ -23,7 +23,17 @@ An initial probe that changed `PATH` *after* Python started loaded both DLLs fro
 
 The result proves that this pair works for one small synthetic transcription on this NVIDIA host. It does not prove all supported hardware, long dictation, app startup, upgrades, or installation on a host without the CUDA Toolkit. Those remain release gates.
 
-On the same date, the app's actual pack manager installed the two locally generated Brotli streams using its pinned compressed and raw size/hash checks. It published pack ID `0b916158ee267fa5b30765e3d998c6e7ea47ca42ecb59e0bddb6112b960b4061` in an isolated test root and revalidated it. The first install and second verification took 16 seconds locally. The unpacked CPU candidate's bundled Python then registered that exact managed directory before importing CTranslate2 and transcribed the same synthetic sample on CUDA in 1.62 seconds including model load. Windows reported both cuBLAS DLLs loading from the manager's installed directory. The process PATH was sanitized before launch and excluded the installed CUDA Toolkit. This verifies the manager-to-packaged-Python seam locally; it still is not a clean-machine installer or a public download test.
+### Historical manager and Python proof (2026-09-25)
+
+The app's manager installed the two local Brotli streams using its pinned compressed and raw size/hash checks. That run recorded pack ID `0b916158ee267fa5b30765e3d998c6e7ea47ca42ecb59e0bddb6112b960b4061` in an isolated test root and revalidated it. The evidence did not record the descriptor's `appBuildId`, so this historical ID cannot be attributed to the exact PR89 alpha.6 descriptor below. The first install and second verification took 16 seconds locally. The unpacked CPU candidate's bundled Python then registered that managed directory before importing CTranslate2 and transcribed the same synthetic sample on CUDA in 1.62 seconds including model load. Windows reported both cuBLAS DLLs loading from the manager's installed directory. The process PATH was sanitized before launch and excluded the installed CUDA Toolkit. This is local manager-to-packaged-Python evidence, not a clean-machine installer or public download test.
+
+### Exact PR89 alpha.6 candidate check (2026-09-27)
+
+The verified NVIDIA source ZIP used for this check was **549,755,186 bytes** with SHA-256 `d534d98b0b453a98914dbf3adf47d7e84b55037abf02f87466439e1dcef581ed`. The current `scripts/prepare-gpu-pack.mjs` validated that archive, extracted the two named DLLs, checked their raw sizes and hashes, generated the pinned Brotli files, and verified each decompression round trip. The run used Node.js v24.15.0, zlib 1.3.1-e00f703, and Brotli 1.2.0 in generic mode at quality 5. The generated asset sizes and four raw/compressed SHA-256 values are the ones in the table above.
+
+This candidate is bound to `appBuildId` `0.8.2-alpha.6`, CTranslate2 build `ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc`, and platform `win32-x64`. Its exact pack ID is `c19a9ccabb3051651e77d1fe2f3432bfdbf0bc679dadad51ed012e36a14fd6bf`.
+
+The PR89 TypeScript pack manager installed those generated Brotli files from a local stream source into a fresh isolated test root. It returned `ready`; `getValidatedRuntime()` revalidated the pack, and both installed DLLs matched the raw byte counts and SHA-256 values in the table. This check exercised the manager's local source seam, not its default HTTP `fetch` path. The candidate descriptor still has null asset URLs, and `PINNED_GPU_PACK_DESCRIPTOR` remains `null`; public URL download, production descriptor activation, and a packaged download/restart/CUDA end-to-end flow remain untested and disabled.
 
 ## Distribution boundary
 
