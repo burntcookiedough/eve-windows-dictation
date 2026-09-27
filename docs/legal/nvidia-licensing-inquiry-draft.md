@@ -2,7 +2,7 @@
 
 **Status: UNSENT DRAFT — for review only. Do not send without authorization.**
 
-**To (suggested):** nvidia-compute-license-questions@nvidia.com  
+**To (suggested):** nvidia-compute-license-questions@nvidia.com
 **Subject:** CUDA 12.9.1.4 cuBLAS redistribution in Eve Windows application
 
 Hello NVIDIA licensing team,
@@ -23,5 +23,5 @@ We read CUDA 12.9.1 EULA §§1.1.1–1.1.2, §1.2(2), §2.5, and Attachment A §
 
 The candidate archive is version 12.9.1.4; the manifest records SHA-256 `d534d98b0b453a98914dbf3adf47d7e84b55037abf02f87466439e1dcef581ed`. Eve has not enabled production asset URLs or distributed this candidate. If neither method is covered by the published EULA, please identify the permitted distribution path or the additional written agreement required.
 
-Thank you,  
+Thank you,
 Eve team
