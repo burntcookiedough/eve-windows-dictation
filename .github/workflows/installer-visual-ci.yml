@@ -1,0 +1,111 @@
+name: Eve Alpha.6 Installer Visual Evidence
+
+on:
+  pull_request:
+    branches:
+      - trunk
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - .github/workflows/installer-visual-ci.yml
+      - app/**
+      - server/**
+      - scripts/installer-visual-ci.ps1
+      - scripts/prepare-python-runtime.ps1
+      - scripts/generate-third-party-notices.ps1
+      - scripts/version.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eve-alpha6-installer-visual-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    if: github.event.pull_request.number == 89 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/eve-alpha6-candidate' && github.event.pull_request.base.ref == 'trunk'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      EVE_VISUAL_PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+      EVE_VISUAL_PR_NUMBER: ${{ github.event.pull_request.number }}
+      EVE_VISUAL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout the candidate PR head without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require the dedicated same-repo candidate PR and current head
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:OS -ne 'Windows_NT') { throw 'Visual capture requires a disposable GitHub-hosted Windows runner.' }
+          if ($env:GITHUB_EVENT_NAME -ne 'pull_request' -or $env:GITHUB_REPOSITORY -ne 'burntcookiedough/eve-windows-dictation' -or $env:EVE_VISUAL_PR_NUMBER -ne '89' -or $env:EVE_VISUAL_PR_HEAD_REPOSITORY -ne $env:GITHUB_REPOSITORY -or $env:GITHUB_HEAD_REF -ne 'codex/eve-alpha6-candidate' -or $env:GITHUB_BASE_REF -ne 'trunk') { throw 'Only PR 89 from same-repo codex/eve-alpha6-candidate into trunk may run this visual gate.' }
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:EVE_VISUAL_CANDIDATE_SHA) { throw 'Checkout does not match the candidate PR head SHA.' }
+          $remoteLine = git ls-remote origin refs/heads/codex/eve-alpha6-candidate
+          if ($LASTEXITCODE -ne 0 -or $remoteLine -notmatch '^([0-9a-f]{40})\s+refs/heads/codex/eve-alpha6-candidate$' -or $Matches[1] -ne $head) { throw 'Candidate checkout is no longer the current candidate branch head.' }
+          Write-Host "Using candidate commit $head."
+
+      - name: Initialize isolated visual evidence directory
+        shell: pwsh
+        run: ./scripts/installer-visual-ci.ps1 -Mode Initialize
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Prepare release server dependencies
+        shell: pwsh
+        working-directory: server
+        run: uv sync --python 3.11 --no-dev --extra release --frozen
+
+      - name: Prepare relocatable Python runtime
+        shell: pwsh
+        run: ./scripts/prepare-python-runtime.ps1
+
+      - name: Install app dependencies
+        shell: pwsh
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      - name: Check candidate version
+        shell: pwsh
+        run: python scripts/version.py check --tag v0.8.2-alpha.6
+
+      - name: Build candidate Windows web installer
+        shell: pwsh
+        working-directory: app
+        run: bun run package:win
+
+      - name: Capture interactive installer and shortcut icon visuals
+        shell: pwsh
+        timeout-minutes: 35
+        run: ./scripts/installer-visual-ci.ps1 -Mode Capture
+
+      - name: Upload diagnostic and visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eve-alpha6-installer-visual-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/eve-alpha6-installer-visual-${{ github.run_id }}-${{ github.run_attempt }}/evidence
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove only this run's isolated scratch directory
+        if: always()
+        shell: pwsh
+        run: ./scripts/installer-visual-ci.ps1 -Mode Cleanup
