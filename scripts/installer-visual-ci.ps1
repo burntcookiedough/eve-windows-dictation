@@ -113,6 +113,33 @@ function Test-VisualUninstallerOwnershipRule {
     if (-not $rejected) { throw 'Synthetic external-InstallLocation check was not rejected.' }
 }
 
+function Get-DesktopShortcutExpected {
+    param([Parameter(Mandatory)]$NsisOptions)
+    $property = $NsisOptions.PSObject.Properties['createDesktopShortcut']
+    $configuredValue = if ($property) { $property.Value } else { $null }
+    return $configuredValue -ne $false
+}
+
+function Assert-DesktopShortcutEvidence {
+    param([Parameter(Mandatory)][bool]$Exists, [Parameter(Mandatory)][bool]$Expected, [Parameter(Mandatory)][string]$Path)
+    if ($Exists) { return 'present' }
+    if ($Expected) { throw "DESKTOP_SHORTCUT_MISSING: fresh alpha.6 install did not create the expected Desktop Eve shortcut at '$Path'." }
+    return 'not-created-as-configured'
+}
+
+function Test-DesktopShortcutEvidenceRules {
+    $defaultOptions = [pscustomobject]@{}
+    $disabledOptions = [pscustomobject]@{ createDesktopShortcut = $false }
+    if (-not (Get-DesktopShortcutExpected -NsisOptions $defaultOptions)) { throw 'Synthetic test failed: omitted createDesktopShortcut must mean enabled on a fresh install.' }
+    if (Get-DesktopShortcutExpected -NsisOptions $disabledOptions) { throw 'Synthetic test failed: createDesktopShortcut=false must disable the requirement.' }
+    if ((Assert-DesktopShortcutEvidence -Exists $true -Expected $true -Path 'synthetic\Eve.lnk') -ne 'present') { throw 'Synthetic test failed: existing required Desktop shortcut was not accepted.' }
+    if ((Assert-DesktopShortcutEvidence -Exists $false -Expected $false -Path 'synthetic\Eve.lnk') -ne 'not-created-as-configured') { throw 'Synthetic test failed: an explicitly disabled Desktop shortcut was not accepted.' }
+    $rejected = $false
+    try { $null = Assert-DesktopShortcutEvidence -Exists $false -Expected (Get-DesktopShortcutExpected -NsisOptions $defaultOptions) -Path 'synthetic\Eve.lnk' }
+    catch { $rejected = $_.Exception.Message -match '^DESKTOP_SHORTCUT_MISSING:' }
+    if (-not $rejected) { throw 'Synthetic test failed: a missing required Desktop shortcut was not rejected.' }
+}
+
 function Add-NativeDesktopType {
     if ('EveInstallerVisual.NativeDesktop' -as [type]) { return }
     Add-Type -TypeDefinition @'
@@ -253,7 +280,7 @@ function Capture-InstallerScreen {
 }
 
 function Save-ShortcutIcon {
-    param([Parameter(Mandatory)][string]$LinkPath, [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$InstallDir, [Parameter(Mandatory)]$State)
+    param([Parameter(Mandatory)][string]$LinkPath, [Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][string]$InstallDir, [Parameter(Mandatory)]$State, [bool]$ExpectedByPackageConfig = $true)
     $expectedExe = [System.IO.Path]::GetFullPath((Join-Path $InstallDir 'Eve.exe'))
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($LinkPath)
@@ -303,6 +330,8 @@ function Save-ShortcutIcon {
     $relativeIcon = if ([System.IO.Path]::GetFullPath($iconPath).Equals($expectedExe, [System.StringComparison]::OrdinalIgnoreCase)) { 'Eve.exe' } else { [System.IO.Path]::GetRelativePath($InstallDir, $iconPath) }
     $State.shortcuts = @($State.shortcuts) + @([pscustomobject]@{
         kind = $Kind
+        status = 'present'
+        expectedByPackageConfig = $ExpectedByPackageConfig
         name = 'Eve'
         target = 'Eve.exe'
         iconSource = $relativeIcon
@@ -367,9 +396,12 @@ function Initialize-Run {
     try {
         $head = Assert-CandidateHead
         Test-VisualUninstallerOwnershipRule
+        Test-DesktopShortcutEvidenceRules
         $package = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'app\package.json') -Raw | ConvertFrom-Json -Depth 16
-        if ($head -ne $state.candidateSha -or $package.version -ne $script:ProductVersion -or -not $package.nsisWeb.oneClick -or $package.win.icon -ne 'resources/icon.ico') {
-            throw 'Candidate SHA, alpha.6 version, one-click UI, or installer icon setting did not match this probe.'
+        $desktopShortcutExpected = Get-DesktopShortcutExpected -NsisOptions $package.nsisWeb
+        if ($head -ne $state.candidateSha -or $package.version -ne $script:ProductVersion -or -not $package.nsisWeb.oneClick -or
+            $package.win.icon -ne 'resources/icon.ico' -or -not $desktopShortcutExpected) {
+            throw 'Candidate SHA, alpha.6 version, one-click UI, installer icon, or fresh-install Desktop shortcut setting did not match this probe.'
         }
         $keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$script:ProductGuid"
         if (Test-Path -LiteralPath $keyPath) { throw 'Pre-existing Eve uninstall key found on the disposable runner.' }
@@ -463,11 +495,15 @@ function Invoke-Capture {
         $desktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::DesktopDirectory)
         $desktopLink = Join-Path $desktop 'Eve.lnk'
         Save-ShortcutIcon -LinkPath $startMenuLinks[0].FullName -Kind 'start-menu' -InstallDir $installDir -State $state
+        $desktopExpected = Get-DesktopShortcutExpected -NsisOptions $package.nsisWeb
         if (Test-Path -LiteralPath $desktopLink -PathType Leaf) {
-            Save-ShortcutIcon -LinkPath $desktopLink -Kind 'desktop' -InstallDir $installDir -State $state
+            $null = Assert-DesktopShortcutEvidence -Exists $true -Expected $desktopExpected -Path 'Desktop\Eve.lnk'
+            Save-ShortcutIcon -LinkPath $desktopLink -Kind 'desktop' -InstallDir $installDir -State $state -ExpectedByPackageConfig $desktopExpected
         } else {
-            $state.shortcuts = @($state.shortcuts) + @([pscustomobject]@{ kind = 'desktop'; status = 'not-created'; expectedByPackageConfig = ($package.nsisWeb.createDesktopShortcut -ne $false) })
+            $status = if ($desktopExpected) { 'missing-required' } else { 'not-created-as-configured' }
+            $state.shortcuts = @($state.shortcuts) + @([pscustomobject]@{ kind = 'desktop'; status = $status; expectedByPackageConfig = $desktopExpected })
             Save-State -State $state
+            $null = Assert-DesktopShortcutEvidence -Exists $false -Expected $desktopExpected -Path 'Desktop\Eve.lnk'
         }
         $state.status = 'captured-awaiting-human-review'
         $state.visualReview = 'pending-human-review'
@@ -475,7 +511,10 @@ function Invoke-Capture {
         Write-Host '[installer-visual] Captured installer and shortcut visuals; screenshots still require human visual review.'
     } catch {
         $operationError = $_
-        if ($_.Exception.Message -match '^INTERACTIVE_DESKTOP_UNAVAILABLE:') {
+        if ($_.Exception.Message -match '^DESKTOP_SHORTCUT_MISSING:') {
+            $state.status = 'capture-failed'
+            Add-Diagnostic -State $state -Code 'DESKTOP_SHORTCUT_MISSING' -Message $_.Exception.Message
+        } elseif ($_.Exception.Message -match '^INTERACTIVE_DESKTOP_UNAVAILABLE:') {
             $state.status = 'blocked-interactive-desktop'
             Add-Diagnostic -State $state -Code 'INTERACTIVE_DESKTOP_UNAVAILABLE' -Message $_.Exception.Message
             if ($null -eq $state.desktop) { $state.desktop = [pscustomobject]@{ available = $false; message = $_.Exception.Message } }
