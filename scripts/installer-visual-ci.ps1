@@ -379,7 +379,7 @@ function Stop-ProcessesWithin {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     while ($true) {
         $ownedProcesses = @(
-            Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue |
+            Get-CimInstance -ClassName Win32_Process -ErrorAction Stop |
                 Where-Object {
                     $path = [string]$_.ExecutablePath
                     -not [string]::IsNullOrWhiteSpace($path) -and (Test-PathWithin -Path $path -Root $Root)
