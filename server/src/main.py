@@ -4,10 +4,10 @@ import logging
 import os
 import socket
 
-import uvicorn
-
 from runtime_paths import configure_windows_cuda_dll_search
 
+# Register the selected runtime before importing application dependencies that
+# can transitively load native extensions.
 configure_windows_cuda_dll_search()
 
 from config import get_settings
@@ -35,6 +35,8 @@ def configure_logging(log_level: str) -> None:
 
 def main() -> None:
     """Run the murmur."""
+    import uvicorn
+
     settings = get_settings()
 
     # Configure logging before uvicorn starts

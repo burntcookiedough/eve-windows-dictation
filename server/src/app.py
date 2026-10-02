@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
@@ -36,6 +37,7 @@ from transcription.factory import (
 )
 from transcription.model_download import get_model_download_state
 from transcription.processor import shutdown_executor
+from runtime_paths import registered_gpu_pack_id
 from version import SERVER_VERSION
 from websocket.handler import websocket_handler
 
@@ -51,6 +53,42 @@ def _safe_settings_validation_detail(error: ValidationError) -> str:
         return "Invalid settings."
     message = str(errors[0].get("msg", "Invalid settings."))
     return message.removeprefix("Value error, ")
+
+
+def _runtime_fingerprint(engine_status: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    """Describe the launched runtime without implying GPU inference readiness."""
+    app_build = os.environ.get("MURMUR_APP_BUILD_ID")
+    if (
+        not app_build
+        or app_build != app_build.strip()
+        or len(app_build) > 128
+        or any(ord(character) < 32 for character in app_build)
+    ):
+        app_build = None
+
+    def supported_device(value: Any) -> str | None:
+        return value if isinstance(value, str) and value in {"cpu", "cuda"} else None
+
+    effective_device: str | None = None
+    info = engine_status.get("info")
+    if engine_status.get("status") == "ready" and isinstance(info, dict):
+        effective_device = supported_device(info.get("device"))
+
+    engine_failed = engine_status.get("status") == "error"
+    if effective_device is None and not engine_failed:
+        effective_config = getattr(settings, "effective_whisper_config", None)
+        effective_device = supported_device(
+            getattr(effective_config, "effective_device", None)
+        )
+    if effective_device is None and not engine_failed:
+        effective_device = supported_device(getattr(settings, "whisper_device", None))
+
+    return {
+        "app_build": app_build,
+        "server_build": SERVER_VERSION,
+        "pack_id": registered_gpu_pack_id(),
+        "effective_device": effective_device,
+    }
 
 
 def _track_runtime_task(task: asyncio.Task[None]) -> asyncio.Task[None]:
@@ -213,12 +251,14 @@ def create_app() -> FastAPI:
             asyncio.to_thread(collect_diagnostics, settings),
             asyncio.to_thread(get_model_download_state),
         )
+        engine_status = serialize_engine_status(status)
         return {
             "status": "healthy",
             "version": SERVER_VERSION,
             "active_sessions": manager.active_count,
             "max_sessions": manager.max_sessions,
-            "engine": serialize_engine_status(status),
+            "engine": engine_status,
+            "runtime": _runtime_fingerprint(engine_status, settings),
             "diagnostics": diagnostics_payload,
             "model_download": model_download,
         }

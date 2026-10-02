@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
+import subprocess
+import threading
+import time
 from dataclasses import dataclass
+
+from runtime_paths import gpu_runtime_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +18,12 @@ logger = logging.getLogger(__name__)
 WHISPER_BASE_VRAM_GB = 3.1
 WHISPER_GROWTH_MB_PER_SEC = 57.0
 
-_GB_BYTES = 1024**3
 _MB_PER_GB = 1024.0
+_NVIDIA_SMI_TIMEOUT_S = 2.0
+_NVIDIA_SMI_CACHE_TTL_S = 30.0
+_nvidia_smi_cache_lock = threading.Lock()
+_nvidia_smi_cached_at: float | None = None
+_nvidia_smi_cached_output: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,15 +54,78 @@ def _resolve_cuda_device_index(device: str) -> int:
 
     if device.startswith("cuda:"):
         _, _, suffix = device.partition(":")
-        return int(suffix)
+        try:
+            device_index = int(suffix)
+        except ValueError as error:
+            raise ValueError(f"Unsupported CUDA device selector: {device!r}") from error
+        if device_index < 0:
+            raise ValueError(f"Unsupported CUDA device selector: {device!r}")
+        return device_index
 
     raise ValueError(f"Unsupported CUDA device selector: {device!r}")
 
 
-def detect_gpu_capabilities(device: str) -> GpuCapabilities:
-    """Detect CUDA device name and total VRAM for the selected device.
+def _get_nvidia_smi_output() -> str | None:
+    """Return cached driver and GPU metadata from one bounded system query."""
+    global _nvidia_smi_cached_at, _nvidia_smi_cached_output
 
-    This uses total VRAM (not current free VRAM) as a stable startup signal.
+    with _nvidia_smi_cache_lock:
+        now = time.monotonic()
+        if (
+            _nvidia_smi_cached_at is not None
+            and now - _nvidia_smi_cached_at < _NVIDIA_SMI_CACHE_TTL_S
+        ):
+            return _nvidia_smi_cached_output
+
+        try:
+            completed = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,driver_version,name,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_NVIDIA_SMI_TIMEOUT_S,
+            )
+        except (FileNotFoundError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            output = None
+        else:
+            output = completed.stdout.strip() or None
+
+        _nvidia_smi_cached_at = now
+        _nvidia_smi_cached_output = output
+        return output
+
+
+def _query_nvidia_device(device_index: int) -> tuple[str | None, float | None]:
+    """Read optional display metadata without using a deep-learning framework."""
+    output = _get_nvidia_smi_output()
+    if output is None:
+        return None, None
+
+    for row in csv.reader(io.StringIO(output)):
+        if len(row) < 4:
+            continue
+        try:
+            row_index = int(row[0].strip())
+            total_memory_mb = float(row[3].strip())
+        except ValueError:
+            continue
+        if row_index == device_index and total_memory_mb >= 0:
+            name = row[2].strip() or None
+            return name, total_memory_mb / _MB_PER_GB
+    return None, None
+
+
+def detect_gpu_capabilities(device: str) -> GpuCapabilities:
+    """Check CTranslate2 CUDA support and optionally read GPU display metadata.
+
+    ``cuda_available`` means CTranslate2 found the selected device and reported
+    supported CUDA compute types. It is a runtime capability probe, not proof
+    that Whisper model loading or transcription succeeds. Total VRAM is a stable
+    startup signal; it does not reflect currently free VRAM.
     """
     if device == "cpu":
         return GpuCapabilities(
@@ -63,32 +137,19 @@ def detect_gpu_capabilities(device: str) -> GpuCapabilities:
             reason="CPU device selected",
         )
 
-    try:
-        import torch
-    except ImportError:
+    if not gpu_runtime_allowed():
         return GpuCapabilities(
             cuda_available=False,
             device=device,
             device_index=None,
             name=None,
             total_vram_gb=None,
-            reason="PyTorch is not installed",
-        )
-
-    if not torch.cuda.is_available():
-        return GpuCapabilities(
-            cuda_available=False,
-            device=device,
-            device_index=None,
-            name=None,
-            total_vram_gb=None,
-            reason="CUDA is not available",
+            reason="The optional GPU runtime is not installed.",
         )
 
     try:
         device_index = _resolve_cuda_device_index(device)
     except ValueError as error:
-        logger.warning("Failed to resolve CUDA device selector", exc_info=error)
         return GpuCapabilities(
             cuda_available=False,
             device=device,
@@ -99,24 +160,67 @@ def detect_gpu_capabilities(device: str) -> GpuCapabilities:
         )
 
     try:
-        props = torch.cuda.get_device_properties(device_index)
-    except Exception as error:  # pragma: no cover - depends on local CUDA runtime
-        logger.warning("Failed to query CUDA device properties", exc_info=error)
+        import ctranslate2
+    except Exception:
         return GpuCapabilities(
             cuda_available=False,
             device=device,
             device_index=None,
             name=None,
             total_vram_gb=None,
-            reason=f"Failed to query CUDA device: {error}",
+            reason="CTranslate2 runtime is unavailable",
         )
 
-    total_vram_gb = props.total_memory / _GB_BYTES
+    try:
+        device_count = ctranslate2.get_cuda_device_count()
+    except Exception:
+        logger.warning("CTranslate2 CUDA device query failed")
+        return GpuCapabilities(
+            cuda_available=False,
+            device=device,
+            device_index=None,
+            name=None,
+            total_vram_gb=None,
+            reason="CTranslate2 CUDA device query failed",
+        )
+    if device_index >= device_count:
+        return GpuCapabilities(
+            cuda_available=False,
+            device=device,
+            device_index=None,
+            name=None,
+            total_vram_gb=None,
+            reason="CTranslate2 did not find the selected CUDA device",
+        )
+
+    try:
+        compute_types = ctranslate2.get_supported_compute_types("cuda", device_index)
+    except Exception:
+        logger.warning("CTranslate2 CUDA compute-type query failed")
+        return GpuCapabilities(
+            cuda_available=False,
+            device=device,
+            device_index=device_index,
+            name=None,
+            total_vram_gb=None,
+            reason="CTranslate2 CUDA compute-type query failed",
+        )
+    if not compute_types:
+        return GpuCapabilities(
+            cuda_available=False,
+            device=device,
+            device_index=device_index,
+            name=None,
+            total_vram_gb=None,
+            reason="CTranslate2 reports no supported CUDA compute types",
+        )
+
+    name, total_vram_gb = _query_nvidia_device(device_index)
     return GpuCapabilities(
         cuda_available=True,
         device=device,
         device_index=device_index,
-        name=props.name,
+        name=name,
         total_vram_gb=total_vram_gb,
         reason=None,
     )

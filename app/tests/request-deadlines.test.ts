@@ -4,11 +4,13 @@ import type { HealthState } from '../src/main/services/server-health';
 mock.module('electron', () => ({
   app: {
     getPath: () => process.cwd(),
+    getVersion: () => 'test-build',
   },
   BrowserWindow: class {},
 }));
 
 const { ServerManager } = await import('../src/main/services/server-manager');
+const { app: electronApp } = await import('electron');
 const { getServerSettings } = await import('../src/main/services/server-settings');
 
 type PrivateServerManager = {
@@ -37,6 +39,345 @@ function restoreGlobalProperty(
 }
 
 describe('Electron request deadlines', () => {
+  test('coalesces starts while packaged GPU runtime validation is pending', async () => {
+    const packagedApp = electronApp as unknown as { isPackaged: boolean };
+    const previousPackaged = packagedApp.isPackaged;
+    let finishValidation: ((value: null) => void) | undefined;
+    let validations = 0;
+    const validation = new Promise<null>((resolve) => { finishValidation = resolve; });
+    const manager = new ServerManager({
+      getValidatedRuntime: () => { validations++; return validation; },
+    } as unknown as ConstructorParameters<typeof ServerManager>[0]);
+    const privateManager = manager as unknown as {
+      readPidFile: () => null;
+      getServerCommand: () => null;
+    };
+    let commandChecks = 0;
+    privateManager.readPidFile = () => null;
+    privateManager.getServerCommand = () => { commandChecks++; return null; };
+    packagedApp.isPackaged = true;
+
+    try {
+      const first = manager.start();
+      const second = manager.start();
+      expect(second).toBe(first);
+      await Promise.resolve();
+      expect(validations).toBe(1);
+      finishValidation?.(null);
+      await Promise.all([first, second]);
+      expect(commandChecks).toBe(1);
+
+      await manager.start();
+      expect(validations).toBe(2);
+    } finally {
+      packagedApp.isPackaged = previousPackaged;
+    }
+  });
+
+  test('cleanup during runtime validation prevents a late server spawn', async () => {
+    const packagedApp = electronApp as unknown as { isPackaged: boolean };
+    const previousPackaged = packagedApp.isPackaged;
+    let finishValidation: ((value: null) => void) | undefined;
+    const validation = new Promise<null>((resolve) => { finishValidation = resolve; });
+    const manager = new ServerManager({
+      getValidatedRuntime: () => validation,
+    } as unknown as ConstructorParameters<typeof ServerManager>[0]);
+    const privateManager = manager as unknown as {
+      readPidFile: () => null;
+      getServerCommand: () => null;
+    };
+    let commandChecks = 0;
+    privateManager.readPidFile = () => null;
+    privateManager.getServerCommand = () => { commandChecks++; return null; };
+    packagedApp.isPackaged = true;
+
+    try {
+      const starting = manager.start();
+      const cleanup = manager.cleanup();
+      finishValidation?.(null);
+      await Promise.all([starting, cleanup]);
+      expect(commandChecks).toBe(0);
+      expect(manager.getState().status).toBe('idle');
+    } finally {
+      finishValidation?.(null);
+      packagedApp.isPackaged = previousPackaged;
+    }
+  });
+
+  test('cleanup during an existing-server probe prevents late adoption', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      readPidFile: () => { pid: number; port: number; startedAt: number };
+      isProcessAlive: () => boolean;
+      isOwnedServerProcess: () => Promise<boolean>;
+      getHealthState: () => Promise<HealthState>;
+    };
+    let finishHealth: ((health: HealthState) => void) | undefined;
+    let healthProbeStarted: (() => void) | undefined;
+    const health = new Promise<HealthState>((resolve) => { finishHealth = resolve; });
+    const probeStarted = new Promise<void>((resolve) => { healthProbeStarted = resolve; });
+    privateManager.readPidFile = () => ({ pid: 1234, port: 51717, startedAt: Date.now() });
+    privateManager.isProcessAlive = () => true;
+    privateManager.isOwnedServerProcess = async () => true;
+    privateManager.getHealthState = () => {
+      healthProbeStarted?.();
+      return health;
+    };
+
+    const starting = manager.start();
+    await probeStarted;
+    const cleanup = manager.cleanup();
+    finishHealth?.({ healthy: true, version: 'test' });
+    await Promise.all([starting, cleanup]);
+    expect(manager.getState().status).toBe('idle');
+  });
+
+  test('restart waits for a pending startup before launching a replacement', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'starting' | 'running') => void;
+    };
+    let finishFirstStart: (() => void) | undefined;
+    const firstStartup = new Promise<void>((resolve) => { finishFirstStart = resolve; });
+    let starts = 0;
+    privateManager.managed = true;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('starting');
+      if (starts === 1) await firstStartup;
+      privateManager.updateStatus('running');
+    };
+
+    const first = manager.start();
+    const restarted = manager.restart();
+    await Promise.resolve();
+    expect(starts).toBe(1);
+
+    finishFirstStart?.();
+    await Promise.all([first, restarted]);
+    expect(starts).toBe(2);
+    expect(manager.getState().status).toBe('running');
+  });
+
+  test('restarts and starts wait for one shutdown before starting a replacement', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    let stopEntered: (() => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    const shutdownStarted = new Promise<void>((resolve) => { stopEntered = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => {
+      stopEntered?.();
+      return processExit;
+    };
+    privateManager.startOnce = async () => {
+      if (manager.getState().status === 'running') return;
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const first = manager.restart();
+      const second = manager.restart();
+      const directStart = manager.start();
+      await shutdownStarted;
+      expect(starts).toBe(0);
+      finishExit?.(true);
+      await Promise.all([first, second, directStart]);
+      expect(starts).toBe(1);
+      expect(manager.getState().status).toBe('running');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('a stop requested after a queued start waits for that start and stops it', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const queuedStart = manager.start();
+      const finalStop = manager.stop();
+      finishExit?.(true);
+      await Promise.all([firstStop, queuedStart, finalStop]);
+      expect(starts).toBe(1);
+      expect(manager.getState().status).toBe('stopped');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('preserves an alternating stop-start-stop-start request order', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => {
+      starts++;
+      privateManager.updateStatus('running');
+    };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const firstStart = manager.start();
+      const secondStop = manager.stop();
+      const lastStart = manager.start();
+      finishExit?.(true);
+      await Promise.all([firstStop, firstStart, secondStop, lastStart]);
+      expect(starts).toBe(2);
+      expect(manager.getState().status).toBe('running');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('a failed startup does not block a following stop', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      startOnce: () => Promise<void>;
+      stopOnce: () => Promise<void>;
+    };
+    let stops = 0;
+    privateManager.startOnce = async () => { throw new Error('startup failed'); };
+    privateManager.stopOnce = async () => { stops++; };
+
+    const [startResult, stopResult] = await Promise.allSettled([manager.start(), manager.stop()]);
+    expect(startResult.status).toBe('rejected');
+    expect(stopResult.status).toBe('fulfilled');
+    expect(stops).toBe(1);
+  });
+
+  test('cleanup cancels a start queued behind shutdown', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      pidFile: { pid: number; port: number; startedAt: number } | null;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+      waitForProcessExit: () => Promise<boolean>;
+    };
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+    let finishExit: ((exited: boolean) => void) | undefined;
+    const processExit = new Promise<boolean>((resolve) => { finishExit = resolve; });
+    let starts = 0;
+
+    privateManager.managed = true;
+    privateManager.pidFile = { pid: 1234, port: 51717, startedAt: Date.now() };
+    privateManager.waitForProcessExit = () => processExit;
+    privateManager.startOnce = async () => { starts++; };
+    privateManager.updateStatus('running');
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: async () => ({ ok: true }),
+    });
+
+    try {
+      const firstStop = manager.stop();
+      const queuedStart = manager.start();
+      const cleanup = manager.cleanup();
+      finishExit?.(true);
+      await Promise.all([firstStop, queuedStart, cleanup]);
+      expect(starts).toBe(0);
+      expect(manager.getState().status).toBe('stopped');
+    } finally {
+      finishExit?.(true);
+      restoreGlobalProperty('fetch', originalFetch);
+    }
+  });
+
+  test('cleanup waits for an unmanaged startup before shutting it down', async () => {
+    const manager = new ServerManager();
+    const privateManager = manager as unknown as {
+      managed: boolean;
+      startOnce: () => Promise<void>;
+      updateStatus: (status: 'running') => void;
+    };
+    let finishStart: (() => void) | undefined;
+    const startup = new Promise<void>((resolve) => { finishStart = resolve; });
+    let starts = 0;
+    privateManager.startOnce = async () => {
+      starts++;
+      await startup;
+      privateManager.managed = true;
+      privateManager.updateStatus('running');
+    };
+
+    const starting = manager.start();
+    await Promise.resolve();
+    const cleanup = manager.cleanup();
+    finishStart?.();
+    await Promise.all([starting, cleanup]);
+    await manager.start();
+    expect(starts).toBe(1);
+    expect(manager.getState().status).toBe('stopped');
+  });
+
   test('restores running state after a transient health-check failure', async () => {
     const manager = asPrivateManager(new ServerManager());
     const originalSetInterval = Object.getOwnPropertyDescriptor(globalThis, 'setInterval');
@@ -44,7 +385,11 @@ describe('Electron request deadlines', () => {
     let poll: (() => Promise<void>) | undefined;
     const healthStates: HealthState[] = [
       { healthy: false },
-      { healthy: true, engineStatus: { current: 'whisper', status: 'ready' } },
+      {
+        healthy: true,
+        engineStatus: { current: 'whisper', status: 'ready' },
+        runtime: { app_build: null, server_build: '0.8.2-alpha.5', pack_id: null, effective_device: 'cpu' },
+      },
     ];
 
     Object.defineProperty(globalThis, 'setInterval', {
@@ -68,6 +413,7 @@ describe('Electron request deadlines', () => {
       expect(manager.getState()).toMatchObject({
         status: 'running',
         engineStatus: { current: 'whisper', status: 'ready' },
+        runtime: { effective_device: 'cpu', pack_id: null },
       });
     } finally {
       manager.stopHealthPolling();
