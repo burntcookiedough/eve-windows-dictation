@@ -18,9 +18,15 @@ The first release-verifier invocation used relative `-InstallDir` and failed its
 
 The packaged Python runtime transcribed the repository's 47.33-second test WAV using public `tiny` weights in a task-local model cache. It reported `device=cpu`, 12 segments, nonempty text, and no loaded `cublas64_12.dll` or `nvcuda.dll`. This host has an NVIDIA driver; the result is not a clean no-driver machine test. No microphone, overlay, clipboard insertion, installer upgrade, or rollback was exercised in this local preflight.
 
-The full server suite passed 294 tests. The first full app run had one failure and one error; a captured repeat passed 312 tests. Later alpha.6 CI runs passed the server, app, and Windows installer lifecycle jobs. The first local failure was an Electron rendered-settings viewport fixture; the latest local app run passed 306 tests and failed only that viewport transition, while the latest GitHub app CI passed.
+Earlier preflight runs passed 294 server tests and, on one captured repeat, 312 app tests. Other local app runs failed rendered Electron fixtures; those runs are not a claim that the complete local app suite passes today.
 
 The optional GPU-pack preflight used a later unpacked Eve package built from a working tree based on `3e7a44e` with the production descriptor change subsequently committed at `dda2b9d`. Its public Settings download, restart, CUDA transcription, and no-pack CPU fallback passed in isolated profiles. That unpacked package was not installed through NSIS or rebuilt from the exact `dda2b9d` commit. See [GPU-pack provenance](eve-gpu-pack-provenance.md).
+
+## October 2 review evidence
+
+Commit `a83438fed1270b97f24e686b8e2044c5a2416b5b` fixes valid apostrophes in Windows GPU-runtime paths. Its registration regression failed before the fix and passed afterward; the full local server suite passed 298 tests. Local app build, main-process TypeScript, and history checks passed. The full local app run passed 303 tests and failed two rendered fixtures; focused History export passed, while Settings capture reproduced `Current display surface not available for capture`. The first startup failure was not reproduced or classified. [Hosted app/server CI](https://github.com/burntcookiedough/eve-windows-dictation/actions/runs/37037443509) passed on this commit.
+
+The [hosted Windows lifecycle run](https://github.com/burntcookiedough/eve-windows-dictation/actions/runs/37037443453) passed CPU installation, published alpha.5 upgrade, rollback, uninstall, transcription, and synthetic-profile preservation at the same head. The September 27 installer visual artifact at `da7f7ae` was inspected on October 2: the Eve Setup text was readable and desktop/Start-menu shortcuts targeted `Eve.exe`; the icon had weak contrast on light backgrounds. [New-head visual capture](https://github.com/burntcookiedough/eve-windows-dictation/actions/runs/37037443466) also passed; capture success alone is not visual approval.
 
 ## Remaining gates
 
