@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import builtins
 import math
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
+import config
 from config import Settings
 import diagnostics
+from engine_compatibility import ComputeCapability, RuntimeCapabilities
+from transcription.vram import GpuCapabilities
 from diagnostics import (
     CudaDiagnostics,
     CudaDllDiagnostics,
@@ -16,6 +21,7 @@ from diagnostics import (
     VcRedistDiagnostics,
     build_warnings,
 )
+import transcription.vram as vram
 
 
 def test_parse_driver_version_handles_patch() -> None:
@@ -29,13 +35,47 @@ def test_run_nvidia_smi_timeout_returns_unavailable(monkeypatch) -> None:
         calls.update(kwargs)
         raise subprocess.TimeoutExpired(args[0], timeout=kwargs["timeout"])
 
-    monkeypatch.setattr(diagnostics.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_at", None)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_output", None)
+    monkeypatch.setattr(vram.subprocess, "run", raise_timeout)
 
     assert diagnostics._run_nvidia_smi() is None
     timeout = calls.get("timeout")
     assert isinstance(timeout, (int, float))
     assert math.isfinite(timeout)
     assert timeout > 0
+
+
+def test_gpu_metadata_and_driver_diagnostics_share_one_nvidia_smi_call(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run_nvidia_smi(args, **_kwargs):
+        calls.append(args)
+        return SimpleNamespace(stdout="0, 551.86, Test GPU, 8192\n")
+
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_at", None)
+    monkeypatch.setattr(vram, "_nvidia_smi_cached_output", None)
+    monkeypatch.setattr(vram.subprocess, "run", run_nvidia_smi)
+    monkeypatch.setitem(
+        sys.modules,
+        "ctranslate2",
+        SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device, _index=0: {"float16"},
+        ),
+    )
+
+    capabilities = vram.detect_gpu_capabilities("cuda")
+    driver = diagnostics.check_nvidia_driver()
+
+    assert capabilities.name == "Test GPU"
+    assert capabilities.total_vram_gb == 8.0
+    assert driver.version == "551.86"
+    assert calls == [[
+        "nvidia-smi",
+        "--query-gpu=index,driver_version,name,memory.total",
+        "--format=csv,noheader,nounits",
+    ]]
 
 
 def test_check_vc_redist_reports_missing_dlls(monkeypatch) -> None:
@@ -123,6 +163,155 @@ def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
     assert isinstance(payload["warnings"], list)
 
 
+def test_collect_diagnostics_warns_when_saved_cuda_preference_falls_back_to_cpu(
+    monkeypatch,
+) -> None:
+    capabilities = RuntimeCapabilities(
+        whisper_cpu=ComputeCapability(frozenset({"int8", "float32"})),
+        whisper_cuda=ComputeCapability(None, "The optional GPU runtime is not installed."),
+    )
+    monkeypatch.setattr(config, "get_runtime_capabilities", lambda: capabilities)
+    checked_devices: list[str] = []
+
+    def check_cuda(device: str) -> CudaDiagnostics:
+        checked_devices.append(device)
+        available = device == "cuda" and capabilities.whisper_cuda_available
+        return CudaDiagnostics(
+            available=available,
+            device=device,
+            reason=None if available else "The optional GPU runtime is not installed.",
+            name="Test GPU" if available else None,
+            compute_capability=None,
+        )
+
+    monkeypatch.setattr(diagnostics, "check_cuda_capability", check_cuda)
+    monkeypatch.setattr(
+        diagnostics,
+        "check_ctranslate2_cuda_dlls",
+        lambda: CudaDllDiagnostics(available=False, detail="GPU runtime missing"),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_nvidia_driver",
+        lambda: NvidiaDriverDiagnostics(
+            available=False,
+            version=None,
+            minimum_version="525.0",
+            meets_minimum=None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_vc_redist",
+        lambda: VcRedistDiagnostics(required=False, installed=None, missing=None, url=None),
+    )
+    settings = Settings(whisper_device="cuda")
+
+    payload = diagnostics.collect_diagnostics(settings, force=True)
+
+    assert settings.whisper_device == "cpu"
+    assert settings.effective_whisper_config is not None
+    assert settings.effective_whisper_config.requested_device == "cuda"
+    assert checked_devices == ["cuda"]
+    assert any(warning["code"] == "cuda_unavailable" for warning in payload["warnings"])
+
+    capabilities = RuntimeCapabilities(
+        whisper_cpu=ComputeCapability(frozenset({"int8", "float32"})),
+        whisper_cuda=ComputeCapability(frozenset({"float16"})),
+    )
+    cuda_settings = Settings(whisper_device="cuda")
+    cuda_payload = diagnostics.collect_diagnostics(cuda_settings)
+
+    assert cuda_settings.whisper_device == "cuda"
+    assert checked_devices == ["cuda", "cuda"]
+    assert cuda_payload["cuda"]["available"] is True
+    assert not any(
+        warning["code"] == "cuda_unavailable" for warning in cuda_payload["warnings"]
+    )
+
+    cpu_settings = Settings(whisper_device="cpu")
+    cpu_payload = diagnostics.collect_diagnostics(cpu_settings)
+
+    assert checked_devices == ["cuda", "cuda", "cpu"]
+    assert not any(
+        warning["code"] == "cuda_unavailable" for warning in cpu_payload["warnings"]
+    )
+
+
+def test_check_cuda_capability_never_imports_torch(monkeypatch) -> None:
+    torch_imports: list[str] = []
+    original_import = builtins.__import__
+
+    def import_without_torch(name, *args, **kwargs):
+        if name == "torch" or name.startswith("torch."):
+            torch_imports.append(name)
+            raise AssertionError("diagnostics must not require PyTorch")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_torch)
+    monkeypatch.setattr(
+        diagnostics,
+        "detect_gpu_capabilities",
+        lambda device: GpuCapabilities(True, device, 0, "Test GPU", 8.0),
+    )
+
+    result = diagnostics.check_cuda_capability("cuda")
+
+    assert result.available is True
+    assert result.name == "Test GPU"
+    assert result.compute_capability is None
+    assert torch_imports == []
+
+
+def test_check_ctranslate2_cuda_dlls_requires_compute_types(monkeypatch) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device: set(),
+        ),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is False
+    assert result.detail == "CTranslate2 reports no supported CUDA compute types."
+
+
+def test_packaged_cpu_diagnostics_do_not_probe_ambient_cuda(monkeypatch) -> None:
+    monkeypatch.setattr(diagnostics, "gpu_runtime_allowed", lambda: False)
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: (_ for _ in ()).throw(AssertionError("CUDA was probed")),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is False
+    assert result.detail == "The optional GPU runtime is not installed."
+
+
+def test_check_ctranslate2_cuda_dlls_discloses_that_it_did_not_test_inference(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "_load_ctranslate2",
+        lambda: SimpleNamespace(
+            get_cuda_device_count=lambda: 1,
+            get_supported_compute_types=lambda _device: {"float16"},
+        ),
+    )
+
+    result = diagnostics.check_ctranslate2_cuda_dlls()
+
+    assert result.available is True
+    assert result.detail is not None
+    assert "did not test Whisper model loading or transcription" in result.detail
+
+
 def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monkeypatch) -> None:
     probe_started = threading.Event()
     release_probe = threading.Event()
@@ -177,7 +366,8 @@ def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monke
         ),
     )
 
-    settings = Settings()
+    # Cache-key behavior must not depend on whether the CI host has a GPU.
+    settings = Settings.model_construct(whisper_device="auto")
     cached = diagnostics.collect_diagnostics(settings, force=True)
     stall_probe = True
     first = threading.Thread(
@@ -190,7 +380,7 @@ def test_collect_diagnostics_does_not_wait_behind_concurrent_cache_refresh(monke
         results["compatible"] = diagnostics.collect_diagnostics(
             settings, force=True
         )
-        incompatible_settings = Settings(whisper_device="cpu")
+        incompatible_settings = Settings.model_construct(whisper_device="cpu")
         results["incompatible"] = diagnostics.collect_diagnostics(
             incompatible_settings, force=True
         )

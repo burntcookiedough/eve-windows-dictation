@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.8.2-alpha.5",
+  "version": "0.8.2-alpha.6",
   "description": "Desktop voice transcription app",
   "repository": {
     "type": "git",
@@ -61,6 +61,7 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/**/*.map",
       "resources/**/*"
     ],
     "extraResources": [
@@ -95,7 +96,6 @@
           "!.venv/Lib/site-packages/**/test/**",
           "!.venv/Lib/site-packages/**/tests/**",
           "!.venv/Lib/site-packages/**/*.lib",
-          "!.venv/Lib/site-packages/torch/include/**",
           "!.runtime/include/**",
           "!.runtime/libs/**",
           "!.runtime/Lib/test/**",

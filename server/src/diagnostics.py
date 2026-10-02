@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import ctypes
+import csv
+import io
 import importlib
-import subprocess
 import sys
 import threading
 import time
@@ -13,17 +14,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import Settings
-from transcription.vram import detect_gpu_capabilities
+from runtime_paths import gpu_runtime_allowed
+from transcription.vram import _get_nvidia_smi_output, detect_gpu_capabilities
 
 MIN_NVIDIA_DRIVER_VERSION = "525.0"
 NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx"
 VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 _DIAGNOSTICS_CACHE_TTL_S = 30.0
-_NVIDIA_SMI_TIMEOUT_S = 2.0
 _last_diagnostics: dict[str, Any] | None = None
 _last_collected_at: float | None = None
-_last_signature: tuple[str] | None = None
+_last_signature: tuple[str, str] | None = None
 _diagnostics_cache_lock = threading.Lock()
 _diagnostics_refresh_lock = threading.Lock()
 
@@ -87,25 +88,7 @@ def _load_windows_dll(name: str) -> Any:
 
 
 def _run_nvidia_smi() -> str | None:
-    try:
-        completed = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=driver_version",
-                "--format=csv,noheader",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=_NVIDIA_SMI_TIMEOUT_S,
-        )
-    except FileNotFoundError:
-        return None
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return None
-
-    output = completed.stdout.strip()
-    return output or None
+    return _get_nvidia_smi_output()
 
 
 def _parse_driver_version(raw: str) -> tuple[int, int, int] | None:
@@ -132,47 +115,72 @@ def _version_tuple(version: str) -> tuple[int, int, int] | None:
 
 
 def _get_whisper_device(settings: Settings) -> str:
+    effective = getattr(settings, "effective_whisper_config", None)
+    if effective is not None:
+        return effective.requested_device
     return settings.whisper_device
 
 
 def check_cuda_capability(device: str) -> CudaDiagnostics:
     capabilities = detect_gpu_capabilities(device)
-    compute_capability: str | None = None
-
-    if capabilities.cuda_available and capabilities.device_index is not None:
-        try:
-            import torch
-
-            major, minor = torch.cuda.get_device_capability(capabilities.device_index)
-            compute_capability = f"{major}.{minor}"
-        except Exception:
-            compute_capability = None
 
     return CudaDiagnostics(
         available=capabilities.cuda_available,
         device=capabilities.device,
         reason=capabilities.reason,
         name=capabilities.name,
-        compute_capability=compute_capability,
+        # CTranslate2 does not expose the CUDA compute capability, and this
+        # diagnostic deliberately does not import another GPU framework.
+        compute_capability=None,
     )
 
 
 def check_ctranslate2_cuda_dlls() -> CudaDllDiagnostics:
+    if not gpu_runtime_allowed():
+        return CudaDllDiagnostics(
+            available=False,
+            detail="The optional GPU runtime is not installed.",
+        )
     try:
         ctranslate2 = _load_ctranslate2()
-    except Exception as exc:
-        return CudaDllDiagnostics(available=False, detail=str(exc))
+    except Exception:
+        return CudaDllDiagnostics(
+            available=False,
+            detail="CTranslate2 runtime is unavailable.",
+        )
 
     try:
-        if hasattr(ctranslate2, "get_cuda_device_count"):
-            _ = ctranslate2.get_cuda_device_count()
-        elif hasattr(ctranslate2, "get_supported_compute_types"):
-            _ = ctranslate2.get_supported_compute_types("cuda")
-        return CudaDllDiagnostics(available=True, detail=None)
-    except OSError as exc:
-        return CudaDllDiagnostics(available=False, detail=str(exc))
-    except Exception as exc:
-        return CudaDllDiagnostics(available=False, detail=str(exc))
+        device_count = ctranslate2.get_cuda_device_count()
+    except Exception:
+        return CudaDllDiagnostics(
+            available=False,
+            detail="CTranslate2 CUDA device query failed.",
+        )
+    if device_count < 1:
+        return CudaDllDiagnostics(
+            available=False,
+            detail="CTranslate2 did not find a CUDA device.",
+        )
+
+    try:
+        compute_types = ctranslate2.get_supported_compute_types("cuda")
+    except Exception:
+        return CudaDllDiagnostics(
+            available=False,
+            detail="CTranslate2 CUDA compute-type query failed.",
+        )
+    if not compute_types:
+        return CudaDllDiagnostics(
+            available=False,
+            detail="CTranslate2 reports no supported CUDA compute types.",
+        )
+    return CudaDllDiagnostics(
+        available=True,
+        detail=(
+            "CTranslate2 reports CUDA compute support; this diagnostic did not "
+            "test Whisper model loading or transcription."
+        ),
+    )
 
 
 def check_nvidia_driver() -> NvidiaDriverDiagnostics:
@@ -186,7 +194,15 @@ def check_nvidia_driver() -> NvidiaDriverDiagnostics:
             meets_minimum=None,
         )
 
-    versions = [line.strip() for line in output.splitlines() if line.strip()]
+    versions: list[str] = []
+    for row in csv.reader(io.StringIO(output)):
+        if not row:
+            continue
+        # Accept a legacy driver-only line as well as the shared CSV query.
+        version_column = 1 if len(row) >= 4 else 0
+        version = row[version_column].strip()
+        if version:
+            versions.append(version)
     if not versions:
         return NvidiaDriverDiagnostics(
             available=False,
@@ -279,8 +295,11 @@ def build_warnings(
             warnings.append(
                 DiagnosticWarning(
                     code="cuda_dll_missing",
-                    message="CUDA runtime DLLs required for GPU acceleration are missing.",
-                    action="Install or update the NVIDIA driver (525+), or switch to CPU mode in Settings > Server.",
+                    message="CTranslate2 did not confirm CUDA runtime support.",
+                    action=(
+                        "Check the CTranslate2 CUDA runtime and compatible NVIDIA driver, "
+                        "or switch to CPU mode in Settings > Server."
+                    ),
                     url=NVIDIA_DRIVER_URL,
                 )
             )
@@ -301,7 +320,7 @@ def build_warnings(
 
 
 def _get_cached_diagnostics(
-    signature: tuple[str],
+    signature: tuple[str, str],
     *,
     fresh_only: bool,
 ) -> dict[str, Any] | None:
@@ -361,7 +380,9 @@ def _diagnostics_refreshing_payload(settings: Settings) -> dict[str, Any]:
 def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str, Any]:
     global _last_diagnostics, _last_collected_at, _last_signature
 
-    signature = (settings.whisper_device,)
+    requested_device = _get_whisper_device(settings)
+    effective_device = settings.whisper_device
+    signature = (requested_device, effective_device)
 
     if not force:
         cached = _get_cached_diagnostics(signature, fresh_only=True)
@@ -379,7 +400,7 @@ def collect_diagnostics(settings: Settings, *, force: bool = False) -> dict[str,
                 return cached
 
         now = time.time()
-        device = _get_whisper_device(settings)
+        device = requested_device
         cuda = check_cuda_capability(device)
         cuda_dlls = check_ctranslate2_cuda_dlls()
         driver = check_nvidia_driver()

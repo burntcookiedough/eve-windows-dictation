@@ -65,12 +65,21 @@ export const IPC_CHANNELS = {
   SERVER_STATE_CHANGE: 'server:state-change',
   SERVER_LOG: 'server:log',
 
+  // Optional GPU runtime pack - independent from server connectivity
+  GPU_PACK_GET_STATE: 'gpu-pack:get-state',
+  GPU_PACK_INSTALL: 'gpu-pack:install',
+  GPU_PACK_STATE_CHANGE: 'gpu-pack:state-change',
+
   // Server settings (REST API proxy)
   GET_SERVER_SETTINGS: 'server:get-settings',
   UPDATE_SERVER_SETTINGS: 'server:update-settings',
   GET_ENGINE_STATUS: 'server:engine-status',
   GET_AVAILABLE_ENGINES: 'server:engines',
 } as const;
+
+/** Exact CTranslate2 wheel/build identity used by the reviewed GPU-pack descriptor. */
+export const GPU_PACK_CTRANSLATE2_BUILD_ID =
+  'ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc' as const;
 
 // Overlay window constants
 export const OVERLAY_CONFIG = {

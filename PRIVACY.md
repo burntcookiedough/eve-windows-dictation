@@ -8,9 +8,10 @@ Network access is still required in these cases:
 
 - the NSIS web installer downloads the application payload from GitHub Releases;
 - an engine downloads its model files from Hugging Face on first use;
+- a user explicitly installs optional NVIDIA GPU support from Eve's versioned GitHub Release assets;
 - a developer runs a separately started localhost speech service during development.
 
-Packaged Eve keeps speech processing on its bundled local service. It does not expose a configurable external-server endpoint.
+Packaged Eve keeps speech processing on its bundled local service. The optional GPU download sends no audio or transcripts. Eve does not expose a configurable external-server endpoint.
 
 ## Local data
 

@@ -8,9 +8,33 @@ import type {
 export interface HealthState {
   healthy: boolean;
   version?: string;
+  runtime?: ServerRuntimeFingerprint;
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
   engineStatus?: EngineStatus;
+}
+
+export interface ServerRuntimeFingerprint {
+  app_build: string | null;
+  server_build: string;
+  pack_id: string | null;
+  effective_device: string | null;
+}
+
+export interface ExpectedRuntimeIdentity {
+  app_build: string;
+  server_build: string;
+  pack_id: string | null;
+}
+
+export function matchesExpectedRuntime(
+  actual: ServerRuntimeFingerprint | undefined,
+  expected: ExpectedRuntimeIdentity,
+): boolean {
+  return actual !== undefined
+    && actual.app_build === expected.app_build
+    && actual.server_build === expected.server_build
+    && actual.pack_id === expected.pack_id;
 }
 
 export interface ServerProcessSnapshot {
@@ -48,6 +72,24 @@ export function parseServerPidFile(data: unknown): ServerPidFile {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function parseRuntimeFingerprint(value: unknown): ServerRuntimeFingerprint | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const runtime = value as Record<string, unknown>;
+  if (
+    !(runtime.app_build === null || typeof runtime.app_build === 'string')
+    || typeof runtime.server_build !== 'string'
+    || runtime.server_build.length === 0
+    || !(runtime.pack_id === null || typeof runtime.pack_id === 'string')
+    || !(runtime.effective_device === null || typeof runtime.effective_device === 'string')
+  ) return undefined;
+  return {
+    app_build: runtime.app_build,
+    server_build: runtime.server_build,
+    pack_id: runtime.pack_id,
+    effective_device: runtime.effective_device,
+  };
 }
 
 function optionalNonNegativeNumber(value: unknown): number | undefined {
@@ -120,6 +162,7 @@ export function parseHealthyResponse(data: unknown): HealthState {
   return {
     healthy: true,
     version: typeof payload.version === 'string' ? payload.version : undefined,
+    runtime: parseRuntimeFingerprint(payload.runtime),
     diagnostics:
       payload.diagnostics && typeof payload.diagnostics === 'object'
         ? (payload.diagnostics as ServerDiagnostics)
