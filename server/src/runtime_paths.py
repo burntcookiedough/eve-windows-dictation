@@ -33,7 +33,7 @@ def _normalized_directory(path: Path) -> str:
 def _validated_gpu_runtime_dir(raw_path: str) -> Path:
     """Resolve an explicit GPU runtime path or fail closed with a safe error."""
     if not raw_path or raw_path != raw_path.strip() or any(
-        character in raw_path for character in ('"', "'", "\x00", "\r", "\n")
+        character in raw_path for character in ('"', "\x00", "\r", "\n")
     ):
         raise RuntimeError(
             "MURMUR_GPU_RUNTIME_DIR must name an absolute existing directory."

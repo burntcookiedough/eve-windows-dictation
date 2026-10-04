@@ -1,0 +1,88 @@
+name: Windows Installer Lifecycle Gate
+
+on:
+  pull_request:
+    branches:
+      - trunk
+    paths:
+      - .github/workflows/installer-lifecycle-ci.yml
+      - app/**
+      - server/**
+      - scripts/installer-lifecycle-ci.ps1
+      - scripts/prepare-python-runtime.ps1
+      - scripts/generate-third-party-notices.ps1
+      - scripts/version.py
+      - README.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eve-installer-lifecycle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/eve-alpha6-candidate')
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout candidate source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require the dedicated candidate or trunk workflow context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:OS -ne 'Windows_NT') { throw 'This installer gate requires a disposable GitHub-hosted Windows runner.' }
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            if ($env:GITHUB_HEAD_REF -ne 'codex/eve-alpha6-candidate') { throw 'Only the Eve alpha.6 candidate PR may run this expensive gate.' }
+          } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha6-candidate', 'refs/heads/trunk')) {
+            throw "Unexpected ref for installer gate: $env:GITHUB_REF"
+          }
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the workflow event commit.' }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Prepare release server dependencies
+        shell: pwsh
+        working-directory: server
+        run: uv sync --python 3.11 --no-dev --extra release --frozen
+
+      - name: Prepare relocatable Python runtime
+        shell: pwsh
+        run: ./scripts/prepare-python-runtime.ps1
+
+      - name: Install app dependencies
+        shell: pwsh
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      - name: Check candidate version
+        shell: pwsh
+        run: python scripts/version.py check --tag v0.8.2-alpha.6
+
+      - name: Build candidate Windows web installer
+        shell: pwsh
+        working-directory: app
+        run: bun run package:win
+
+      - name: Run isolated alpha.5 to candidate lifecycle
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/installer-lifecycle-ci.ps1

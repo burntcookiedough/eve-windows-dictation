@@ -13,10 +13,13 @@ import runtime_paths
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows DLL search semantics")
 
 
+@pytest.mark.parametrize(
+    "directory_name", ["GPU runtime with spaces", "GPU runtime O'Brien"]
+)
 def test_explicit_gpu_runtime_directory_is_registered_and_precedes_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    directory_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime_dir = tmp_path / "GPU runtime with spaces"
+    runtime_dir = tmp_path / directory_name
     runtime_dir.mkdir()
     prior_path = tmp_path / "other runtime"
     monkeypatch.setenv("PATH", os.pathsep.join([str(prior_path), str(runtime_dir)]))

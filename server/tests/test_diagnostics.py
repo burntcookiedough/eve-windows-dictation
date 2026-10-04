@@ -9,8 +9,10 @@ import sys
 import threading
 from types import SimpleNamespace
 
+import config
 from config import Settings
 import diagnostics
+from engine_compatibility import ComputeCapability, RuntimeCapabilities
 from transcription.vram import GpuCapabilities
 from diagnostics import (
     CudaDiagnostics,
@@ -159,6 +161,81 @@ def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
     assert "nvidia_driver" in payload
     assert "vc_redist" in payload
     assert isinstance(payload["warnings"], list)
+
+
+def test_collect_diagnostics_warns_when_saved_cuda_preference_falls_back_to_cpu(
+    monkeypatch,
+) -> None:
+    capabilities = RuntimeCapabilities(
+        whisper_cpu=ComputeCapability(frozenset({"int8", "float32"})),
+        whisper_cuda=ComputeCapability(None, "The optional GPU runtime is not installed."),
+    )
+    monkeypatch.setattr(config, "get_runtime_capabilities", lambda: capabilities)
+    checked_devices: list[str] = []
+
+    def check_cuda(device: str) -> CudaDiagnostics:
+        checked_devices.append(device)
+        available = device == "cuda" and capabilities.whisper_cuda_available
+        return CudaDiagnostics(
+            available=available,
+            device=device,
+            reason=None if available else "The optional GPU runtime is not installed.",
+            name="Test GPU" if available else None,
+            compute_capability=None,
+        )
+
+    monkeypatch.setattr(diagnostics, "check_cuda_capability", check_cuda)
+    monkeypatch.setattr(
+        diagnostics,
+        "check_ctranslate2_cuda_dlls",
+        lambda: CudaDllDiagnostics(available=False, detail="GPU runtime missing"),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_nvidia_driver",
+        lambda: NvidiaDriverDiagnostics(
+            available=False,
+            version=None,
+            minimum_version="525.0",
+            meets_minimum=None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "check_vc_redist",
+        lambda: VcRedistDiagnostics(required=False, installed=None, missing=None, url=None),
+    )
+    settings = Settings(whisper_device="cuda")
+
+    payload = diagnostics.collect_diagnostics(settings, force=True)
+
+    assert settings.whisper_device == "cpu"
+    assert settings.effective_whisper_config is not None
+    assert settings.effective_whisper_config.requested_device == "cuda"
+    assert checked_devices == ["cuda"]
+    assert any(warning["code"] == "cuda_unavailable" for warning in payload["warnings"])
+
+    capabilities = RuntimeCapabilities(
+        whisper_cpu=ComputeCapability(frozenset({"int8", "float32"})),
+        whisper_cuda=ComputeCapability(frozenset({"float16"})),
+    )
+    cuda_settings = Settings(whisper_device="cuda")
+    cuda_payload = diagnostics.collect_diagnostics(cuda_settings)
+
+    assert cuda_settings.whisper_device == "cuda"
+    assert checked_devices == ["cuda", "cuda"]
+    assert cuda_payload["cuda"]["available"] is True
+    assert not any(
+        warning["code"] == "cuda_unavailable" for warning in cuda_payload["warnings"]
+    )
+
+    cpu_settings = Settings(whisper_device="cpu")
+    cpu_payload = diagnostics.collect_diagnostics(cpu_settings)
+
+    assert checked_devices == ["cuda", "cuda", "cpu"]
+    assert not any(
+        warning["code"] == "cuda_unavailable" for warning in cpu_payload["warnings"]
+    )
 
 
 def test_check_cuda_capability_never_imports_torch(monkeypatch) -> None:

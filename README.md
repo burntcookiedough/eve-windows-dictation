@@ -1,6 +1,6 @@
 # Eve for Windows
 
-<p><img src="https://img.shields.io/badge/v0.8.2-alpha.5-orange?style=flat-square" alt="v0.8.2-alpha.5"> <strong>Source status: v0.8.2-alpha.5 Faster-Whisper-only alpha · prerelease</strong></p>
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.6-orange?style=flat-square" alt="v0.8.2-alpha.6"> <strong>Source status: v0.8.2-alpha.6 CPU-first alpha · candidate, unpublished</strong></p>
 
 ## Local-first dictation that stays in your flow
 
@@ -22,7 +22,7 @@ Eve is a Windows desktop dictation app for turning speech into usable text quick
 - A click-through overlay that keeps recording state visible without taking focus.
 - Automatic clipboard copy and paste, with optional clipboard restoration.
 - Searchable local History and aggregate Insights.
-- A packaged Python transcription service with CPU fallback and CUDA diagnostics for supported NVIDIA systems.
+- A packaged Faster-Whisper service with a CPU-first setup and clear optional NVIDIA pack status.
 - Privacy-bounded diagnostics and explicit server controls.
 
 The desktop client captures 16 kHz mono audio and sends it over a local WebSocket to the packaged Python service. The service returns partial and final text for the overlay, clipboard, and local History.
@@ -38,28 +38,32 @@ Models are downloaded from their public Hugging Face repositories the first time
 | **Small — Lightweight** | A smaller download for constrained hardware | [faster-whisper-small](https://huggingface.co/Systran/faster-whisper-small) |
 | **Medium / Tiny — Advanced** | Additional model choices for users who want to tune the trade-off | [faster-whisper-medium](https://huggingface.co/Systran/faster-whisper-medium) / [faster-whisper-tiny](https://huggingface.co/Systran/faster-whisper-tiny) |
 
-The v0.8.2-alpha.5 alpha supports one model family: Faster-Whisper through the
+The v0.8.2-alpha.6 candidate supports one model family: Faster-Whisper through the
 CTranslate2 adapter. A future model family must arrive through its own adapter after
 it has passed the same accuracy, latency, memory, packaging, and recovery gates.
 
-Eve derives device and precision availability from the installed PyTorch and CTranslate2 runtimes. `auto` is the safest starting point; a particular device/precision/model combination still depends on the local driver, VRAM, and runtime capabilities. The catalog is not a promise of every device-by-precision combination.
+New packaged Windows profiles start with the **Small** model for CPU use. Existing
+profiles and explicit model overrides keep their current choice. The packaged CPU
+runtime does not include PyTorch or a full CUDA runtime. On supported NVIDIA systems,
+Settings can download the optional, separately hosted 495 MB GPU pack. Eve verifies
+both compressed assets and installed DLLs before enabling CUDA. Without a valid pack,
+automatic GPU preferences fall back to CPU, while explicitly selecting unavailable CUDA is rejected.
 
 ## Local-first, with clear network boundaries
 
-The packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload and for the selected model's first-use download from Hugging Face. During development, Eve may connect to a separately started localhost speech service; packaged builds use the bundled local service only.
+The packaged path keeps captured audio and transcription on the local machine. Network access is used for the small installer to fetch its application payload, for the selected model's first-use download from Hugging Face, and only when requested to fetch optional NVIDIA GPU support from GitHub Releases. The GPU download sends no audio or transcripts. During development, Eve may connect to a separately started localhost speech service; packaged builds use the bundled local service only.
 
 Read the full data boundary in [PRIVACY.md](PRIVACY.md). Do not include private audio, transcript text, clipboard contents, access tokens, or unredacted local paths in support or security reports; see [support](.github/SUPPORT.md) and [SECURITY.md](.github/SECURITY.md).
 
 ## Installation and release status
 
-The current release candidate is **Eve v0.8.2-alpha.5**. After its gated publication,
-the release and exact asset hashes will be available from the
-[v0.8.2-alpha.5 release record](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.5).
-The `nsis-web` installer downloads the application payload during installation, and
-internet access is required again if a selected model needs its weights. The alpha is
-unsigned and may trigger Windows reputation warnings. Until alpha.5 passes those gates,
-[v0.8.2-alpha.4](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.4)
-remains the latest published prerelease.
+The current release candidate is **Eve v0.8.2-alpha.6**. This source tree and its
+[candidate release notes](docs/releases/eve-v0.8.2-alpha.6-release-notes.md) are not yet
+published. The [v0.8.2-alpha.5 release](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.5)
+remains the latest published prerelease. The `nsis-web` installer downloads the
+application payload during installation, and internet access is required again if a
+selected model needs its weights. The alpha is unsigned and may trigger Windows
+reputation warnings.
 
 ### v0.7.0 integrity evidence
 
@@ -71,7 +75,7 @@ The [v0.7.0 release record](https://github.com/burntcookiedough/eve-windows-dict
 | `murmur-0.7.0-x64.nsis.7z` | 2,033,658,084 | `9f3137a096ac2183828e393a41b19e23a0b7387c2f44d40f6285d059ae2ae619` |
 | `latest.yml` | 558 | `fd23678bbed97980152fe9495c27f39081e61c1207f76f0eb614afac9d5c6221` |
 
-The source tree is the **Eve v0.8.2-alpha.5 release candidate**. A commit is not a
+The source tree is the **Eve v0.8.2-alpha.6 release candidate**. A commit is not a
 downloadable release: only artifacts attached to the matching GitHub prerelease have
 passed the repository's package, lifecycle, manifest, and promotion gates.
 

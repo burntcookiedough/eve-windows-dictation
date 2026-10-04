@@ -535,8 +535,7 @@ async function startApplication(): Promise<void> {
   historyService.initialize();
   log.info('History service initialized');
 
-  // GPU-pack identity and storage are machine-local. The descriptor remains null until its
-  // exact binaries and redistribution terms have passed review.
+  // GPU-pack identity and storage are machine-local; installation requires an explicit user action.
   gpuPackManager = createGpuPackManager({
     descriptor: PINNED_GPU_PACK_DESCRIPTOR,
     root: resolveGpuPackStorageRoot(),
