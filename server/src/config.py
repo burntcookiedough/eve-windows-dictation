@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     _requested_whisper_device: str = PrivateAttr(default="auto")
     _requested_whisper_compute_type: str = PrivateAttr(default="auto")
     _effective_whisper_config: EffectiveWhisperConfig | None = PrivateAttr(default=None)
+    _explicit_patch_keys: frozenset[str] | None = PrivateAttr(default=None)
 
     @field_validator("whisper_language", mode="before")
     @classmethod
@@ -492,7 +493,9 @@ def build_settings_candidate(patch: dict[str, Any]) -> Settings:
         frozenset(patch) & {"whisper_device", "whisper_compute_type"}
     )
     try:
-        return Settings(**current_dict)
+        candidate = Settings(**current_dict)
+        candidate._explicit_patch_keys = frozenset(patch)
+        return candidate
     except ValidationError as e:
         logger.warning("Rejected invalid settings update: %s", e)
         raise
@@ -537,15 +540,21 @@ def _persist_settings(settings: Settings) -> None:
     defaults = _default_settings()
     default_dict = defaults.model_dump()
     current_dict = settings.model_dump()
+    stored = _load_settings_json()
     # Preserve settings written by older versions or managed outside the
     # Settings API. API-managed values below are replaced from the candidate.
     diff = {
         key: value
-        for key, value in _load_settings_json().items()
+        for key, value in stored.items()
         if key not in API_KEYS and key not in PERSISTED_INTERNAL_KEYS
     }
-    # Only persist API values that differ from defaults.
+    # Persist API values that differ from defaults. An API patch changes only
+    # its named keys, so saved choices shadowed by OS or dotenv settings stay.
     for key in API_KEYS | PERSISTED_INTERNAL_KEYS:
+        if settings._explicit_patch_keys is not None and key not in settings._explicit_patch_keys:
+            if key in stored:
+                diff[key] = stored[key]
+            continue
         if key in current_dict and current_dict[key] != default_dict.get(key):
             diff[key] = current_dict[key]
     settings_file = get_settings_file_path()

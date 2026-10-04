@@ -50,6 +50,64 @@ def test_environment_overrides_persisted_settings(
     assert settings.whisper_device == "cpu"
 
 
+def test_unrelated_patch_preserves_model_shadowed_by_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text('{"whisper_model":"small"}', encoding="utf-8")
+    monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(settings_file))
+    monkeypatch.setenv("MURMUR_WHISPER_MODEL", "large-v3-turbo")
+
+    assert config.get_settings().whisper_model == "large-v3-turbo"
+    config.update_settings({"partial_emission_interval": 0.5})
+    assert json.loads(settings_file.read_text(encoding="utf-8")) == {
+        "whisper_model": "small",
+        "partial_emission_interval": 0.5,
+    }
+
+    # Choosing the built-in default explicitly should clear the old choice.
+    config.update_settings({"whisper_model": "large-v3-turbo"})
+    assert json.loads(settings_file.read_text(encoding="utf-8")) == {
+        "partial_emission_interval": 0.5,
+    }
+
+
+def test_unrelated_patch_does_not_persist_environment_only_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(settings_file))
+    monkeypatch.setenv("MURMUR_WHISPER_MODEL", "small")
+
+    assert config.get_settings().whisper_model == "small"
+    config.update_settings({"partial_emission_interval": 0.5})
+
+    persisted = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert "whisper_model" not in persisted
+    assert persisted["partial_emission_interval"] == 0.5
+
+
+def test_unrelated_patch_preserves_model_shadowed_by_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text('{"whisper_model":"small"}', encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "MURMUR_WHISPER_MODEL=large-v3-turbo\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MURMUR_SETTINGS_FILE", str(settings_file))
+    monkeypatch.delenv("MURMUR_WHISPER_MODEL", raising=False)
+
+    assert config.get_settings().whisper_model == "large-v3-turbo"
+    config.update_settings({"partial_emission_interval": 0.5})
+    assert json.loads(settings_file.read_text(encoding="utf-8")) == {
+        "whisper_model": "small",
+        "partial_emission_interval": 0.5,
+    }
+
+
 def test_settings_persist_atomically_to_launcher_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
