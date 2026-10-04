@@ -1,18 +1,19 @@
 # Eve installer: end-user dependency research
 
-> Research date: February 2026
-> Scope: what a Windows user needs when downloading Eve from GitHub Releases.
+> Original research: February 2026. Lean-runtime candidate updated September 2026.
+> Scope: packaged Windows dependencies in this checkout. The lean candidate has not been released.
 
 ## Executive summary
 
 The `nsis-web` installer contains the Electron client and a self-contained Python
 runtime. Eve currently ships one speech model family: Faster-Whisper through the
-CTranslate2 adapter. The `release` dependency closure adds the locked CUDA-enabled
-PyTorch runtime needed for GPU support. Model weights are downloaded on first run,
-not embedded in the installer.
+CTranslate2 adapter. The lean candidate's `release` closure is CPU-capable and omits
+PyTorch; a local two-DLL NVIDIA pack has passed synthetic GPU inference but is not
+hosted or enabled for production downloads. Model
+weights are downloaded on first run, not embedded in the installer.
 
-The release verifier checks the actual prepared payload: Faster-Whisper and PyTorch
-must be importable, retired model-runtime packages and source modules must be absent,
+The release verifier checks the actual prepared payload: Faster-Whisper and CTranslate2
+must be importable, PyTorch and the bulk CUDA runtime closure and retired model modules must be absent,
 and the bundled Python runtime must be self-contained. It does not import or discover
 an unsupported model family.
 
@@ -23,16 +24,20 @@ payload archives during installation; the payload contains:
 
 | Component | Source | Approximate size |
 | --- | --- | ---: |
-| Electron/Chromium runtime | `app/dist/` | 150–200 MB |
+| Electron/Chromium runtime | packaged Electron distribution | Included in the measured installed total |
+| Compiled Eve code | `app/dist/` | 2.7 MB raw before package filters |
 | Eve resources | `app/resources/` | <1 MB |
 | Native Node modules | Electron-rebuilt `app/node_modules/` | ~10 MB |
-| Python interpreter | `server/.runtime/python.exe` | ~100 MB |
-| Python packages | `server/.venv/Lib/site-packages/` | Depends on the release closure |
+| Python interpreter | `server/.runtime/` | 75.6 MB raw before package filters |
+| Python packages | `server/.venv/Lib/site-packages/` | 296.2 MB raw before package filters |
 | Server source | `server/src/` | ~100 KB |
 
 Build filters exclude bytecode, package-manager tooling, dependency tests, static
-linker archives, PyTorch headers, and standalone-Python development assets. They do
-not remove runtime DLLs needed by Faster-Whisper or CUDA.
+linker archives, and standalone-Python development assets. They do not remove runtime
+DLLs needed by Faster-Whisper. The CPU release dependency closure excludes PyTorch and
+the bulk CUDA runtime at resolution time. The pinned CTranslate2 wheel contains one
+266,288-byte `cudnn64_9.dll` dispatcher that remains in the base for optional GPU use;
+the release verifier permits this exact hashed file only.
 
 The installer does not contain:
 
@@ -46,15 +51,16 @@ The installer does not contain:
 | Requirement | Details |
 | --- | --- |
 | Windows | Windows 10/11, x86_64 |
-| Disk | Plan for roughly 5–8 GB for the app and 2–4 GB for model caches |
+| Disk | Local final candidate: 685,806,043 bytes unpacked; allow separate space for model weights and an optional GPU pack |
 | RAM | 4 GB minimum; 8 GB or more recommended |
 | Internet | Required for `nsis-web` payloads and first-use model download |
 | Visual C++ Redistributable | Required by Electron native modules and Python extensions; Eve links to the official installer when missing |
 
-CPU mode works without a GPU. For acceleration, use a CUDA-capable NVIDIA GPU with
-a current driver (CUDA 12.4 compatibility requires a driver in the supported range)
-and enough VRAM for the selected model and audio length. The adapter reports the
-effective device and precision at runtime; `auto` is the safest default.
+CPU mode works without a GPU. The proposed NVIDIA pack requires a supported driver
+and sufficient VRAM. The local candidate pack is 494,950,029 bytes compressed and
+771,188,224 bytes installed; clean-machine support and distribution remain release
+gates. The adapter must report actual effective device and
+precision; `auto` is the safest default.
 
 ## 3. Self-contained Python runtime
 
@@ -79,20 +85,21 @@ managed interpreter have the same Python ABI before copying. Release verificatio
 then probes `sys.prefix`, `sys.path`, and the executable to ensure they resolve inside
 the bundled runtime.
 
-## 4. CUDA runtime and diagnostics
+## 4. Optional CUDA runtime and diagnostics
 
-The release extra currently includes `torch==2.6.0+cu124` from the explicit PyTorch
-CUDA index and Faster-Whisper/CTranslate2 from PyPI. PyTorch supplies the CUDA DLLs
-under `torch/lib`; the Electron server launcher prepends that directory to `PATH` and
-the server registers it before CTranslate2 initializes.
+The previous release included `torch==2.6.0+cu124` to supply CUDA DLLs under `torch/lib`.
+The lean candidate removes it from the default release closure. A separate, reviewed
+GPU pack must be proven with real inference and registered before CTranslate2 initializes
+before this candidate can offer optional NVIDIA acceleration.
 
 | Build command | GPU closure | Intended use |
 | --- | --- | --- |
-| `uv sync --python 3.11 --no-dev --extra release --frozen` | Faster-Whisper + CUDA PyTorch | Packaged Windows runtime |
-| `uv sync --extra whisper --group dev --frozen` | Faster-Whisper without CUDA PyTorch | Development and CPU tests |
+| `uv sync --python 3.11 --no-dev --extra release --frozen` | CPU Faster-Whisper/CTranslate2 | Candidate packaged Windows runtime |
+| `uv sync --extra whisper --group dev --frozen` | CPU Faster-Whisper/CTranslate2 | Development and CPU tests |
 | `uv sync --group dev --frozen` | No speech runtime unless requested | General server development |
 
-The release verifier imports `faster_whisper` and `torch`, checks that the supported
+The release verifier imports `faster_whisper` and `ctranslate2`, rejects Torch and CUDA
+runtime DLLs other than the exact pinned CTranslate2 cuDNN dispatcher, checks that the supported
 source tree contains no retired adapter modules, and rejects unsupported package
 directories if they appear in the prepared site-packages directory. It also starts
 the bundled server and verifies `/health`.
@@ -149,11 +156,11 @@ Before a release-authorized package attempt, verify:
 
 1. `uv sync --python 3.11 --no-dev --extra release --frozen` completed without lock changes.
 2. `prepare-python-runtime.ps1` copied an ABI-matched managed runtime.
-3. `scripts/release-verify.ps1` found Faster-Whisper and PyTorch, found no retired
+3. `scripts/release-verify.ps1` found Faster-Whisper/CTranslate2, rejected PyTorch/CUDA files, found no retired
    model-runtime packages or source modules, and passed the bundled `/health` check.
 4. The generated third-party notice inventory matches the prepared closure.
-5. Model downloads, CPU fallback, CUDA diagnostics, model replacement, and Quick/Long
-   Dictation are covered by the accepted exact-head validation plan.
+5. Model downloads, CPU dictation, optional GPU inference, CUDA diagnostics, model
+   replacement, and Quick/Long Dictation are covered by the lean-runtime release plan.
 
 Packaging, signing, tagging, uploading, and publication remain separately authorized
 release actions. This document does not authorize any of them.
