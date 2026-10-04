@@ -55,6 +55,12 @@ async function measure(window, view, state, compatibility, zoom) {
     const optionRects = options.map(rect);
     const compatibilityButton = document.querySelector('[data-fixture-compatibility-toggle]');
     const compatibilityControls = document.querySelector('[data-fixture-compatibility-controls]');
+    const compatibilityDropdowns = [...document.querySelectorAll('[data-settings-row]')]
+      .filter((row) => ['Compute type. Precision used by Faster-Whisper', 'Device. Hardware device for inference'].includes(row.getAttribute('aria-label')))
+      .map((row) => ({
+        control: rect(row.querySelector('[data-settings-control]')),
+        dropdown: rect(row.querySelector('[role="combobox"]')),
+      }));
     return {
       ...meta,
       viewport: { width: innerWidth, height: innerHeight },
@@ -69,6 +75,8 @@ async function measure(window, view, state, compatibility, zoom) {
       document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
       compatibilityExpanded: compatibilityButton?.getAttribute('aria-expanded') === 'true' && !!compatibilityControls,
       compatibilityAssociation: !!compatibilityButton && compatibilityButton.getAttribute('aria-controls') === compatibilityControls?.id,
+      inlineOptionReasonCount: document.querySelectorAll('[data-setting-option-reason]').length,
+      compatibilityDropdowns,
     };
   })()`);
 }
@@ -76,6 +84,23 @@ async function measure(window, view, state, compatibility, zoom) {
 async function capture(window, view, state, compatibility, filename) {
   await window.webContents.setZoomFactor(1);
   await window.setContentSize(960, 900);
+  await wait(120);
+  fs.mkdirSync(screenshotDir, { recursive: true });
+  const image = await window.webContents.capturePage();
+  const target = path.resolve(screenshotDir, filename);
+  fs.writeFileSync(target, image.toPNG());
+  return target;
+}
+
+async function captureCompatibilityOptions(window, width, filename) {
+  await window.webContents.setZoomFactor(1);
+  await window.setContentSize(width, 900);
+  await wait(120);
+  await window.webContents.executeJavaScript(`(() => {
+    [...document.querySelectorAll('[data-settings-row]')]
+      .find((row) => row.getAttribute('aria-label')?.startsWith('Compute type.'))
+      ?.scrollIntoView({ block: 'center' });
+  })()`);
   await wait(120);
   fs.mkdirSync(screenshotDir, { recursive: true });
   const image = await window.webContents.capturePage();
@@ -148,6 +173,9 @@ async function main() {
         }
       }
     }
+    await loadFixture(window, 'speech', 'ready', true);
+    screenshots.push(await captureCompatibilityOptions(window, 810, 'compatibility-disabled-options-810.png'));
+    screenshots.push(await captureCompatibilityOptions(window, 320, 'compatibility-disabled-options-320.png'));
     interactions = await exerciseModelSelection(window);
   } finally {
     if (window && !window.isDestroyed()) await window.close();

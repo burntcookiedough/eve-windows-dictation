@@ -1,24 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import {
-  disabledOptionReasons,
-  optionsForDraftWhisperDevice,
-} from '../src/renderer/app/server-setting-options.js';
+import { optionsForDraftWhisperDevice } from '../src/renderer/app/server-setting-options.js';
 
 describe('Server setting option compatibility metadata', () => {
-  test('returns visible reasons for disabled options', () => {
-    expect(disabledOptionReasons([
-      { value: 'auto', label: 'Auto' },
-      { value: 'cuda', label: 'CUDA', disabled: true, reason: 'PyTorch CUDA is unavailable.' },
-    ])).toEqual(['CUDA: PyTorch CUDA is unavailable.']);
-  });
-
-  test('accepts metadata from older servers without disabled fields', () => {
-    expect(disabledOptionReasons([
-      { value: 'cpu', label: 'CPU' },
-    ])).toEqual([]);
-  });
-
   test.each([
     ['cpu', true, true],
     ['cuda', false, false],
@@ -50,7 +34,7 @@ describe('Server setting option compatibility metadata', () => {
     expect(options[1].disabled).toBe(mixedDisabled);
   });
 
-  test('renders disabled options and their reasons in compatibility selects', () => {
+  test('keeps disabled-option reasons accessible through compatibility selects', () => {
     const settingsView = readFileSync(
       new URL('../src/renderer/app/views/SettingsView.svelte', import.meta.url),
       'utf8',
@@ -62,14 +46,14 @@ describe('Server setting option compatibility metadata', () => {
 
     expect(settingsView).toContain('<EveDropdown');
     expect(settingsView).toContain('toDropdownOptions');
+    expect(settingsView).toContain('disabled: option.disabled');
+    expect(settingsView).toContain('description: option.reason');
+    expect(settingsView).toContain('getWhisperComputeOptions()');
+    expect(settingsView).not.toContain('disabledOptionReasons');
+    expect(settingsView).not.toContain('data-setting-option-reason');
     expect(dropdown).toContain('disabled={option.disabled}');
     expect(dropdown).toContain('aria-disabled={option.disabled || undefined}');
     expect(dropdown).toContain('aria-describedby={option.description ?');
     expect(dropdown).toContain('if (!option || option.disabled) return;');
-    expect(settingsView).toContain('data-setting-option-reason');
-    expect(settingsView).toContain('getWhisperComputeOptions()');
-    expect(settingsView).toContain("disabledOptionReasons(getWhisperComputeOptions())");
-    expect(settingsView).toContain("disabledOptionReasons(getOptions('whisper_device'))");
-    expect(settingsView).not.toContain("disabledOptionReasons(getOptions('nemotron_device'))");
   });
 });

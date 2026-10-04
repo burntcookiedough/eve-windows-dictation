@@ -18,7 +18,7 @@
     shouldClearServerSettings,
     shouldRetryServerSettings,
   } from '../server-settings-recovery';
-  import { disabledOptionReasons, optionsForDraftWhisperDevice } from '../server-setting-options';
+  import { optionsForDraftWhisperDevice } from '../server-setting-options';
   import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type GpuPackState, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
@@ -916,9 +916,6 @@
               options={toDropdownOptions(getWhisperComputeOptions())}
               onchange={(value) => updateEngineSetting('whisper_compute_type', value)}
             />
-            {#each disabledOptionReasons(getWhisperComputeOptions()) as reason}
-              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
-            {/each}
           </SettingsRow>
         {/if}
 
@@ -940,9 +937,6 @@
               options={toDropdownOptions(getOptions('whisper_device'))}
               onchange={(value) => updateEngineSetting('whisper_device', value)}
             />
-            {#each disabledOptionReasons(getOptions('whisper_device')) as reason}
-              <p data-setting-option-reason class="mt-1 text-xs leading-5 text-amber-300">{reason}</p>
-            {/each}
           </SettingsRow>
         {/if}
         </div>

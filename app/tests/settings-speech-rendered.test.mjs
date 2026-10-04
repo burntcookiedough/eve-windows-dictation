@@ -138,6 +138,21 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(expanded.compatibilityAssociation).toBeTrue();
   });
 
+  test('keeps compatibility dropdowns usable without duplicate inline warnings', () => {
+    const expandedMeasurements = measurements.filter((measurement) => measurement.view === 'speech' && measurement.compatibility);
+    expect(expandedMeasurements).toHaveLength(6);
+
+    for (const measurement of expandedMeasurements) {
+      expect(measurement.inlineOptionReasonCount).toBe(0);
+      expect(measurement.compatibilityDropdowns).toHaveLength(2);
+      for (const dropdown of measurement.compatibilityDropdowns) {
+        expect(dropdown.dropdown.width).toBeGreaterThanOrEqual(Math.min(128, dropdown.control.width) - 1);
+        expect(dropdown.dropdown.left).toBeGreaterThanOrEqual(dropdown.control.left - 1);
+        expect(dropdown.dropdown.right).toBeLessThanOrEqual(dropdown.control.right + 1);
+      }
+    }
+  });
+
   test('keeps the renderer mounted while selecting every curated model', () => {
     expect(result.interactions).toHaveLength(3);
     expect(result.interactions.map((interaction) => interaction.label)).toEqual([
@@ -155,7 +170,7 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {
-    expect(result.screenshots).toHaveLength(5);
+    expect(result.screenshots).toHaveLength(7);
     for (const screenshot of result.screenshots) {
       expect(existsSync(screenshot)).toBeTrue();
     }
