@@ -12,11 +12,14 @@ const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
 const appCss = source('../src/renderer/app/app.css');
 const primaryPage = source('../src/renderer/app/components/PrimaryPage.svelte');
 
-describe('Phase 3 Server and diagnostics cohesion contracts', () => {
-  test('uses one cohesive Server & diagnostics section without nested SettingsSection composition', () => {
-    expect(settingsView).toContain('title="Server &amp; diagnostics"');
+describe('Settings server and diagnostics contracts', () => {
+  test('keeps server status in Engine and nests full diagnostics under Advanced', () => {
+    expect(settingsView).toContain('<SettingsSection title="Engine"');
     expect(settingsView).toContain('data-server-diagnostics');
-    expect(settingsView).toContain('<ServerView embedded />');
+    expect(settingsView).toContain('<ServerView embedded showAutoStart={false} />');
+    expect(settingsView).toContain('label="Server"');
+    expect(settingsView).toContain('label="Auto-start server"');
+    expect(settingsView).toContain('title="Advanced"');
     expect(settingsView).not.toContain('<SettingsSection title="Server">');
     expect(serverView).not.toContain('<SettingsSection');
     expect(serverView).not.toContain('title="Settings"');
@@ -36,6 +39,9 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('window.murmurMain.startServer()');
     expect(serverView).toContain('window.murmurMain.stopServer()');
     expect(serverView).toContain('window.murmurMain.restartServer()');
+    expect(serverView).toContain('showAutoStart?: boolean;');
+    expect(serverView).toContain('showAutoStart = true');
+    expect(serverView).toContain('{#if showAutoStart}');
   });
 
   test('keeps factual status and diagnostics readable without duplicating app announcements', () => {
@@ -51,7 +57,10 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(serverView).toContain('data-server-logs-loading role="status" aria-live="polite"');
     expect(serverView).not.toContain('aria-label={`Server status: ${statusDisplay.label}`}');
     expect(serverView).toContain('motion-safe:animate-ping');
-    expect(settingsRow).toContain('focus-visible:ring-2');
+    expect(serverView).toContain('.server-settings-embedded');
+    expect(serverView).toContain('var(--fg2, #9b9b9b) !important');
+    expect(serverView).toContain('button:hover:not(:disabled)');
+    expect(settingsRow).toContain(':global(:focus-visible)');
     expect(appCss).toContain('@media (forced-colors: active)');
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
   });
@@ -82,8 +91,10 @@ describe('Phase 3 Server and diagnostics cohesion contracts', () => {
     expect(settingsView).not.toContain('overflow-y-auto');
     expect(settingsView).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
     expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
-    expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
-    expect(settingsView).toContain('min-h-9 w-full max-w-full rounded-lg border border-zinc-700');
+    expect(primaryPage).toContain('class="primary-page__scroll"');
+    expect(appCss).toContain('.primary-page__scroll {');
+    expect(appCss).toContain('overflow-y: auto;');
+    expect(settingsView).toContain('options={toWhisperLanguageOptions()}');
     expect(serverView).toContain('[overflow-wrap:anywhere]');
     expect(serverView).toContain('serverState.version !== undefined');
     expect(serverView).toContain('serverState.uptime !== undefined');

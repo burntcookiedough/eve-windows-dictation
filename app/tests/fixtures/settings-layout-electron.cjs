@@ -67,7 +67,7 @@ async function main() {
       frame: false,
       resizable: false,
       backgroundColor: '#08090a',
-      webPreferences: { contextIsolation: true, nodeIntegration: false },
+      webPreferences: { contextIsolation: true, nodeIntegration: false, offscreen: true },
     });
     window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
       process.stderr.write(`renderer console ${level} ${sourceId}:${line}: ${message}\n`);
@@ -76,8 +76,8 @@ async function main() {
       process.stderr.write(`renderer load failed ${errorCode} ${errorDescription} ${validatedURL}\n`);
     });
     await window.loadURL(url);
-    window.show();
-    window.focus();
+    window.webContents.debugger.attach('1.3');
+    await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
     window.webContents.focus();
     await wait(500);
 

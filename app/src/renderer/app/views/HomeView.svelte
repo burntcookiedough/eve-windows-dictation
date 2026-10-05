@@ -1,203 +1,352 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { ServerStatusPhase } from '../server-status';
-  import { retryManagedServer, serverStatusState } from '../server-status';
+  import type { HistoryEntryWithGroup, InsightsResponse, Settings } from '$shared/types';
   import PrimaryPage from '../components/PrimaryPage.svelte';
+  import Cactus from '../components/Cactus.svelte';
+  import { serverStatusState, retryManagedServer, type ServerStatusPhase } from '../server-status';
+  import { recordingRendererState } from '../recording-renderer-state';
 
   interface Props {
     onNavigate: (view: 'history' | 'insights' | 'settings') => void;
   }
 
-  let { onNavigate }: Props = $props();
-  let quickHotkey = $state('Checking shortcut…');
-  let longHotkey = $state('Checking shortcut…');
-  let shortcutsError = $state(false);
-  let retrying = $state(false);
-  let snapshot = $derived($serverStatusState);
-  let server = $derived(snapshot.state);
-  let engine = $derived(server?.engineStatus?.info);
-  let model = $derived(server?.modelDownload ?? null);
+  interface ActivityDay {
+    date: Date;
+    key: string;
+    words: number;
+    dictations: number;
+    today: boolean;
+  }
 
-  const phaseCopy: Record<ServerStatusPhase, { title: string; detail: string }> = {
-    connecting: { title: 'Connecting', detail: 'Checking the local speech service.' },
-    stale: { title: 'Refreshing readiness', detail: 'Waiting for a current speech-service status.' },
-    unavailable: { title: 'Speech service unavailable', detail: 'Eve cannot currently confirm speech readiness.' },
-    missing: { title: 'Speech model not prepared', detail: 'Open Settings to prepare the selected model.' },
-    partial: { title: 'Speech model needs completion', detail: 'Open Settings to continue preparing the selected model.' },
-    checking: { title: 'Checking model files', detail: 'Looking for the selected speech model.' },
-    downloading: { title: 'Preparing speech model', detail: 'The selected model is downloading in the background.' },
-    loading: { title: 'Loading speech model', detail: 'The selected model is being loaded into memory.' },
-    ready: { title: 'Ready for dictation', detail: 'Eve can accept Quick and Long dictation.' },
-    error: { title: 'Speech setup needs attention', detail: 'Open Settings for the current speech-service details.' },
+  let { onNavigate }: Props = $props();
+  let now = $state(new Date());
+  let insights = $state<InsightsResponse | null>(null);
+  let latestEntry = $state<HistoryEntryWithGroup | null>(null);
+  let quickHotkey = $state('—');
+  let longHotkey = $state('—');
+  let retrying = $state(false);
+  let plant: HTMLDivElement | null = null;
+
+  let serverSnapshot = $derived($serverStatusState);
+  let motion = $derived($recordingRendererState);
+  let model = $derived(serverSnapshot.state?.modelDownload);
+
+  const phaseCopy: Record<ServerStatusPhase, string> = {
+    connecting: 'connecting',
+    stale: 'refreshing readiness',
+    unavailable: 'speech service unavailable',
+    missing: 'speech model not prepared',
+    partial: 'speech model needs more files',
+    checking: 'checking speech model files',
+    downloading: 'downloading speech model',
+    loading: 'loading speech model',
+    ready: 'ready',
+    error: 'speech setup needs attention',
   };
 
-  let readiness = $derived(phaseCopy[snapshot.phase]);
-  let phaseAccent = $derived(
-    snapshot.phase === 'ready'
-      ? 'emerald'
-      : snapshot.phase === 'error' || snapshot.phase === 'unavailable'
-        ? 'red'
-        : snapshot.phase === 'downloading' || snapshot.phase === 'loading' || snapshot.phase === 'checking'
-          ? 'amber'
-          : 'zinc'
+  let homeStatus = $derived.by(() => {
+    const recordingState = motion.recording?.state;
+    if (recordingState === 'listening') {
+      const elapsed = motion.listeningSince === null ? 0 : Math.max(0, Math.floor((now.getTime() - motion.listeningSince) / 1000));
+      return `listening · ${formatDuration(elapsed)}`;
+    }
+    if (recordingState === 'processing' || recordingState === 'transcribing') return 'transcribing';
+    if (recordingState === 'success' || motion.cactusState === 'done') return 'done';
+    if (recordingState === 'error') return 'dictation error';
+
+    if (serverSnapshot.phase !== 'ready') {
+      const percent = model?.progress_percent;
+      return serverSnapshot.phase === 'downloading' && typeof percent === 'number' && Number.isFinite(percent)
+        ? `downloading · ${Math.round(percent)}%`
+        : phaseCopy[serverSnapshot.phase] ?? 'checking readiness';
+    }
+
+    return 'ready';
+  });
+
+  let statusAction = $derived.by(() => {
+    if ((serverSnapshot.phase === 'error' || serverSnapshot.phase === 'unavailable') && serverSnapshot.state?.managed) return 'retry';
+    if (serverSnapshot.phase === 'error' || serverSnapshot.phase === 'unavailable' || serverSnapshot.phase === 'missing' || serverSnapshot.phase === 'partial') return 'open settings';
+    return null;
+  });
+
+  let insightsReady = $derived(insights !== null && !insights.indexing.isIndexing);
+  let todayWords = $derived(insightsReady ? insights?.summary.totalWords ?? null : null);
+  let spokenMinutes = $derived(insightsReady && insights ? (insights.summary.totalAudioSeconds / 60).toFixed(1) : null);
+  let pace = $derived(insightsReady && insights ? Math.round(insights.summary.avgWpm) : null);
+  let activityByDate = $derived(new Map((insights?.yearActivity ?? []).map((day) => [day.date, day])));
+  let activityDays = $derived.by((): ActivityDay[] => {
+    if (!insightsReady || !insights?.yearActivity) return [];
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const mondayOffset = (today.getDay() + 6) % 7;
+    const firstDay = addLocalDays(today, -28 - mondayOffset);
+    return Array.from({ length: 35 }, (_, index) => {
+      const date = addLocalDays(firstDay, index);
+      const key = localDayKey(date);
+      const summary = activityByDate.get(key);
+      return {
+        date,
+        key,
+        words: summary?.words ?? 0,
+        dictations: summary?.dictations ?? 0,
+        today: key === localDayKey(today),
+      };
+    });
+  });
+  let currentStreak = $derived.by(() => {
+    const streak = insights?.currentStreakDays;
+    return insightsReady && typeof streak === 'number' && Number.isFinite(streak)
+      ? Math.max(0, Math.floor(streak))
+      : null;
+  });
+  let activityPeak = $derived(Math.max(0, ...activityDays.map((day) => day.words)));
+  let greeting = $derived(
+    now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening'
   );
-  let reportedLanguages = $derived(Array.isArray(engine?.languages) ? engine.languages : []);
-  let reportedModelSize = $derived(
-    typeof engine?.model_size_gb === 'number' && Number.isFinite(engine.model_size_gb) && engine.model_size_gb > 0
-      ? engine.model_size_gb
-      : null
-  );
+  let todayLabel = $derived(now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }));
+
+  function localDayKey(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function addLocalDays(date: Date, count: number): Date {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    next.setDate(next.getDate() + count);
+    return next;
+  }
+
+  function formatDuration(seconds: number): string {
+    const rounded = Math.max(0, Math.floor(seconds));
+    return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}`;
+  }
+
+  function formatNumber(value: number | null): string {
+    return value === null || !Number.isFinite(value) ? '—' : Math.round(value).toLocaleString('en-US');
+  }
+
+  function formatLatestTime(timestamp: number): string {
+    const minutes = Math.max(0, Math.round((now.getTime() - timestamp) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    if (minutes < 1440) return `${Math.round(minutes / 60)} h ago`;
+    return new Date(timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  }
+
+  function activityOpacity(words: number): number {
+    if (words <= 0 || activityPeak <= 0) return .07;
+    const share = words / activityPeak;
+    if (share < .2) return .18;
+    if (share < .4) return .34;
+    if (share < .7) return .55;
+    return .85;
+  }
+
+  function handlePlantPointerMove(event: PointerEvent): void {
+    if (!plant) return;
+    const rect = plant.getBoundingClientRect();
+    const horizontalDistance = event.clientX - (rect.left + rect.width / 2);
+    const lean = Math.max(-1, Math.min(1, horizontalDistance / 320)) * 2.5;
+    plant.style.setProperty('--lean', String(lean));
+  }
+
+  function resetPlantLean(): void {
+    plant?.style.setProperty('--lean', '0');
+  }
+
+  async function handleStatusAction(): Promise<void> {
+    if (statusAction === 'retry') {
+      if (retrying) return;
+      retrying = true;
+      try {
+        await retryManagedServer();
+      } finally {
+        retrying = false;
+      }
+      return;
+    }
+    onNavigate('settings');
+  }
 
   onMount(() => {
-    async function loadSettings(): Promise<void> {
-      try {
-        const settings = await window.murmurMain.getSettings();
-        [quickHotkey, longHotkey] = await Promise.all([
-          window.murmurMain.getHotkeyDisplayName(settings.hotkey),
-          window.murmurMain.getHotkeyDisplayName(settings.longHotkey),
-        ]);
-      } catch {
-        shortcutsError = true;
-        quickHotkey = 'Shortcut unavailable';
-        longHotkey = 'Shortcut unavailable';
+    let active = true;
+    let dataRequest = 0;
+    let historyRevision = 0;
+    let settingsRequest = 0;
+    let currentSettingsRevision = 0;
+    let indexingRefresh: ReturnType<typeof setTimeout> | undefined;
+
+    async function loadInsights(): Promise<void> {
+      if (indexingRefresh !== undefined) clearTimeout(indexingRefresh);
+      const request = ++dataRequest;
+      const today = await window.murmurMain.getInsights('today').catch(() => null);
+      if (!active || request !== dataRequest) return;
+      insights = today;
+      if (today?.indexing.isIndexing) {
+        indexingRefresh = setTimeout(() => {
+          if (active) void loadInsights();
+        }, 1000);
       }
     }
 
-    void loadSettings();
-  });
-
-  async function retry(): Promise<void> {
-    if (retrying) return;
-    retrying = true;
-    try {
-      await retryManagedServer();
-    } finally {
-      retrying = false;
+    async function loadLatestEntry(): Promise<void> {
+      const revision = historyRevision;
+      try {
+        const response = await window.murmurMain.getHistoryEntries(0, 1);
+        if (active && historyRevision === revision) latestEntry = response.entries[0] ?? null;
+      } catch {
+        if (active && historyRevision === revision) latestEntry = null;
+      }
     }
-  }
+
+    async function loadHotkeys(settings: Settings): Promise<void> {
+      const request = ++settingsRequest;
+      try {
+        const [quick, long] = await Promise.all([
+          window.murmurMain.getHotkeyDisplayName(settings.hotkey),
+          window.murmurMain.getHotkeyDisplayName(settings.longHotkey),
+        ]);
+        if (!active || request !== settingsRequest) return;
+        quickHotkey = quick.toLowerCase();
+        longHotkey = long.toLowerCase();
+      } catch {
+        if (!active || request !== settingsRequest) return;
+        quickHotkey = 'shortcut unavailable';
+        longHotkey = 'shortcut unavailable';
+      }
+    }
+
+    const unsubscribeHistory = window.murmurMain.onNewHistoryEntry((entry) => {
+      historyRevision += 1;
+      latestEntry = entry;
+      void loadInsights();
+    });
+    const refreshAfterDelete = (event: Event) => {
+      const detail = (event as CustomEvent<{ ids?: string[]; deleted?: boolean }>).detail;
+      if (!detail?.deleted || !detail.ids?.length) return;
+      historyRevision += 1;
+      if (latestEntry && detail.ids.includes(latestEntry.id)) latestEntry = null;
+      void loadInsights();
+      void loadLatestEntry();
+    };
+    window.addEventListener('history-delete-committed', refreshAfterDelete);
+    const unsubscribeSettings = window.murmurMain.onSettingsChanged((settings) => {
+      currentSettingsRevision += 1;
+      void loadHotkeys(settings);
+    });
+    const refreshClock = window.setInterval(() => {
+      const previousDay = localDayKey(now);
+      now = new Date();
+      if (localDayKey(now) !== previousDay) {
+        void loadInsights();
+        void loadLatestEntry();
+      }
+    }, 1000);
+
+    void loadLatestEntry();
+    void loadInsights();
+    void window.murmurMain.getSettings().then((settings) => {
+      if (active && currentSettingsRevision === 0) void loadHotkeys(settings);
+    }).catch(() => {
+      if (active) {
+        quickHotkey = 'shortcut unavailable';
+        longHotkey = 'shortcut unavailable';
+      }
+    });
+
+    return () => {
+      active = false;
+      dataRequest += 1;
+      settingsRequest += 1;
+      window.clearInterval(refreshClock);
+      if (indexingRefresh !== undefined) clearTimeout(indexingRefresh);
+      unsubscribeHistory();
+      window.removeEventListener('history-delete-committed', refreshAfterDelete);
+      unsubscribeSettings();
+    };
+  });
 </script>
 
-<PrimaryPage page="home" scrollOwner="home" contentClass="flex flex-col gap-4 pb-5">
-    <section
-      data-home-hero
-      class="relative min-w-0 overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_82%_18%,rgba(255,255,255,0.08),transparent_34%),radial-gradient(circle_at_22%_90%,rgba(161,161,170,0.08),transparent_38%),linear-gradient(145deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] px-5 py-6 sm:px-7 sm:py-7"
-      aria-labelledby="home-readiness-heading"
-    >
-      <div aria-hidden="true" class="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full border border-white/10"></div>
-      <div aria-hidden="true" class="pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full border border-white/10"></div>
+<PrimaryPage page="home" scrollOwner="home">
+  <div class="home-view" role="presentation" onpointermove={handlePlantPointerMove} onpointerleave={resetPlantLean}>
+    <header class="home-top" data-r style="--r:0">
+      <span>{greeting}</span>
+      <time class="home-date" datetime={localDayKey(now)}>{todayLabel}</time>
+    </header>
 
-      <div class="relative grid min-w-0 gap-7 md:grid-cols-[minmax(0,1fr)_220px] md:items-center">
-        <div class="min-w-0">
-          <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-zinc-300">
-              <span class="relative flex h-2 w-2" aria-hidden="true">
-                {#if snapshot.phase === 'ready'}<span class="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-emerald-300 opacity-60"></span>{/if}
-                <span class="relative inline-flex h-2 w-2 rounded-full {phaseAccent === 'emerald' ? 'bg-emerald-300' : phaseAccent === 'red' ? 'bg-red-300' : phaseAccent === 'amber' ? 'bg-amber-300' : 'bg-zinc-500'}"></span>
-              </span>
-              {snapshot.phase === 'ready' ? 'Listening when you are' : readiness.title}
-            </span>
+    <div class="home-main">
+      <section class="home-presence" data-r style="--r:1" aria-label="Eve recording presence">
+        <div class="home-stage">
+          <div class="home-rings" class:home-rings--active={motion.cactusState === 'listening'} aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="home-plant" bind:this={plant}>
+            <Cactus
+              class="home-cactus-svg"
+              state={motion.cactusState}
+              level={motion.audioLevel}
+              homeTarget
+            />
           </div>
-
-          <p class="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Your words, ready to move</p>
-          <h1 id="home-readiness-heading" class="mt-2 max-w-xl text-3xl font-semibold tracking-[-0.035em] text-zinc-50 sm:text-4xl">
-            {readiness.title}
-          </h1>
-          <p class="mt-3 max-w-xl text-sm leading-6 text-zinc-400">{readiness.detail}</p>
-
-          <dl data-home-engine-summary class="mt-6 flex min-w-0 flex-wrap gap-x-5 gap-y-3 border-t border-white/[0.08] pt-4">
-            <div class="min-w-0">
-              <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Engine</dt>
-              <dd class="mt-1 max-w-[220px] truncate text-sm text-zinc-200">{engine?.name ?? server?.engineStatus?.current ?? 'Checking…'}</dd>
-            </div>
-            <div class="min-w-0">
-              <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Model</dt>
-              <dd class="mt-1 max-w-[260px] truncate text-sm text-zinc-200">{model?.model ?? engine?.model ?? 'Checking…'}</dd>
-            </div>
-            {#if reportedModelSize !== null}
-              <div>
-                <dt class="text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">Size</dt>
-                <dd class="mt-1 text-sm text-zinc-200">~{reportedModelSize.toFixed(1)} GB</dd>
-              </div>
-            {/if}
-          </dl>
+          <div class="home-ground"></div>
         </div>
+        <div class="home-status" aria-label={`Speech service: ${homeStatus}`}>
+          <span
+            class="home-status__dot"
+            class:home-status__dot--listening={motion.cactusState === 'listening'}
+            class:home-status__dot--transcribing={motion.cactusState === 'transcribing'}
+            aria-hidden="true"
+          ></span>
+          <span>{homeStatus}</span>
+          {#if statusAction}
+            <button type="button" onclick={handleStatusAction} disabled={retrying}>
+              {retrying ? 'retrying' : statusAction}
+            </button>
+          {/if}
+        </div>
+      </section>
 
-        <div data-home-voice-orb class="relative mx-auto flex h-44 w-44 items-center justify-center md:h-48 md:w-48" aria-hidden="true">
-          <div class="absolute inset-0 rounded-full border border-white/10 bg-white/[0.025] shadow-[0_20px_80px_rgba(255,255,255,0.04)]"></div>
-          <div class="absolute inset-5 rounded-full border border-white/10 bg-gradient-to-br from-white/10 via-transparent to-zinc-500/10 {snapshot.phase === 'ready' ? 'motion-safe:animate-pulse' : ''}"></div>
-          <div class="relative flex h-20 w-24 items-center justify-center gap-1 rounded-full border border-white/10 bg-black/25 shadow-inner">
-            {#each ['h-1.5', 'h-2.5', 'h-4', 'h-6', 'h-4', 'h-2.5', 'h-1.5'] as heightClass}
-              <span class="w-1 rounded-full {heightClass} {phaseAccent === 'emerald' ? 'bg-emerald-300/80' : phaseAccent === 'red' ? 'bg-red-300/70' : phaseAccent === 'amber' ? 'bg-amber-300/75' : 'bg-zinc-500'} {snapshot.phase === 'ready' ? 'motion-safe:animate-pulse' : ''}"></span>
+      <section class="home-stats" data-r style="--r:2" aria-label="Today's dictation activity">
+        <div class="section-label">today</div>
+        <div class="home-words" aria-live="off">
+          <span>{formatNumber(todayWords)}</span>
+          <small>words</small>
+        </div>
+        <div class="home-stat-rows">
+          <div class="home-stat-row"><span>Spoken</span><b><span>{spokenMinutes ?? '—'}</span><small>min</small></b></div>
+          <div class="home-stat-row"><span>Pace</span><b><span>{formatNumber(pace)}</span><small>wpm</small></b></div>
+          <div class="home-stat-row"><span>Streak</span><b><span>{formatNumber(currentStreak)}</span><small>days</small></b></div>
+        </div>
+        <div class="home-activity">
+          <div class="section-label">last 5 weeks</div>
+          <div class="home-activity-weekdays mono" aria-hidden="true">
+            <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+          </div>
+          <div class="home-activity-grid" role="img" aria-label="Dictation activity for the last five weeks">
+            {#each activityDays as day (day.key)}
+              <span
+                class="home-activity-cell"
+                class:home-activity-cell--today={day.today}
+                title={`${day.date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · ${day.words.toLocaleString('en-US')} words`}
+                style={`--o:${activityOpacity(day.words)}`}
+              ></span>
             {/each}
           </div>
         </div>
-      </div>
-
-      {#if server?.managed && (snapshot.phase === 'error' || snapshot.phase === 'unavailable')}
-        <button
-          type="button"
-          onclick={retry}
-          disabled={retrying}
-          class="relative mt-5 min-h-10 rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]
-            {retrying ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' : 'bg-zinc-100 text-zinc-950 hover:bg-white cursor-pointer'}"
-        >
-          {retrying ? 'Retrying…' : 'Retry managed server'}
-        </button>
-      {/if}
-
-      {#if model && snapshot.phase === 'downloading'}
-        <p class="relative mt-4 text-xs text-zinc-400">
-          {#if typeof model.downloaded_bytes === 'number' && typeof model.total_bytes === 'number' && model.total_bytes > 0}
-            Download progress is available in the preparation banner.
-          {:else}
-            Downloading with progress details still being established.
-          {/if}
-        </p>
-      {/if}
-    </section>
-
-    <section data-home-modes class="grid gap-3 sm:grid-cols-2" aria-label="Dictation shortcuts and guidance">
-      <article class="group min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition-colors hover:border-white/20 hover:bg-white/[0.04]">
-        <div class="flex min-w-0 items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-xs font-medium text-zinc-300">Quick</p>
-            <h2 class="mt-1 text-base font-semibold text-zinc-100">Say it. Send it.</h2>
-            <p class="mt-1 text-xs leading-5 text-zinc-500">Short, immediate speech-to-text input.</p>
-          </div>
-          <span aria-hidden="true" class="text-lg text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-zinc-200">→</span>
-        </div>
-        <p class="mt-4 inline-flex max-w-full rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">{quickHotkey}</p>
-      </article>
-      <article class="group min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 transition-colors hover:border-white/20 hover:bg-white/[0.04]">
-        <div class="flex min-w-0 items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-xs font-medium text-zinc-300">Long</p>
-            <h2 class="mt-1 text-base font-semibold text-zinc-100">Keep the thought flowing.</h2>
-            <p class="mt-1 text-xs leading-5 text-zinc-500">Longer recordings are processed after capture.</p>
-          </div>
-          <span aria-hidden="true" class="text-lg text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-zinc-200">→</span>
-        </div>
-        <p class="mt-4 inline-flex max-w-full rounded-lg bg-black/25 px-2.5 py-1.5 font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">{longHotkey}</p>
-      </article>
-    </section>
-
-    <div class="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.018] p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div class="min-w-0">
-        <h2 id="home-privacy-heading" class="text-sm font-medium text-zinc-200">Private by default</h2>
-        <p class="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">Packaged Eve uses its managed local service for speech. During development, Eve may use a separately started localhost service. Eve keeps the Murmur legacy profile untouched and does not automatically import personal data.</p>
-        {#if shortcutsError}<p class="mt-2 text-xs text-zinc-500">Shortcut labels could not be read. Open Settings to review them.</p>{/if}
-      </div>
-      <span class="shrink-0 rounded-full border border-emerald-300/15 bg-emerald-300/[0.05] px-3 py-1.5 text-xs text-emerald-300">Local-first</span>
+      </section>
     </div>
 
-    <nav aria-label="Home actions" class="flex min-w-0 flex-wrap items-center gap-1 text-xs">
-      <span class="mr-2 text-zinc-600">Explore</span>
-      <button type="button" onclick={() => onNavigate('history')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">History</button>
-      <button type="button" onclick={() => onNavigate('insights')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">Insights</button>
-      <button type="button" onclick={() => onNavigate('settings')} class="rounded-full px-3 py-2 text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-zinc-100">Settings</button>
-    </nav>
-
-    {#if engine && reportedLanguages.length > 0}
-      <p class="sr-only">Languages reported by the current engine: {reportedLanguages.join(', ')}.</p>
-    {/if}
+    <p class="home-last" data-r style="--r:3">
+      {latestEntry?.text ?? (insights?.hasData === false && !insights.indexing.isIndexing ? 'No dictations yet' : '')}
+    </p>
+    <div class="home-last-meta mono" data-r style="--r:4">
+      {#if latestEntry}
+        last · {formatLatestTime(latestEntry.timestamp)}
+      {/if}
+    </div>
+    <footer class="home-keys mono" data-r style="--r:5">
+      <span>quick<b>{quickHotkey}</b></span>
+      <span>long<b>{longHotkey}</b></span>
+    </footer>
+  </div>
 </PrimaryPage>

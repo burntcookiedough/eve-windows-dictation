@@ -19,6 +19,7 @@ import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { GPU_PACK_CTRANSLATE2_BUILD_ID, IPC_CHANNELS } from '../shared/constants.js';
 import { buildHotwordsPrompt } from '../shared/hotwords.js';
+import { getAudioFrameLevel } from '../shared/audio-level.js';
 import { getModelProgressShortSummary } from '../shared/model-progress.js';
 import type {
   RecordingStatePayload,
@@ -35,6 +36,7 @@ const log = createLogger('App');
 
 let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
+let secondInstanceShowRequested = false;
 let transcriptionService: TranscriptionService | null = null;
 let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
@@ -52,6 +54,15 @@ let recordingTerminalOverride: 'error' | null = null;
 let overlaySessionGeneration = 0;
 let overlayExitTimer: ReturnType<typeof setTimeout> | null = null;
 let overlayHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+app.on('second-instance', (_event, commandLine) => {
+  if (!commandLine.includes('--show-window')) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow(mainWindow);
+  } else {
+    secondInstanceShowRequested = true;
+  }
+});
 
 const OVERLAY_SUCCESS_DWELL_MS = 900;
 const OVERLAY_ERROR_DWELL_MS = 2200;
@@ -129,8 +140,8 @@ function showTransientOverlayError(message: string, mode: DictationSessionMode):
 }
 let currentPasteTargetWindowHandlePromise: Promise<number | null> | null = null;
 
-function broadcastLabState<T>(channel: string, payload: T): void {
-  if (recordingSource === 'lab' && mainWindow && !mainWindow.isDestroyed()) {
+function broadcastRecordingState<T>(channel: string, payload: T): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
 }
@@ -138,33 +149,26 @@ function broadcastLabState<T>(channel: string, payload: T): void {
 function updateRecordingState(payload: RecordingStatePayload): void {
   const nextPayload = { ...payload, mode: payload.mode ?? recordingSessionMode };
   currentRecordingState = nextPayload;
-  broadcastLabState(IPC_CHANNELS.STATE_RECORDING, nextPayload);
+  broadcastRecordingState(IPC_CHANNELS.STATE_RECORDING, nextPayload);
+  if (nextPayload.state !== 'listening') broadcastRecordingState(IPC_CHANNELS.STATE_AUDIO_LEVEL, 0);
 }
 
 function updateConnectionState(payload: ConnectionStatePayload): void {
   currentConnectionState = payload;
-  broadcastLabState(IPC_CHANNELS.STATE_CONNECTION, payload);
+  broadcastRecordingState(IPC_CHANNELS.STATE_CONNECTION, payload);
 }
 
 function updateTranscription(payload: TranscriptionPayload): void {
   latestTranscription = payload;
-  broadcastLabState(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
+  broadcastRecordingState(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
 }
 
 function updateStatus(payload: RecordingStatusPayload): void {
   latestStatus = payload;
-  broadcastLabState(IPC_CHANNELS.STATE_STATUS, payload);
+  broadcastRecordingState(IPC_CHANNELS.STATE_STATUS, payload);
 }
 
 function getRecordingDebugState(): RecordingDebugState {
-  if (recordingSource !== 'lab') {
-    return {
-      recording: { state: 'idle', isRecording: false, mode: 'quick' },
-      connection: { status: 'disconnected' },
-      transcription: null,
-    };
-  }
-
   return {
     recording: currentRecordingState,
     connection: currentConnectionState,
@@ -289,8 +293,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
         pasteTargetWindowHandle
       );
 
-      // Push new entry to main window if visible
-      if (mainWindow && mainWindow.isVisible()) {
+      // Keep Home and History current when dictation happens while Eve is in the tray.
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
       }
     }
@@ -390,6 +394,7 @@ function toggleLongRecording(): void {
 
 // Handle audio data from overlay renderer
 function setupAudioHandler() {
+  let lastLevelAt = 0;
   ipcMain.on('audio:data', (event, audioData: ArrayBuffer) => {
     if (
       !overlayWindow ||
@@ -401,6 +406,11 @@ function setupAudioHandler() {
     }
     if (transcriptionService && isRecording) {
       transcriptionService.sendAudioBuffer(audioData);
+      const now = Date.now();
+      if (now - lastLevelAt >= 33) {
+        lastLevelAt = now;
+        broadcastRecordingState(IPC_CHANNELS.STATE_AUDIO_LEVEL, getAudioFrameLevel(audioData));
+      }
     }
   });
 
@@ -457,6 +467,7 @@ function setupMainWindowHandlers() {
 
   ipcMain.on(IPC_CHANNELS.MAIN_WINDOW_MAXIMIZE, (event) => {
     if (!isMainWindowSender(event.sender.id)) return;
+    if (!mainWindow?.isMaximizable()) return;
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize();
     } else {
@@ -556,10 +567,15 @@ async function startApplication(): Promise<void> {
   setupMainWindowHandlers();
   setupDisplayChangeHandlers();
 
-  // Create main window (respects startMinimized setting)
-  const startMinimized = getSetting('startMinimized');
+  // The explicit launcher flag shows Eve without changing the saved preference.
+  const showOnLaunch = process.argv.includes('--show-window');
+  const startMinimized = getSetting('startMinimized') && !showOnLaunch;
   mainWindow = await createMainWindow({ startMinimized });
   log.info('Main window created', { startMinimized });
+  if (secondInstanceShowRequested) {
+    secondInstanceShowRequested = false;
+    showMainWindow(mainWindow);
+  }
 
   // Give server manager reference to main window for state broadcasts
   serverManager.setMainWindow(mainWindow);

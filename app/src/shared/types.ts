@@ -1,7 +1,7 @@
 // Recording/Session states
 export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'error';
 export type DictationSessionMode = 'quick' | 'long';
-export type InsightsRange = 'today' | '7d' | '30d' | 'all';
+export type InsightsRange = 'today' | '7d' | '30d' | '90d' | '1y' | 'all';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -194,6 +194,7 @@ export interface HistoryEntryWithGroup extends TranscriptionEntry {
 
 // Filters for history queries
 export interface HistoryFilters {
+  sessionMode?: DictationSessionMode;
   text?: string;
   dateFrom?: number;
   dateTo?: number;
@@ -300,6 +301,11 @@ export interface InsightsResponse {
   commonPhrases: InsightsWordStat[];
   longestEntries: InsightsEntryStat[];
   slowestEntries: InsightsEntryStat[];
+  yearActivity?: Array<{ date: string; words: number; dictations: number }>;
+  currentStreakDays?: number;
+  hourlyDictations?: number[];
+  previousPeriodWords?: number;
+  fastestEntry?: InsightsEntryStat;
 }
 
 // Hotkey configuration
@@ -331,6 +337,7 @@ export interface Settings {
   // Startup behavior
   launchOnBoot: boolean;
   startMinimized: boolean;
+  appearance: 'dark' | 'light';
   // Server management
   serverAutoStart: boolean; // Auto-start server in production mode
   // Recognition vocabulary hints
@@ -478,6 +485,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Startup behavior
   launchOnBoot: false,
   startMinimized: false,
+  appearance: 'dark',
   // Server management
   serverAutoStart: true,
   // Recognition vocabulary hints

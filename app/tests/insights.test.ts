@@ -37,6 +37,8 @@ describe('insights helpers', () => {
     expect(isInsightsRange('today')).toBe(true);
     expect(isInsightsRange('7d')).toBe(true);
     expect(isInsightsRange('30d')).toBe(true);
+    expect(isInsightsRange('90d')).toBe(true);
+    expect(isInsightsRange('1y')).toBe(true);
     expect(isInsightsRange('all')).toBe(true);
     expect(isInsightsRange('week')).toBe(false);
     expect(isInsightsRange(null)).toBe(false);
@@ -101,7 +103,23 @@ describe('insights helpers', () => {
     const now = new Date(2026, 6, 1, 17, 30).getTime();
     expect(getRangeStart('today', now)).toBe(new Date(2026, 6, 1).getTime());
     expect(getRangeStart('7d', now)).toBe(new Date(2026, 5, 25).getTime());
+    expect(getRangeStart('90d', now)).toBe(new Date(2026, 3, 3).getTime());
+    expect(getRangeStart('1y', now)).toBe(new Date(2025, 6, 2).getTime());
     expect(getRangeStart('all', now)).toBeNull();
+  });
+
+  test('fills 90-day and one-year trends through today', () => {
+    const now = new Date(2026, 6, 1, 12).getTime();
+    const day = new Date(2026, 6, 1, 8).getTime();
+
+    const ninetyDays = buildTrendPoints([entry('recent', day, 'three useful words', 30, 10000)], '90d', now);
+    const year = buildTrendPoints([], '1y', now);
+
+    expect(ninetyDays).toHaveLength(90);
+    expect(ninetyDays.at(-1)).toMatchObject({ date: '2026-07-01', words: 3, dictations: 1 });
+    expect(year).toHaveLength(365);
+    expect(year.at(0)?.date).toBe('2025-07-02');
+    expect(year.at(-1)?.date).toBe('2026-07-01');
   });
 
   test('uses calendar days across daylight-saving transitions', () => {

@@ -5,6 +5,7 @@ describe('History filter IPC validation', () => {
   test('accepts the optional filter shape and finite numeric values', () => {
     expect(isHistoryFilters(undefined)).toBe(true);
     expect(isHistoryFilters({
+      sessionMode: 'long',
       text: 'planning',
       dateFrom: 0,
       dateTo: 1,
@@ -19,6 +20,7 @@ describe('History filter IPC validation', () => {
     expect(isHistoryFilters(null)).toBe(false);
     expect(isHistoryFilters([])).toBe(false);
     expect(isHistoryFilters({ text: 42 })).toBe(false);
+    expect(isHistoryFilters({ sessionMode: 'short' })).toBe(false);
     expect(isHistoryFilters({ editedOnly: 'yes' })).toBe(false);
     expect(isHistoryFilters({ minDuration: Number.NaN })).toBe(false);
     expect(isHistoryFilters({ maxDuration: Number.POSITIVE_INFINITY })).toBe(false);

@@ -136,6 +136,7 @@
     if (event.key === 'Escape') {
       if (!open) return;
       event.preventDefault();
+      event.stopPropagation();
       close(true);
       return;
     }
@@ -197,7 +198,8 @@
 
   onMount(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (open && !root?.contains(event.target as Node)) close(false);
+      if (!(event.target instanceof Node)) return;
+      if (open && root && !root.contains(event.target)) close(false);
     };
     document.addEventListener('pointerdown', handlePointerDown);
     return () => {
@@ -207,7 +209,7 @@
   });
 </script>
 
-<div bind:this={root} data-eve-dropdown class="relative min-w-0 w-full max-w-full sm:w-auto {className}">
+<div bind:this={root} data-eve-dropdown class="dropdown-root {className}">
   <button
     bind:this={button}
     id={buttonId}
@@ -219,12 +221,12 @@
     aria-controls={listboxId}
     aria-activedescendant={open ? activeOptionId : undefined}
     {disabled}
-    class="flex min-h-9 min-w-0 w-full max-w-full items-center justify-between gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-left text-xs text-zinc-200 transition-colors hover:bg-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-32 sm:w-auto"
+    class="dropdown-trigger"
     onclick={() => open ? close() : openMenu()}
     onkeydown={handleButtonKeydown}
   >
-    <span class="min-w-0 truncate">{selectedOption?.label ?? 'Choose an option'}</span>
-    <svg viewBox="0 0 12 12" class="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true">
+    <span class="dropdown-value">{selectedOption?.label ?? 'Choose an option'}</span>
+    <svg viewBox="0 0 12 12" class="dropdown-chevron" aria-hidden="true">
       <path d="M3 4.5 6 7.5l3-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   </button>
@@ -235,7 +237,7 @@
       role="listbox"
       aria-label={label}
       aria-labelledby={buttonId}
-      class="fixed z-50 overflow-x-hidden overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-[0_16px_40px_rgba(0,0,0,0.55)] focus:outline-none"
+      class="dropdown-listbox"
       style={listboxStyle}
     >
       {#each options as option, index}
@@ -248,14 +250,144 @@
           aria-disabled={option.disabled || undefined}
           aria-describedby={option.description ? `${listboxId}-option-${index}-description` : undefined}
           disabled={option.disabled}
-          class="flex min-h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-45 {option.value === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'} {index === activeIndex ? 'ring-1 ring-inset ring-zinc-300/70' : ''}"
+          class="dropdown-option {option.value === value ? 'selected' : ''} {index === activeIndex ? 'active' : ''}"
           onclick={() => handleOptionClick(index)}
         >
           <span class="min-w-0 truncate">{option.label}</span>
           {#if option.description}<span id={`${listboxId}-option-${index}-description`} class="sr-only">{option.description}</span>{/if}
-          {#if option.value === value}<span aria-hidden="true" class="shrink-0 text-zinc-200">✓</span>{/if}
+          {#if option.value === value}<span aria-hidden="true" class="dropdown-check"></span>{/if}
         </button>
       {/each}
     </div>
   {/if}
 </div>
+
+<style>
+  .dropdown-root {
+    position: relative;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dropdown-trigger {
+    display: inline-flex;
+    max-width: 100%;
+    min-height: 44px;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--fg2, #9b9b9b);
+    font-size: 13px;
+    line-height: normal;
+    text-align: right;
+    cursor: pointer;
+    transition: color 200ms ease;
+  }
+
+  .dropdown-trigger:hover:not(:disabled),
+  .dropdown-trigger[aria-expanded="true"] {
+    color: var(--fg, #ececec);
+  }
+
+  .dropdown-root .dropdown-trigger:focus-visible {
+    outline: none;
+    box-shadow: 0 1px 0 var(--fg2, #9b9b9b);
+    color: var(--fg, #ececec);
+  }
+
+  .dropdown-option:focus-visible {
+    outline: 1px solid var(--fg, #ececec);
+    outline-offset: 3px;
+  }
+
+  @media (forced-colors: active) {
+    .dropdown-root .dropdown-trigger:focus-visible {
+      outline: 1px solid Highlight;
+      outline-offset: 3px;
+      box-shadow: none;
+    }
+  }
+
+  .dropdown-trigger:disabled,
+  .dropdown-option:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .dropdown-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dropdown-chevron {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    color: var(--fg3, #565656);
+    transition: transform 300ms var(--ease, cubic-bezier(.2, .7, .2, 1));
+  }
+
+  .dropdown-trigger[aria-expanded="true"] .dropdown-chevron {
+    transform: rotate(180deg);
+  }
+
+  .dropdown-listbox {
+    position: fixed;
+    z-index: 60;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border: 1px solid var(--line2, rgba(255, 255, 255, 0.14));
+    padding: 4px;
+    background: var(--bg, #0b0b0b);
+    color: var(--fg2, #9b9b9b);
+    box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.55);
+  }
+
+  .dropdown-option {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 34px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--fg2, #9b9b9b);
+    text-align: left;
+    cursor: pointer;
+    transition: color 180ms ease, background 180ms ease;
+  }
+
+  .dropdown-option:hover,
+  .dropdown-option.active {
+    background: var(--hover, rgba(255, 255, 255, 0.028));
+    color: var(--fg, #ececec);
+  }
+
+  .dropdown-option.selected {
+    color: var(--fg, #ececec);
+  }
+
+  .dropdown-check {
+    width: 5px;
+    height: 5px;
+    flex: none;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dropdown-trigger,
+    .dropdown-chevron,
+    .dropdown-option {
+      transition-duration: 1ms;
+    }
+  }
+</style>

@@ -21,14 +21,17 @@ describe('Gate 5 accessibility contracts', () => {
   test('uses native Windows caption controls and preserves drag regions', () => {
     expect(mainWindow).toContain("titleBarStyle: 'hidden'");
     expect(mainWindow).toContain('titleBarOverlay:');
-    expect(titleBar).toContain('[-webkit-app-region:drag]');
+    expect(titleBar).toContain('class="app-titlebar"');
+    expect(appCss).toContain('.app-titlebar {');
+    expect(appCss).toContain('-webkit-app-region: drag;');
     expect(titleBar).not.toContain('onclick={minimize}');
     expect(titleBar).not.toContain('onclick={maximize}');
     expect(titleBar).not.toContain('onclick={close}');
   });
 
   test('provides visible focus, forced-colors, reduced motion, and transparency fallbacks', () => {
-    expect(appView).toContain('focus-visible:ring-2');
+    expect(appCss).toContain('button:focus-visible,');
+    expect(appCss).toContain('outline: 1px solid var(--fg2);');
     expect(appCss).toContain('@media (forced-colors: active)');
     expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
     expect(appCss).toContain('@media (prefers-reduced-transparency: reduce)');
@@ -41,8 +44,10 @@ describe('Gate 5 accessibility contracts', () => {
     expect(toggle).toContain('role="switch"');
     expect(toggle).toContain('aria-checked={enabled}');
     expect(toggle).toContain('aria-label={label}');
-    expect(toggle).toContain('min-w-10');
-    expect(toggle).toContain('min-h-6');
+    expect(toggle).toContain('width: 40px;');
+    expect(toggle).toContain('height: 40px;');
+    expect(toggle).toContain('width: 30px;');
+    expect(toggle).toContain('height: 16px;');
   });
 
   test('traps modal focus, supports Escape, and restores the opener', () => {

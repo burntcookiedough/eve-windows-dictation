@@ -30,6 +30,29 @@ def _capabilities(
     )
 
 
+def test_language_choices_match_installed_validation_codes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "get_whisper_language_codes", lambda: frozenset({"en", "de", "hi"}))
+    monkeypatch.setattr(config, "get_runtime_capabilities", _capabilities)
+    setting = config.get_settings_with_metadata(config.Settings.model_construct())["whisper_language"]
+    assert setting["type"] == "select"
+    assert setting["options"] == [
+        {"value": None, "label": "Auto detect"},
+        {"value": "de", "label": "de"},
+        {"value": "en", "label": "en"},
+        {"value": "hi", "label": "hi"},
+    ]
+    assert setting["value"] == "en"
+
+
+def test_language_choices_preserve_current_hint_without_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "get_whisper_language_codes", lambda: None)
+    monkeypatch.setattr(config, "get_runtime_capabilities", _capabilities)
+    settings = config.Settings.model_construct(whisper_language="fr")
+    assert [option["value"] for option in config.get_settings_with_metadata(settings)["whisper_language"]["options"]] == [None, "fr"]
+    settings.whisper_language = None
+    assert config.get_settings_with_metadata(settings)["whisper_language"]["options"] == [{"value": None, "label": "Auto detect"}]
+
+
 @pytest.fixture(autouse=True)
 def _reset_settings_cache(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(config, "_settings", None)

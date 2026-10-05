@@ -127,6 +127,11 @@ async function measure(window, state, logsExpanded, zoom) {
       headingLevels: [...document.querySelectorAll('h1, h2, h3')].map((heading) => Number(heading.tagName.slice(1))),
       serverSubsectionCount: serverView?.querySelectorAll('[data-server-section]').length ?? 0,
       status: document.querySelector('[data-server-status]')?.textContent?.trim() ?? '',
+      healthStatusBounds: rect(document.querySelector('[data-server-status]')),
+      healthActionsBounds: rect(document.querySelector('[data-server-health-actions]')),
+      diagnosticsBounds: rect(document.querySelector('[data-server-diagnostics-surface]')),
+      diagnosticsCopyBounds: rect(document.querySelector('[data-server-diagnostics-copy]')),
+      healthActionStyles: [...document.querySelectorAll('[data-server-health-actions] button')].map((button) => ({ color: getComputedStyle(button).color, background: getComputedStyle(button).backgroundColor, width: button.getBoundingClientRect().width })),
       healthButtonsDisabled: [...document.querySelectorAll('[data-server-health-surface] button')].map((button) => button.disabled),
       autoStartDisabled: document.querySelector('[data-server-management-surface] [role="switch"]')?.disabled ?? false,
       logsAssociation: !!logsToggle && !!logPanel && logsToggle.getAttribute('aria-controls') === logPanel.id,
@@ -165,6 +170,7 @@ async function main() {
   let window = null;
   const measurements = [];
   const screenshots = [];
+  const lightMeasurements = [];
   await app.whenReady();
   try {
     window = new BrowserWindow({
@@ -174,7 +180,7 @@ async function main() {
       frame: false,
       resizable: false,
       backgroundColor: '#08090a',
-      webPreferences: { contextIsolation: true, nodeIntegration: false },
+      webPreferences: { contextIsolation: true, nodeIntegration: false, offscreen: true },
     });
     window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
       process.stderr.write(`renderer console ${level} ${sourceId}:${line}: ${message}\n`);
@@ -182,9 +188,6 @@ async function main() {
     window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
       process.stderr.write(`renderer load failed ${errorCode} ${errorDescription} ${validatedURL}\n`);
     });
-    window.show();
-    window.focus();
-    window.webContents.focus();
     await wait(500);
 
     for (const [state, logsExpanded, filename] of cases) {
@@ -200,11 +203,26 @@ async function main() {
         }
       }
     }
+    for (const [width, height] of [[600, 900], [400, 600]]) {
+      await window.webContents.setZoomFactor(1);
+      await window.setContentSize(width, height);
+      await loadFixture(window, 'managed-ready', false);
+      lightMeasurements.push(await window.webContents.executeJavaScript(`(() => {
+        const root = document.querySelector('[data-server-fixture-main]').parentElement;
+        root.classList.add('eve-shell--light');
+        root.style.backgroundColor = 'var(--bg)';
+        return {
+          background: getComputedStyle(root).backgroundColor,
+          label: getComputedStyle(document.querySelector('[data-server-logs-toggle] span:first-child')).color,
+          values: Array.from(document.querySelectorAll('[data-server-health-details] dd')).map(e => getComputedStyle(e).color)
+        };
+      })()`));
+    }
   } finally {
     if (window && !window.isDestroyed()) await window.close();
   }
 
-  process.stdout.write(JSON.stringify({ measurements, screenshots, userDataPath: userData }));
+  process.stdout.write(JSON.stringify({ measurements, lightMeasurements, screenshots, userDataPath: userData }));
   app.quit();
 }
 

@@ -13,10 +13,6 @@ const insightsView = readFileSync(
   new URL('../src/renderer/app/views/InsightsView.svelte', import.meta.url),
   'utf8'
 );
-const eveDropdown = readFileSync(
-  new URL('../src/renderer/app/components/EveDropdown.svelte', import.meta.url),
-  'utf8'
-);
 const settingsSection = readFileSync(
   new URL('../src/renderer/app/components/SettingsSection.svelte', import.meta.url),
   'utf8'
@@ -31,13 +27,19 @@ const modelProgressCard = readFileSync(
 );
 
 describe('renderer visual regression guards', () => {
-  test('contains long unbroken history text inside its card', () => {
-    const historyCard = historyView.match(/<div\s+class="group[^>]+>/)?.[0];
-    const transcript = historyView.match(/<p\s+class="[^"]+"[^>]*>\s*\{item\.text\}\s*<\/p>/)?.[0];
+  test('contains long unbroken history text inside the thin day-group row', () => {
+    const historyEntry = historyView.match(/<article\s+class="entry"[^>]*>/)?.[0];
+    const transcript = historyView.match(/<span\s+class="entry-text">[\s\S]*?<\/span>/)?.[0];
 
-    expect(historyCard).toContain('min-w-0 overflow-hidden');
-    expect(transcript).toContain('max-w-full');
-    expect(transcript).toContain('[overflow-wrap:anywhere]');
+    expect(historyEntry).toContain('class="entry"');
+    expect(transcript).toContain('item.text');
+    expect(historyView).toContain('overflow-wrap: anywhere');
+    expect(historyView).toContain('aria-hidden={!isExpanded} inert={!isExpanded}');
+    expect(historyView).toContain('data-history-export-all');
+    expect(historyView).toContain('data-history-selection-toggle');
+    expect(historyView).toContain("import Cactus from '../components/Cactus.svelte';");
+    expect(historyView).toContain('<Cactus class="empty-cactus" />');
+    expect(historyView).toContain(':global(.empty-cactus) { width: 30px;');
   });
 
   test('uses an accessible dark microphone warning instead of the amber card', () => {
@@ -52,42 +54,57 @@ describe('renderer visual regression guards', () => {
   });
 
   test('keeps the approved Insights visual hierarchy backed by real trend data', () => {
-    expect(insightsView).toContain('Daily dictation time');
+    expect(insightsView).toContain("{ id: '7d', label: '7d' }");
+    expect(insightsView).toContain("{ id: '30d', label: '30d' }");
+    expect(insightsView).toContain("{ id: '90d', label: '90d' }");
+    expect(insightsView).toContain("{ id: '1y', label: '1y' }");
+    expect(insightsView).toContain("{ id: 'today', label: 'Today' }");
+    expect(insightsView).toContain("{ id: 'all', label: 'All time' }");
+    expect(insightsView).toContain('buildWordsAreaChart(insights?.trends ?? [], chartWidth, 160)');
+    expect(insightsView).toContain('data-insights-word-chart');
+    expect(insightsView).toContain('onpointermove={handleChartPointerMove}');
+    expect(insightsView).toContain('onkeydown={handleChartKeydown}');
     expect(insightsView).toContain('Dictations');
-    expect(insightsView).toContain('Average dictation length');
-    expect(insightsView).toContain('Daily totals');
+    expect(insightsView).toContain('Avg length');
     expect(insightsView).toContain('dailyChart.unitLabel');
-    expect(insightsView).toContain('@render DailyDictationChart(dailyChart, selectedRangeLabel)');
-    expect(insightsView).toContain('data-insights-chart-x-axis');
+    expect(insightsView).toContain('@render DailyDictationChart(');
+    expect(insightsView).toContain('class="daily-chart-axis"');
     expect(insightsView).toContain('chart.xAxisStartLabel');
     expect(insightsView).toContain('chart.xAxisEndLabel');
-    expect(insightsView).toContain('period ${periodLabel}; ${chart.xAxisDescription}; zero baseline; maximum scale');
-    expect(insightsView).toContain('MiniLine(insights.trends)');
-    expect(insightsView).toContain('formatDuration(averages[index])');
-    expect(insightsView).toContain('dailyChart.bars.slice(-7)');
-    expect(insightsView).toContain('<EveDropdown');
-    expect(eveDropdown).toContain('role="combobox"');
-    expect(eveDropdown).toContain('aria-haspopup="listbox"');
-    expect(eveDropdown).toContain('role="listbox"');
-    expect(eveDropdown).toContain('role="option"');
-    expect(eveDropdown).toMatch(/role="option"\s+tabindex="-1"/);
-    expect(eveDropdown).toContain("event.key === 'Escape'");
-    expect(eveDropdown).toContain("event.key === 'ArrowDown'");
-    expect(eveDropdown).toContain("event.key === 'ArrowUp'");
-    expect(eveDropdown).toContain("event.key === 'Home' || event.key === 'End'");
-    expect(eveDropdown).toContain('document.addEventListener(\'pointerdown\'');
-    expect(eveDropdown).toContain('button?.focus({ preventScroll: true })');
-    expect(eveDropdown).toContain('findTypeaheadIndex');
+    expect(insightsView).toContain('${chart.xAxisDescription}; zero baseline; maximum scale');
+    expect(insightsView).toContain('insights?.yearActivity');
+    expect(insightsView).toContain('insights?.hourlyDictations');
+    expect(insightsView).toContain('insights?.previousPeriodWords');
+    expect(insightsView).toContain('insights.fastestEntry');
+    expect(insightsView).toContain('insights?.hasData ? formatTypingDifference');
+    expect(insightsView).toContain("insights.summary.totalDictations > 0 ? formatRatio(insights.summary.avgProcessingRatio) : '—'");
+    expect(insightsView).toContain('data-r style:--r={0}');
+    expect(insightsView).toContain('data-r style:--r={7}');
+    expect(insightsView).toContain('More insights');
+    expect(insightsView).toContain('Common phrases');
+    expect(insightsView).toContain('Slowest processing');
     expect(insightsView).not.toContain('<select');
     expect(insightsView).not.toContain('gpt-4o-transcribe');
   });
 
   test('uses compact contiguous settings rows instead of isolated cards', () => {
-    expect(settingsSection).toContain('divide-y');
-    expect(settingsSection).toContain("variant === 'rows'");
-    expect(settingsSection).toContain("variant === 'panel'");
+    const settingsRow = readFileSync(
+      new URL('../src/renderer/app/components/SettingsRow.svelte', import.meta.url),
+      'utf8'
+    );
+    const settingsGroup = readFileSync(
+      new URL('../src/renderer/app/components/SettingsGroup.svelte', import.meta.url),
+      'utf8'
+    );
+    expect(settingsSection).toContain('margin-top: 26px;');
+    expect(settingsSection).toContain('font-size: 10px;');
     expect(settingsSection).toContain('aria-labelledby={headingId}');
     expect(settingsSection).not.toContain('overflow-hidden');
+    expect(settingsRow).toContain('min-height: 46px;');
+    expect(settingsRow).toContain('border-top: 1px solid var(--line');
+    expect(settingsGroup).toContain('<details data-settings-group');
+    expect(settingsGroup).toContain('grid-template-rows: 0fr;');
+    expect(settingsGroup).toContain('grid-template-rows: 1fr;');
   });
 
   test('provides a renderer recovery surface instead of leaving a blank window', () => {

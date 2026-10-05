@@ -35,7 +35,7 @@ describe('History export application boundary', () => {
     expect(historyView).toContain("onclick={() => exportHistory('selected')}");
     expect(historyView).toContain("scope === 'selected' && !hasSelection");
     expect(historyView).toContain('aria-busy={exporting}');
-    expect(historyView).toContain('Export all history, or select entries to export a filtered subset.');
+    expect(historyView).toContain('Export all entries, or select a filtered subset.');
     expect(historyView).not.toContain('<select');
     expect(historyView).not.toMatch(/\b(?:blue|sky|violet|purple|cyan)-/);
   });

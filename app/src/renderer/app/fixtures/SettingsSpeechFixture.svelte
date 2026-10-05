@@ -5,6 +5,7 @@
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
   import SpeechModelChooser from '../components/SpeechModelChooser.svelte';
+  import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.svelte';
   import Toggle from '../components/Toggle.svelte';
   import EveDropdown from '../components/EveDropdown.svelte';
 
@@ -13,7 +14,7 @@
   const params = new URLSearchParams(globalThis.location.search);
   const fixtureState = (params.get('state') ?? 'ready') as FixtureState;
   const fixtureView = params.get('view') ?? 'all';
-  let compatibilityOpen = $state(params.get('compatibility') === 'expanded');
+  let compatibilityNeedsAttention = $state(params.get('compatibility') === 'expanded');
   const fixtureCatalog: ModelCatalogItem[] = [
     {
       model: 'large-v3-turbo',
@@ -105,12 +106,60 @@
           cached: true,
         };
 
+  let modelSheetOpen = $state(false);
+  let modelSheetPending = $state<SpeechModelPreset | null>(null);
+  let modelSheetPreparing = $state(false);
+  let modelSheetApplyCalls = $state<string[]>([]);
+  let modelSheetSelected = $derived(modelSheetPending ?? currentPreset);
+  let modelSheetEngineStatus = $derived(
+    modelSheetPreparing && modelSheetPending
+      ? {
+          ...currentEngineStatus,
+          pending: { engine: 'whisper' as const, model: modelSheetPending.model, status: 'loading' as const, message: 'Fixture preparation started.' },
+        }
+      : currentEngineStatus
+  );
+  let modelSheetDownload = $derived<ModelDownloadState>(
+    modelSheetPreparing && modelSheetPending
+      ? {
+          model: modelSheetPending.model,
+          size_gb: modelSheetPending.sizeGb,
+          status: 'downloading',
+          phase: 'downloading',
+          progress_percent: 20,
+          downloaded_bytes: 300000000,
+          total_bytes: 1500000000,
+          bytes_per_second: 3000000,
+          eta_seconds: 400,
+          current_file: 'fixture model weights',
+        }
+      : {
+          model: currentPreset.model,
+          size_gb: currentPreset.sizeGb,
+          status: 'ready',
+          phase: 'ready',
+          cached: true,
+        }
+  );
+
   function selectPreset(preset: SpeechModelPreset): void {
     selectedPreset = preset;
+  }
+
+  function useModelSheetPreset(preset: SpeechModelPreset): void {
+    modelSheetPending = preset;
+    modelSheetPreparing = true;
+    modelSheetApplyCalls = [...modelSheetApplyCalls, preset.model];
+  }
+
+  function revertModelSheetPreset(): void {
+    modelSheetPending = null;
+    modelSheetPreparing = false;
   }
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#08090a] text-zinc-100">
+  <input type="checkbox" hidden aria-label="Fixture Advanced attention state" data-fixture-compatibility-attention bind:checked={compatibilityNeedsAttention} />
   <header class="flex h-12 shrink-0 items-center justify-between gap-3 px-4 sm:px-6">
     <h1 class="text-sm font-semibold text-zinc-100">Phase 2 Settings fixture</h1>
     <span data-fixture-state class="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-zinc-400">{fixtureState}</span>
@@ -207,33 +256,19 @@
               </SpeechModelChooser>
             </SettingsSection>
 
-            <section data-fixture-compatibility class="min-w-0 space-y-2" aria-labelledby="fixture-compatibility-heading">
-              <div class="px-1">
-                <h2 id="fixture-compatibility-heading" class="text-sm font-semibold text-zinc-400">Advanced</h2>
-                <p class="mt-1 text-xs leading-5 text-zinc-500">Engine compatibility controls remain explicit and local to this fixture.</p>
-              </div>
-              <div class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 class="text-sm font-medium text-zinc-100">Compatibility controls</h3>
-                    <p class="mt-1 text-xs leading-5 text-zinc-500">Raw model, precision, language, device, and unload-before-swap settings.</p>
-                  </div>
-                  <button
-                    type="button"
-                    data-fixture-compatibility-toggle
-                    aria-expanded={compatibilityOpen}
-                    aria-controls="fixture-compatibility-controls"
-                    onclick={() => compatibilityOpen = !compatibilityOpen}
-                    class="min-h-9 cursor-pointer rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-                  >
-                    {compatibilityOpen ? 'Hide controls' : 'Show controls'}
-                  </button>
-                </div>
-                <div id="fixture-compatibility-controls" data-fixture-compatibility-controls hidden={!compatibilityOpen} class="mt-4 divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
-                    <SettingsRow label="Whisper model" description="Raw compatibility model"><EveDropdown label="Whisper model" value="large-v3-turbo" options={[{ value: 'large-v3-turbo', label: 'large-v3-turbo' }, { value: 'large-v3', label: 'large-v3' }]} onchange={() => undefined} /></SettingsRow>
-                    <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><EveDropdown label="Compute type" value="int8" options={[{ value: 'int8', label: 'int8' }, { value: 'float16', label: 'float16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'int8_float16', label: 'int8_float16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'int8_bfloat16', label: 'int8_bfloat16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'float32', label: 'float32', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }]} onchange={() => undefined} /></SettingsRow>
-                    <SettingsRow label="Language" description="Language hint for compatibility"><input aria-label="Whisper language" value="auto" class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-28" /></SettingsRow>
-                    <SettingsRow label="Device" description="Hardware device for inference"><EveDropdown label="Whisper device" value="cuda" options={[{ value: 'cuda', label: 'cuda', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'cpu', label: 'cpu' }]} onchange={() => undefined} /></SettingsRow>
+            <SettingsSection
+              title="Advanced"
+              variant="content"
+              collapsible
+              summary="Device cuda · Precision int8"
+              open={compatibilityNeedsAttention}
+            >
+              <div data-fixture-compatibility class="min-w-0 p-4">
+                <div id="fixture-compatibility-controls" data-fixture-compatibility-controls class="divide-y divide-white/[0.08] border-t border-white/[0.08] pt-2">
+                  <SettingsRow label="Whisper model" description="Raw compatibility model"><EveDropdown label="Whisper model" value="large-v3-turbo" options={[{ value: 'large-v3-turbo', label: 'large-v3-turbo' }, { value: 'large-v3', label: 'large-v3' }]} onchange={() => undefined} /></SettingsRow>
+                  <SettingsRow label="Compute type" description="Precision used by Faster-Whisper"><EveDropdown label="Compute type" value="int8" options={[{ value: 'int8', label: 'int8' }, { value: 'float16', label: 'float16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'int8_float16', label: 'int8_float16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'int8_bfloat16', label: 'int8_bfloat16', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'float32', label: 'float32', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }]} onchange={() => undefined} /></SettingsRow>
+                  <SettingsRow label="Language" description="Language hint for compatibility"><input aria-label="Whisper language" value="auto" class="min-h-9 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-300 sm:w-28" /></SettingsRow>
+                  <SettingsRow label="Device" description="Hardware device for inference"><EveDropdown label="Whisper device" value="cuda" options={[{ value: 'cuda', label: 'cuda', disabled: true, description: 'CUDA support from the optional GPU pack is unavailable.' }, { value: 'cpu', label: 'cpu' }]} onchange={() => undefined} /></SettingsRow>
                 </div>
                 <div data-fixture-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
@@ -243,10 +278,34 @@
                   <p class="mt-2 text-xs text-zinc-500">Engine status: Ready · Faster-Whisper · 16 GB fixture GPU</p>
                 </div>
               </div>
-            </section>
+            </SettingsSection>
           {/if}
         </div>
       </div>
     </div>
   </main>
 </div>
+
+<button type="button" hidden data-fixture-sheet-open onclick={() => modelSheetOpen = true}>Open model sheet</button>
+<span hidden data-sheet-current>{currentPreset.model}</span>
+<span hidden data-sheet-pending>{modelSheetPending?.model ?? ''}</span>
+<span hidden data-sheet-preparation-started>{modelSheetApplyCalls.at(-1) ?? ''}</span>
+
+<SpeechModelSelectionSheet
+  open={modelSheetOpen}
+  serverAvailable
+  presets={fixturePresets}
+  selected={modelSheetSelected}
+  selectedNeedsApply={modelSheetPending !== null}
+  engineStatus={modelSheetEngineStatus}
+  modelDownload={modelSheetDownload}
+  preparationFailed={false}
+  preparationActive={modelSheetPreparing}
+  applying={false}
+  canRevert={modelSheetPending !== null}
+  revertDisabled={modelSheetPreparing}
+  errorMessage=""
+  onClose={() => modelSheetOpen = false}
+  onUse={useModelSheetPreset}
+  onRevert={revertModelSheetPreset}
+/>

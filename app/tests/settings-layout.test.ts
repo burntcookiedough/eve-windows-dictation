@@ -5,121 +5,135 @@ function source(path: string): string {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
 }
 
-const appView = source('../src/renderer/app/App.svelte');
-const appCss = source('../src/renderer/app/app.css');
-const appHtml = source('../src/renderer/app/index.html');
-const settingsView = source('../src/renderer/app/views/SettingsView.svelte');
-const settingsGroup = source('../src/renderer/app/components/SettingsGroup.svelte');
-const settingsSection = source('../src/renderer/app/components/SettingsSection.svelte');
-const settingsRow = source('../src/renderer/app/components/SettingsRow.svelte');
-const primaryPage = source('../src/renderer/app/components/PrimaryPage.svelte');
-const eveDropdown = source('../src/renderer/app/components/EveDropdown.svelte');
-const statusBanner = source('../src/renderer/app/components/ModelProgressBanner.svelte');
-const statusCard = source('../src/renderer/app/components/ModelProgressCard.svelte');
+const settings = source('../src/renderer/app/views/SettingsView.svelte');
+const row = source('../src/renderer/app/components/SettingsRow.svelte');
+const section = source('../src/renderer/app/components/SettingsSection.svelte');
+const group = source('../src/renderer/app/components/SettingsGroup.svelte');
+const sheet = source('../src/renderer/app/components/SettingsBottomSheet.svelte');
+const modelSheet = source('../src/renderer/app/components/SpeechModelSelectionSheet.svelte');
+const dropdown = source('../src/renderer/app/components/EveDropdown.svelte');
+const toggle = source('../src/renderer/app/components/Toggle.svelte');
+const hotkeyModal = source('../src/renderer/app/components/HotkeyCaptureModal.svelte');
 const serverView = source('../src/renderer/app/views/ServerView.svelte');
 
-describe('Phase 1 Settings layout contracts', () => {
-  test('owns the full-height Eve background from the document to the app shell', () => {
-    expect(appHtml).toContain('<html lang="en" class="h-full bg-[#08090a]">');
-    expect(appHtml).toContain('<body class="h-full bg-[#08090a]">');
-    expect(appHtml).toContain('<div id="app" class="h-full min-h-0 bg-[#08090a]">');
-    expect(appCss).toMatch(/html,\s*body,\s*#app\s*\{[\s\S]*?height: 100%;[\s\S]*?background: #08090a;/);
-    expect(appView).toContain('class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#08090a]');
-    expect(appView).toContain('class="min-h-0 min-w-0 flex-1 overflow-hidden"');
-    expect(appView).toContain('hidden={activeView !== \'settings\'}');
+describe('Settings redesign contracts', () => {
+  test('keeps the approved four-section hierarchy and compact divider rows', () => {
+    expect(settings.match(/<SettingsSection title=/g)).toHaveLength(4);
+    for (const sectionName of ['Dictation', 'Output', 'Engine', 'App']) {
+      expect(settings).toContain(`<SettingsSection title="${sectionName}"`);
+    }
+    expect(settings).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
+    expect(settings).not.toContain('overflow-y-auto');
+    expect(section).toContain('margin-top: 26px;');
+    expect(section).toContain('font-size: 10px;');
+    expect(section).toContain('letter-spacing: 0.12em;');
+    expect(row).toContain('min-height: 46px;');
+    expect(row).toContain('border-top: 1px solid var(--line');
+    expect(settings).not.toContain('rounded-xl');
+    expect(settings).not.toContain('bg-emerald-');
+    expect(settings).not.toContain('text-red-');
   });
 
-  test('uses one in-flow model status region instead of a fixed overlay', () => {
-    expect(statusBanner).toContain('data-status-region="model-progress"');
-    expect(statusBanner).toContain('class="mx-auto w-full max-w-4xl shrink-0');
-    expect(statusBanner).not.toContain('fixed');
-    expect(statusBanner).not.toContain('pointer-events-none');
-    expect(statusBanner).not.toContain('z-20');
-    expect(statusBanner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
-    expect(statusBanner).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
-    expect(statusCard).toContain('aria-live={announce ? \'polite\' : undefined}');
-    expect(appView).toMatch(/<\/header>[\s\S]*?<ModelProgressBanner visible \/>[\s\S]*?<main id="main-content"/);
+  test('retains hotkey, activation, microphone, output, and app setting actions', () => {
+    for (const capability of [
+      "openHotkeyCapture('quick')",
+      "openHotkeyCapture('long')",
+      'resetHotkey',
+      'resetLongHotkey',
+      "updateSetting('holdToTalk'",
+      "updateSetting('selectedDeviceId'",
+      "updateSetting('dictationMode'",
+      "updateSetting('appendPeriod'",
+      "updateSetting('appendSpace'",
+      "updateSetting('autoCopy'",
+      "updateSetting('autoPaste'",
+      "updateSetting('restoreClipboardAfterPaste'",
+      "updateSetting('startMinimized'",
+      "updateSetting('appearance', 'dark')",
+      "updateSetting('appearance', 'light')",
+      'updateLaunchOnBoot',
+      'onclick={onReplayIntro}',
+    ]) expect(settings).toContain(capability);
+
+    expect(settings).toContain('onReplayIntro?: () => void;');
+    expect(settings).toContain('onReplayIntro = () => {}');
+    expect(settings).toContain('function updateSetting<K extends keyof Settings>');
   });
 
-  test('keeps Settings as the single page scroll owner while logs remain bounded', () => {
-    expect(settingsView).not.toContain('overflow-y-auto');
-    expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
-    expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
-    expect(settingsView).toContain('<PrimaryPage page="settings" scrollOwner="settings-page"');
-    expect(settingsView).not.toContain('h-screen');
-    expect(serverView).toContain("embedded ? 'min-w-0 space-y-6'");
-    expect(serverView).toContain("${logBodySize === 'long' ? 'max-h-64 overflow-y-auto overscroll-contain' : 'min-h-16 overflow-hidden'}");
+  test('keeps vocabulary import/export and edits in a real, accessible sheet', () => {
+    expect(settings).toContain("activeSheet = 'vocabulary';");
+    expect(settings).toContain('function saveVocabulary()');
+    expect(settings).toContain("updateSetting('hotwordsCsl'");
+    expect(settings).toContain("updateSetting('hotwordsEnabled'");
+    expect(settings).toContain('window.murmurMain.importHotwordsFromFile()');
+    expect(settings).toContain('window.murmurMain.exportHotwordsToFile(value)');
+    expect(settings).toContain('HOTWORDS_WARNING_THRESHOLD');
+    expect(settings).toContain('aria-describedby="settings-vocabulary-help settings-vocabulary-count"');
+    expect(settings).toContain('placeholder="One term per line"');
+    expect(settings).not.toContain('placeholder="Svelte');
+    expect(settings).toContain('Use vocabulary');
   });
 
-  test('keeps controls trailing at every width and contains control content', () => {
-    expect(settingsRow).toContain('grid-cols-[minmax(0,1fr)_minmax(5rem,45%)]');
-    expect(settingsRow).toContain('items-center');
-    expect(settingsRow).toContain('items-center justify-end justify-self-end');
-    expect(settingsRow).toContain('min-w-0 w-full max-w-full items-center justify-end justify-self-end');
-    expect(settingsRow).toContain('[&>input]:max-w-full');
-    expect(settingsRow).toContain('[&>[data-eve-dropdown]]:max-w-full');
-    expect(eveDropdown).toContain('data-eve-dropdown');
-    expect(settingsRow).toContain('[&_textarea]:focus-visible:ring-2');
-    expect(settingsView).toContain('w-full max-w-full');
-    expect(eveDropdown).toContain('sm:w-auto');
+  test('keeps the model chooser and keyboard sheet controls functional and monochrome', () => {
+    expect(settings).toContain("activeSheet = 'model';");
+    expect(settings).toContain('presets={speechModelPresets}');
+    expect(settings).toContain('onUse={selectPreset}');
+    expect(settings).toContain('function applyEngineSettings()');
+    expect(settings).toContain('function revertEngineSettings()');
+    expect(modelSheet).toContain('data-model-sheet-actions');
+    expect(modelSheet).toContain('description="Runs on this machine. Nothing you say leaves it."');
+    expect(modelSheet).toContain('onclick={close}>cancel</button>');
+    expect(modelSheet).toContain('disabled={!canUseDraft}');
+    expect(modelSheet).toContain('draftPresetId = null;');
+    expect(modelSheet).toContain('onUse(draftPreset);');
+    expect(sheet).toContain('role="dialog"');
+    expect(sheet).toContain('aria-modal={open}');
+    expect(sheet).toContain('inert={!open}');
+    expect(sheet).toContain("event.key === 'Escape'");
+    expect(sheet).toContain("event.key !== 'Tab'");
+    expect(sheet).toContain('element.getClientRects().length > 0');
+    expect(sheet).toContain("element.closest('[hidden], [inert], [aria-hidden=\"true\"]')");
+    expect(sheet).toContain('focusGeneration');
+    expect(dropdown).toContain('event.stopPropagation();');
+    expect(dropdown).toContain("if (!open) return;");
+    expect(dropdown).not.toContain('text-sky-');
+    expect(dropdown).not.toContain('accent-sky-');
+    expect(dropdown).toContain('data-eve-dropdown');
   });
 
-  test('disables page scroll anchoring and avoids programmatic scroll jumps', () => {
-    expect(primaryPage).toContain('[overflow-anchor:none]');
-    expect(primaryPage).toContain('[scroll-behavior:auto]');
-    expect(settingsView).not.toContain('scrollIntoView');
-    expect(settingsView).not.toContain('startViewTransition');
+  test('keeps launch and switch semantics with a usable hit target', () => {
+    expect(toggle).toContain('role="switch"');
+    expect(toggle).toContain('aria-checked={enabled}');
+    expect(toggle).toContain('aria-label={label}');
+    expect(toggle).toContain('width: 40px;');
+    expect(toggle).toContain('height: 40px;');
+    expect(toggle).toContain('width: 30px;');
+    expect(toggle).toContain('height: 16px;');
+    expect(toggle).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(hotkeyModal).toContain('class="hotkey-capture-layer"');
+    expect(hotkeyModal).toContain('aria-modal="true"');
+    expect(hotkeyModal).toContain('captureGeneration += 1;');
+    expect(hotkeyModal).toContain('@media (prefers-reduced-motion: reduce)');
   });
 
-  test('associates section headings and form controls with accessible names', () => {
-    expect(settingsSection).toContain('aria-labelledby={headingId}');
-    expect(settingsSection).toContain('aria-describedby={descriptionId}');
-    expect(settingsSection).toContain('id={descriptionId}');
-    expect(settingsSection).toContain('<h2 id={headingId}');
-    expect(settingsView).toContain('<h1 class="sr-only">Settings</h1>');
-    expect(settingsView).toContain('label="Input device"');
-    expect(settingsView).toContain('label="Dictation mode"');
-    expect(settingsView).toContain('label="Paste method"');
-    expect(settingsView).toContain('aria-describedby="hotwords-help"');
-    expect(settingsView).toContain('aria-expanded={compatibilityControlsOpen}');
-    expect(settingsView).toContain('aria-controls="compatibility-controls"');
-  });
-
-  test('keeps generated section heading IDs unique and non-empty while preserving explicit IDs', () => {
-    expect(settingsSection).toContain('const componentId = $props.id();');
-    expect(settingsSection).toContain("slugify(title) || 'section'");
-    expect(settingsSection).toContain('id ?? `settings-section-${slugify(title) || \'section\'}-${componentId}`');
-  });
-
-  test('keeps app-level announcements as the sole status announcer', () => {
-    expect(serverView).toContain('<ModelProgressCard state={modelDownload} announce={false} />');
-    expect(serverView).not.toContain('announce={embedded}');
-    expect(appView).toContain('<p class="sr-only" aria-live="polite" aria-atomic="true">{$serverStatusState.announcement}</p>');
-    expect(settingsView).toContain('aria-pressed={settings.holdToTalk}');
-    expect(settingsView).toContain('aria-pressed={!settings.holdToTalk}');
-    expect(settingsView).toContain('data-hotwords-editor');
-    expect(settingsView.match(/<EveDropdown\b/g)?.length).toBe(6);
-  });
-
-  test('keeps the Phase 2 General subgroup foundation aligned with the row primitive', () => {
-    expect(settingsGroup).toContain('<h3 id={headingId}');
-    expect(settingsGroup).toContain('data-settings-group-surface');
-    expect(settingsView).toContain('<SettingsSection title="General"');
-    expect(settingsView).toContain('<SettingsGroup title="Shortcuts &amp; activation">');
-    expect(settingsView).toContain('<SettingsGroup title="Audio">');
-    expect(settingsView).toContain('<SettingsGroup title="Dictation/output">');
-    expect(settingsView).toContain('<SettingsGroup title="Hotwords"');
-    expect(settingsView).toContain('<SettingsGroup title="App behavior">');
-    expect(settingsView).not.toContain('<SettingsSection title="Shortcuts &amp; activation">');
-    expect(settingsView).not.toContain('<SettingsSection title="Model compatibility">');
-  });
-
-  test('keeps shared focus, forced-colors, and reduced-motion fallbacks intact', () => {
-    expect(appCss).toContain('@media (forced-colors: active)');
-    expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
-    expect(appCss).toContain(':focus-visible');
-    expect(settingsRow).toContain('focus-visible:ring-2');
-    expect(primaryPage).toContain('[scroll-behavior:auto]');
-    expect(statusCard).not.toContain('animate-');
+  test('uses the flat Advanced disclosure and preserves server, compatibility, and GPU controls', () => {
+    expect(settings).toContain('title="Advanced"');
+    expect(settings).toContain('collapsible');
+    expect(settings).toContain('summary={advancedSettingsSummary}');
+    expect(settings).toContain('open={advancedSettingsNeedAttention}');
+    expect(settings).toContain('id="compatibility-controls"');
+    expect(settings).toContain("'whisper_model'");
+    expect(settings).toContain("'whisper_device'");
+    expect(settings).toContain("'whisper_compute_type'");
+    expect(settings).toContain("'whisper_language'");
+    expect(settings).toContain('label="Paste method"');
+    expect(settings).toContain('label="Auto-start server"');
+    expect(settings).toContain('data-gpu-pack-status');
+    expect(settings).toContain('data-server-diagnostics');
+    expect(settings).toContain('<ServerView embedded showAutoStart={false} />');
+    expect(serverView).toContain('data-server-logs');
+    expect(group).toContain('<details data-settings-group');
+    expect(group).toContain('grid-template-rows: 0fr;');
+    expect(group).toContain('prefers-reduced-motion: reduce');
   });
 });

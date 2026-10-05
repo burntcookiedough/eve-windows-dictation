@@ -50,6 +50,7 @@ describe('Engine settings transaction UI', () => {
     expect(settingsView).toContain('pendingEngine = {};');
     expect(settingsView).toContain('disabled={engineApplying || engineRevertDisabled}');
     expect(settingsView).toContain('recoverInterruptedManagedPreparation');
-    expect(settingsView).toContain('data-engine-preparation-interrupted');
+    expect(settingsView).toContain('if (recovery.message) engineApplyError = recovery.message;');
+    expect(settingsView).toContain('data-settings-readiness role="alert"');
   });
 });

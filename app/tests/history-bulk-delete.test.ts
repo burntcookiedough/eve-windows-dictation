@@ -98,6 +98,14 @@ describe('History selection and bulk deletion contracts', () => {
     expect(newEntryHandler).not.toContain('exitSelectionMode()');
   });
 
+  test('refreshes the paged snapshot when a live entry arrives during a fetch', () => {
+    expect(newEntryHandler).toContain('if (loading) { void loadEntries(true); return; }');
+    expect(newEntryHandler).toContain('history = [entry, ...history]; offset += 1;');
+    expect(historyView).toContain("if (document.visibilityState === 'visible' && (!pageLayer || pageLayer.classList.contains('app-page-layer--active'))) resumeDeferredHistoryDeletes();");
+    expect(historyView).toContain("else pauseDeferredHistoryDeletes();");
+    expect(historyView).toContain("document.addEventListener('visibilitychange', handleVisibilityChange);");
+  });
+
   test('makes row selection and confirmation keyboard/screen-reader accessible', () => {
     expect(historyViewFlat).toContain('type="checkbox"');
     expect(historyViewFlat).toContain('aria-label={`Select transcription from ${formatFullDate(item.timestamp)}`}');

@@ -9,11 +9,22 @@ export const INSIGHTS_RANGE_LABELS: Record<InsightsRange, string> = {
   today: 'Today',
   '7d': '7 days',
   '30d': '30 days',
+  '90d': '90 days',
+  '1y': '1 year',
   all: 'All time',
 };
 
+const INSIGHTS_RANGE_DAY_COUNTS: Record<Exclude<InsightsRange, 'all'>, number> = {
+  today: 1,
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+  '1y': 365,
+};
+
 export function isInsightsRange(value: unknown): value is InsightsRange {
-  return value === 'today' || value === '7d' || value === '30d' || value === 'all';
+  return value === 'today' || value === '7d' || value === '30d'
+    || value === '90d' || value === '1y' || value === 'all';
 }
 
 const STOP_WORDS = new Set([
@@ -212,20 +223,14 @@ export function addLocalDays(timestamp: number, days: number): number {
   return date.getTime();
 }
 
+export function getInsightsRangeDayCount(range: Exclude<InsightsRange, 'all'>): number {
+  return INSIGHTS_RANGE_DAY_COUNTS[range];
+}
+
 export function getRangeStart(range: InsightsRange, now = Date.now()): number | null {
   const today = getLocalDayStart(now);
-  switch (range) {
-    case 'today':
-      return today;
-    case '7d':
-      return addLocalDays(today, -6);
-    case '30d':
-      return addLocalDays(today, -29);
-    case 'all':
-      return null;
-    default:
-      return null;
-  }
+  if (range === 'all') return null;
+  return addLocalDays(today, 1 - getInsightsRangeDayCount(range));
 }
 
 export function formatTrendLabel(dayKey: string): string {
@@ -256,7 +261,7 @@ export function buildTrendPoints(
 
   if (range !== 'all') {
     const start = getRangeStart(range, now) ?? getLocalDayStart(now);
-    const days = range === 'today' ? 1 : range === '7d' ? 7 : 30;
+    const days = getInsightsRangeDayCount(range);
     for (let i = 0; i < days; i += 1) {
       const key = getLocalDayKey(addLocalDays(start, i));
       if (!buckets.has(key)) buckets.set(key, []);

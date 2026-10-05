@@ -22,6 +22,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from engine_compatibility import (
     EffectiveWhisperConfig,
     get_runtime_capabilities,
+    get_whisper_language_codes,
     normalize_whisper_language,
     option_compatibility,
     resolve_effective_whisper_config,
@@ -285,8 +286,8 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     },
     "whisper_language": {
         "label": "Language",
-        "description": "Language code for Whisper. Use en for fastest English dictation.",
-        "type": "text",
+        "description": "Choose a transcription language or detect it automatically.",
+        "type": "select",
         "requires_reload": True,
         "category": "engine",
         "visible_when": {"engine": "whisper"},
@@ -430,6 +431,13 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
             from transcription.catalog import model_setting_options
 
             source_options = model_setting_options()
+        elif key == "whisper_language":
+            language_codes = get_whisper_language_codes()
+            if language_codes is None:
+                language_codes = frozenset({settings.whisper_language}) if settings.whisper_language else frozenset()
+            source_options = [{"value": None, "label": "Auto detect"}] + [
+                {"value": code, "label": code} for code in sorted(language_codes)
+            ]
         else:
             source_options = meta.get("options", [])
         options = []
@@ -459,7 +467,7 @@ def get_settings_with_metadata(settings: Settings) -> dict[str, Any]:
         result[key] = {
             "value": values[key],
             **meta,
-            **({"options": options} if "options" in meta or key == "whisper_model" else {}),
+            **({"options": options} if "options" in meta or key in {"whisper_model", "whisper_language"} else {}),
         }
     return result
 

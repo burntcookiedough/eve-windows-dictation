@@ -140,6 +140,114 @@ export function buildDictationTimeChart(
   };
 }
 
+export const WORDS_AREA_CHART_WIDTH = 720;
+export const WORDS_AREA_CHART_HEIGHT = 160;
+
+export interface WordsAreaChartPoint {
+  date: string;
+  label: string;
+  words: number;
+  x: number;
+  y: number;
+}
+
+export interface WordsAreaChart {
+  width: number;
+  height: number;
+  plotLeft: number;
+  plotRight: number;
+  plotTop: number;
+  plotBottom: number;
+  scaleMaxWords: number;
+  totalWords: number;
+  gapDays: number;
+  xAxisStartLabel: string;
+  xAxisEndLabel: string | null;
+  xAxisDescription: string;
+  linePath: string;
+  areaPath: string;
+  points: WordsAreaChartPoint[];
+  ticks: Array<{ valueWords: number; y: number; label: string }>;
+}
+
+interface NormalizedWordPoint {
+  date: string;
+  label: string;
+  words: number;
+}
+
+export function buildWordsAreaChart(
+  points: InsightsTrendPoint[],
+  width = WORDS_AREA_CHART_WIDTH,
+  height = WORDS_AREA_CHART_HEIGHT,
+): WordsAreaChart {
+  const safeWidth = finitePositive(width, WORDS_AREA_CHART_WIDTH);
+  const safeHeight = finitePositive(height, WORDS_AREA_CHART_HEIGHT);
+  const normalized = normalizeWordPoints(points);
+  const plotLeft = clamp(8, 0, safeWidth);
+  const plotRight = Math.max(plotLeft, safeWidth - Math.min(8, safeWidth - plotLeft));
+  const plotTop = clamp(12, 0, safeHeight);
+  const plotBottom = Math.max(plotTop, safeHeight - Math.min(22, safeHeight - plotTop));
+  const plotWidth = Math.max(0, plotRight - plotLeft);
+  const plotHeight = Math.max(0, plotBottom - plotTop);
+  const scaleMaxWords = chooseScaleMax(normalized.reduce((peak, point) => Math.max(peak, point.words), 0));
+  const totalWords = normalized.reduce((sum, point) => safeAdd(sum, point.words), 0);
+  const firstDay = normalized[0] ? dayOrdinal(normalized[0].date) ?? 0 : 0;
+  const lastPoint = normalized.at(-1);
+  const lastDay = lastPoint ? dayOrdinal(lastPoint.date) ?? firstDay : firstDay;
+  const daySpan = Math.max(1, lastDay - firstDay + 1);
+  let gapDays = 0;
+  let previousDay: number | null = null;
+
+  const chartPoints = normalized.map((point) => {
+    const currentDay = dayOrdinal(point.date) ?? firstDay;
+    if (previousDay !== null) gapDays += Math.max(0, currentDay - previousDay - 1);
+    previousDay = currentDay;
+
+    const x = normalized.length === 1
+      ? plotLeft + plotWidth / 2
+      : plotLeft + ((currentDay - firstDay) / Math.max(1, daySpan - 1)) * plotWidth;
+    const y = plotBottom - (point.words / scaleMaxWords) * plotHeight;
+    return {
+      date: point.date,
+      label: point.label,
+      words: point.words,
+      x: clamp(x, plotLeft, plotRight),
+      y: clamp(y, plotTop, plotBottom),
+    };
+  });
+
+  const linePath = buildSmoothLinePath(chartPoints, plotTop, plotBottom);
+  const firstPoint = chartPoints[0];
+  const lastChartPoint = chartPoints.at(-1);
+  const areaPath = firstPoint && lastChartPoint
+    ? `${linePath} L${pathNumber(lastChartPoint.x)},${pathNumber(plotBottom)} L${pathNumber(firstPoint.x)},${pathNumber(plotBottom)} Z`
+    : '';
+  const ticks = [0, scaleMaxWords / 2, scaleMaxWords].map((valueWords) => ({
+    valueWords,
+    y: clamp(plotBottom - (valueWords / scaleMaxWords) * plotHeight, plotTop, plotBottom),
+    label: formatChartCount(valueWords),
+  }));
+  const xAxis = buildXAxisLabels(normalized.map(({ date, label }) => ({ date, label, valueSeconds: 0 })));
+
+  return {
+    width: safeWidth,
+    height: safeHeight,
+    plotLeft,
+    plotRight,
+    plotTop,
+    plotBottom,
+    scaleMaxWords,
+    totalWords,
+    gapDays,
+    ...xAxis,
+    linePath,
+    areaPath,
+    points: chartPoints,
+    ticks,
+  };
+}
+
 export function formatChartDuration(seconds: number): string {
   const value = finiteNonNegative(seconds);
   if (value >= EXTREME_DURATION_SECONDS) return formatExtremeDuration(value);
@@ -175,6 +283,21 @@ function normalizePoints(points: InsightsTrendPoint[]): NormalizedPoint[] {
         label: point.label || point.date,
         valueSeconds,
       });
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function normalizeWordPoints(points: InsightsTrendPoint[]): NormalizedWordPoint[] {
+  const byDate = new Map<string, NormalizedWordPoint>();
+  for (const point of points) {
+    if (dayOrdinal(point.date) === null) continue;
+    const current = byDate.get(point.date);
+    const words = finiteNonNegative(point.words);
+    if (current) {
+      current.words = safeAdd(current.words, words);
+    } else {
+      byDate.set(point.date, { date: point.date, label: point.label || point.date, words });
     }
   }
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
@@ -260,6 +383,38 @@ function formatCompact(value: number): string {
   if (value >= EXTREME_DURATION_SECONDS) return value.toExponential(2);
   if (value < 10) return value.toFixed(1).replace(/\.0$/, '');
   return Math.round(value).toLocaleString('en-US');
+}
+
+function formatChartCount(value: number): string {
+  const safeValue = finiteNonNegative(value);
+  return safeValue < 1
+    ? safeValue.toLocaleString('en-US', { maximumFractionDigits: 1 })
+    : Math.round(safeValue).toLocaleString('en-US');
+}
+
+function pathNumber(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : '0';
+}
+
+function buildSmoothLinePath(points: WordsAreaChartPoint[], minimumY: number, maximumY: number): string {
+  const first = points[0];
+  if (!first) return '';
+  if (points.length === 1) return `M${pathNumber(first.x)},${pathNumber(first.y)}`;
+
+  let path = `M${pathNumber(first.x)},${pathNumber(first.y)}`;
+  const tension = 0.18;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = points[index - 1] ?? points[index]!;
+    const current = points[index]!;
+    const next = points[index + 1]!;
+    const afterNext = points[index + 2] ?? next;
+    const control1X = current.x + (next.x - previous.x) * tension;
+    const control1Y = clamp(current.y + (next.y - previous.y) * tension, minimumY, maximumY);
+    const control2X = next.x - (afterNext.x - current.x) * tension;
+    const control2Y = clamp(next.y - (afterNext.y - current.y) * tension, minimumY, maximumY);
+    path += ` C${pathNumber(control1X)},${pathNumber(control1Y)} ${pathNumber(control2X)},${pathNumber(control2Y)} ${pathNumber(next.x)},${pathNumber(next.y)}`;
+  }
+  return path;
 }
 
 function formatExtremeDuration(value: number): string {

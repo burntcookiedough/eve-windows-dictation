@@ -8,7 +8,9 @@ import {
   calcWordsPerMinute,
   countWords,
   formatTrendLabel,
+  getInsightsRangeDayCount,
   getLocalDayKey,
+  getLocalDayStart,
   getRangeStart,
   sortWordStats,
   tokenizeInsightWords,
@@ -58,6 +60,10 @@ function buildHistoryQuery(filters?: HistoryFilters): HistoryQuery {
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
 
+  if (filters?.sessionMode) {
+    conditions.push('sessionMode = @sessionMode');
+    params.sessionMode = filters.sessionMode;
+  }
   if (filters?.text) {
     conditions.push('text LIKE @textSearch');
     params.textSearch = `%${filters.text}%`;
@@ -402,7 +408,7 @@ export class HistoryService {
     const longestEntries = this.getLongestEntries(rangeStart, 5);
     const slowestEntries = this.getSlowestEntries(rangeStart, 5);
 
-    return {
+    const response: InsightsResponse = {
       range,
       generatedAt,
       hasData: summary.totalDictations > 0,
@@ -414,6 +420,19 @@ export class HistoryService {
       longestEntries,
       slowestEntries,
     };
+
+    if (!indexing.isIndexing) {
+      response.hourlyDictations = this.getHourlyDictations(rangeStart);
+      response.yearActivity = this.getYearActivity(generatedAt);
+      response.currentStreakDays = computeCurrentStreak(this.getDailyRows(null), generatedAt);
+      if (range !== 'all') {
+        response.previousPeriodWords = this.getPreviousPeriodWords(range, generatedAt);
+      }
+      const fastestEntry = this.getFastestEntry(rangeStart);
+      if (fastestEntry) response.fastestEntry = fastestEntry;
+    }
+
+    return response;
   }
 
   rebuildInsights(): void {
@@ -765,6 +784,77 @@ export class HistoryService {
     `).all({ dayStart }) as DailyRollupRow[]).map(normalizeDailyRow);
   }
 
+  private getYearActivity(now: number): Array<{ date: string; words: number; dictations: number }> {
+    if (!this.db) throw new Error('Database not initialized');
+    const today = getLocalDayStart(now);
+    const mondayOffset = (new Date(today).getDay() + 6) % 7;
+    const start = addLocalDays(addLocalDays(today, -52 * 7), -mondayOffset);
+    const rows = this.getDailyRows(getLocalDayKey(start));
+    const rowByDay = new Map(rows.map((row) => [row.day, row]));
+    const activity: Array<{ date: string; words: number; dictations: number }> = [];
+
+    for (let day = start; day <= today; day = addLocalDays(day, 1)) {
+      const date = getLocalDayKey(day);
+      const row = rowByDay.get(date) ?? emptyDailyRow(date);
+      activity.push({ date, words: row.words, dictations: row.dictations });
+    }
+
+    return activity;
+  }
+
+  private getHourlyDictations(rangeStart: number | null): number[] {
+    if (!this.db) throw new Error('Database not initialized');
+    const whereClause = rangeStart === null ? '' : 'WHERE timestamp >= @rangeStart';
+    const params = rangeStart === null ? {} : { rangeStart };
+    const rows = this.db.prepare(`
+      SELECT
+        CAST(strftime('%H', timestamp / 1000.0, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+        COUNT(*) AS dictations
+      FROM transcriptions
+      ${whereClause}
+      GROUP BY hour
+    `).all(params) as Array<{ hour: number | null; dictations: number }>;
+    const counts = Array.from({ length: 24 }, () => 0);
+
+    for (const row of rows) {
+      if (row.hour !== null && row.hour >= 0 && row.hour < counts.length) {
+        counts[row.hour] = safeCount(row.dictations);
+      }
+    }
+
+    return counts;
+  }
+
+  private getPreviousPeriodWords(range: Exclude<InsightsRange, 'all'>, now: number): number {
+    if (!this.db) throw new Error('Database not initialized');
+    const currentStart = getRangeStart(range, now);
+    if (currentStart === null) return 0;
+    const previousStart = getLocalDayKey(addLocalDays(currentStart, -getInsightsRangeDayCount(range)));
+    const currentStartKey = getLocalDayKey(currentStart);
+    const row = this.db.prepare(`
+      SELECT COALESCE(SUM(words), 0) AS words
+      FROM insights_daily_rollups
+      WHERE day >= @previousStart AND day < @currentStart
+    `).get({ previousStart, currentStart: currentStartKey }) as { words: number } | undefined;
+    return safeCount(Number(row?.words ?? 0));
+  }
+
+  private getFastestEntry(rangeStart: number | null): InsightsEntryStat | undefined {
+    if (!this.db) throw new Error('Database not initialized');
+    const whereClause = rangeStart === null ? '' : 'AND timestamp >= @rangeStart';
+    const params = rangeStart === null ? {} : { rangeStart };
+    const row = this.db.prepare(`
+      SELECT id, timestamp, text, confidence, audioDuration, transcriptionTime, wordCount
+      FROM transcriptions
+      WHERE COALESCE(wordCount, 0) > 0
+        AND COALESCE(audioDuration, 0) > 0
+        ${whereClause}
+      ORDER BY (wordCount / (audioDuration / 60.0)) DESC, timestamp DESC, id DESC
+      LIMIT 1
+    `).get(params);
+    return row ? toEntryStat(mapInsightSourceEntry(row)) : undefined;
+  }
+
   private buildTrends(rows: DailyRollupRow[], range: InsightsRange, now: number): InsightsTrendPoint[] {
     const normalizedRows = rows.map(normalizeDailyRow);
     const rowMap = new Map(normalizedRows.map((row) => [row.day, row]));
@@ -996,8 +1086,20 @@ function emptyDailyRow(day: string): DailyRollupRow {
 
 function buildRangeDayKeys(range: Exclude<InsightsRange, 'all'>, now: number): string[] {
   const start = getRangeStart(range, now) ?? now;
-  const days = range === 'today' ? 1 : range === '7d' ? 7 : 30;
+  const days = getInsightsRangeDayCount(range);
   return Array.from({ length: days }, (_, index) => getLocalDayKey(addLocalDays(start, index)));
+}
+
+function computeCurrentStreak(rows: DailyRollupRow[], now: number): number {
+  const activeDays = new Set(rows.filter((row) => row.dictations > 0).map((row) => row.day));
+  let cursor = now;
+  if (!activeDays.has(getLocalDayKey(cursor))) cursor = addLocalDays(cursor, -1);
+  let streak = 0;
+  while (activeDays.has(getLocalDayKey(cursor))) {
+    streak += 1;
+    cursor = addLocalDays(cursor, -1);
+  }
+  return streak;
 }
 
 function computeLongestStreak(rows: DailyRollupRow[]): number {

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { slide } from 'svelte/transition';
-  import { quintOut } from 'svelte/easing';
+  import { onMount, tick } from 'svelte';
   import { toast } from '$lib/toast.svelte';
+  import Cactus from '../components/Cactus.svelte';
   import type {
+    DictationSessionMode,
     HistoryEntryWithGroup,
     HistoryExportFormat,
     HistoryExportRequest,
@@ -11,14 +11,28 @@
   } from '$shared/types';
   import EveDropdown from '../components/EveDropdown.svelte';
   import PrimaryPage from '../components/PrimaryPage.svelte';
+  import {
+    deferHistoryDelete,
+    pauseDeferredHistoryDeletes,
+    pendingHistoryDeletes,
+    resumeDeferredHistoryDeletes,
+    undoDeferredHistoryDelete,
+  } from '../history-delete-queue.svelte';
 
   const BATCH_SIZE = 30;
   const HISTORY_EXPORT_FORMATS = [
     { value: 'json', label: 'JSON' },
     { value: 'csv', label: 'CSV' },
   ];
+  type SessionFilter = 'all' | DictationSessionMode | 'edited';
+  const SESSION_FILTERS: SessionFilter[] = ['all', 'quick', 'long', 'edited'];
+  interface HistoryDayGroup {
+    date: string;
+    label: string;
+    entries: HistoryEntryWithGroup[];
+    words: number;
+  }
 
-  // State
   let history: HistoryEntryWithGroup[] = $state([]);
   let hasMore = $state(true);
   let loading = $state(false);
@@ -26,8 +40,6 @@
   let offset = $state(0);
   let requestGeneration = 0;
   let resetQueued = false;
-
-  // Search and filters
   let searchQuery = $state('');
   let showFilters = $state(false);
   let dateFrom = $state('');
@@ -35,18 +47,11 @@
   let minDuration = $state('');
   let maxDuration = $state('');
   let minConfidence = $state('');
-  let editedOnly = $state(false);
-
-  // Delete confirmation
-  let deleteConfirmId: string | null = $state(null);
-  let deleteDialog: HTMLDivElement | undefined = $state(undefined);
-  let deleteTrigger: HTMLElement | null = null;
+  let sessionFilter = $state<SessionFilter>('all');
   let bulkDeleteConfirmOpen = $state(false);
   let bulkDeleteDialog: HTMLDivElement | undefined = $state(undefined);
   let bulkDeleteTrigger: HTMLElement | null = null;
-  let selectionToggle: HTMLButtonElement | undefined;
-
-  // Selection mode
+  let selectionToggle: HTMLButtonElement | undefined = $state(undefined);
   let selectionMode = $state(false);
   let selectedIds = $state<Set<string>>(new Set());
   let selectingAll = $state(false);
@@ -55,61 +60,40 @@
   let exportFormat: HistoryExportFormat = $state('json');
   let selectionFeedback = $state('');
   let selectionGeneration = 0;
+  let expandedId: string | null = $state(null);
+  let sentinel: HTMLElement | undefined = $state(undefined);
+  let historyRoot: HTMLElement | undefined = $state(undefined);
+  let searchInput: HTMLInputElement | undefined = $state(undefined);
+  let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  let pendingIds = $derived(new Set(pendingHistoryDeletes.items.map((item) => item.id)));
+  let pendingDeletes = $derived(pendingHistoryDeletes.items);
+  let visibleHistory = $derived(history.filter((item) => !pendingIds.has(item.id)));
+  let dayGroups = $derived(groupHistoryByDay(visibleHistory));
   let selectedCount = $derived(selectedIds.size);
   let hasSelection = $derived(selectedCount > 0);
+  let loadedWordCount = $derived(visibleHistory.reduce((sum, item) => sum + (item.wordCount ?? countWords(item.text)), 0));
+  let loadedCountLabel = $derived(`${formatInteger(visibleHistory.length)}${hasMore ? '+' : ''} · ${formatInteger(loadedWordCount)}${hasMore ? '+' : ''} words`);
+  let loadedCountDescription = $derived(`${visibleHistory.length} ${visibleHistory.length === 1 ? 'entry' : 'entries'} and ${formatInteger(loadedWordCount)} words loaded${hasMore ? ', more history is available' : ', all matching history is loaded'}`);
+  let hasActiveFilters = $derived(Boolean(sessionFilter !== 'all' || dateFrom || dateTo || minDuration || maxDuration || minConfidence));
 
-  $effect(() => {
-    if (deleteConfirmId) queueMicrotask(() => deleteDialog?.focus());
-  });
-
-  $effect(() => {
-    if (bulkDeleteConfirmOpen) queueMicrotask(() => bulkDeleteDialog?.focus());
-  });
-
-  // Expanded item
-  let expandedId: string | null = $state(null);
-
-  // Last updated timestamp
-  let lastUpdated: number | null = $state(null);
-
-  // Sentinel element ref
-  let sentinel: HTMLElement | undefined = $state(undefined);
-
-  // Build filters object from state
   function buildFilters(): HistoryFilters | undefined {
     const filters: HistoryFilters = {};
     let hasFilters = false;
-
-    if (searchQuery.trim()) {
-      filters.text = searchQuery.trim();
-      hasFilters = true;
-    }
+    if (searchQuery.trim()) { filters.text = searchQuery.trim(); hasFilters = true; }
+    if (sessionFilter === 'quick' || sessionFilter === 'long') { filters.sessionMode = sessionFilter; hasFilters = true; }
+    if (sessionFilter === 'edited') { filters.editedOnly = true; hasFilters = true; }
     if (dateFrom) {
-      filters.dateFrom = new Date(dateFrom).getTime();
-      hasFilters = true;
+      const start = new Date(`${dateFrom}T00:00:00`);
+      if (Number.isFinite(start.getTime())) { filters.dateFrom = start.getTime(); hasFilters = true; }
     }
     if (dateTo) {
-      // End of day
-      filters.dateTo = new Date(dateTo).getTime() + 86400000 - 1;
-      hasFilters = true;
+      const end = new Date(`${dateTo}T00:00:00`);
+      if (Number.isFinite(end.getTime())) { end.setHours(23, 59, 59, 999); filters.dateTo = end.getTime(); hasFilters = true; }
     }
-    if (minDuration) {
-      filters.minDuration = parseFloat(minDuration);
-      hasFilters = true;
-    }
-    if (maxDuration) {
-      filters.maxDuration = parseFloat(maxDuration);
-      hasFilters = true;
-    }
-    if (minConfidence) {
-      filters.minConfidence = parseFloat(minConfidence) / 100;
-      hasFilters = true;
-    }
-    if (editedOnly) {
-      filters.editedOnly = true;
-      hasFilters = true;
-    }
-
+    if (minDuration) { filters.minDuration = Number(minDuration); hasFilters = true; }
+    if (maxDuration) { filters.maxDuration = Number(maxDuration); hasFilters = true; }
+    if (minConfidence) { filters.minConfidence = Number(minConfidence) / 100; hasFilters = true; }
     return hasFilters ? filters : undefined;
   }
 
@@ -119,19 +103,15 @@
     selectionFeedback = '';
   }
 
-  function enterSelectionMode(): void {
-    selectionMode = true;
-    clearSelection();
-  }
+  function enterSelectionMode(): void { selectionMode = true; clearSelection(); }
+  function exitSelectionMode(): void { selectionMode = false; clearSelection(); }
+  function toggleSelectionMode(): void { selectionMode ? exitSelectionMode() : enterSelectionMode(); }
 
-  function exitSelectionMode(): void {
-    selectionMode = false;
-    clearSelection();
-  }
-
-  function toggleSelectionMode(): void {
-    if (selectionMode) exitSelectionMode();
-    else enterSelectionMode();
+  function toggleEntrySelection(id: string, selected: boolean): void {
+    const next = new Set(selectedIds);
+    if (selected) next.add(id); else next.delete(id);
+    selectedIds = next;
+    selectionFeedback = '';
   }
 
   function removeEntryFromSelection(id: string): void {
@@ -139,14 +119,6 @@
     const next = new Set(selectedIds);
     next.delete(id);
     selectedIds = next;
-  }
-
-  function toggleEntrySelection(id: string, selected: boolean): void {
-    const next = new Set(selectedIds);
-    if (selected) next.add(id);
-    else next.delete(id);
-    selectedIds = next;
-    selectionFeedback = '';
   }
 
   async function selectAllCurrentFilter(): Promise<void> {
@@ -157,8 +129,8 @@
     try {
       const ids = await window.murmurMain.getHistoryEntryIds(buildFilters());
       if (generation !== selectionGeneration) return;
-      selectedIds = new Set(ids);
-      if (ids.length === 0) selectionFeedback = 'No entries match the current filters.';
+      selectedIds = new Set(ids.filter((id) => !pendingIds.has(id)));
+      if (selectedIds.size === 0) selectionFeedback = 'No entries match the current filters.';
     } catch (err) {
       if (generation !== selectionGeneration) return;
       console.error('Failed to select history entries:', err);
@@ -168,8 +140,7 @@
     }
   }
 
-  // Load entries
-  async function loadEntries(reset = false) {
+  async function loadEntries(reset = false): Promise<void> {
     if (reset) {
       if (selectionMode || selectedIds.size > 0) exitSelectionMode();
       requestGeneration += 1;
@@ -177,31 +148,19 @@
       hasMore = true;
       history = [];
     }
-
-    if (loading) {
-      resetQueued ||= reset;
-      return;
-    }
-
+    if (loading) { resetQueued ||= reset; return; }
     if (!hasMore) return;
 
     const generation = requestGeneration;
     const requestOffset = offset;
-    const filters = buildFilters();
     loading = true;
     loadError = '';
     try {
-      const response = await window.murmurMain.getHistoryEntries(
-        requestOffset,
-        BATCH_SIZE,
-        filters
-      );
+      const response = await window.murmurMain.getHistoryEntries(requestOffset, BATCH_SIZE, buildFilters());
       if (generation !== requestGeneration) return;
-
       history = reset ? response.entries : [...history, ...response.entries];
       hasMore = response.hasMore;
       offset = requestOffset + response.entries.length;
-      lastUpdated = Date.now();
     } catch (err) {
       if (generation === requestGeneration) {
         console.error('Failed to load history:', err);
@@ -209,137 +168,100 @@
       }
     } finally {
       loading = false;
-      if (resetQueued) {
-        resetQueued = false;
-        void loadEntries(true);
-      }
+      if (resetQueued) { resetQueued = false; void loadEntries(true); }
     }
   }
 
-  // Debounced search
-  let searchTimeout: ReturnType<typeof setTimeout> | null = null;
-  function handleSearchInput() {
+  function handleSearchInput(): void {
     clearSelection();
     if (searchTimeout) clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
-      loadEntries(true);
-    }, 300);
+    searchTimeout = setTimeout(() => void loadEntries(true), 300);
   }
 
-  // Filter changes
-  function handleFilterChange() {
-    clearSelection();
-    loadEntries(true);
-  }
+  function handleFilterChange(): void { clearSelection(); loadEntries(true); }
 
-  function clearFilters() {
+  function clearFilters(): void {
     dateFrom = '';
     dateTo = '';
     minDuration = '';
     maxDuration = '';
     minConfidence = '';
-    editedOnly = false;
+    sessionFilter = 'all';
     clearSelection();
-    loadEntries(true);
+    void loadEntries(true);
   }
 
-  // Format functions
-  function formatTime(ts: number): string {
-    const diff = Date.now() - ts;
-    if (diff < 1000 * 60) return 'Just now';
-    if (diff < 1000 * 60 * 60) return `${Math.floor(diff / 1000 / 60)}m ago`;
-    if (diff < 1000 * 60 * 60 * 24) return `${Math.floor(diff / 1000 / 60 / 60)}h ago`;
-    return `${Math.floor(diff / 1000 / 60 / 60 / 24)}d ago`;
+  function formatClock(timestamp: number): string {
+    return new Date(timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   }
 
-  function formatFullDate(ts: number): string {
-    return new Date(ts).toLocaleString();
-  }
-
-  function countWords(text: string): number {
-    return text.split(/\s+/).filter((w) => w.length > 0).length;
-  }
-
+  function formatFullDate(timestamp: number): string { return new Date(timestamp).toLocaleString(); }
+  function countWords(text: string): number { return text.trim().split(/\s+/).filter(Boolean).length; }
   function calcWordsPerMinute(text: string, audioDurationSec: number): number {
-    if (audioDurationSec <= 0) return 0;
-    const words = countWords(text);
-    return words / (audioDurationSec / 60);
+    return audioDurationSec > 0 ? countWords(text) / (audioDurationSec / 60) : 0;
   }
-
   function calcPerformanceRatio(audioDurationSec: number, processingTimeMs: number): number {
-    if (processingTimeMs <= 0) return 0;
-    return audioDurationSec / (processingTimeMs / 1000);
+    return processingTimeMs > 0 ? audioDurationSec / (processingTimeMs / 1000) : 0;
+  }
+  function formatInteger(value: number): string { return Math.max(0, Math.round(Number.isFinite(value) ? value : 0)).toLocaleString(); }
+  function formatDuration(seconds: number): string {
+    const value = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    return value < 60 ? `${value.toFixed(1)}s` : `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
   }
 
-  // Actions
-  function handleCopy(text: string) {
-    window.murmurMain.copyToClipboard(text);
-    toast('Copied to clipboard');
-  }
-
-  function handleDelete(id: string) {
-    deleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    deleteConfirmId = id;
-  }
-
-  function closeDeleteDialog() {
-    deleteConfirmId = null;
-    const trigger = deleteTrigger;
-    deleteTrigger = null;
-    queueMicrotask(() => {
-      if (trigger?.isConnected) trigger.focus();
-    });
-  }
-
-  async function confirmDelete() {
-    if (!deleteConfirmId) return;
-    const id = deleteConfirmId;
+  async function handleCopy(text: string): Promise<void> {
     try {
-      await window.murmurMain.deleteHistoryEntry(id);
-      history = history.filter((item) => item.id !== id);
-      removeEntryFromSelection(id);
-      toast('Transcription deleted', 'info');
+      await window.murmurMain.copyToClipboard(text);
+      toast('Copied to clipboard');
     } catch (err) {
-      console.error('Failed to delete:', err);
-      toast('Failed to delete', 'error');
+      console.error('Failed to copy history entry:', err);
+      toast('Could not copy dictation', 'error');
     }
-    closeDeleteDialog();
   }
 
-  function cancelDelete() {
-    closeDeleteDialog();
+  function handleDelete(id: string): void {
+    if (pendingIds.has(id) || selectionMode) return;
+    deferHistoryDelete(id);
+    expandedId = null;
   }
+
+  function undoDelete(id: string): void { undoDeferredHistoryDelete(id); }
 
   function openBulkDeleteDialog(): void {
     if (!hasSelection || bulkDeleting || exporting) return;
     bulkDeleteTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     selectionFeedback = '';
     bulkDeleteConfirmOpen = true;
+    void tick().then(() => {
+      if (!bulkDeleteConfirmOpen) return;
+      const firstButton = bulkDeleteDialog?.querySelector<HTMLButtonElement>('button:not([disabled])');
+      (firstButton ?? bulkDeleteDialog)?.focus();
+    });
   }
 
   function closeBulkDeleteDialog(): void {
     bulkDeleteConfirmOpen = false;
     const trigger = bulkDeleteTrigger;
     bulkDeleteTrigger = null;
-    queueMicrotask(() => {
+    void tick().then(() => {
       if (trigger?.isConnected) trigger.focus();
       else selectionToggle?.focus();
     });
   }
 
-  function cancelBulkDelete(): void {
-    exitSelectionMode();
-    closeBulkDeleteDialog();
-  }
+  function cancelBulkDelete(): void { exitSelectionMode(); closeBulkDeleteDialog(); }
 
   async function confirmBulkDelete(): Promise<void> {
     if (bulkDeleting || exporting || !hasSelection) return;
-    const ids = [...selectedIds];
+    const ids = [...selectedIds].filter((id) => !pendingIds.has(id));
     const requestedCount = ids.length;
     bulkDeleting = true;
     selectionFeedback = '';
     try {
       const result = await window.murmurMain.deleteHistoryEntries(ids);
+      if (result.deletedIds.length > 0) {
+        window.dispatchEvent(new CustomEvent('history-delete-committed', { detail: { ids: result.deletedIds, deleted: true } }));
+      }
       exitSelectionMode();
       closeBulkDeleteDialog();
       await loadEntries(true);
@@ -363,26 +285,19 @@
 
   async function exportHistory(scope: 'all' | 'selected'): Promise<void> {
     if (exporting || bulkDeleting || selectingAll || (scope === 'selected' && !hasSelection)) return;
-
     const request: HistoryExportRequest = scope === 'selected'
-      ? { format: exportFormat, scope, ids: [...selectedIds] }
+      ? { format: exportFormat, scope, ids: [...selectedIds].filter((id) => !pendingIds.has(id)) }
       : { format: exportFormat, scope };
     exporting = true;
     selectionFeedback = '';
     try {
       const result = await window.murmurMain.exportHistory(request);
       if (result.status === 'cancelled') return;
-
       const format = exportFormat.toUpperCase();
       if (result.missingCount > 0) {
-        toast(
-          `Exported ${result.exportedCount} of ${result.requestedCount} selected entries as ${format}; ${result.missingCount} were no longer available.`,
-          'info',
-        );
+        toast(`Exported ${result.exportedCount} of ${result.requestedCount} selected entries as ${format}; ${result.missingCount} were no longer available.`, 'info');
       } else {
-        toast(
-          `Exported ${result.exportedCount} ${result.exportedCount === 1 ? 'entry' : 'entries'} as ${format}.`,
-        );
+        toast(`Exported ${result.exportedCount} ${result.exportedCount === 1 ? 'entry' : 'entries'} as ${format}.`);
       }
     } catch (err) {
       console.error('Failed to export history:', err);
@@ -393,654 +308,440 @@
     }
   }
 
-  function getActiveConfirmationDialog(): HTMLDivElement | undefined {
-    return deleteConfirmId ? deleteDialog : bulkDeleteConfirmOpen ? bulkDeleteDialog : undefined;
-  }
+  function toggleExpand(id: string): void { expandedId = expandedId === id ? null : id; }
 
-  function handleWindowKeydown(event: KeyboardEvent) {
-    const activeDialog = getActiveConfirmationDialog();
-    if (!activeDialog) return;
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    const activeDialog = bulkDeleteConfirmOpen ? bulkDeleteDialog : undefined;
+    if (!activeDialog) {
+      const target = event.target;
+      if (event.key === '/' && target instanceof HTMLElement && !target.closest('input,textarea,select,[contenteditable="true"]')) {
+        event.preventDefault();
+        searchInput?.focus();
+      }
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (deleteConfirmId) cancelDelete();
+      if (bulkDeleting) return;
       else if (!bulkDeleting) cancelBulkDelete();
       return;
     }
     if (event.key === 'Tab') {
-      const focusable = Array.from(
-        activeDialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        activeDialog.focus();
-        return;
-      }
+      const focusable = Array.from(activeDialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'));
       const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      const last = focusable.at(-1);
+      if (!first || !last) { event.preventDefault(); activeDialog.focus(); return; }
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }
   }
 
-  function toggleExpand(id: string) {
-    expandedId = expandedId === id ? null : id;
+  function onDeleteCommitted(event: Event): void {
+    const detail = (event as CustomEvent<{ ids: string[]; deleted: boolean }>).detail;
+    if (!detail?.deleted) return;
+    for (const id of detail.ids) removeEntryFromSelection(id);
+    void loadEntries(true);
   }
-
-  // Get unique date groups in order
-  let dateGroups = $derived(() => {
-    const groups: string[] = [];
-    let lastGroup = '';
-    for (const item of history) {
-      if (item.dateGroup !== lastGroup) {
-        groups.push(item.dateGroup);
-        lastGroup = item.dateGroup;
-      }
-    }
-    return groups;
-  });
-
-  // Check if item is first in its date group
-  function isFirstInGroup(index: number): boolean {
-    if (index === 0) return true;
-    return history[index]?.dateGroup !== history[index - 1]?.dateGroup;
-  }
-
-  function isLastInGroup(index: number): boolean {
-    if (index === history.length - 1) return true;
-    return history[index]?.dateGroup !== history[index + 1]?.dateGroup;
-  }
-
-  // Check if any filters are active
-  let hasActiveFilters = $derived(
-    dateFrom || dateTo || minDuration || maxDuration || minConfidence || editedOnly
-  );
 
   onMount(() => {
-    // Initial load
-    loadEntries(true);
+    void loadEntries(true);
+    const pageLayer = historyRoot?.closest<HTMLElement>('.app-page-layer');
+    const syncDeleteQueueVisibility = () => {
+      if (document.visibilityState === 'visible' && (!pageLayer || pageLayer.classList.contains('app-page-layer--active'))) resumeDeferredHistoryDeletes();
+      else pauseDeferredHistoryDeletes();
+    };
+    syncDeleteQueueVisibility();
+    const layerObserver = pageLayer ? new MutationObserver(syncDeleteQueueVisibility) : null;
+    layerObserver?.observe(pageLayer!, { attributes: true, attributeFilter: ['class'] });
 
-    // Reload when window becomes visible again (e.g., reopened from tray)
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        loadEntries(true);
-      }
+      if (document.visibilityState === 'visible') { syncDeleteQueueVisibility(); void loadEntries(true); }
+      else pauseDeferredHistoryDeletes();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Listen for new entries
     const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry((entry) => {
-      // Prepend new entry if it passes current filters
       const filters = buildFilters();
-      let shouldAdd = true;
-
-      if (filters?.text && !entry.text.toLowerCase().includes(filters.text.toLowerCase())) {
-        shouldAdd = false;
-      }
-      if (filters?.dateFrom && entry.timestamp < filters.dateFrom) {
-        shouldAdd = false;
-      }
-      if (filters?.dateTo && entry.timestamp > filters.dateTo) {
-        shouldAdd = false;
-      }
-      if (filters?.minDuration !== undefined && entry.audioDuration < filters.minDuration) {
-        shouldAdd = false;
-      }
-      if (filters?.maxDuration !== undefined && entry.audioDuration > filters.maxDuration) {
-        shouldAdd = false;
-      }
-      if (filters?.minConfidence !== undefined && entry.confidence < filters.minConfidence) {
-        shouldAdd = false;
-      }
-      if (filters?.editedOnly && entry.editedAt === undefined) {
-        shouldAdd = false;
-      }
-
-      if (shouldAdd) {
+      let shouldAdd = !filters?.text || entry.text.toLowerCase().includes(filters.text.toLowerCase());
+      if (filters?.sessionMode && entry.sessionMode !== filters.sessionMode) shouldAdd = false;
+      if (filters?.dateFrom !== undefined && entry.timestamp < filters.dateFrom) shouldAdd = false;
+      if (filters?.dateTo !== undefined && entry.timestamp > filters.dateTo) shouldAdd = false;
+      if (filters?.minDuration !== undefined && entry.audioDuration < filters.minDuration) shouldAdd = false;
+      if (filters?.maxDuration !== undefined && entry.audioDuration > filters.maxDuration) shouldAdd = false;
+      if (filters?.minConfidence !== undefined && entry.confidence < filters.minConfidence) shouldAdd = false;
+      if (filters?.editedOnly && entry.editedAt === undefined) shouldAdd = false;
+      if (pendingIds.has(entry.id)) shouldAdd = false;
+      if (shouldAdd && !history.some((item) => item.id === entry.id)) {
+        if (loading) {
+          void loadEntries(true);
+          return;
+        }
         history = [entry, ...history];
         offset += 1;
-        lastUpdated = Date.now();
       }
     });
+    window.addEventListener('history-delete-committed', onDeleteCommitted);
 
-    // Set up intersection observer for infinite scroll
     let observer: IntersectionObserver | null = null;
-
-    // Wait for sentinel to be mounted
     const setupObserver = () => {
       if (!sentinel) return;
-
-      observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0]?.isIntersecting && hasMore && !loading) {
-            loadEntries();
-          }
-        },
-        { rootMargin: '200px' }
-      );
-
+      const scrollRoot = document.querySelector<HTMLElement>('[data-scroll-owner="history"]');
+      observer = new IntersectionObserver((entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !loading) void loadEntries();
+      }, { root: scrollRoot, rootMargin: '200px' });
       observer.observe(sentinel);
     };
-
-    // Try to set up observer after a tick
-    setTimeout(setupObserver, 0);
+    const observerTimer = setTimeout(setupObserver, 0);
 
     return () => {
       observer?.disconnect();
+      clearTimeout(observerTimer);
+      layerObserver?.disconnect();
+      pauseDeferredHistoryDeletes();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('history-delete-committed', onDeleteCommitted);
       unsubscribeNewHistoryEntry();
       if (searchTimeout) clearTimeout(searchTimeout);
     };
   });
 
-  // Re-observe when sentinel changes
-  $effect(() => {
-    if (sentinel && hasMore && !loading) {
-      // Trigger a load check when we have a sentinel
+  function localDateKey(timestamp: number): string {
+    const date = new Date(timestamp);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  function groupHistoryByDay(entries: HistoryEntryWithGroup[]): HistoryDayGroup[] {
+    const groups: HistoryDayGroup[] = [];
+    for (const entry of entries) {
+      const date = localDateKey(entry.timestamp);
+      let group = groups.at(-1);
+      if (!group || group.date !== date) {
+        group = { date, label: formatDayGroupLabel(entry.timestamp), entries: [], words: 0 };
+        groups.push(group);
+      }
+      group.entries.push(entry);
+      group.words += entry.wordCount ?? countWords(entry.text);
     }
-  });
+    return groups;
+  }
+
+  function formatDayGroupLabel(timestamp: number): string {
+    const current = new Date();
+    const today = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+    const item = new Date(timestamp);
+    const itemDay = new Date(item.getFullYear(), item.getMonth(), item.getDate());
+    const difference = Math.round((today.getTime() - itemDay.getTime()) / 86400000);
+    if (difference === 0) return 'Today';
+    if (difference === 1) return 'Yesterday';
+    return item.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  }
+
+  function highlightSegments(text: string, query: string): Array<{ text: string; match: boolean }> {
+    const needle = query.trim();
+    if (!needle) return [{ text, match: false }];
+    const lowerText = text.toLocaleLowerCase();
+    const lowerNeedle = needle.toLocaleLowerCase();
+    const segments: Array<{ text: string; match: boolean }> = [];
+    let cursor = 0;
+    let matchIndex = lowerText.indexOf(lowerNeedle, cursor);
+    while (matchIndex >= 0) {
+      if (matchIndex > cursor) segments.push({ text: text.slice(cursor, matchIndex), match: false });
+      segments.push({ text: text.slice(matchIndex, matchIndex + needle.length), match: true });
+      cursor = matchIndex + needle.length;
+      matchIndex = lowerText.indexOf(lowerNeedle, cursor);
+    }
+    if (cursor < text.length) segments.push({ text: text.slice(cursor), match: false });
+    return segments.length ? segments : [{ text, match: false }];
+  }
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <PrimaryPage page="history" scrollOwner="history" contentClass="pb-4">
-<div class="mx-auto flex min-h-full w-full max-w-[560px] flex-col">
-  <!-- Search Bar -->
-  <div class="pb-3 pr-3">
-    <div class="relative">
-      <svg
-        class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-      </svg>
+  <main class="history-view" bind:this={historyRoot}>
+    <div class="search-row" data-r style:--r={0}>
       <input
-        type="text"
-        aria-label="Search transcriptions"
-        placeholder="Search transcriptions..."
+        bind:this={searchInput}
+        type="search"
+        aria-label="Search dictations"
+        placeholder="Search dictations"
+        autocomplete="off"
+        spellcheck="false"
         bind:value={searchQuery}
         oninput={handleSearchInput}
-        class="w-full bg-zinc-900/65 border border-white/10 rounded-full
-          pl-10 pr-12 py-2 text-[13px] text-zinc-100 placeholder-zinc-500
-          focus:outline-none focus:border-zinc-700 focus:bg-zinc-900"
       />
-      <!-- Filter toggle button -->
-      <button
-        type="button"
-        onclick={() => (showFilters = !showFilters)}
-        aria-label="Toggle history filters"
-        aria-expanded={showFilters}
-        class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-colors cursor-pointer
-          {showFilters || hasActiveFilters ? 'text-zinc-200 bg-white/[0.08]' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
-        title="Filters"
-      >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-        </svg>
-      </button>
+      <kbd>/</kbd>
     </div>
 
-    <!-- Expandable Filters -->
-    {#if showFilters}
-      <div class="mt-3 p-4 bg-zinc-900/60 border border-zinc-800 rounded-xl" transition:slide={{ duration: 200, easing: quintOut }}>
-        <div class="grid grid-cols-2 gap-4">
-          <!-- Date Range -->
-          <label class="block">
-            <span class="block text-xs text-zinc-500 mb-1.5">From Date</span>
-            <input
-              type="date"
-              bind:value={dateFrom}
-              onchange={handleFilterChange}
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100
-                focus:outline-none focus:border-zinc-600"
-            />
-          </label>
-          <label class="block">
-            <span class="block text-xs text-zinc-500 mb-1.5">To Date</span>
-            <input
-              type="date"
-              bind:value={dateTo}
-              onchange={handleFilterChange}
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100
-                focus:outline-none focus:border-zinc-600"
-            />
-          </label>
-
-          <!-- Duration -->
-          <label class="block">
-            <span class="block text-xs text-zinc-500 mb-1.5">Min Duration (s)</span>
-            <input
-              type="number"
-              bind:value={minDuration}
-              onchange={handleFilterChange}
-              min="0"
-              step="0.1"
-              placeholder="0"
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100
-                focus:outline-none focus:border-zinc-600 placeholder-zinc-600"
-            />
-          </label>
-          <label class="block">
-            <span class="block text-xs text-zinc-500 mb-1.5">Max Duration (s)</span>
-            <input
-              type="number"
-              bind:value={maxDuration}
-              onchange={handleFilterChange}
-              min="0"
-              step="0.1"
-              placeholder="No limit"
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100
-                focus:outline-none focus:border-zinc-600 placeholder-zinc-600"
-            />
-          </label>
-
-          <!-- Confidence -->
-          <label class="block">
-            <span class="block text-xs text-zinc-500 mb-1.5">Min Confidence (%)</span>
-            <input
-              type="number"
-              bind:value={minConfidence}
-              onchange={handleFilterChange}
-              min="0"
-              max="100"
-              step="5"
-              placeholder="0"
-              class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100
-                focus:outline-none focus:border-zinc-600 placeholder-zinc-600"
-            />
-          </label>
-
-          <!-- Edited Only -->
-          <div class="flex items-end">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                bind:checked={editedOnly}
-                onchange={handleFilterChange}
-                class="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-zinc-200
-                  focus:ring-zinc-200 focus:ring-offset-0 cursor-pointer"
-              />
-              <span class="text-sm text-zinc-300">Edited only</span>
-            </label>
-          </div>
-        </div>
-
-        {#if hasActiveFilters}
-          <div class="mt-4 pt-3 border-t border-zinc-800">
+    <div class="history-toolbar" data-r style:--r={1}>
+      <div class="filter-control-row">
+        <div class="session-filters" role="group" aria-label="Filter dictations by type">
+          {#each SESSION_FILTERS as filter (filter)}
             <button
-              onclick={clearFilters}
-              class="text-xs text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-            >
-              Clear all filters
-            </button>
-          </div>
-        {/if}
+              type="button"
+              data-history-session-filter={filter}
+              class:active={sessionFilter === filter}
+              aria-pressed={sessionFilter === filter}
+              onclick={() => { sessionFilter = filter; handleFilterChange(); }}
+            >{filter}</button>
+          {/each}
+        </div>
+        <button
+          type="button"
+          data-history-more-filters
+          class="quiet-toggle"
+          class:active={hasActiveFilters}
+          class:open={showFilters}
+          aria-label={hasActiveFilters ? 'More filters, active' : 'More filters'}
+          aria-expanded={showFilters}
+          onclick={() => showFilters = !showFilters}
+        >
+          <span>{showFilters ? 'less filters' : 'more filters'}</span><span class="filter-chevron" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="toolbar-actions" aria-label="History actions">
+        <span class="entry-count" aria-live="polite" aria-label={loadedCountDescription}>{loadedCountLabel}</span>
+        {#if !selectionMode}<button type="button" data-history-export-all class="text-action" aria-label="Export all history" aria-busy={exporting} disabled={exporting} onclick={() => exportHistory('all')}>{exporting ? 'exporting…' : 'export'}</button>{/if}
+        <button type="button" data-history-selection-toggle class="text-action" bind:this={selectionToggle} aria-pressed={selectionMode} disabled={exporting} onclick={toggleSelectionMode}>{selectionMode ? 'done' : 'select'}</button>
+      </div>
+    </div>
+
+    {#if showFilters}
+      <div class="filters-panel">
+        <label><span>From date</span><input type="date" bind:value={dateFrom} onchange={handleFilterChange} /></label>
+        <label><span>To date</span><input type="date" bind:value={dateTo} onchange={handleFilterChange} /></label>
+        <label><span>Min duration (s)</span><input type="number" min="0" step="0.1" placeholder="0" bind:value={minDuration} onchange={handleFilterChange} /></label>
+        <label><span>Max duration (s)</span><input type="number" min="0" step="0.1" placeholder="No limit" bind:value={maxDuration} onchange={handleFilterChange} /></label>
+        <label><span>Min confidence (%)</span><input type="number" min="0" max="100" step="5" placeholder="0" bind:value={minConfidence} onchange={handleFilterChange} /></label>
+        {#if hasActiveFilters}<button class="text-action clear-filters" onclick={clearFilters}>Clear all filters</button>{/if}
       </div>
     {/if}
 
-    <div data-history-selection-toolbar class="mt-3 flex min-w-0 flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.018] p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="min-w-0">
-        {#if selectionMode}
-          <p data-history-selection-count class="text-xs text-zinc-200" aria-live="polite">{selectedCount} selected</p>
-          <p class="mt-1 text-[11px] text-zinc-500">Selection applies to the current filters.</p>
-        {:else}
-          <p class="text-xs text-zinc-500">Export all history, or select entries to export a filtered subset.</p>
-        {/if}
-        {#if selectionFeedback && !bulkDeleteConfirmOpen}
-          <p data-history-selection-feedback class="mt-1 text-xs text-red-300" role="alert">{selectionFeedback}</p>
-        {/if}
+    {#if selectionMode}
+    <div data-history-selection-toolbar class="selection-toolbar">
+      <div class="selection-copy">
+        <p data-history-selection-count aria-live="polite">{selectedCount} selected</p>
+        <p class="selection-note">Selection applies to the current filters. Export all entries, or select a filtered subset.</p>
+        {#if selectionFeedback && !bulkDeleteConfirmOpen}<p data-history-selection-feedback class="feedback" role="alert">{selectionFeedback}</p>{/if}
       </div>
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <button
-          type="button"
-          data-history-selection-toggle
-          bind:this={selectionToggle}
-          aria-pressed={selectionMode}
-          disabled={exporting}
-          onclick={toggleSelectionMode}
-          class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {selectionMode ? 'Exit selection' : 'Select entries'}
-        </button>
+      <div class="selection-actions">
+        <EveDropdown label="History export format" value={exportFormat} options={HISTORY_EXPORT_FORMATS} onchange={changeExportFormat} disabled={exporting || bulkDeleting || selectingAll} />
         {#if selectionMode}
-          <button
-            type="button"
-            data-history-select-all
-            aria-label="Select all entries in the current filter"
-            aria-busy={selectingAll}
-            disabled={selectingAll || bulkDeleting || exporting}
-            onclick={selectAllCurrentFilter}
-            class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {selectingAll ? 'Selecting…' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            data-history-clear-selection
-            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
-            onclick={clearSelection}
-            class="min-h-9 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Clear selection
-          </button>
-          <EveDropdown
-            label="History export format"
-            value={exportFormat}
-            options={HISTORY_EXPORT_FORMATS}
-            onchange={changeExportFormat}
-            disabled={exporting || bulkDeleting || selectingAll}
-          />
-          <button
-            type="button"
-            data-history-export-selected
-            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
-            aria-busy={exporting}
-            onclick={() => exportHistory('selected')}
-            class="min-h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {exporting ? 'Exporting…' : 'Export selected'}
-          </button>
-          <button
-            type="button"
-            data-history-delete-selected
-            disabled={!hasSelection || selectingAll || bulkDeleting || exporting}
-            aria-busy={bulkDeleting}
-            onclick={openBulkDeleteDialog}
-            class="min-h-9 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-950 transition-colors hover:bg-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {bulkDeleting ? 'Deleting…' : 'Delete selected'}
-          </button>
-        {:else}
-          <EveDropdown
-            label="History export format"
-            value={exportFormat}
-            options={HISTORY_EXPORT_FORMATS}
-            onchange={changeExportFormat}
-            disabled={exporting}
-          />
-          <button
-            type="button"
-            data-history-export-all
-            aria-label="Export all history"
-            aria-busy={exporting}
-            disabled={exporting}
-            onclick={() => exportHistory('all')}
-            class="min-h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {exporting ? 'Exporting…' : 'Export all'}
-          </button>
+          <button type="button" data-history-select-all aria-busy={selectingAll} disabled={selectingAll || bulkDeleting || exporting} onclick={selectAllCurrentFilter}>{selectingAll ? 'Selecting…' : 'Select all'}</button>
+          <button type="button" data-history-clear-selection disabled={!hasSelection || selectingAll || bulkDeleting || exporting} onclick={clearSelection}>Clear selection</button>
+          <button type="button" data-history-export-selected disabled={!hasSelection || selectingAll || bulkDeleting || exporting} aria-busy={exporting} onclick={() => exportHistory('selected')}>{exporting ? 'Exporting…' : 'Export selected'}</button>
+          <button type="button" aria-busy={exporting} disabled={exporting || bulkDeleting} onclick={() => exportHistory('all')}>{exporting ? 'Exporting…' : 'Export all'}</button>
+          <button type="button" data-history-delete-selected class="primary-action" disabled={!hasSelection || selectingAll || bulkDeleting || exporting} aria-busy={bulkDeleting} onclick={openBulkDeleteDialog}>{bulkDeleting ? 'Deleting…' : 'Delete selected'}</button>
         {/if}
       </div>
     </div>
+    {/if}
 
-  </div>
-
-  <!-- History List -->
-  <div class="flex-1 pr-3">
-    {#if loadError}
-      <div class="rounded-[10px] border border-red-400/40 bg-red-950/30 p-4" role="alert">
-        <p class="text-sm text-red-200">{loadError}</p>
-        <button
-          type="button"
-          onclick={() => loadEntries(true)}
-          class="mt-3 rounded-md border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-100 hover:bg-white/[0.09] cursor-pointer"
-        >
-          Try again
-        </button>
+    {#if pendingDeletes.length > 0}
+      <div class="undo-list" aria-live="polite">
+        {#each pendingDeletes as pending (pending.id)}
+          {@const pendingEntry = history.find((item) => item.id === pending.id)}
+          <p>{pending.committing ? 'Deleting dictation…' : pendingEntry ? `Deleting dictation from ${formatClock(pendingEntry.timestamp)}` : 'Deleting dictation'}
+            {#if !pending.committing}<button type="button" onclick={() => undoDelete(pending.id)}>Undo</button>{/if}
+          </p>
+        {/each}
       </div>
-    {:else if history.length === 0 && !loading}
-      <div class="text-center py-12 text-zinc-500 text-sm">
-        {searchQuery || hasActiveFilters ? 'No matching transcriptions' : 'No transcriptions yet'}
+    {/if}
+
+    {#if loadError}
+      <div class="load-error" role="alert"><p>{loadError}</p><button type="button" onclick={() => loadEntries(true)}>Try again</button></div>
+    {:else if visibleHistory.length === 0 && !loading && pendingDeletes.length === 0}
+      <div class="empty-state" aria-live="polite">
+        <Cactus class="empty-cactus" />
+        <span>{searchQuery.trim() ? `Nothing matches “${searchQuery.trim()}”` : hasActiveFilters ? 'Nothing matches' : 'Nothing here yet'}</span>
       </div>
     {:else}
-      <div>
-        {#each history as item, index (item.id)}
-          {@const isExpanded = expandedId === item.id}
-          {@const showHeader = isFirstInGroup(index)}
-          {@const closeGroup = isLastInGroup(index)}
-
-          <!-- Date Group Header -->
-          {#if showHeader}
-            <div class="pt-4 pb-2 first:pt-0 flex items-center justify-between">
-              <span class="text-[11px] font-medium text-zinc-500 uppercase tracking-[0.08em]">
-                {item.dateGroup}
-              </span>
-              {#if index === 0 && lastUpdated}
-                <span class="text-[11px] text-zinc-500">
-                  Updated {formatFullDate(lastUpdated)}
-                </span>
-              {/if}
-            </div>
-          {/if}
-
-          <!-- Entry -->
-          <div
-            class="group min-w-0 overflow-hidden border border-white/[0.09] bg-white/[0.018] transition-colors duration-150
-              {showHeader ? 'rounded-t-[8px]' : 'border-t-0'}
-              {closeGroup ? 'rounded-b-[8px]' : ''}
-              {isExpanded ? 'bg-white/[0.045]' : 'hover:bg-white/[0.035]'}"
-          >
-            <!-- Collapsed/Preview State -->
-            <div class="px-3 py-3">
-              <div class="flex items-center gap-3">
-                {#if selectionMode}
-                  <label class="flex shrink-0 items-center">
+      <div class="history-list" data-r style:--r={2}>
+        {#each dayGroups as group (group.date)}
+          <section class="day-group" aria-labelledby={`history-day-${group.date}`}>
+            <header class="day-header">
+              <h2 id={`history-day-${group.date}`}>{group.label}</h2>
+              <span aria-label={`${group.entries.length} ${group.entries.length === 1 ? 'dictation' : 'dictations'}, ${formatInteger(group.words)} words`}>{group.entries.length} · {formatInteger(group.words)} words</span>
+            </header>
+            {#each group.entries as item (item.id)}
+              {@const isExpanded = expandedId === item.id}
+              {@const wordCount = item.wordCount ?? countWords(item.text)}
+              {@const wpm = calcWordsPerMinute(item.text, item.audioDuration)}
+              {@const processingRatio = calcPerformanceRatio(item.audioDuration, item.transcriptionTime)}
+              <article class="entry" data-history-entry={item.id} class:open={isExpanded}>
+                <div class="entry-row">
+                  {#if selectionMode}
                     <input
+                      class="entry-check"
                       type="checkbox"
+                      data-history-select-entry={item.id}
                       checked={selectedIds.has(item.id)}
                       disabled={selectingAll || bulkDeleting || exporting}
                       aria-label={`Select transcription from ${formatFullDate(item.timestamp)}`}
                       onchange={(event) => toggleEntrySelection(item.id, event.currentTarget.checked)}
-                      class="h-4 w-4 cursor-pointer rounded border-zinc-700 bg-zinc-800 text-zinc-200 focus:ring-2 focus:ring-zinc-200 focus:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50"
                     />
-                  </label>
-                {/if}
-                <button
-                  type="button"
-                  onclick={() => toggleExpand(item.id)}
-                  aria-expanded={isExpanded}
-                  class="flex-1 min-w-0 rounded-md text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-[#08090a]"
-                >
-                  <p class="max-w-full text-[13px] leading-[1.45] text-zinc-100 [overflow-wrap:anywhere] {isExpanded ? '' : 'line-clamp-2'}">
-                    {item.text}
-                  </p>
-                  <p class="mt-1 text-[11px] text-zinc-500">
-                    {formatTime(item.timestamp)}
-                    {#if item.editedAt}
-                      <span class="ml-2 text-zinc-500">edited</span>
-                    {/if}
-                  </p>
-                </button>
-
-                <!-- Quick Action Buttons (stacked vertically) -->
-                <div class="flex shrink-0 gap-1.5">
-                  <button
-                    type="button"
-                    onclick={(e) => { e.stopPropagation(); handleCopy(item.text); }}
-                    aria-label="Copy transcription"
-                    class="min-h-8 min-w-8 p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.09] rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-                    title="Copy"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onclick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                    aria-label="Delete transcription"
-                    class="min-h-8 min-w-8 p-1.5 text-zinc-400 hover:text-red-300 hover:bg-white/[0.09] rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
-                    title="Delete"
-                  >
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
+                  {/if}
+                  <button class="entry-preview" type="button" onclick={() => toggleExpand(item.id)} aria-expanded={isExpanded}>
+                    <time>{formatClock(item.timestamp)}</time>
+                    <span class="entry-text">
+                      {#each highlightSegments(item.text, searchQuery) as segment, index (`${index}-${segment.text}`)}
+                        {#if segment.match}<mark>{segment.text}</mark>{:else}{segment.text}{/if}
+                      {/each}
+                    </span>
+                    <span class="entry-duration">{formatDuration(item.audioDuration)}</span>
                   </button>
                 </div>
-              </div>
-            </div>
-
-            <!-- Expanded Details -->
-            {#if isExpanded}
-              {@const wordCount = countWords(item.text)}
-              {@const wpm = calcWordsPerMinute(item.text, item.audioDuration)}
-              {@const perfRatio = calcPerformanceRatio(item.audioDuration, item.transcriptionTime)}
-              <div class="px-4 pb-4 pt-0" transition:slide={{ duration: 200, easing: quintOut }}>
-                <div class="pt-3 border-t border-zinc-800">
-                  <!-- Metadata Grid -->
-                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-xs mb-4">
-                    <div>
-                      <span class="text-zinc-500">Duration</span>
-                      <span class="text-zinc-300 ml-2">{item.audioDuration.toFixed(1)}s</span>
+                <div class="entry-more" class:expanded={isExpanded} aria-hidden={!isExpanded} inert={!isExpanded}>
+                  <div class="entry-more-inner">
+                    <div class="entry-more-summary">
+                    <div class="entry-details" data-history-entry-metrics>
+                      <span>{wordCount} words</span>
+                      <span>{Math.round(Math.max(0, item.confidence) * 100)}% confidence</span>
+                      <span>{Math.round(wpm)} wpm</span>
+                      <span>{Math.round(Math.max(0, item.transcriptionTime))}ms processing</span>
+                      <span>{processingRatio.toFixed(1)}x</span>
+                      {#if item.sessionMode}<span>{item.sessionMode}</span>{/if}
+                      {#if item.editedAt !== undefined}<span>edited</span>{/if}
                     </div>
-                    <div>
-                      <span class="text-zinc-500">Confidence</span>
-                      <span class="text-zinc-300 ml-2">{Math.round(item.confidence * 100)}%</span>
+                    <div class="entry-actions">
+                      <button type="button" data-history-entry-copy onclick={() => handleCopy(item.text)}>Copy</button>
+                      <button type="button" data-history-entry-delete disabled={pendingIds.has(item.id)} onclick={() => handleDelete(item.id)}>Delete</button>
                     </div>
-                    <div>
-                      <span class="text-zinc-500">Words</span>
-                      <span class="text-zinc-300 ml-2">{wordCount}</span>
                     </div>
-                    <div>
-                      <span class="text-zinc-500">WPM</span>
-                      <span class="text-zinc-300 ml-2">{Math.round(wpm)}</span>
-                    </div>
-                    <div>
-                      <span class="text-zinc-500">Processing</span>
-                      <span class="text-zinc-300 ml-2">{Math.round(item.transcriptionTime)}ms</span>
-                    </div>
-                    <div>
-                      <span class="text-zinc-500">Performance</span>
-                      <span class="text-zinc-300 ml-2">{perfRatio.toFixed(1)}x</span>
-                    </div>
-                    <div class="col-span-2 sm:col-span-3">
-                      <span class="text-zinc-500">Timestamp</span>
-                      <span class="text-zinc-300 ml-2">{formatFullDate(item.timestamp)}</span>
-                    </div>
-                  </div>
-
-                  <!-- Action Buttons -->
-                  <div class="flex gap-2">
-                    <button
-                      onclick={() => handleCopy(item.text)}
-                      class="px-3 py-1.5 text-xs font-medium bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Copy Text
-                    </button>
-                    <button
-                      onclick={() => handleDelete(item.id)}
-                      class="px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950/50 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Delete
-                    </button>
+                    <p class="entry-timestamp">{formatFullDate(item.timestamp)}</p>
                   </div>
                 </div>
-              </div>
-            {/if}
-          </div>
+              </article>
+            {/each}
+          </section>
         {/each}
-
-        <!-- Loading indicator / Sentinel -->
-        <div bind:this={sentinel} class="py-4 flex justify-center">
-          {#if loading}
-            <div class="flex items-center gap-2 text-zinc-500 text-sm">
-              <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Loading...</span>
-            </div>
-          {:else if !hasMore && history.length > 0}
-            <span class="text-zinc-600 text-xs">No more entries</span>
-          {/if}
+        <div bind:this={sentinel} class="list-end" aria-live="polite">
+          {#if loading}<span>Loading…</span>{:else if !hasMore && visibleHistory.length > 0}<span>No more entries</span>{/if}
         </div>
       </div>
     {/if}
-  </div>
-</div>
+  </main>
 </PrimaryPage>
 
-<!-- Delete Confirmation Dialog -->
-{#if deleteConfirmId}
-  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-    <div
-      bind:this={deleteDialog}
-      tabindex="-1"
-      class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="delete-dialog-title"
-      aria-describedby="delete-dialog-description"
-    >
-      <h3 id="delete-dialog-title" class="text-lg font-medium text-zinc-100 mb-2">Delete Transcription?</h3>
-      <p id="delete-dialog-description" class="text-sm text-zinc-400 mb-6">
-        This action cannot be undone. The transcription will be permanently removed from your history.
-      </p>
-      <div class="flex gap-3 justify-end">
-        <button
-          onclick={cancelDelete}
-          class="px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button
-          onclick={confirmDelete}
-          class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors cursor-pointer"
-        >
-          Delete
-        </button>
+{#if bulkDeleteConfirmOpen}
+  <div class="dialog-backdrop">
+    <div bind:this={bulkDeleteDialog} tabindex="-1" class="bulk-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-delete-dialog-title" aria-describedby="bulk-delete-dialog-description">
+      <h2 id="bulk-delete-dialog-title">Delete {selectedCount} selected {selectedCount === 1 ? 'entry' : 'entries'}?</h2>
+      <p id="bulk-delete-dialog-description">This action cannot be undone. Exactly {selectedCount} selected {selectedCount === 1 ? 'entry will' : 'entries will'} be permanently removed from your history.</p>
+      {#if selectionFeedback}<p class="feedback" role="alert">{selectionFeedback}</p>{/if}
+      <div class="dialog-actions">
+        <button type="button" onclick={cancelBulkDelete} disabled={bulkDeleting}>Cancel</button>
+        <button type="button" class="primary-action" onclick={confirmBulkDelete} disabled={bulkDeleting} aria-busy={bulkDeleting}>{bulkDeleting ? 'Deleting…' : `Delete ${selectedCount}`}</button>
       </div>
     </div>
   </div>
 {/if}
 
-{#if bulkDeleteConfirmOpen}
-  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-    <div
-      bind:this={bulkDeleteDialog}
-      tabindex="-1"
-      class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm mx-4 shadow-xl"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="bulk-delete-dialog-title"
-      aria-describedby="bulk-delete-dialog-description"
-    >
-      <h3 id="bulk-delete-dialog-title" class="text-lg font-medium text-zinc-100 mb-2">Delete {selectedCount} selected {selectedCount === 1 ? 'entry' : 'entries'}?</h3>
-      <p id="bulk-delete-dialog-description" class="text-sm text-zinc-400 mb-4">
-        This action cannot be undone. Exactly {selectedCount} selected {selectedCount === 1 ? 'entry will' : 'entries will'} be permanently removed from your history.
-      </p>
-      {#if selectionFeedback}
-        <p data-bulk-delete-error class="mb-4 text-sm text-red-300" role="alert">{selectionFeedback}</p>
-      {/if}
-      <div class="flex gap-3 justify-end">
-        <button
-          type="button"
-          onclick={cancelBulkDelete}
-          disabled={bulkDeleting}
-          class="px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onclick={confirmBulkDelete}
-          disabled={bulkDeleting}
-          aria-busy={bulkDeleting}
-          class="px-4 py-2 text-sm font-medium bg-zinc-100 hover:bg-white text-zinc-950 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {bulkDeleting ? 'Deleting…' : `Delete ${selectedCount}`}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+
+
+<style>
+  .history-view { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 0 24px; color: var(--fg); }
+  .search-row { display: flex; align-items: center; gap: 12px; padding: 22px 0 12px; border-bottom: 1px solid var(--line2); transition: border-color .3s var(--ease); }
+  .search-row:focus-within { border-color: var(--fg2); }
+  .search-row input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--fg); font: inherit; font-size: 21px; font-weight: 300; letter-spacing: -.01em; }
+  .search-row input::placeholder { color: var(--fg3); }
+  .search-row input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .55; }
+  .search-row kbd { padding: 1px 6px; border: 1px solid var(--line2); border-radius: 3px; color: var(--fg3); font: 10px var(--font-mono, "Geist Mono", ui-monospace, monospace); }
+  .history-toolbar { display: flex; min-width: 0; flex-direction: column; gap: 0; padding: 14px 0 4px; font-size: 12px; }
+  .filter-control-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 14px; }
+  .session-filters, .toolbar-actions { display: flex; min-width: 0; align-items: center; }
+  .session-filters { flex: none; gap: 16px; }
+  .toolbar-actions { width: 100%; justify-content: flex-end; gap: 16px; padding: 7px 0 6px; }
+  .history-toolbar button, .selection-actions button, .entry-actions button, .dialog-actions button { color: var(--fg3); transition: color .2s var(--ease); }
+  .session-filters button:hover, .session-filters button.active, .toolbar-actions button:hover:not(:disabled), .selection-actions button:hover:not(:disabled), .entry-actions button:hover, .dialog-actions button:hover:not(:disabled) { color: var(--fg); }
+  .history-toolbar button:disabled, .selection-actions button:disabled, .dialog-actions button:disabled { cursor: not-allowed; opacity: .5; }
+  .entry-count { color: var(--fg3); font: 10.5px var(--font-mono, "Geist Mono", ui-monospace, monospace); white-space: nowrap; }
+  .text-action { color: var(--fg2) !important; }
+  .quiet-toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--fg3); font: 10px var(--font-mono, "Geist Mono", ui-monospace, monospace); letter-spacing: .06em; }
+  .quiet-toggle:hover, .quiet-toggle.active { color: var(--fg2); }
+  .quiet-toggle:focus-visible { outline: 1px solid var(--line2); outline-offset: 3px; }
+  .filter-chevron { width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-1px) rotate(45deg); transition: transform .2s var(--ease); }
+  .quiet-toggle.open .filter-chevron { transform: translateY(2px) rotate(225deg); }
+  .filters-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 18px; padding: 14px 0 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .filters-panel label { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--fg3); font-size: 10.5px; }
+  .filters-panel input { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line2); border-radius: 0; outline: 0; background: transparent; padding: 5px 0; color: var(--fg); font: 11px var(--font-mono, "Geist Mono", ui-monospace, monospace); color-scheme: dark; }
+  :global(.eve-shell--light) .filters-panel input { color-scheme: light; }
+  .filters-panel input:focus { border-color: var(--fg2); }
+  .filters-panel input::placeholder { color: var(--fg3); }
+  .clear-filters { align-self: end; justify-self: start; font-size: 11px; }
+  .selection-toolbar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 13px; border-bottom: 1px solid var(--line); }
+  .selection-copy { min-width: 0; }
+  .selection-copy > p:first-child { color: var(--fg); font-size: 11.5px; }
+  .selection-note { color: var(--fg3); font-size: 10.5px; }
+  .feedback { margin-top: 5px; color: var(--fg2); font-size: 10.5px; }
+  .selection-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .selection-actions button { font-size: 10.5px; }
+  .primary-action { border: 1px solid var(--fg); background: var(--fg); padding: 7px 10px; color: var(--bg) !important; font-size: 11px; }
+  .primary-action:hover:not(:disabled) { opacity: .85; }
+  .undo-list { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .undo-list p { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--fg2); font-size: 11px; }
+  .undo-list p + p { margin-top: 5px; }
+  .undo-list button { flex: none; color: var(--fg); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+  .load-error { padding: 16px 0; color: var(--fg2); font-size: 12px; }
+  .load-error button { margin-top: 8px; color: var(--fg); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+  .empty-state { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 90px 0; color: var(--fg3); font-size: 13px; text-align: center; }
+  :global(.empty-cactus) { width: 30px; height: auto; color: var(--fg3); }
+  :global(.empty-cactus), :global(.empty-cactus .c-armL), :global(.empty-cactus .c-armR) { animation: none; }
+  .day-group { margin-top: 20px; }
+  .day-header { position: sticky; z-index: 2; top: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 0 9px; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .day-header h2 { color: var(--fg3); font-size: 10px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; }
+  .day-header span { color: var(--fg3); font: 10px var(--font-mono, "Geist Mono", ui-monospace, monospace); letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+  .entry { margin: 0 -12px; padding: 0 12px; border-bottom: 1px solid var(--line); transition: background .2s var(--ease); }
+  .entry:hover, .entry.open { background: var(--hover); }
+  .entry-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
+  .entry-check { flex: none; accent-color: var(--fg); }
+  .entry-preview { display: grid; flex: 1; min-width: 0; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: baseline; gap: 14px; padding: 13px 0; color: inherit; text-align: left; }
+  .entry-preview time, .entry-duration { color: var(--fg3); font: 10.5px var(--font-mono, "Geist Mono", ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+  .entry-text { display: -webkit-box; overflow: hidden; color: var(--fg); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; line-clamp: 2; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .entry.open .entry-text { display: block; }
+  .entry-text mark { background: var(--fg); color: var(--bg); }
+  .entry-more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .4s var(--ease); }
+  .entry-more.expanded { grid-template-rows: 1fr; }
+  .entry-more-inner { min-height: 0; overflow: hidden; }
+  .entry-more-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0 13px; border-top: 1px solid var(--line); }
+  .entry-details { display: flex; min-width: 0; flex-wrap: wrap; gap: 6px 16px; color: var(--fg2); font: 10.5px var(--font-mono, "Geist Mono", ui-monospace, monospace); }
+  .entry-actions { display: flex; flex: none; gap: 16px; }
+  .entry-actions button { color: var(--fg2); font-size: 11px; }
+  .entry-actions button:disabled { color: var(--fg3); }
+  .entry-timestamp { padding-bottom: 12px; color: var(--fg3); font-size: 10px; }
+  .list-end { display: flex; justify-content: center; padding: 18px 0 24px; color: var(--fg3); font-size: 10.5px; }
+  .dialog-backdrop { position: fixed; z-index: 60; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / .62); }
+  .bulk-dialog { width: min(420px, calc(100vw - 32px)); border: 1px solid var(--line2); background: var(--bg); padding: 22px; color: var(--fg); box-shadow: 0 14px 40px rgb(0 0 0 / .25); }
+  .bulk-dialog h2 { font-size: 16px; font-weight: 400; }
+  .bulk-dialog > p { margin-top: 10px; color: var(--fg2); font-size: 12px; line-height: 1.6; }
+  .bulk-dialog .feedback { color: var(--fg2); }
+  .dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 18px; margin-top: 20px; }
+  .dialog-actions button { color: var(--fg2); font-size: 11px; }
+  @media (max-width: 520px) {
+    .history-view { padding-right: 0; padding-left: 0; }
+    .filter-control-row { gap: 10px; }
+    .session-filters { gap: 12px; }
+    .toolbar-actions { gap: 14px; padding-top: 5px; }
+    .entry-count { margin-right: auto; }
+    .day-header { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .day-header h2, .day-header span { white-space: normal; }
+    .filters-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .selection-toolbar { align-items: flex-start; }
+    .selection-actions { gap: 9px; }
+    .entry { margin-right: -8px; margin-left: -8px; padding-right: 8px; padding-left: 8px; }
+    .entry-preview { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 8px; }
+    .entry-text { font-size: 13px; }
+    .entry-duration { font-size: 9.5px; }
+    .day-header span { font-size: 9px; }
+    .entry-more-summary { flex-wrap: wrap; align-items: flex-start; }
+    .entry-details { flex-basis: 100%; }
+    .entry-actions { margin-left: auto; }
+  }
+  @media (max-width: 340px) {
+    .filter-control-row { flex-wrap: wrap; row-gap: 8px; }
+    .session-filters { width: 100%; justify-content: space-between; gap: 7px; }
+    .quiet-toggle { margin-left: auto; }
+    .toolbar-actions { flex-wrap: wrap; row-gap: 4px; }
+    .entry-count { flex: 1 1 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) { .entry-more, .entry { transition: none; } }
+</style>

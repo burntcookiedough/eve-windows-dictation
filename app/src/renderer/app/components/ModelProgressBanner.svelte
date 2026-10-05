@@ -1,30 +1,63 @@
 <script lang="ts">
   import { shouldShowModelProgress } from '$shared/model-progress';
-  import ModelProgressCard from './ModelProgressCard.svelte';
-  import { serverStatusState } from '../server-status';
+  import { retryManagedServer, serverStatusState } from '../server-status';
 
-  let { visible = true }: { visible?: boolean } = $props();
-  let modelDownload = $derived($serverStatusState.state?.modelDownload);
+  interface Props {
+    visible?: boolean;
+    onNavigate?: () => void;
+  }
+
+  let { visible = true, onNavigate = () => {} }: Props = $props();
+  let retrying = $state(false);
+  let snapshot = $derived($serverStatusState);
+  let modelDownload = $derived(snapshot.state?.modelDownload);
   let showBanner = $derived(
-    modelDownload?.status === 'error' || shouldShowModelProgress(modelDownload)
+    snapshot.phase === 'error'
+      || snapshot.phase === 'unavailable'
+      || snapshot.phase === 'missing'
+      || snapshot.phase === 'partial'
+      || shouldShowModelProgress(modelDownload)
   );
+
+  let message = $derived.by(() => {
+    const model = modelDownload?.model;
+    switch (snapshot.phase) {
+      case 'connecting': return 'Connecting to speech services';
+      case 'stale': return 'Refreshing speech readiness';
+      case 'unavailable': return 'Speech service unavailable';
+      case 'missing': return model ? `${model} is not prepared` : 'Speech model is not prepared';
+      case 'partial': return model ? `${model} needs more files` : 'Speech model needs more files';
+      case 'checking': return 'Checking speech model files';
+      case 'downloading': return 'Downloading speech model';
+      case 'loading': return 'Loading speech model';
+      case 'ready': return 'Ready for dictation';
+      case 'error': return 'Speech setup needs attention';
+    }
+  });
+
+  async function retry(): Promise<void> {
+    if (retrying) return;
+    retrying = true;
+    try {
+      await retryManagedServer();
+    } finally {
+      retrying = false;
+    }
+  }
 </script>
 
-{#if visible && modelDownload && showBanner}
-  <section
-    data-status-region="model-progress"
-    aria-label="Speech model status"
-    class="mx-auto w-full max-w-4xl shrink-0 px-4 pb-3 pt-2 sm:px-6"
-  >
-    {#if modelDownload.status === 'error'}
-      <div class="rounded-lg border border-red-500/30 bg-red-950/25 p-3" role="status" aria-live="off">
-        <p class="text-sm font-medium text-red-200 text-pretty">Speech model setup failed</p>
-        <p class="mt-1 text-xs text-red-200/80 text-pretty [overflow-wrap:anywhere]">
-          {modelDownload.detail ?? 'Check your connection.'} Open Settings &gt; Server &amp; diagnostics for details.
-        </p>
-      </div>
-    {:else}
-      <ModelProgressCard state={modelDownload} announce={false} />
+{#if visible && showBanner}
+  <section class="app-status-banner" data-status-region="model-progress" aria-label="Speech model status" aria-live="off">
+    <span class="app-status-banner__dot" aria-hidden="true"></span>
+    <span>{message}</span>
+    {#if snapshot.phase === 'downloading' && typeof modelDownload?.progress_percent === 'number' && Number.isFinite(modelDownload.progress_percent)}
+      <span class="mono">{Math.round(modelDownload.progress_percent)}%</span>
+    {/if}
+    <span class="app-status-banner__spacer"></span>
+    {#if (snapshot.phase === 'error' || snapshot.phase === 'unavailable') && snapshot.state?.managed}
+      <button type="button" onclick={retry} disabled={retrying}>{retrying ? 'retrying' : 'retry'}</button>
+    {:else if snapshot.phase === 'error' || snapshot.phase === 'unavailable' || snapshot.phase === 'missing' || snapshot.phase === 'partial'}
+      <button type="button" onclick={onNavigate}>settings</button>
     {/if}
   </section>
 {/if}

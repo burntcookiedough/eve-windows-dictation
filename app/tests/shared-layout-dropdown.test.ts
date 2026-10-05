@@ -37,9 +37,11 @@ describe('shared primary-page and dropdown foundation', () => {
       expect(view).toContain('<PrimaryPage');
     }
     expect(primaryPage).toContain('data-primary-page-content');
-    expect(primaryPage).toContain('max-w-4xl');
-    expect(primaryPage).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
-    expect(primaryPage).toContain('[scrollbar-gutter:stable]');
+    expect(primaryPage).toContain('class="primary-page__scroll"');
+    expect(appCss).toContain('max-width: 600px;');
+    expect(appCss).toContain('overflow-y: auto;');
+    expect(appCss).toContain('overscroll-behavior: contain;');
+    expect(appCss).toContain('scrollbar-gutter: stable;');
     expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
     expect(appCss).toMatch(/html,\s*body,\s*#app\s*\{[\s\S]*?overflow: hidden;/);
     expect(history).not.toContain('flex-1 overflow-y-auto');
@@ -48,15 +50,16 @@ describe('shared primary-page and dropdown foundation', () => {
   });
 
   test('keeps the production palette neutral and reserves color for semantic state/focus cues', () => {
-    expect(appCss).toContain('--eve-surface-0: #08090a;');
-    expect(appCss).toContain('--eve-focus: #f4f4f5;');
-    expect(appCss).toContain('--eve-status-success: #86efac;');
-    expect(appCss).toContain('--eve-status-warning: #fcd34d;');
-    expect(appCss).toContain('--eve-status-error: #fca5a5;');
+    expect(appCss).toContain('--bg: #0b0b0b;');
+    expect(appCss).toContain('--fg: #ececec;');
+    expect(appCss).toContain('--fg2: #9b9b9b;');
+    expect(appCss).toContain('--fg3: #565656;');
+    expect(appCss).toContain('--bg: #f4f4f2;');
     expect(home).not.toMatch(/\b(?:sky|violet|purple|cyan)-/);
     expect(history).not.toMatch(/\b(?:blue|sky|violet|purple|cyan)-/);
     expect(dropdown).not.toMatch(/\b(?:blue|sky|cyan|violet|purple)-/);
-    expect(dropdown).toContain('focus-visible:ring-zinc-100');
+    expect(dropdown).toContain('.dropdown-trigger:focus-visible');
+    expect(dropdown).toContain('.dropdown-option:focus-visible');
   });
 
   test('covers accessible dropdown semantics and interaction ownership in one reusable component', () => {
@@ -80,8 +83,10 @@ describe('shared primary-page and dropdown foundation', () => {
   });
 
   test('visibly marks the keyboard-active option without replacing selected or hover styling', () => {
-    expect(dropdown).toContain("option.value === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100'");
-    expect(dropdown).toContain("index === activeIndex ? 'ring-1 ring-inset ring-zinc-300/70' : ''");
+    expect(dropdown).toContain("{option.value === value ? 'selected' : ''} {index === activeIndex ? 'active' : ''}");
+    expect(dropdown).toMatch(/\.dropdown-option:hover,\s*\.dropdown-option\.active/);
+    expect(dropdown).toContain('.dropdown-option.selected');
+    expect(dropdown).toContain('outline: 1px solid var(--fg, #ececec);');
     expect(dropdown).toContain('aria-activedescendant={open ? activeOptionId : undefined}');
   });
 

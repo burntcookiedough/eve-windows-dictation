@@ -132,10 +132,31 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(error.states.some((label) => label.includes('Selected') && label.includes('Error'))).toBeTrue();
   });
 
-  test('keeps the compatibility disclosure association', () => {
+  test('keeps advanced controls mounted in one native, accessible disclosure', () => {
     const expanded = measurements.find((measurement) => measurement.compatibility);
     expect(expanded.compatibilityExpanded).toBeTrue();
     expect(expanded.compatibilityAssociation).toBeTrue();
+    expect(expanded.compatibilityControlsPresent).toBeTrue();
+    expect(expanded.compatibilityControlsVisible).toBeTrue();
+    expect(expanded.compatibilitySummaryHeading).toBe('Advanced');
+
+    const collapsed = measurements.find((measurement) => measurement.view === 'speech' && measurement.state === 'ready' && !measurement.compatibility && measurement.zoom === 1 && measurement.viewport.width === 960);
+    expect(collapsed.compatibilityExpanded).toBeFalse();
+    expect(collapsed.compatibilityControlsPresent).toBeTrue();
+    expect(collapsed.compatibilityControlsVisible).toBeFalse();
+
+    expect(result.disclosureInteraction).toEqual({
+      initiallyClosed: true,
+      controlsMountedInitially: true,
+      openedForAttention: true,
+      manuallyClosedWhileAttention: true,
+      stayedClosedAfterRerender: true,
+      remainedClosedAfterAttentionCleared: true,
+      stayedOpenAfterAttentionCleared: true,
+      controlsVisible: true,
+      controlsRemainMounted: true,
+      summaryHeading: 'Advanced',
+    });
   });
 
   test('keeps compatibility dropdowns usable without duplicate inline warnings', () => {
@@ -167,6 +188,22 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
       expect(interaction.rendererFailed).toBeFalse();
       expect(interaction.scrollDelta).toBeLessThanOrEqual(1);
     }
+  });
+
+  test('keeps model sheet choices local until Use, and Cancel reopens on the current model', () => {
+    expect(result.modelSheetDraftInteraction).toEqual({
+      draftChangedBeforeCancel: true,
+      useEnabledBeforeCancel: true,
+      pendingBeforeCancel: '',
+      startedBeforeCancel: '',
+      pendingAfterCancel: '',
+      startedAfterCancel: '',
+      reopensWithCurrent: true,
+      useEnabledAfterSelection: true,
+      pendingAfterUse: 'large-v3',
+      startedAfterUse: 'large-v3',
+      selectedAfterUseLabel: 'Maximum Multilingual Accuracy, Selected · Preparing',
+    });
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {

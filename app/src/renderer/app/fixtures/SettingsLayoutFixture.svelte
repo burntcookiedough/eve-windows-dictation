@@ -42,7 +42,7 @@
             <SettingsRow label="Fast dictation hotkey" description="Start or stop fast dictation">
               <button
                 type="button"
-                class="max-w-full cursor-pointer rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
+                class="max-w-full cursor-pointer text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
               >
                 Ctrl+Win
               </button>

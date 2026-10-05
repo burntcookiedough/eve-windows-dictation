@@ -139,6 +139,21 @@ const result = await runElectron();
 const { measurements } = result;
 
 describe('rendered Phase 3 Server and diagnostics fixture', () => {
+  test('keeps server labels and runtime values readable on the light surface', () => {
+    const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(c => {
+      const v = c / 255;
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    expect(result.lightMeasurements).toHaveLength(2);
+    for (const measurement of result.lightMeasurements) {
+      const background = luminance(measurement.background);
+      for (const color of [measurement.label, ...measurement.values]) {
+        const foreground = luminance(color);
+        const contrast = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+        expect(contrast).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
   test('keeps one page scroll owner and no horizontal overflow at narrow/high zoom states', () => {
     expect(measurements.length).toBe(48);
     for (const measurement of measurements) {
@@ -158,6 +173,20 @@ describe('rendered Phase 3 Server and diagnostics fixture', () => {
     expect(ready.healthButtonsDisabled.every((disabled) => disabled === false)).toBeTrue();
     expect(error.status).toBe('Error');
     expect(error.healthButtonsDisabled.every((disabled) => disabled === false)).toBeTrue();
+  });
+
+  test('aligns diagnostic copy and lifecycle actions consistently without colored button blocks', () => {
+    for (const measurement of measurements.filter(m => ['managed-ready', 'managed-error'].includes(m.state))) {
+      expect(Math.abs(measurement.diagnosticsCopyBounds.right - measurement.diagnosticsBounds.right)).toBeLessThan(2);
+      const statusCenter = (measurement.healthStatusBounds.top + measurement.healthStatusBounds.bottom) / 2;
+      const actionsCenter = (measurement.healthActionsBounds.top + measurement.healthActionsBounds.bottom) / 2;
+      expect(Math.abs(statusCenter - actionsCenter)).toBeLessThan(2);
+      for (const action of measurement.healthActionStyles) {
+        expect(action.width).toBeGreaterThan(0);
+        expect(action.background).toBe('rgba(0, 0, 0, 0)');
+        expect(action.color).not.toBe('rgba(0, 0, 0, 0)');
+      }
+    }
   });
 
   test('keeps collapsed and expanded logs associated, private-data warning visible, and output bounded', () => {
