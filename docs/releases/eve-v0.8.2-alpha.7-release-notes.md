@@ -1,37 +1,26 @@
-# Eve v0.8.2-alpha.7 release notes (candidate draft)
+# Eve v0.8.2-alpha.7 release notes
 
-**Status:** Candidate notes only. Eve v0.8.2-alpha.7 has not been published; this is
-not a release announcement.
+**Channel:** Windows alpha pre-release.
 
-This candidate continues the CPU-first Faster-Whisper and CTranslate2 runtime while
-prioritizing security fixes and a verified in-place upgrade path.
+## Highlights
 
-## Candidate changes
+- A compact monochrome interface brings Home, History, Insights, and Settings into a
+  consistent layout. Settings uses an accessible language dropdown and groups server
+  health, diagnostics, and logs under Engine.
+- The fixed 2:3 main window fits the available monitor work area and is repositioned
+  when display layouts change. History deletion supports Undo, flushes on pagehide,
+  and waits for pending database writes before app exit.
+- The packaged speech service rejects non-loopback peers, browser-originated requests,
+  and invalid or non-local Host headers. It bounds partial-emission settings and closes
+  sessions when no first audio frame arrives.
+- Debug logs keep length metadata while omitting dictated input and recognized text.
+  Clipboard copy, paste, and restore use Electron's asynchronous API.
+- The CPU-first Faster-Whisper runtime uses maintained CPython 3.11.17 and
+  CTranslate2 4.6.3. Model weights remain first-use downloads; the optional NVIDIA
+  pack reuses its existing assets and build identity and remains opt-in.
 
-- Debug diagnostics retain input and output lengths while omitting raw dictation input,
-  recognized text, and output text.
-- Malformed server-frame warnings retain the frame length rather than its contents.
-- The optional NVIDIA GPU pack is bound to the alpha.7 app identity. It reuses the
-  existing published pack with the same two files, URLs, sizes, hashes, and CTranslate2
-  build identity; downloading and enabling CUDA remain opt-in.
-- The dedicated Windows lifecycle gate covers the published alpha.5 baseline, a
-  synthetic in-place upgrade to alpha.7, profile and model-cache sentinel retention,
-  CPU transcription, and rollback on a disposable hosted runner.
-
-## Compatibility and privacy
-
-- Faster-Whisper through CTranslate2 remains the packaged model family. Model weights
-  remain separate first-use downloads.
-- Eve's app and installer identity, Eve and preserved Murmur profiles, internal
-  `murmur` compatibility names, protocols, and install chain remain unchanged.
-- Captured audio and transcripts remain local. Debug-mode logging records length
-  metadata instead of raw content.
-
-## Release status
-
-These notes describe an unpublished candidate. Security review, exact-head PR review
-and merge, a fresh package from the merged commit, hosted lifecycle validation, and a
-laptop in-place upgrade with opaque profile checks remain required. No public app tag,
-asset upload, or release is part of this candidate work. The published [Eve
-v0.8.2-alpha.5 release](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.5)
-is the fixed baseline used by this candidate's hosted lifecycle gate.
+Eve's app and installer identity and its Eve and preserved Murmur profiles remain
+unchanged. Hosted Windows lifecycle checks passed the synthetic upgrade, CPU
+transcription, and rollback path. Captured audio and transcripts stay on the device.
+See the [v0.8.2-alpha.7 release page](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.7)
+for current downloads and release status.
