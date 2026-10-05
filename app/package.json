@@ -11,7 +11,7 @@
   "private": true,
   "packageManager": "bun@1.4.2",
   "scripts": {
-    "postinstall": "electron-rebuild",
+    "postinstall": "node node_modules/electron/install.js && electron-rebuild",
     "dev": "node scripts/dev.js",
     "dev:vite": "vite",
     "dev:main": "bun run build:main --watch",
