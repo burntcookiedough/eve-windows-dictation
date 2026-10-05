@@ -22,5 +22,5 @@
 Eve's app and installer identity and its Eve and preserved Murmur profiles remain
 unchanged. Hosted Windows lifecycle checks passed the synthetic upgrade, CPU
 transcription, and rollback path. Captured audio and transcripts stay on the device.
-See the [v0.8.2-alpha.7 release page](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.7)
-for current downloads and release status.
+See [GitHub Releases](https://github.com/burntcookiedough/eve-windows-dictation/releases)
+for release status and downloads.
