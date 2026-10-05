@@ -26,24 +26,17 @@ app.on('before-quit', (event) => {
   if (quitFlushPending) return;
   quitFlushPending = true;
 
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<'timeout'>((resolve) => {
-    timeout = setTimeout(() => resolve('timeout'), 5000);
-  });
-  const flushed = window.webContents
+  void window.webContents
     .executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')
-    .then(() => 'flushed' as const);
-
-  void Promise.race([flushed, timedOut]).then((result) => {
-    if (result === 'timeout') console.warn('History delete flush timed out during app shutdown.');
-  }).catch((error: unknown) => {
-    console.error('Failed to flush History deletes during app shutdown:', error);
-  }).finally(() => {
-    if (timeout !== undefined) clearTimeout(timeout);
-    isQuitting = true;
-    quitFlushPending = false;
-    app.quit();
-  });
+    .then(() => {
+      isQuitting = true;
+      app.quit();
+    })
+    .catch((error: unknown) => {
+      console.error('Failed to flush History deletes during app shutdown:', error);
+      quitFlushPending = false;
+      if (!window.isDestroyed()) showMainWindow(window);
+    });
 });
 
 export interface CreateMainWindowOptions {
