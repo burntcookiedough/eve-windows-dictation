@@ -9,6 +9,7 @@
   "main": "dist/main/index.js",
   "type": "module",
   "private": true,
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "postinstall": "electron-rebuild",
     "dev": "node scripts/dev.js",

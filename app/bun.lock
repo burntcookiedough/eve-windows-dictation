@@ -1,5 +1,5 @@
 {
-  "lockfileVersion": 1,
+  "lockfileVersion": 3,
   "configVersion": 1,
   "workspaces": {
     "": {
@@ -33,7 +33,9 @@
   "overrides": {
     "devalue": "5.9.3",
     "fast-uri": "3.1.8",
-    "tar@>=7.0.0 <7.5.22": "7.5.22",
+    "tar@>=7.0.0 <7.5.22": {
+      ".": "7.5.22",
+    },
   },
   "packages": {
     "@electron-internal/extract-zip": ["@electron-internal/extract-zip@1.0.4", "", {}, "sha512-Zr1Vs7E9tpCNhZHDAbFVXc2gEVCG9RqPDjrno5+bdgB6LRAuvgyMHJut4NCVyYwtAieapMzc3fiQ3CSTi75ARg=="],

@@ -83,6 +83,8 @@ passed the repository's package, lifecycle, manifest, and promotion gates.
 
 Development and packaging target Windows. If you open the repository from WSL, run Bun, uv, Python, pytest, and packaging commands through Windows PowerShell so platform-specific environments are not replaced with Linux binaries.
 
+Use Bun 1.4.2 for desktop app development and packaging; it matches the committed lockfile format and CI.
+
 The supported Windows installer packaging target is `nsis-web`; packaging remains a release-authorized step.
 
 ```powershell
