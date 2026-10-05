@@ -146,7 +146,6 @@ def test_release_sync_pins_python_excludes_dev_and_checks_runtime_abi() -> None:
     release_sync = "uv sync --python 3.11 --no-dev --extra release --frozen"
     for relative_path in (
         "AGENTS.md",
-        "README.md",
         "docs/development/building.md",
         "docs/installer-dependencies.md",
     ):

@@ -25,10 +25,14 @@ def test_build_docs_match_packaging_flow() -> None:
     building = _read("docs/development/building.md")
     readme = _read("README.md")
 
-    for content in (building, readme):
-        assert "uv sync" in content
-
+    assert "uv sync --extra whisper --group dev --frozen" in building
+    assert "uv sync --python 3.11 --no-dev --extra release --frozen" in building
+    assert "bun run package:win" in building
     assert "nsis-web" in building
-    assert "nsis-web" in readme
     assert "prepare-python-runtime.ps1" in building
     assert ".runtime" in building
+    assert "nsis-web" in readme
+
+    build_guide = ROOT / "docs" / "development" / "building.md"
+    assert "(docs/development/building.md)" in readme
+    assert build_guide.is_file()
