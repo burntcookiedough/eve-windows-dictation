@@ -1,17 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  buildWordsAreaChart,
   buildDictationTimeChart,
   formatChartDuration,
   formatInsightsDuration,
 } from '../src/renderer/app/insights-chart.js';
 import type { InsightsTrendPoint } from '../src/shared/types.js';
 
-function point(date: string, audioSeconds: number, dictations = 1): InsightsTrendPoint {
+function point(date: string, audioSeconds: number, dictations = 1, words = 0): InsightsTrendPoint {
   return {
     date,
     label: date,
     dictations,
-    words: 0,
+    words,
     audioSeconds,
     processingMs: 0,
     avgWpm: 0,
@@ -136,5 +137,50 @@ describe('deterministic Insights dictation-time chart', () => {
     expect(chart.width).toBe(1);
     expect(chart.height).toBe(1);
     expectFiniteGeometry(chart);
+  });
+});
+
+describe('Insights words area chart', () => {
+  test('sorts real daily word totals and closes the area at the zero baseline', () => {
+    const chart = buildWordsAreaChart([
+      point('2026-07-03', 30, 1, 320),
+      point('2026-07-01', 20, 1, 120),
+    ]);
+
+    expect(chart.points.map(({ date, words }) => ({ date, words }))).toEqual([
+      { date: '2026-07-01', words: 120 },
+      { date: '2026-07-03', words: 320 },
+    ]);
+    expect(chart.totalWords).toBe(440);
+    expect(chart.gapDays).toBe(1);
+    expect(chart.ticks[0]).toMatchObject({ valueWords: 0, label: '0' });
+    expect(chart.linePath).toMatch(/^M.+ C.+$/);
+    expect(chart.areaPath.endsWith(' Z')).toBe(true);
+    for (const point of chart.points) {
+      expect(point.x).toBeGreaterThanOrEqual(chart.plotLeft);
+      expect(point.x).toBeLessThanOrEqual(chart.plotRight);
+      expect(point.y).toBeGreaterThanOrEqual(chart.plotTop);
+      expect(point.y).toBeLessThanOrEqual(chart.plotBottom);
+    }
+  });
+
+  test('keeps empty, malformed, and collapsed chart geometry finite', () => {
+    const empty = buildWordsAreaChart([]);
+    expect(empty.points).toEqual([]);
+    expect(empty.areaPath).toBe('');
+    expect(empty.xAxisStartLabel).toBe('No recorded days');
+
+    const chart = buildWordsAreaChart([
+      point('2026-07-02', Number.POSITIVE_INFINITY, 1, Number.NaN),
+      point('2026-07-01', 1, 1, 80),
+      point('2026-02-31', 1, 1, 1000),
+    ], 1, 1);
+    expect(chart.points.map(({ date, words }) => ({ date, words }))).toEqual([
+      { date: '2026-07-01', words: 80 },
+      { date: '2026-07-02', words: 0 },
+    ]);
+    expect(chart.plotRight).toBeGreaterThanOrEqual(chart.plotLeft);
+    expect(chart.plotBottom).toBeGreaterThanOrEqual(chart.plotTop);
+    expect(chart.points.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))).toBe(true);
   });
 });

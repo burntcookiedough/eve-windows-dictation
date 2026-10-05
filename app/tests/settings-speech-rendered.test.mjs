@@ -100,6 +100,14 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(settingsMarkup).not.toContain('nemotron_device');
   });
 
+  test('routes model Use through only the selected preset patch', () => {
+    expect(settingsViewSource).toContain('const patch = presetPatch(preset);');
+    expect(settingsViewSource).toContain('pendingEngine = mergeEngineSettingsPatch(pendingEngine, patch);');
+    expect(settingsViewSource).toContain('void applyEngineSettings(patch);');
+    expect(settingsViewSource).toContain('onclick={() => applyEngineSettings()}');
+    expect(settingsViewSource).not.toContain('onclick={applyEngineSettings}');
+  });
+
   test('keeps the General and Speech fixture inside one page scroll owner at all zooms', () => {
     expect(measurements.length).toBe(30);
     for (const measurement of measurements) {
@@ -132,10 +140,31 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(error.states.some((label) => label.includes('Selected') && label.includes('Error'))).toBeTrue();
   });
 
-  test('keeps the compatibility disclosure association', () => {
+  test('keeps advanced controls mounted in one native, accessible disclosure', () => {
     const expanded = measurements.find((measurement) => measurement.compatibility);
     expect(expanded.compatibilityExpanded).toBeTrue();
     expect(expanded.compatibilityAssociation).toBeTrue();
+    expect(expanded.compatibilityControlsPresent).toBeTrue();
+    expect(expanded.compatibilityControlsVisible).toBeTrue();
+    expect(expanded.compatibilitySummaryHeading).toBe('Advanced');
+
+    const collapsed = measurements.find((measurement) => measurement.view === 'speech' && measurement.state === 'ready' && !measurement.compatibility && measurement.zoom === 1 && measurement.viewport.width === 960);
+    expect(collapsed.compatibilityExpanded).toBeFalse();
+    expect(collapsed.compatibilityControlsPresent).toBeTrue();
+    expect(collapsed.compatibilityControlsVisible).toBeFalse();
+
+    expect(result.disclosureInteraction).toEqual({
+      initiallyClosed: true,
+      controlsMountedInitially: true,
+      openedForAttention: true,
+      manuallyClosedWhileAttention: true,
+      stayedClosedAfterRerender: true,
+      remainedClosedAfterAttentionCleared: true,
+      stayedOpenAfterAttentionCleared: true,
+      controlsVisible: true,
+      controlsRemainMounted: true,
+      summaryHeading: 'Advanced',
+    });
   });
 
   test('keeps compatibility dropdowns usable without duplicate inline warnings', () => {
@@ -167,6 +196,37 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
       expect(interaction.rendererFailed).toBeFalse();
       expect(interaction.scrollDelta).toBeLessThanOrEqual(1);
     }
+  });
+
+  test('keeps model sheet choices local until Use, and Cancel reopens on the current model', () => {
+    expect(result.modelSheetDraftInteraction).toEqual({
+      draftChangedBeforeCancel: true,
+      useEnabledBeforeCancel: true,
+      pendingBeforeCancel: '',
+      startedBeforeCancel: '',
+      pendingAfterCancel: '',
+      startedAfterCancel: '',
+      reopensWithCurrent: true,
+      useEnabledAfterSelection: true,
+      pendingAfterUse: 'large-v3',
+      startedAfterUse: 'large-v3',
+      closedAfterUse: true,
+      submittedPatch: { whisper_model: 'large-v3' },
+      pendingEngineSettings: { whisper_device: 'cuda', whisper_language: 'en', whisper_model: 'large-v3' },
+      committedAdvancedSettings: { whisper_device: 'cpu', whisper_language: 'auto' },
+    });
+  });
+
+  test('submits staged Advanced settings on Apply and retries the same patch after failure', () => {
+    const advancedPatch = { whisper_device: 'cuda', whisper_language: 'en' };
+    expect(result.advancedApplyRetryInteraction).toEqual({
+      firstPatch: advancedPatch,
+      stagedAfterFailure: advancedPatch,
+      errorShownAfterFailure: true,
+      retryLabel: 'Retry compatibility changes',
+      retryPatch: advancedPatch,
+      stagedAfterRetry: {},
+    });
   });
 
   test('writes deterministic isolated screenshots and cleans Electron userData', () => {

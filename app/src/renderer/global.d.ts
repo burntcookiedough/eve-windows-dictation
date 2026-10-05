@@ -3,6 +3,7 @@ import type {
   AudioCaptureErrorPayload,
   ConnectionStatePayload,
   EngineStatus,
+  GpuPackState,
   HistoryEntryWithGroup,
   HistoryDeleteResult,
   HistoryExportRequest,
@@ -31,6 +32,8 @@ declare global {
       maximizeWindow: () => void;
       getAppVersion: () => Promise<string>;
       getSettings: () => Promise<Settings>;
+      onSettingsChanged: (callback: (settings: Settings) => void) => () => void;
+      onAudioLevel: (callback: (level: number) => void) => () => void;
       updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<void>;
       importHotwordsFromFile: () => Promise<string | null>;
       exportHotwordsToFile: (hotwordsCsl: string) => Promise<boolean>;
@@ -45,7 +48,7 @@ declare global {
       getInsights: (range: InsightsRange) => Promise<InsightsResponse | null>;
       rebuildInsights: () => Promise<void>;
       onNewHistoryEntry: (callback: (entry: HistoryEntryWithGroup) => void) => () => void;
-      copyToClipboard: (text: string) => void;
+      copyToClipboard: (text: string) => Promise<void>;
       copyDiagnostics: () => Promise<void>;
       getRecordingDebugState: () => Promise<RecordingDebugState>;
       startRecording: () => Promise<RecordingDebugState>;
@@ -60,6 +63,9 @@ declare global {
       stopServer: () => Promise<ServerStatePayload>;
       restartServer: () => Promise<ServerStatePayload>;
       getServerLogs: () => Promise<ServerLogEntry[]>;
+      getGpuPackState: () => Promise<GpuPackState>;
+      installGpuPack: () => Promise<GpuPackState>;
+      onGpuPackStateChange: (callback: (state: GpuPackState) => void) => () => void;
       onServerStateChange: (callback: (state: ServerStatePayload) => void) => () => void;
       onServerLog: (callback: (entry: ServerLogEntry) => void) => () => void;
       removeServerListeners: () => void;

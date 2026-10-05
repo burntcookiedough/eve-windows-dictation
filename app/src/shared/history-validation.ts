@@ -1,6 +1,7 @@
 import type { HistoryExportRequest, HistoryFilters } from './types.js';
 
 const HISTORY_FILTER_KEYS = new Set([
+  'sessionMode',
   'text',
   'dateFrom',
   'dateTo',
@@ -26,6 +27,7 @@ export function isHistoryFilters(value: unknown): value is HistoryFilters | unde
 
   const filters = value as Record<string, unknown>;
   if (Object.keys(filters).some((key) => !HISTORY_FILTER_KEYS.has(key))) return false;
+  if (filters.sessionMode !== undefined && filters.sessionMode !== 'quick' && filters.sessionMode !== 'long') return false;
   if (filters.text !== undefined && typeof filters.text !== 'string') return false;
   if (filters.editedOnly !== undefined && typeof filters.editedOnly !== 'boolean') return false;
 

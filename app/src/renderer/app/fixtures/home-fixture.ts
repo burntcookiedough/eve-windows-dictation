@@ -1,6 +1,6 @@
 import '../app.css';
 import { mount } from 'svelte';
-import type { ServerStatePayload } from '$shared/types';
+import { DEFAULT_SETTINGS, type InsightsResponse, type RecordingStatePayload, type ServerStatePayload } from '$shared/types';
 import HomeView from '../views/HomeView.svelte';
 import { serverStatusState, type ServerStatusPhase } from '../server-status';
 
@@ -47,6 +47,35 @@ const state: ServerStatePayload | null = phase === 'ready'
       ? { status: 'error', managed: true, error: 'Fixture speech service unavailable.' }
       : null;
 
+const emptyInsights: InsightsResponse = {
+  range: 'today',
+  generatedAt: Date.now(),
+  hasData: false,
+  indexing: { isIndexing: false, processedEntries: 0, totalEntries: 0 },
+  summary: {
+    totalDictations: 0,
+    totalWords: 0,
+    totalAudioSeconds: 0,
+    totalProcessingMs: 0,
+    avgConfidence: 0,
+    avgWpm: 0,
+    avgProcessingRatio: 0,
+    avgWordsPerDictation: 0,
+    longestStreakDays: 0,
+  },
+  trends: [],
+  commonWords: [],
+  commonPhrases: [],
+  longestEntries: [],
+  slowestEntries: [],
+  yearActivity: [],
+  currentStreakDays: 0,
+};
+let insightCalls = 0;
+
+const idleRecording: RecordingStatePayload = { state: 'idle', isRecording: false };
+const unsubscribe = () => () => {};
+
 serverStatusState.set({
   state,
   phase,
@@ -54,12 +83,27 @@ serverStatusState.set({
 });
 
 Object.assign(window, {
+  getHomeInsightsCalls: () => insightCalls,
   murmurMain: {
-    getSettings: async () => ({
-      hotkey: { keycode: 3675, ctrlKey: true, altKey: false, shiftKey: false, metaKey: false },
-      longHotkey: { keycode: 3675, ctrlKey: true, altKey: false, shiftKey: true, metaKey: false },
-    }),
+    getSettings: async () => DEFAULT_SETTINGS,
     getHotkeyDisplayName: async (hotkey: { shiftKey: boolean }) => hotkey.shiftKey ? 'Ctrl+Shift+Win' : 'Ctrl+Win',
+    getInsights: async () => {
+      insightCalls += 1;
+      if (params.get('indexing') !== '1') return emptyInsights;
+      return {
+        ...emptyInsights,
+        hasData: true,
+        summary: { ...emptyInsights.summary, totalWords: 123, totalDictations: 1 },
+        indexing: { isIndexing: insightCalls === 1, processedEntries: insightCalls === 1 ? 0 : 1, totalEntries: 1 },
+        currentStreakDays: insightCalls === 1 ? undefined : 400,
+      };
+    },
+    getHistoryEntries: async () => ({ entries: [], hasMore: false }),
+    getRecordingDebugState: async () => ({ recording: idleRecording }),
+    onRecordingState: unsubscribe,
+    onAudioLevel: unsubscribe,
+    onNewHistoryEntry: unsubscribe,
+    onSettingsChanged: unsubscribe,
   },
 });
 

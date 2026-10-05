@@ -23,7 +23,6 @@
     children,
   }: Props = $props();
   const componentId = $props.id();
-  const helpId = `speech-model-help-${componentId}`;
 
   function detailId(presetId: SpeechModelPreset['id']): string {
     return `speech-model-${componentId}-${presetId}-detail`;
@@ -57,46 +56,30 @@
     return 'Available';
   }
 
-  function stateClass(label: string): string {
-    switch (label) {
-      case 'Current':
-        return 'text-emerald-300';
-      case 'Selected':
-        return 'text-sky-300';
-      case 'Selected · Preparing':
-      case 'Preparing':
-        return 'text-amber-300';
-      case 'Selected · Error':
-      case 'Error':
-        return 'text-red-300';
-      default:
-        return 'text-zinc-400';
-    }
+  function stateClass(_label: string): string {
+    return 'model-state';
   }
 </script>
 
-<div data-speech-model-panel class="min-w-0 w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
-  <fieldset class="m-0 min-w-0 border-0 p-0" aria-describedby={helpId}>
-    <legend class="text-sm font-medium text-zinc-100">Choose a speech model</legend>
-    <p id={helpId} class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">
-      Select a curated model to stage. Apply and prepare model confirms the change. The current engine stays active until the selected model is ready.
-    </p>
+<div data-speech-model-panel class="model-panel min-w-0 w-full">
+  <fieldset class="m-0 min-w-0 border-0 p-0">
+    <legend class="model-legend">Choose a speech model</legend>
 
     {#if presets.length === 0}
-      <p data-model-catalog-empty class="mt-4 rounded-lg border border-dashed border-white/[0.12] p-3 text-xs leading-5 text-zinc-500">
+      <p data-model-catalog-empty class="model-empty">
         Curated model metadata is unavailable from this server. Use the raw compatibility controls below to select a model.
       </p>
     {:else}
-      <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="mt-4 divide-y divide-white/[0.08]">
+      <div data-speech-model-list role="radiogroup" aria-label="Curated speech models" class="model-list">
         {#each presets as preset}
         {@const checked = selected?.id === preset.id}
         {@const label = stateLabel(preset)}
         <label
           data-speech-model-option
-          class="flex min-w-0 cursor-pointer items-start gap-3 rounded-lg px-2 py-3 first:pt-2 last:pb-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-zinc-100"
+          class="model-option"
         >
           <input
-            class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-sky-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-100 disabled:cursor-not-allowed"
+            class="model-choice-control"
             type="radio"
             name={`speech-model-preset-${componentId}`}
             checked={checked}
@@ -105,15 +88,15 @@
             aria-describedby={detailId(preset.id)}
           />
           <span class="min-w-0 flex-1">
-            <span class="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-x-3 sm:gap-y-1">
-              <span class="min-w-0 text-sm font-medium text-zinc-100 [overflow-wrap:anywhere]">{preset.label}</span>
-              <span data-speech-model-state class="max-w-full text-xs [overflow-wrap:anywhere] {stateClass(label)}">{label}</span>
+            <span class="model-option-heading">
+              <span class="model-option-name">{preset.label}</span>
+              <span data-speech-model-state class={stateClass(label)}>{label}</span>
             </span>
-            <span id={detailId(preset.id)} class="mt-1 block text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">
+            <span id={detailId(preset.id)} class="model-option-detail">
               {preset.language} · approx. {preset.sizeGb} GB. {preset.summary}
             </span>
             {#if isError(preset)}
-              <span class="mt-1 block text-xs text-red-300">Preparation failed. Use Retry preparation or Revert below.</span>
+              <span class="model-option-error">Preparation failed. Use Retry preparation or Revert below.</span>
             {/if}
           </span>
         </label>
@@ -123,8 +106,112 @@
   </fieldset>
 
   {#if children}
-    <div data-model-action-footer class="mt-4 border-t border-white/[0.08] pt-4">
+    <div data-model-action-footer class="model-actions">
       {@render children()}
     </div>
   {/if}
 </div>
+
+<style>
+  .model-panel,
+  .model-list {
+    min-width: 0;
+  }
+
+  .model-legend {
+    color: var(--fg, #ececec);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  .model-help,
+  .model-empty,
+  .model-option-detail,
+  .model-option-error {
+    display: block;
+    margin: 6px 0 0;
+    color: var(--fg2, #9b9b9b);
+    font-size: 11px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .model-list {
+    margin-top: 14px;
+  }
+
+  .model-option {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 11px;
+    border-top: 1px solid var(--line, rgba(255, 255, 255, 0.07));
+    padding: 10px 0;
+    color: var(--fg, #ececec);
+    cursor: pointer;
+  }
+
+  .model-option-heading {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+  }
+
+  .model-option-name {
+    color: var(--fg, #ececec);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .model-state {
+    color: var(--fg2, #9b9b9b);
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: 9px;
+    white-space: nowrap;
+  }
+
+  .model-option-detail {
+    margin-top: 3px;
+  }
+
+  .model-choice-control {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    appearance: none;
+    margin: 2px 0 0;
+    border: 1px solid var(--line2, rgba(255, 255, 255, 0.14));
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .model-choice-control:checked {
+    border-color: var(--fg, #ececec);
+    background: radial-gradient(circle, var(--fg, #ececec) 0 3px, transparent 3.5px);
+  }
+
+  .model-choice-control:focus-visible {
+    outline: 1px solid var(--fg, #ececec);
+    outline-offset: 3px;
+  }
+
+  .model-choice-control:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .model-option-error {
+    margin-top: 3px;
+    color: var(--fg, #ececec);
+  }
+
+  .model-actions {
+    margin-top: 12px;
+    border-top: 1px solid var(--line, rgba(255, 255, 255, 0.07));
+    padding-top: 12px;
+  }
+</style>

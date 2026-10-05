@@ -101,6 +101,9 @@ describe('rendered Settings layout fixture', () => {
       expect(measurement.status.rect.bottom).toBeLessThanOrEqual(measurement.main.top);
       expect(measurement.owner.overflowY).toBe('auto');
       expect(measurement.owner.scrollHeight).toBeGreaterThan(measurement.owner.clientHeight);
+      if (measurement.owner.scrollWidth > measurement.owner.clientWidth) {
+        throw new Error(`Settings scroll owner overflows horizontally: ${JSON.stringify({ viewport: measurement.viewport, zoom: measurement.zoom, owner: measurement.owner, row: measurement.row })}`);
+      }
       expect(measurement.owner.scrollWidth).toBeLessThanOrEqual(measurement.owner.clientWidth);
       expect(measurement.document.scrollWidth).toBeLessThanOrEqual(measurement.document.clientWidth);
     }

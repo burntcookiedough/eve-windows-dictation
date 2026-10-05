@@ -13,6 +13,7 @@ import { exportHistoryToFile } from '../services/history-export.js';
 import type { ServerManager } from '../services/server-manager.js';
 import type { GpuPackManager } from '../services/gpu-pack-manager.js';
 import { getSettings, updateSetting } from '../services/settings.js';
+import { applyMainWindowAppearance } from '../windows/main.js';
 import {
   getServerSettings,
   updateServerSettings,
@@ -87,6 +88,10 @@ export function setupIpcHandlers(
   ipcMain.on(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: string) => {
     copyToClipboard(text);
   });
+  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: unknown) => {
+    if (typeof text !== 'string') throw new TypeError('Clipboard text must be a string.');
+    copyToClipboard(text);
+  });
 
   ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS, () => {
     const report = formatDiagnosticsReport({
@@ -111,6 +116,9 @@ export function setupIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.UPDATE_SETTING,
     (_event, key: keyof Settings, value: Settings[keyof Settings]) => {
+      if (key === 'appearance' && value !== 'dark' && value !== 'light') {
+        throw new TypeError('Invalid appearance');
+      }
       if (key === 'launchOnBoot') {
         const result = applyLaunchOnBoot(app, value, {
           localAppData: process.env.LOCALAPPDATA,
@@ -123,6 +131,16 @@ export function setupIpcHandlers(
       }
 
       updateSetting(key, value);
+      const settings = getSettings();
+      const senderWindow = BrowserWindow.fromWebContents(_event.sender);
+      if (key === 'appearance' && senderWindow && !senderWindow.isDestroyed()) {
+        applyMainWindowAppearance(senderWindow, settings.appearance);
+      }
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+          window.webContents.send(IPC_CHANNELS.SETTINGS_CHANGED, settings);
+        }
+      }
     }
   );
 

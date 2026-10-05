@@ -43,12 +43,24 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_APP_VERSION);
   },
 
-  getSettings: () => {
+  getSettings: (): Promise<Settings> => {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS);
   },
 
   updateSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => {
     return ipcRenderer.invoke(IPC_CHANNELS.UPDATE_SETTING, key, value);
+  },
+
+  onSettingsChanged: (callback: (settings: Settings) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: Settings) => callback(settings);
+    ipcRenderer.on(IPC_CHANNELS.SETTINGS_CHANGED, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SETTINGS_CHANGED, handler);
+  },
+
+  onAudioLevel: (callback: (level: number) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, level: number) => callback(level);
+    ipcRenderer.on(IPC_CHANNELS.STATE_AUDIO_LEVEL, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.STATE_AUDIO_LEVEL, handler);
   },
 
   importHotwordsFromFile: (): Promise<string | null> => {
@@ -110,8 +122,8 @@ const murmurMainAPI = {
   },
 
   // Clipboard
-  copyToClipboard: (text: string): void => {
-    ipcRenderer.send(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
+  copyToClipboard: (text: string): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, text);
   },
 
   copyDiagnostics: (): Promise<void> => {
@@ -160,6 +172,7 @@ const murmurMainAPI = {
   },
 
   removeRecordingListeners: (): void => {
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_AUDIO_LEVEL);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_RECORDING);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_CONNECTION);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_TRANSCRIPTION);
@@ -244,6 +257,8 @@ const murmurMainAPI = {
 
   // Cleanup
   removeAllListeners: () => {
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.SETTINGS_CHANGED);
+    ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_AUDIO_LEVEL);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.HISTORY_NEW_ENTRY);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_STATE_CHANGE);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.SERVER_LOG);

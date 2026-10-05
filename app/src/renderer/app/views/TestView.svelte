@@ -258,10 +258,14 @@
     }
   }
 
-  function copySelectedFinal() {
+  async function copySelectedFinal() {
     if (!activeSession?.latestFinal) return;
-    murmurMain.copyToClipboard(activeSession.latestFinal);
-    toast('Session final copied');
+    try {
+      await murmurMain.copyToClipboard(activeSession.latestFinal);
+      toast('Session final copied');
+    } catch {
+      toast('Could not copy the session final', 'error');
+    }
   }
 
   function clearSessions() {

@@ -65,16 +65,20 @@ try {
   service.initialize();
 
   const now = new Date(2026, 6, 1, 10).getTime();
-  const empty = service.getInsights('7d');
+  const empty = service.getInsights('7d', now);
   assert.equal(empty.hasData, false);
   assert.equal(empty.summary.totalDictations, 0);
   assert.equal(empty.indexing.isIndexing, false);
   assert.equal(empty.indexing.totalEntries, 0);
+  assert.equal(empty.yearActivity.at(-1)?.date, '2026-07-01');
+  assert.equal(empty.hourlyDictations.length, 24);
+  assert.equal(empty.hourlyDictations.reduce((sum, count) => sum + count, 0), 0);
+  assert.equal(empty.previousPeriodWords, 0);
 
   service.save(transcription('a', now, 'Project planning project notes', 30, 15000));
   service.save(transcription('b', now, 'Project review notes', 30, 30000));
 
-  const saved = service.getInsights('all');
+  const saved = service.getInsights('all', now);
   assert.equal(saved.summary.totalDictations, 2);
   assert.equal(saved.summary.totalWords, 7);
   assert.equal(saved.summary.totalAudioSeconds, 60);
@@ -82,17 +86,24 @@ try {
   assert.equal(saved.summary.avgWpm, 7);
   assert.equal(saved.commonWords[0]?.text, 'project');
   assert.equal(saved.commonWords[0]?.count, 3);
+  assert.equal(saved.fastestEntry?.id, 'a');
+  assert.equal(saved.fastestEntry?.wordCount, 4);
+  assert.equal(saved.yearActivity.at(-1)?.date, '2026-07-01');
+  assert.equal(saved.yearActivity.at(-1)?.words, 7);
+  assert.equal(saved.yearActivity.at(-1)?.dictations, 2);
+  assert.equal(saved.hourlyDictations[new Date(now).getHours()], 2);
+  assert.equal(saved.previousPeriodWords, undefined);
   assert.deepEqual(service.getEntryIds({ text: 'planning' }), ['a']);
 
   service.rebuildInsights();
-  const rebuilt = service.getInsights('all');
+  const rebuilt = service.getInsights('all', now);
   assert.equal(rebuilt.summary.totalDictations, 2);
   assert.equal(rebuilt.summary.totalWords, 7);
   assert.equal(rebuilt.commonWords[0]?.text, 'project');
   assert.equal(rebuilt.commonWords[0]?.count, 3);
 
   service.delete('a');
-  const afterDelete = service.getInsights('all');
+  const afterDelete = service.getInsights('all', now);
   assert.equal(afterDelete.summary.totalDictations, 1);
   assert.equal(afterDelete.summary.totalWords, 3);
   assert.deepEqual(afterDelete.commonWords.slice(0, 3), [
@@ -134,6 +145,10 @@ try {
     assert.equal(deterministic.trends.find(({ date }) => date === '2026-06-30')?.audioSeconds, 0);
     assert.equal(deterministic.trends.find(({ date }) => date === '2026-07-01')?.audioSeconds, 20);
     assert.equal(deterministic.summary.totalAudioSeconds, 60);
+    assert.equal(deterministic.previousPeriodWords, 0);
+    assert.equal(deterministic.trends.length, 7);
+    assert.equal(deterministicService.getInsights('90d', now).trends.length, 90);
+    assert.equal(deterministicService.getInsights('1y', now).trends.length, 365);
 
     deterministicService.delete('det-older');
     const afterDeterministicDelete = deterministicService.getInsights('7d', now);
@@ -383,6 +398,8 @@ try {
       cudaActive: true,
     },
   );
+  assert.deepEqual(migratedService.getEntryIds({ sessionMode: 'long' }), ['m-current']);
+  assert.deepEqual(migratedService.getEntryIds({ sessionMode: 'quick' }), []);
   migratedService.close();
 
   const phrasesDbPath = join(workDir, 'full-range-phrases.db');
@@ -436,6 +453,24 @@ try {
     else process.env.TZ = originalTimezone;
   }
 
+  const currentStreakService = new HistoryService(join(workDir, 'current-streak.db'));
+  currentStreakService.initialize();
+  const streakNow = new Date(2026, 9, 5, 12);
+  for (let index = 0; index < 400; index += 1) {
+    const day = new Date(streakNow);
+    day.setDate(day.getDate() - index);
+    currentStreakService.save(transcription(`streak-${index}`, day.getTime(), 'daily activity', 1, 100));
+  }
+  assert.equal(currentStreakService.getInsights('today', streakNow.getTime()).currentStreakDays, 400);
+  const nextDay = new Date(streakNow);
+  nextDay.setDate(nextDay.getDate() + 1);
+  assert.equal(currentStreakService.getInsights('today', nextDay.getTime()).currentStreakDays, 400);
+  nextDay.setDate(nextDay.getDate() + 1);
+  assert.equal(currentStreakService.getInsights('today', nextDay.getTime()).currentStreakDays, 0);
+  currentStreakService.delete('streak-200');
+  assert.equal(currentStreakService.getInsights('today', streakNow.getTime()).currentStreakDays, 200);
+  currentStreakService.close();
+
   const largeDbPath = join(workDir, 'large-history.db');
   const largeSetup = new HistoryService(largeDbPath);
   largeSetup.initialize();
@@ -482,6 +517,11 @@ try {
   assert.equal(largeInsights.indexing.isIndexing, true);
   assert.equal(largeInsights.indexing.totalEntries, 5000);
   assert.equal(largeInsights.indexing.processedEntries, 1250);
+  assert.equal(largeInsights.yearActivity, undefined);
+  assert.equal(largeInsights.currentStreakDays, undefined);
+  assert.equal(largeInsights.hourlyDictations, undefined);
+  assert.equal(largeInsights.previousPeriodWords, undefined);
+  assert.equal(largeInsights.fastestEntry, undefined);
   largeService.close();
 
   console.log('history insights aggregate check passed');

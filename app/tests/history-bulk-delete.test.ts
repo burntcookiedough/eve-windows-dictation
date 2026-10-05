@@ -16,6 +16,8 @@ const rendererTypes = source('../src/renderer/global.d.ts');
 const constants = source('../src/shared/constants.ts');
 const types = source('../src/shared/types.ts');
 const historyView = source('../src/renderer/app/views/HistoryView.svelte');
+const deleteQueue = source('../src/renderer/app/history-delete-queue.svelte.ts');
+const mainWindow = source('../src/main/windows/main.ts');
 
 const deleteManyMatch = historyService.match(
   /  deleteMany\(ids: string\[\]\): HistoryDeleteResult \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  getById/
@@ -32,6 +34,9 @@ if (!newEntryHandlerMatch) {
   throw new Error('HistoryView new-entry handler contract section was not found');
 }
 const newEntryHandler = normalized(newEntryHandlerMatch[1]!);
+const deleteCommittedMatch = historyView.match(/function onDeleteCommitted\(event: Event\): void \{([\s\S]*?)\r?\n  \}/);
+if (!deleteCommittedMatch) throw new Error('HistoryView delete-committed handler was not found');
+const deleteCommittedHandler = normalized(deleteCommittedMatch[1]!);
 
 describe('History selection and bulk deletion contracts', () => {
   test('exposes filtered IDs and one transactional bulk service operation', () => {
@@ -93,9 +98,28 @@ describe('History selection and bulk deletion contracts', () => {
     expect(historyViewFlat).toContain('function cancelBulkDelete(): void { exitSelectionMode(); closeBulkDeleteDialog(); }');
     expect(historyViewFlat).toContain('clearSelection(); if (searchTimeout)');
     expect(historyViewFlat).toContain('clearSelection(); loadEntries(true);');
-    expect(historyViewFlat).toContain('function removeEntryFromSelection(id: string): void');
-    expect(historyViewFlat).toContain('removeEntryFromSelection(id);');
+    expect(historyViewFlat).toContain('const removedCount = history.filter((item) => deletedIds.has(item.id)).length;');
+    expect(historyViewFlat).toContain('offset = Math.max(0, offset - removedCount);');
+    expect(historyViewFlat).toContain('selectedIds = new Set([...selectedIds].filter((id) => !deletedIds.has(id)));');
+    expect(deleteCommittedHandler).not.toContain('loadEntries(');
     expect(newEntryHandler).not.toContain('exitSelectionMode()');
+  });
+
+  test('refreshes the paged snapshot when a live entry arrives during a fetch', () => {
+    expect(newEntryHandler).toContain('if (loading) { void loadEntries(true); return; }');
+    expect(newEntryHandler).toContain('history = [entry, ...history]; offset += 1;');
+    expect(historyView).toContain("if (historyRoot?.closest('[inert]')) return;");
+    expect(historyView).toContain('flushExpiredDeferredHistoryDeletes();');
+    expect(historyView).not.toContain('pauseDeferredHistoryDeletes');
+    expect(historyView).not.toContain('resumeDeferredHistoryDeletes');
+    expect(deleteQueue).toContain('const DELETE_DELAY_MS = 5000;');
+    expect(deleteQueue).toContain('export async function flushDeferredHistoryDeletes(): Promise<void>');
+    expect(historyView).toContain('class="delete-action"');
+    expect(historyView).not.toContain('class="primary-action"');
+    expect(mainWindow).toContain("executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')");
+    expect(mainWindow).toContain('quitFlushPending = true;');
+    expect(mainWindow).toContain('app.quit();');
+    expect(historyView).toContain("document.addEventListener('visibilitychange', handleVisibilityChange);");
   });
 
   test('makes row selection and confirmation keyboard/screen-reader accessible', () => {

@@ -62,6 +62,7 @@ export function getSettings(): Settings {
     selectedDeviceId: store.get('selectedDeviceId'),
     launchOnBoot: store.get('launchOnBoot'),
     startMinimized: store.get('startMinimized'),
+    appearance: store.get('appearance') === 'light' ? 'light' : 'dark',
     serverAutoStart: store.get('serverAutoStart'),
     hotwordsEnabled: store.get('hotwordsEnabled'),
     hotwordsCsl: store.get('hotwordsCsl'),

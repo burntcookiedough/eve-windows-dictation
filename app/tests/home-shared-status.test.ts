@@ -17,6 +17,9 @@ function source(path: string): string {
 
 const appView = source('../src/renderer/app/App.svelte');
 const homeView = source('../src/renderer/app/views/HomeView.svelte');
+const cactus = source('../src/renderer/app/components/Cactus.svelte');
+const recordingState = source('../src/renderer/app/recording-renderer-state.ts');
+const appCss = source('../src/renderer/app/app.css');
 const statusController = source('../src/renderer/app/server-status.ts');
 const banner = source('../src/renderer/app/components/ModelProgressBanner.svelte');
 const card = source('../src/renderer/app/components/ModelProgressCard.svelte');
@@ -141,9 +144,15 @@ describe('Home and shared server status', () => {
 
   test('makes Home the default and keeps primary navigation in the required order', () => {
     expect(appView).toContain("let activeView = $state<View>('home')");
-    expect(appView).toMatch(/\{ id: 'home', label: 'Home' \}[\s\S]*\{ id: 'history', label: 'History' \}[\s\S]*\{ id: 'insights', label: 'Insights' \}[\s\S]*\{ id: 'settings', label: 'Settings' \}/);
+    expect(appView).toMatch(/\{ id: 'home', label: 'home' \}[\s\S]*\{ id: 'insights', label: 'insights' \}[\s\S]*\{ id: 'history', label: 'history' \}[\s\S]*\{ id: 'settings', label: 'settings' \}/);
     expect(appView).toContain('<HomeView onNavigate={selectView} />');
-    expect(appView).toContain("return match?.id ?? 'home'");
+    expect(appView).toContain("let visited = $state<Record<PrimaryView, boolean>>({");
+    expect(appView).toContain("home: true,");
+    expect(appView).toContain("event.key === String(index + 1)");
+    expect(appView).toContain('event.defaultPrevented');
+    expect(appView).toContain('isEditableTarget(event.target) || hasOpenMenuOrDialog()');
+    expect(appView).not.toContain('handleGlobalShortcut, true');
+    expect(appView).not.toContain("event.code === 'Space'");
   });
 
   test('covers connecting, stale, unavailable, model, loading, ready, and error phases without stale Ready', () => {
@@ -196,30 +205,31 @@ describe('Home and shared server status', () => {
   });
 
   test('keeps Home read-only until an explicit managed retry click', () => {
-    const mount = homeView.match(/async function loadSettings\(\): Promise<void> \{([\s\S]*?)\n    \}/)?.[1] ?? '';
-    expect(mount).toContain('getSettings');
-    expect(mount).not.toContain('restartServer');
-    expect(mount).not.toContain('updateServerSettings');
-    expect(mount).not.toContain('prepare');
-    expect(homeView).toContain('onclick={retry}');
+    expect(homeView).toContain('window.murmurMain.getSettings()');
+    expect(homeView).toContain('window.murmurMain.getInsights(\'today\')');
+    expect(homeView).not.toContain('restartServer');
+    expect(homeView).not.toContain('startRecording');
+    expect(homeView).not.toContain('stopRecording');
+    expect(homeView).not.toContain('hold to record');
+    expect(cactus).not.toContain('onclick');
     expect(homeView).not.toContain('External server');
     expect(statusController).not.toContain('useExternalServer');
+    expect(homeView).toContain("statusAction === 'retry'");
     expect(homeView).toContain('if (retrying) return;');
     expect(homeView).toContain('disabled={retrying}');
     expect(statusController).toContain('if (!initialized || !current.state?.managed || retryInFlight) return false;');
     expect(statusController).toContain('await window.murmurMain.restartServer()');
   });
 
-  test('shares phase and progress UI while retaining factual shortcuts, privacy, actions, and restrained live announcements', () => {
-    expect(appView).toContain('<ModelProgressBanner visible />');
+  test('shares phase and progress UI while retaining factual shortcuts, actions, and restrained live announcements', () => {
+    expect(appView).toContain("visible={activeView === 'history' || activeView === 'insights'}");
     expect(homeView).not.toContain('ModelProgressCard');
     expect(homeView).not.toContain('shouldShowModelProgress');
     expect(homeView).toContain('getHotkeyDisplayName(settings.hotkey)');
     expect(homeView).toContain('getHotkeyDisplayName(settings.longHotkey)');
-    expect(homeView).toContain('does not automatically import personal data');
-    expect(homeView).toContain("onNavigate('history')");
-    expect(homeView).toContain("onNavigate('insights')");
     expect(homeView).toContain("onNavigate('settings')");
+    expect(homeView).toContain('onNewHistoryEntry');
+    expect(homeView).toContain('latestEntry = entry;');
     expect(appView).toContain('aria-live="polite"');
     expect(statusController).toContain('percent < 25');
     expect(card).toContain("aria-live={announce ? 'polite' : undefined}");
@@ -229,28 +239,41 @@ describe('Home and shared server status', () => {
     expect(appView).toContain('aria-live="polite"');
     expect(serverView).toContain('let active = true;');
     expect(serverView).toContain('if (!active) return;');
-    expect(banner).toContain('Open Settings &gt; Server &amp; diagnostics for details.');
-    expect(banner).not.toContain('Open Server and use Restart');
-    expect(homeView).toContain('Packaged Eve uses its managed local service for speech.');
-    expect(homeView).toContain('During development, Eve may use a separately started localhost service.');
+    expect(banner).toContain('>settings</button>');
+    expect(banner).toContain('onclick={onNavigate}');
+    expect(homeView).not.toContain('Open Server and use Restart');
   });
 
   test('keeps detected development servers separate from managed retry actions', () => {
     expect(getServerStatusPhase({ status: 'running', managed: false, engineStatus: { current: 'whisper', status: 'ready' } })).toBe('ready');
     expect(statusController).toContain('!current.state?.managed');
     expect(homeView).not.toContain('getServerManagementMode');
-    expect(homeView).toContain('focus-visible:outline-hidden');
     expect(banner).not.toContain('getServerManagementMode');
   });
 
-  test('uses the expressive Home composition and tolerates sparse runtime metadata', () => {
-    expect(homeView).toContain('data-home-hero');
-    expect(homeView).toContain('data-home-voice-orb');
-    expect(homeView).toContain('data-home-modes');
-    expect(homeView).toContain('Your words, ready to move');
-    expect(homeView).toContain('Array.isArray(engine?.languages)');
-    expect(homeView).toContain("typeof engine?.model_size_gb === 'number'");
-    expect(homeView).not.toContain('engine.languages.length');
+  test('uses real Home activity, passive recording feedback, and the prototype cactus artwork', () => {
+    expect(homeView).toContain('home-presence');
+    expect(homeView).toContain('home-activity-grid');
+    expect(homeView).toContain('getInsights(\'today\')');
+    expect(homeView).toContain('yearActivity');
+    expect(homeView).toContain('getHistoryEntries(0, 1)');
+    expect(homeView).toContain('insights?.hasData === false');
+    expect(homeView).toContain('motion.audioLevel');
+    expect(homeView).toContain("setInterval(() => {");
+    expect(homeView).toContain('}, 1000);');
+    expect(homeView).toContain("if (localDayKey(now) !== previousDay)");
+    expect(homeView).toContain("window.addEventListener('history-delete-committed', refreshAfterDelete)");
+    expect(homeView).toContain("window.removeEventListener('history-delete-committed', refreshAfterDelete)");
+    expect(homeView).toContain('if (active && historyRevision === revision)');
+    expect(homeView).toContain("return 'dictation error'");
+    expect(homeView).not.toContain('goal');
+    expect(homeView).not.toContain('Your words, ready to move');
+    expect(cactus).toContain('M100 152 H82 Q60 152 60 130 V106');
+    expect(cactus).toContain('M100 124 H120 Q142 124 142 102 V78');
+    expect(cactus).toContain('M100 214 V50');
+    expect(recordingState).toContain('if (currentLifecycle !== lifecycle) return;');
+    expect(appCss).toContain('@media (max-width: 440px)');
+    expect(appCss).toContain('@media (prefers-reduced-motion: reduce)');
   });
 
   test('preserves the frozen Eve identity and cross-runtime version baseline', () => {

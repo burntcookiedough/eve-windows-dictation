@@ -8,32 +8,71 @@
     children: Snippet;
   }
 
-  let { label, description, notImplemented = false, children }: Props = $props();
+  let { label, description, children }: Props = $props();
 </script>
 
 <div
   data-settings-row
-  class="grid min-h-12 min-w-0 w-full grid-cols-[minmax(0,1fr)_minmax(5rem,45%)] items-center gap-x-4 px-4 py-3 transition-colors hover:bg-white/[0.035] sm:gap-x-6 {notImplemented ? 'outline outline-1 outline-red-800' : ''}"
+  class="settings-row"
   role="group"
-  aria-label={description ? `${label}. ${description}` : label}
+  aria-label={description ? label + '. ' + description : label}
 >
-  <div class="min-w-0">
-    <p class="text-[13px] leading-5 text-zinc-100 [overflow-wrap:anywhere]">{label}</p>
-    {#if description}
-      <p class="mt-0.5 text-[11px] leading-4 text-zinc-500 [overflow-wrap:anywhere]">{description}</p>
-    {/if}
-  </div>
-  <div
-    data-settings-control
-    class="flex min-w-0 w-full max-w-full items-center justify-end justify-self-end
-      [&>button]:max-w-full [&>div]:max-w-full [&>input]:max-w-full [&>select]:max-w-full [&>textarea]:max-w-full [&>[data-eve-dropdown]]:max-w-full
-      [&>div]:min-w-0
-      [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-zinc-100
-      [&_input]:focus-visible:outline-none [&_input]:focus-visible:ring-2 [&_input]:focus-visible:ring-zinc-100
-      [&_select]:focus-visible:outline-none [&_select]:focus-visible:ring-2 [&_select]:focus-visible:ring-zinc-100
-      [&_[data-eve-dropdown] button]:focus-visible:outline-none [&_[data-eve-dropdown] button]:focus-visible:ring-2 [&_[data-eve-dropdown] button]:focus-visible:ring-zinc-100
-      [&_textarea]:focus-visible:outline-none [&_textarea]:focus-visible:ring-2 [&_textarea]:focus-visible:ring-zinc-100"
-  >
+  <span class="settings-row-label">{label}</span>
+  <div data-settings-control class="settings-row-control">
     {@render children()}
   </div>
 </div>
+
+<style>
+  .settings-row {
+    display: flex;
+    min-width: 0;
+    min-height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-top: 1px solid var(--line, rgba(255, 255, 255, 0.07));
+    color: var(--fg, #ececec);
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+
+  .settings-row-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-row-control {
+    display: flex;
+    min-width: 0;
+    max-width: 62%;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    color: var(--fg2, #9b9b9b);
+    text-align: right;
+  }
+
+  .settings-row :global(:focus-visible) {
+    outline: 1px solid var(--fg, #ececec);
+    outline-offset: 3px;
+  }
+
+  @media (max-width: 480px) {
+    .settings-row {
+      gap: 10px;
+      font-size: 12.5px;
+    }
+
+    .settings-row-control {
+      max-width: 64%;
+      gap: 9px;
+    }
+
+    .settings-row :global(button) {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+  }
+</style>

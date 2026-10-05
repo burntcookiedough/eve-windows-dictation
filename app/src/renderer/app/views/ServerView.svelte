@@ -16,9 +16,10 @@
 
   interface Props {
     embedded?: boolean;
+    showAutoStart?: boolean;
   }
 
-  let { embedded = false }: Props = $props();
+  let { embedded = false, showAutoStart = true }: Props = $props();
   const componentId = $props.id();
   const headingTag = $derived(embedded ? 'h3' : 'h2');
 
@@ -39,6 +40,7 @@
   let isLoading = $state(false);
   let logsContainer: HTMLDivElement | null = $state(null);
   let logsCopied = $state(false);
+  let logsCopyError = $state(false);
   let logsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
   let diagnosticsCopyState = $state<'idle' | 'copied' | 'error'>('idle');
   let diagnosticsCopyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -158,17 +160,28 @@
     if (logsContainer) logsContainer.scrollTop = logsContainer.scrollHeight;
   }
 
-  function copyLogs() {
+  async function copyLogs(): Promise<void> {
     if (logsLoadState !== 'ready' || logs.length === 0) return;
+
+    if (logsCopiedTimer !== null) clearTimeout(logsCopiedTimer);
+    logsCopiedTimer = null;
+    logsCopied = false;
+    logsCopyError = false;
 
     const text = logs
       .map((log) => `${formatLogTime(log.timestamp)} ${log.message}`)
       .join('\n');
-    window.murmurMain.copyToClipboard(text);
-    logsCopied = true;
-    if (logsCopiedTimer !== null) clearTimeout(logsCopiedTimer);
+
+    try {
+      await window.murmurMain.copyToClipboard(text);
+      logsCopied = true;
+    } catch {
+      logsCopyError = true;
+    }
+
     logsCopiedTimer = setTimeout(() => {
       logsCopied = false;
+      logsCopyError = false;
       logsCopiedTimer = null;
     }, 2000);
   }
@@ -266,16 +279,16 @@
   });
 </script>
 
-<div data-server-view class={embedded ? 'min-w-0 space-y-6' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
+<div data-server-view class={embedded ? 'server-settings-embedded min-w-0 space-y-4' : 'h-full min-h-0 min-w-0 space-y-6 overflow-y-auto overscroll-contain p-4 pr-3'}>
   <section data-server-section="diagnostics" class="min-w-0 space-y-2" aria-labelledby={headingId('diagnostics')}>
     <div class="min-w-0 px-1">
       <svelte:element this={headingTag} id={headingId('diagnostics')} class="text-sm font-semibold text-zinc-200">Diagnostics</svelte:element>
-      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Copy an allowlisted system summary without logs, paths, history, or transcription text.</p>
     </div>
     <div data-server-diagnostics-surface class="flex min-w-0 flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-4 sm:flex-row sm:items-center sm:justify-between">
-      <p class="min-w-0 text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">Diagnostics include only the information Eve needs to explain server readiness and compatibility.</p>
+      <p class="min-w-0 text-xs leading-5 text-zinc-400 [overflow-wrap:anywhere]">Copies an allowlisted summary; excludes logs, paths, history, and transcription text.</p>
       <button
         type="button"
+        data-server-diagnostics-copy
         onclick={copyDiagnostics}
         aria-describedby={diagnosticsStatusId}
         class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100"
@@ -292,26 +305,30 @@
     </div>
   </section>
 
-  <section data-server-section="management" class="min-w-0 space-y-2" aria-labelledby={headingId('management')}>
-    <div class="min-w-0 px-1">
-      <svelte:element this={headingTag} id={headingId('management')} class="text-sm font-semibold text-zinc-200">Server management</svelte:element>
-      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Control the built-in server lifecycle and startup behavior.</p>
-    </div>
-    <div data-server-management-surface class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
-      <SettingsRow label="Auto-start server" description="Automatically start the built-in server when Eve launches">
-        <Toggle
-          enabled={autoStart}
-          onchange={updateAutoStart}
-          label="Auto-start server"
-        />
-      </SettingsRow>
-    </div>
-  </section>
+  {#if showAutoStart}
+    <section data-server-section="management" class="min-w-0 space-y-2" aria-labelledby={headingId('management')}>
+      <div class="min-w-0 px-1">
+        <svelte:element this={headingTag} id={headingId('management')} class="text-sm font-semibold text-zinc-200">Server management</svelte:element>
+        <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Control the built-in server lifecycle and startup behavior.</p>
+      </div>
+      <div data-server-management-surface class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025]">
+        <SettingsRow label="Auto-start server" description="Automatically start the built-in server when Eve launches">
+          <Toggle
+            enabled={autoStart}
+            onchange={updateAutoStart}
+            label="Auto-start server"
+          />
+        </SettingsRow>
+      </div>
+    </section>
+  {/if}
 
   <section data-server-section="health" class="min-w-0 space-y-2" aria-labelledby={headingId('health')}>
     <div class="min-w-0 px-1">
       <svelte:element this={headingTag} id={headingId('health')} class="text-sm font-semibold text-zinc-200">Health &amp; actions</svelte:element>
-      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Live status from the shared server controller; lifecycle actions apply only to the managed server.</p>
+      {#if !embedded}
+        <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Speech server status and controls.</p>
+      {/if}
     </div>
     <div data-server-health-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
       <div data-server-health-status class="grid min-w-0 gap-4 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
@@ -340,11 +357,9 @@
               <div class="flex min-w-0 items-baseline gap-1.5"><dt class="text-[11px] text-zinc-500">Uptime</dt><dd class="break-all font-mono text-xs text-zinc-300">{formatUptime(serverState.uptime)}</dd></div>
             {/if}
           </dl>
-        {:else}
-          <div class="hidden md:block"></div>
         {/if}
 
-        <div class="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
+        <div data-server-health-actions class="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
           {#if serverState.status === 'running'}
             <button
               type="button"
@@ -437,7 +452,9 @@
   <section data-server-section="logs" class="min-w-0 space-y-2" aria-labelledby={headingId('logs')}>
     <div class="min-w-0 px-1">
       <svelte:element this={headingTag} id={headingId('logs')} class="text-sm font-semibold text-zinc-200">Logs</svelte:element>
-      <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Inspect recent server output only when needed for troubleshooting.</p>
+      {#if !embedded}
+        <p class="mt-1 max-w-prose text-xs leading-5 text-zinc-500">Inspect recent server output only when needed for troubleshooting.</p>
+      {/if}
     </div>
     <div data-server-logs-surface class="min-w-0 rounded-xl border border-white/10 bg-white/[0.025] p-4">
       <button
@@ -456,7 +473,7 @@
         <span class="min-w-0 text-sm text-zinc-200 [overflow-wrap:anywhere]">Server logs</span>
         <span data-server-logs-count class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs tabular-nums text-zinc-400">{logCountLabel}</span>
       </button>
-      <p id={privacyWarningId} data-server-logs-privacy class="mt-3 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">Raw logs may contain local paths. Review them before sharing.</p>
+      <p id={privacyWarningId} data-server-logs-privacy class="mt-3 text-xs leading-5 text-amber-300/80 [overflow-wrap:anywhere]">Logs may contain local paths. Review before sharing.</p>
 
       <div id={logOutputId} hidden={!showLogs} class="mt-3 min-w-0">
         {#if logsLoadState === 'loading'}
@@ -467,7 +484,6 @@
             <button
               type="button"
               onclick={retryLogs}
-              disabled={logsLoadState === 'loading'}
               class="inline-flex min-h-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Retry
@@ -491,7 +507,7 @@
                   ? 'cursor-default text-emerald-400'
                   : 'cursor-pointer text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}"
           >
-            {#if logsCopied}Copied{:else}Copy raw logs{/if}
+            {#if logsCopied}Copied{:else if logsCopyError}Copy failed{:else}Copy raw logs{/if}
           </button>
         </div>
         {#if logBodySize !== 'empty'}
@@ -518,3 +534,211 @@
     </div>
   </section>
 </div>
+
+<style>
+  .server-settings-embedded {
+    color: var(--fg, #ececec);
+  }
+
+  .server-settings-embedded :global([data-server-section] + [data-server-section]) {
+    border-top: 1px solid var(--line, rgba(255, 255, 255, 0.07));
+    padding-top: 12px;
+  }
+
+  .server-settings-embedded :global([data-server-section] > div:first-child) {
+    padding: 0;
+  }
+
+  .server-settings-embedded :global([data-server-section] h3) {
+    color: var(--fg2, #9b9b9b);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .server-settings-embedded :global([data-server-section="diagnostics"] h3),
+  .server-settings-embedded :global([data-server-section="health"] h3),
+  .server-settings-embedded :global([data-server-section="logs"] h3) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .server-settings-embedded :global([data-server-section] p) {
+    color: var(--fg2, #9b9b9b);
+  }
+
+  .server-settings-embedded :global([data-server-diagnostics-surface]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .server-settings-embedded :global([data-server-diagnostics-surface] > p) {
+    margin: 0;
+  }
+
+  .server-settings-embedded :global([data-server-health-status]) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  .server-settings-embedded :global([data-server-health-status] > div:first-child),
+  .server-settings-embedded :global([data-server-health-actions]) {
+    grid-row: 1;
+  }
+
+  .server-settings-embedded :global([data-server-health-details]) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-left: 18px;
+    column-gap: 12px;
+    row-gap: 8px;
+  }
+
+  .server-settings-embedded :global([data-server-status]) {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.4;
+  }
+
+  .server-settings-embedded :global([data-server-health-actions]) {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
+
+  .server-settings-embedded :global([data-server-health-status] [aria-hidden="true"] > span:last-child) {
+    width: 6px;
+    height: 6px;
+    background-color: var(--fg2, #9b9b9b) !important;
+  }
+
+  .server-settings-embedded :global([data-server-health-status] [aria-hidden="true"]) {
+    width: 6px;
+    height: 6px;
+  }
+
+  .server-settings-embedded :global([data-server-health-status] [aria-hidden="true"] > span.absolute) {
+    display: none !important;
+  }
+
+  .server-settings-embedded :global([data-server-diagnostics-surface]),
+  .server-settings-embedded :global([data-server-management-surface]),
+  .server-settings-embedded :global([data-server-health-surface]),
+  .server-settings-embedded :global([data-server-logs-surface]) {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  .server-settings-embedded :global([class*="text-emerald-"]:not(button)),
+  .server-settings-embedded :global([class*="text-amber-"]:not(button)),
+  .server-settings-embedded :global([class*="text-red-"]:not(button)),
+  .server-settings-embedded :global([class*="text-sky-"]:not(button)) {
+    color: var(--fg2, #9b9b9b) !important;
+  }
+
+  .server-settings-embedded :global([data-server-health-details] dd),
+  .server-settings-embedded :global([data-server-logs-toggle] > span:first-child),
+  .server-settings-embedded :global([data-server-log-output] span[class*="text-zinc-300"]) {
+    color: var(--fg, #ececec) !important;
+  }
+
+  .server-settings-embedded :global([data-server-logs-toggle] > span:first-child) {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .server-settings-embedded :global([data-server-health-details] dt),
+  .server-settings-embedded :global([data-server-log-output] > div > span:first-child) {
+    color: var(--fg2, #9b9b9b) !important;
+  }
+
+  .server-settings-embedded :global([class*="bg-emerald-"]:not(button)),
+  .server-settings-embedded :global([class*="bg-amber-"]:not(button)),
+  .server-settings-embedded :global([class*="bg-red-"]:not(button)),
+  .server-settings-embedded :global([class*="bg-sky-"]:not(button)) {
+    background-color: var(--fg2, #9b9b9b) !important;
+  }
+
+  .server-settings-embedded :global([class*="border-emerald-"]),
+  .server-settings-embedded :global([class*="border-amber-"]),
+  .server-settings-embedded :global([class*="border-red-"]),
+  .server-settings-embedded :global([class*="border-sky-"]) {
+    border-color: var(--line2, rgba(255, 255, 255, 0.14)) !important;
+  }
+
+  .server-settings-embedded :global([class*="bg-red-"]:not(button)),
+  .server-settings-embedded :global([class*="bg-amber-"]:not(button)) {
+    background-color: transparent !important;
+  }
+
+  .server-settings-embedded :global([data-server-logs-count]) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--fg2, #9b9b9b);
+    font-family: "Geist Mono", ui-monospace, monospace;
+  }
+
+  .server-settings-embedded :global([data-server-log-output]) {
+    border-color: var(--line, rgba(255, 255, 255, 0.07));
+    border-radius: 0;
+    background: transparent;
+    color: var(--fg2, #9b9b9b);
+  }
+
+  .server-settings-embedded :global(button) {
+    min-height: 30px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 2px 0 !important;
+    background: transparent !important;
+    color: var(--fg2, #9b9b9b) !important;
+    font: inherit;
+    font-size: 10px;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    box-shadow: none !important;
+  }
+
+  .server-settings-embedded :global(button:hover:not(:disabled)) {
+    color: var(--fg, #ececec) !important;
+    text-decoration-color: currentColor;
+  }
+
+  .server-settings-embedded :global(button:focus-visible) {
+    outline: 1px solid var(--fg, #ececec);
+    outline-offset: 3px;
+  }
+
+  .server-settings-embedded :global([data-server-diagnostics-copy]) {
+    justify-self: end;
+    min-height: 34px;
+    color: var(--fg, #ececec) !important;
+    text-decoration-color: currentColor;
+    white-space: nowrap;
+  }
+
+  .server-settings-embedded :global([data-server-section] .rounded-xl),
+  .server-settings-embedded :global([data-server-section] .rounded-lg) {
+    border-radius: 0 !important;
+  }
+
+  .server-settings-embedded :global([data-server-section] .bg-white\/\[0\.025\]),
+  .server-settings-embedded :global([data-server-section] .bg-zinc-950),
+  .server-settings-embedded :global([data-server-section] .bg-zinc-950\/60) {
+    background: transparent !important;
+  }
+</style>

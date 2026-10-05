@@ -1,107 +1,85 @@
 import { app, BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { MAIN_WINDOW_CONFIG } from '../../shared/constants.js';
-import { getMainWindowBounds, setMainWindowBounds } from '../services/settings.js';
-import type { WindowBounds } from '../../shared/types.js';
+import { getMainWindowBounds, setMainWindowBounds, getSettings } from '../services/settings.js';
 import { getMurmurIcon } from '../services/app-icon.js';
+import { fitMainWindowBounds } from './main-window-bounds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '');
 const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
 
 let isQuitting = false;
+let quitFlushPending = false;
+let mainWindowForQuit: BrowserWindow | null = null;
 
-// Set up app quit handler once
-app.on('before-quit', () => {
-  isQuitting = true;
-});
-
-/**
- * Check if the saved bounds are visible on any connected display.
- * Returns true if at least part of the window would be visible.
- */
-function areBoundsOnScreen(bounds: WindowBounds): boolean {
-  const displays = screen.getAllDisplays();
-
-  // Check if at least a portion of the window is visible on any display
-  for (const display of displays) {
-    const { x, y, width, height } = display.bounds;
-
-    // Check if the bounds overlap with this display
-    const overlapsX = bounds.x < x + width && bounds.x + bounds.width > x;
-    const overlapsY = bounds.y < y + height && bounds.y + bounds.height > y;
-
-    if (overlapsX && overlapsY) {
-      return true;
-    }
+// Wait for deferred History deletes before the app closes its database services.
+app.on('before-quit', (event) => {
+  if (isQuitting) return;
+  const window = mainWindowForQuit;
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+    isQuitting = true;
+    return;
   }
 
-  return false;
-}
+  event.preventDefault();
+  if (quitFlushPending) return;
+  quitFlushPending = true;
 
-function clampBoundsToDisplay(bounds: WindowBounds): WindowBounds {
-  const { workArea } = screen.getDisplayMatching(bounds);
-  const width = Math.min(
-    Math.max(bounds.width, MAIN_WINDOW_CONFIG.MIN_WIDTH),
-    workArea.width
-  );
-  const height = Math.min(
-    Math.max(bounds.height, MAIN_WINDOW_CONFIG.MIN_HEIGHT),
-    workArea.height
-  );
-  const x = Math.min(
-    Math.max(bounds.x, workArea.x),
-    workArea.x + workArea.width - width
-  );
-  const y = Math.min(
-    Math.max(bounds.y, workArea.y),
-    workArea.y + workArea.height - height
-  );
-
-  return { x, y, width, height };
-}
+  void window.webContents
+    .executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')
+    .then(() => {
+      isQuitting = true;
+      app.quit();
+    })
+    .catch((error: unknown) => {
+      console.error('Failed to flush History deletes during app shutdown:', error);
+      quitFlushPending = false;
+      if (!window.isDestroyed()) showMainWindow(window);
+    });
+});
 
 export interface CreateMainWindowOptions {
   startMinimized?: boolean;
 }
 
+export function applyMainWindowAppearance(window: BrowserWindow, appearance: 'dark' | 'light'): void {
+  const light = appearance === 'light';
+  window.setBackgroundColor(light ? '#f4f4f2' : '#0b0b0b');
+  window.setTitleBarOverlay({
+    color: light ? '#f4f4f2' : '#0b0b0b',
+    symbolColor: light ? '#141414' : '#ececec',
+    height: 40,
+  });
+}
+
 export async function createMainWindow(options: CreateMainWindowOptions = {}): Promise<BrowserWindow> {
   const preloadPath = join(__dirname, 'preload/main.js');
+  const lightAppearance = getSettings().appearance === 'light';
 
-  // Restore saved window bounds if valid, otherwise use defaults
+  // Saved dimensions are intentionally ignored so past user resizing cannot change the fixed window size.
   const savedBounds = getMainWindowBounds();
-  const useSavedBounds = savedBounds && areBoundsOnScreen(savedBounds);
-  const restoredBounds = useSavedBounds ? clampBoundsToDisplay(savedBounds) : null;
-  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
-  const displayWorkAreas = screen.getAllDisplays().map((display) => display.workArea);
-  const defaultWidth = Math.min(MAIN_WINDOW_CONFIG.WIDTH, primaryWorkArea.width);
-  const defaultHeight = Math.min(MAIN_WINDOW_CONFIG.HEIGHT, primaryWorkArea.height);
-  const minWidth = Math.min(
-    MAIN_WINDOW_CONFIG.MIN_WIDTH,
-    ...displayWorkAreas.map((workArea) => workArea.width)
-  );
-  const minHeight = Math.min(
-    MAIN_WINDOW_CONFIG.MIN_HEIGHT,
-    ...displayWorkAreas.map((workArea) => workArea.height)
+  const getDisplayWorkAreas = () => screen.getAllDisplays().map(({ id, workArea }) => ({ id, workArea }));
+  const fittedBounds = fitMainWindowBounds(
+    savedBounds,
+    getDisplayWorkAreas(),
+    screen.getPrimaryDisplay().id
   );
 
   const mainWindow = new BrowserWindow({
-    width: restoredBounds?.width ?? defaultWidth,
-    height: restoredBounds?.height ?? defaultHeight,
-    x: restoredBounds?.x,
-    y: restoredBounds?.y,
-    minWidth,
-    minHeight,
+    ...fittedBounds,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     show: false,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#08090a',
-      symbolColor: '#f4f4f5',
-      height: 36,
+      color: lightAppearance ? '#f4f4f2' : '#0b0b0b',
+      symbolColor: lightAppearance ? '#141414' : '#ececec',
+      height: 40,
     },
     transparent: false,
-    backgroundColor: '#08090a',
+    backgroundColor: lightAppearance ? '#f4f4f2' : '#0b0b0b',
     icon: getMurmurIcon('icon.ico'),
     webPreferences: {
       preload: preloadPath,
@@ -110,6 +88,8 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
       sandbox: false,
     },
   });
+  mainWindowForQuit = mainWindow;
+  mainWindow.setBounds(fittedBounds);
 
   // Save window bounds when moved or resized
   const saveBounds = () => {
@@ -117,8 +97,48 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
       setMainWindowBounds(mainWindow.getBounds());
     }
   };
-  mainWindow.on('moved', saveBounds);
+
+  const refitBounds = () => {
+    if (mainWindow.isDestroyed()) {
+      return;
+    }
+
+    const bounds = mainWindow.getBounds();
+    const nextBounds = fitMainWindowBounds(
+      bounds,
+      getDisplayWorkAreas(),
+      screen.getPrimaryDisplay().id,
+      bounds
+    );
+    if (
+      bounds.x !== nextBounds.x ||
+      bounds.y !== nextBounds.y ||
+      Math.abs(bounds.width - nextBounds.width) > 1 ||
+      Math.abs(bounds.height - nextBounds.height) > 1
+    ) {
+      mainWindow.setBounds(nextBounds);
+    }
+  };
+
+  const refitOnDisplayChange = () => {
+    refitBounds();
+    saveBounds();
+  };
+  mainWindow.on('moved', () => {
+    refitBounds();
+    saveBounds();
+  });
   mainWindow.on('resized', saveBounds);
+  screen.on('display-added', refitOnDisplayChange);
+  screen.on('display-removed', refitOnDisplayChange);
+  screen.on('display-metrics-changed', refitOnDisplayChange);
+  mainWindow.once('closed', () => {
+    if (mainWindowForQuit === mainWindow) mainWindowForQuit = null;
+    screen.off('display-added', refitOnDisplayChange);
+    screen.off('display-removed', refitOnDisplayChange);
+    screen.off('display-metrics-changed', refitOnDisplayChange);
+  });
+  setMainWindowBounds(mainWindow.getBounds());
 
   // Show when ready to avoid visual flash (unless starting minimized)
   if (!options.startMinimized) {

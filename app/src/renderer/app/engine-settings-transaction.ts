@@ -18,6 +18,29 @@ export function shouldDisableEngineRevert(
   return preparationActive;
 }
 
+export function mergeEngineSettingsPatch(
+  pending: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...pending, ...patch };
+}
+
+export function clearAppliedEngineSettings(
+  pending: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(pending).filter(([key, value]) =>
+    !Object.prototype.hasOwnProperty.call(patch, key) || !Object.is(value, patch[key])
+  ));
+}
+
+export function engineSettingsPatchMatches(
+  patch: Record<string, unknown>,
+  settings: Record<string, { value: unknown }> | null,
+): boolean {
+  return Object.entries(patch).every(([key, value]) => settings?.[key]?.value === value);
+}
+
 export function shouldRefreshCommittedSettings(
   pending: Record<string, unknown>,
   preparationRequested: boolean,
