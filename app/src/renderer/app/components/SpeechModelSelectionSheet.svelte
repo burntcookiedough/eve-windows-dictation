@@ -70,6 +70,7 @@
   function useDraft(): void {
     if (!canUseDraft || !draftPreset) return;
     onUse(draftPreset);
+    close();
   }
 
   function revert(): void {

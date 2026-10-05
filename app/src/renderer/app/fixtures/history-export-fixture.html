@@ -6,7 +6,9 @@
     <title>Eve History export fixture</title>
   </head>
   <body class="h-full bg-[#08090a]">
-    <div id="fixture-root" class="h-full min-h-0 bg-[#08090a]"></div>
+    <div id="history-page-layer" class="app-page-layer app-page-layer--active">
+      <div id="fixture-root" class="h-full min-h-0 bg-[#08090a]"></div>
+    </div>
     <script>Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });</script>
     <script type="module" src="./history-export-fixture.ts"></script>
   </body>

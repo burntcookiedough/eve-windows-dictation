@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { EngineStatus, ModelCatalogItem, ModelDownloadState } from '$shared/types';
-  import { speechModelPresetsFromCatalog, type SpeechModelPreset } from '../speech-model-presets';
+  import { presetPatch, speechModelPresetsFromCatalog, type SpeechModelPreset } from '../speech-model-presets';
+  import { clearAppliedEngineSettings, mergeEngineSettingsPatch } from '../engine-settings-transaction';
   import SettingsGroup from '../components/SettingsGroup.svelte';
   import SettingsRow from '../components/SettingsRow.svelte';
   import SettingsSection from '../components/SettingsSection.svelte';
@@ -110,6 +111,11 @@
   let modelSheetPending = $state<SpeechModelPreset | null>(null);
   let modelSheetPreparing = $state(false);
   let modelSheetApplyCalls = $state<string[]>([]);
+  let pendingEngineSettings = $state<Record<string, unknown>>({ whisper_device: 'cuda', whisper_language: 'en' });
+  let modelSheetApplyPatches = $state<Record<string, unknown>[]>([]);
+  let advancedApplyPatches = $state<Record<string, unknown>[]>([]);
+  let advancedApplyError = $state('');
+  const committedAdvancedSettings = { whisper_device: 'cpu', whisper_language: 'auto' };
   let modelSheetSelected = $derived(modelSheetPending ?? currentPreset);
   let modelSheetEngineStatus = $derived(
     modelSheetPreparing && modelSheetPending
@@ -147,9 +153,23 @@
   }
 
   function useModelSheetPreset(preset: SpeechModelPreset): void {
+    const patch = presetPatch(preset);
     modelSheetPending = preset;
     modelSheetPreparing = true;
+    pendingEngineSettings = mergeEngineSettingsPatch(pendingEngineSettings, patch);
     modelSheetApplyCalls = [...modelSheetApplyCalls, preset.model];
+    modelSheetApplyPatches = [...modelSheetApplyPatches, patch];
+  }
+
+  function applyAdvancedSettings(requestedPatch: Record<string, unknown> = pendingEngineSettings): void {
+    const patch = Object.fromEntries(Object.entries(requestedPatch));
+    advancedApplyPatches = [...advancedApplyPatches, patch];
+    if (advancedApplyPatches.length === 1) {
+      advancedApplyError = 'Fixture request failed. Retry the staged changes.';
+      return;
+    }
+    pendingEngineSettings = clearAppliedEngineSettings(pendingEngineSettings, patch);
+    advancedApplyError = '';
   }
 
   function revertModelSheetPreset(): void {
@@ -273,8 +293,9 @@
                 <div data-fixture-compatibility-footer class="mt-4 border-t border-white/[0.08] pt-4">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <p class="text-xs text-amber-300">Compatibility changes require an engine reload.</p>
-                    <button type="button" class="min-h-9 cursor-pointer rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100">Apply compatibility changes</button>
+                    <button type="button" data-fixture-advanced-apply onclick={() => applyAdvancedSettings()} class="min-h-9 cursor-pointer rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100">{advancedApplyError ? 'Retry compatibility changes' : 'Apply compatibility changes'}</button>
                   </div>
+                  {#if advancedApplyError}<p role="alert" data-fixture-advanced-error class="mt-2 text-xs text-red-300">{advancedApplyError}</p>{/if}
                   <p class="mt-2 text-xs text-zinc-500">Engine status: Ready · Faster-Whisper · 16 GB fixture GPU</p>
                 </div>
               </div>
@@ -290,6 +311,10 @@
 <span hidden data-sheet-current>{currentPreset.model}</span>
 <span hidden data-sheet-pending>{modelSheetPending?.model ?? ''}</span>
 <span hidden data-sheet-preparation-started>{modelSheetApplyCalls.at(-1) ?? ''}</span>
+<span hidden data-model-apply-patch>{JSON.stringify(modelSheetApplyPatches.at(-1) ?? {})}</span>
+<span hidden data-pending-engine-settings>{JSON.stringify(pendingEngineSettings)}</span>
+<span hidden data-committed-advanced-settings>{JSON.stringify(committedAdvancedSettings)}</span>
+<span hidden data-advanced-apply-patches>{JSON.stringify(advancedApplyPatches)}</span>
 
 <SpeechModelSelectionSheet
   open={modelSheetOpen}

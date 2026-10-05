@@ -13,9 +13,9 @@
   import PrimaryPage from '../components/PrimaryPage.svelte';
   import {
     deferHistoryDelete,
-    pauseDeferredHistoryDeletes,
+    flushExpiredDeferredHistoryDeletes,
+    flushDeferredHistoryDeletes,
     pendingHistoryDeletes,
-    resumeDeferredHistoryDeletes,
     undoDeferredHistoryDelete,
   } from '../history-delete-queue.svelte';
 
@@ -112,13 +112,6 @@
     if (selected) next.add(id); else next.delete(id);
     selectedIds = next;
     selectionFeedback = '';
-  }
-
-  function removeEntryFromSelection(id: string): void {
-    if (!selectedIds.has(id)) return;
-    const next = new Set(selectedIds);
-    next.delete(id);
-    selectedIds = next;
   }
 
   async function selectAllCurrentFilter(): Promise<void> {
@@ -311,6 +304,7 @@
   function toggleExpand(id: string): void { expandedId = expandedId === id ? null : id; }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
+    if (historyRoot?.closest('[inert]')) return;
     const activeDialog = bulkDeleteConfirmOpen ? bulkDeleteDialog : undefined;
     if (!activeDialog) {
       const target = event.target;
@@ -339,24 +333,21 @@
   function onDeleteCommitted(event: Event): void {
     const detail = (event as CustomEvent<{ ids: string[]; deleted: boolean }>).detail;
     if (!detail?.deleted) return;
-    for (const id of detail.ids) removeEntryFromSelection(id);
-    void loadEntries(true);
+    const deletedIds = new Set(detail.ids);
+    const removedCount = history.filter((item) => deletedIds.has(item.id)).length;
+    history = history.filter((item) => !deletedIds.has(item.id));
+    offset = Math.max(0, offset - removedCount);
+    selectedIds = new Set([...selectedIds].filter((id) => !deletedIds.has(id)));
+    if (expandedId && deletedIds.has(expandedId)) expandedId = null;
   }
 
   onMount(() => {
     void loadEntries(true);
-    const pageLayer = historyRoot?.closest<HTMLElement>('.app-page-layer');
-    const syncDeleteQueueVisibility = () => {
-      if (document.visibilityState === 'visible' && (!pageLayer || pageLayer.classList.contains('app-page-layer--active'))) resumeDeferredHistoryDeletes();
-      else pauseDeferredHistoryDeletes();
-    };
-    syncDeleteQueueVisibility();
-    const layerObserver = pageLayer ? new MutationObserver(syncDeleteQueueVisibility) : null;
-    layerObserver?.observe(pageLayer!, { attributes: true, attributeFilter: ['class'] });
-
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') { syncDeleteQueueVisibility(); void loadEntries(true); }
-      else pauseDeferredHistoryDeletes();
+      if (document.visibilityState === 'visible') {
+        flushExpiredDeferredHistoryDeletes();
+        void loadEntries(true);
+      } else void flushDeferredHistoryDeletes();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     const unsubscribeNewHistoryEntry = window.murmurMain.onNewHistoryEntry((entry) => {
@@ -395,8 +386,6 @@
     return () => {
       observer?.disconnect();
       clearTimeout(observerTimer);
-      layerObserver?.disconnect();
-      pauseDeferredHistoryDeletes();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('history-delete-committed', onDeleteCommitted);
       unsubscribeNewHistoryEntry();
@@ -530,7 +519,7 @@
           <button type="button" data-history-clear-selection disabled={!hasSelection || selectingAll || bulkDeleting || exporting} onclick={clearSelection}>Clear selection</button>
           <button type="button" data-history-export-selected disabled={!hasSelection || selectingAll || bulkDeleting || exporting} aria-busy={exporting} onclick={() => exportHistory('selected')}>{exporting ? 'Exporting…' : 'Export selected'}</button>
           <button type="button" aria-busy={exporting} disabled={exporting || bulkDeleting} onclick={() => exportHistory('all')}>{exporting ? 'Exporting…' : 'Export all'}</button>
-          <button type="button" data-history-delete-selected class="primary-action" disabled={!hasSelection || selectingAll || bulkDeleting || exporting} aria-busy={bulkDeleting} onclick={openBulkDeleteDialog}>{bulkDeleting ? 'Deleting…' : 'Delete selected'}</button>
+          <button type="button" data-history-delete-selected class="delete-action" disabled={!hasSelection || selectingAll || bulkDeleting || exporting} aria-busy={bulkDeleting} onclick={openBulkDeleteDialog}>{bulkDeleting ? 'Deleting…' : 'Delete selected'}</button>
         {/if}
       </div>
     </div>
@@ -630,7 +619,7 @@
       {#if selectionFeedback}<p class="feedback" role="alert">{selectionFeedback}</p>{/if}
       <div class="dialog-actions">
         <button type="button" onclick={cancelBulkDelete} disabled={bulkDeleting}>Cancel</button>
-        <button type="button" class="primary-action" onclick={confirmBulkDelete} disabled={bulkDeleting} aria-busy={bulkDeleting}>{bulkDeleting ? 'Deleting…' : `Delete ${selectedCount}`}</button>
+        <button type="button" class="delete-action" onclick={confirmBulkDelete} disabled={bulkDeleting} aria-busy={bulkDeleting}>{bulkDeleting ? 'Deleting…' : `Delete ${selectedCount}`}</button>
       </div>
     </div>
   </div>
@@ -675,8 +664,8 @@
   .feedback { margin-top: 5px; color: var(--fg2); font-size: 10.5px; }
   .selection-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 12px; }
   .selection-actions button { font-size: 10.5px; }
-  .primary-action { border: 1px solid var(--fg); background: var(--fg); padding: 7px 10px; color: var(--bg) !important; font-size: 11px; }
-  .primary-action:hover:not(:disabled) { opacity: .85; }
+  .delete-action { color: var(--fg2) !important; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+  .delete-action:hover:not(:disabled) { color: var(--fg) !important; }
   .undo-list { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .undo-list p { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--fg2); font-size: 11px; }
   .undo-list p + p { margin-top: 5px; }

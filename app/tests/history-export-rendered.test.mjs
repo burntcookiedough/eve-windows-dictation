@@ -94,6 +94,8 @@ describe('rendered History export controls', () => {
         expect(measurement.hasFormat).toBeTrue();
         expect(measurement.controlHeights.length).toBeGreaterThan(0);
         for (const height of measurement.controlHeights) expect(height).toBeGreaterThan(14);
+        expect(measurement.deleteActionStyle.background).toBe('rgba(0, 0, 0, 0)');
+        expect(measurement.deleteActionStyle.decoration).toBe('underline');
       } else {
         expect(measurement.hasFormat).toBeFalse();
       }
@@ -126,6 +128,7 @@ describe('rendered History export controls', () => {
   });
 
   test('search, extended filters, expansion, copy, deferred Undo, and delete use History handlers', () => {
+    expect(result.historyControls.shortcuts).toEqual({ ignoredInactive: true, focusesSearchWhenActive: true });
     expect(result.historyControls.search).toEqual({
       ids: ['fixture-1'],
       highlight: 'release',
@@ -152,6 +155,18 @@ describe('rendered History export controls', () => {
     expect(result.historyControls.singleDelete.restoredIds).toEqual(['fixture-1', 'fixture-2']);
     expect(result.historyControls.singleDelete.requestsAfterUndo).toEqual([]);
     expect(result.historyControls.singleDelete.committedIds).toEqual(['fixture-1']);
+    expect(result.historyControls.singleDelete.retainedSelection).toMatchObject({
+      count: '1 selected',
+      selected: true,
+      undoVisible: false,
+    });
+    expect(result.historyControls.singleDelete.retainedSelection.historyRequests)
+      .toBe(result.historyControls.singleDelete.requestsBeforeBackgroundCommit);
+    expect(result.historyControls.queueFlush).toEqual({
+      waitedForAcknowledgement: true,
+      completed: true,
+      recovery: { entryRestored: true, undoHidden: true, failureToast: 'Delete failed; transcription restored' },
+    });
   });
 
   test('selects the current filtered IDs and confirms bulk deletion through the bridge', () => {
@@ -169,6 +184,7 @@ describe('rendered History export controls', () => {
   test('moves focus into bulk-delete confirmation, traps it, and restores the selection control', () => {
     expect(result.deleteDialogFocus).toEqual({
       initiallyFocusedCancel: true,
+      deleteStyle: { background: 'rgba(0, 0, 0, 0)', decoration: 'underline' },
       shiftTabWrapsToDelete: true,
       tabWrapsToCancel: true,
       closedOnEscape: true,

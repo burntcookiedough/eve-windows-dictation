@@ -55,8 +55,7 @@ let overlaySessionGeneration = 0;
 let overlayExitTimer: ReturnType<typeof setTimeout> | null = null;
 let overlayHideTimer: ReturnType<typeof setTimeout> | null = null;
 
-app.on('second-instance', (_event, commandLine) => {
-  if (!commandLine.includes('--show-window')) return;
+app.on('second-instance', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     showMainWindow(mainWindow);
   } else {

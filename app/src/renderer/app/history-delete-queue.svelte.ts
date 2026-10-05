@@ -5,7 +5,6 @@ const DELETE_DELAY_MS = 5000;
 
 export interface PendingHistoryDelete {
   id: string;
-  remainingMs: number;
   committing: boolean;
 }
 
@@ -25,13 +24,12 @@ export const pendingHistoryDeletes = new HistoryDeleteQueueState();
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const deadlines = new Map<string, number>();
-let paused = true;
+const committing = new Map<string, Promise<void>>();
 
 export function deferHistoryDelete(id: string): void {
   if (pendingHistoryDeletes.items.some((item) => item.id === id)) return;
-  const remainingMs = DELETE_DELAY_MS;
-  pendingHistoryDeletes.add({ id, remainingMs, committing: false });
-  if (!paused) scheduleCommit(id, remainingMs);
+  pendingHistoryDeletes.add({ id, committing: false });
+  scheduleCommit(id, DELETE_DELAY_MS);
 }
 
 export function undoDeferredHistoryDelete(id: string): void {
@@ -41,24 +39,18 @@ export function undoDeferredHistoryDelete(id: string): void {
   pendingHistoryDeletes.remove(id);
 }
 
-export function pauseDeferredHistoryDeletes(): void {
-  if (paused) return;
-  paused = true;
+export function flushExpiredDeferredHistoryDeletes(): void {
+  const now = Date.now();
   for (const item of pendingHistoryDeletes.items) {
-    if (item.committing) continue;
     const deadline = deadlines.get(item.id);
-    const remainingMs = deadline === undefined ? item.remainingMs : Math.max(0, deadline - Date.now());
+    if (item.committing || deadline === undefined || deadline > now) continue;
     clearTimer(item.id);
-    pendingHistoryDeletes.add({ ...item, remainingMs });
+    void commitDeferredDelete(item.id);
   }
 }
 
-export function resumeDeferredHistoryDeletes(): void {
-  if (!paused) return;
-  paused = false;
-  for (const item of pendingHistoryDeletes.items) {
-    if (!item.committing) scheduleCommit(item.id, item.remainingMs);
-  }
+export async function flushDeferredHistoryDeletes(): Promise<void> {
+  await Promise.all(pendingHistoryDeletes.items.map(({ id }) => commitDeferredDelete(id)));
 }
 
 function scheduleCommit(id: string, delayMs: number): void {
@@ -72,10 +64,20 @@ function scheduleCommit(id: string, delayMs: number): void {
   timers.set(id, timer);
 }
 
-async function commitDeferredDelete(id: string): Promise<void> {
+function commitDeferredDelete(id: string): Promise<void> {
+  const currentCommit = committing.get(id);
+  if (currentCommit) return currentCommit;
   const pending = pendingHistoryDeletes.items.find((item) => item.id === id);
-  if (!pending || !canUndoDeferredDelete(pending)) return;
+  if (!pending || !canUndoDeferredDelete(pending)) return Promise.resolve();
+  clearTimer(id);
   pendingHistoryDeletes.add(markDeferredDeleteCommitting(pending));
+  const request = finishDeferredDelete(id);
+  committing.set(id, request);
+  void request.finally(() => committing.delete(id));
+  return request;
+}
+
+async function finishDeferredDelete(id: string): Promise<void> {
   try {
     await window.murmurMain.deleteHistoryEntry(id);
     pendingHistoryDeletes.remove(id);
@@ -99,3 +101,6 @@ function clearTimer(id: string): void {
 function dispatchDeleteCommitted(id: string, deleted: boolean): void {
   window.dispatchEvent(new CustomEvent('history-delete-committed', { detail: { ids: [id], deleted } }));
 }
+
+const quitFlushWindow = window as Window & { __flushDeferredHistoryDeletesOnQuit?: () => Promise<void> };
+quitFlushWindow.__flushDeferredHistoryDeletesOnQuit = flushDeferredHistoryDeletes;

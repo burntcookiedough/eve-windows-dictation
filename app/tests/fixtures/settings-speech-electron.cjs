@@ -180,8 +180,7 @@ async function exerciseModelSheetDraft(window) {
     await flush();
     const pendingAfterUse = document.querySelector('[data-sheet-pending]')?.textContent?.trim() ?? '';
     const startedAfterUse = document.querySelector('[data-sheet-preparation-started]')?.textContent?.trim() ?? '';
-    const selectedAfterUse = [...(reopened?.querySelectorAll('input[type="radio"]') ?? [])]
-      .find((radio) => radio.getAttribute('aria-label')?.startsWith('Maximum Multilingual Accuracy'));
+    const closedAfterUse = !document.querySelector('.sheet-layer.open');
     return {
       draftChangedBeforeCancel,
       useEnabledBeforeCancel,
@@ -193,7 +192,10 @@ async function exerciseModelSheetDraft(window) {
       useEnabledAfterSelection,
       pendingAfterUse,
       startedAfterUse,
-      selectedAfterUseLabel: selectedAfterUse?.getAttribute('aria-label') ?? '',
+      closedAfterUse,
+      submittedPatch: JSON.parse(document.querySelector('[data-model-apply-patch]')?.textContent ?? '{}'),
+      pendingEngineSettings: JSON.parse(document.querySelector('[data-pending-engine-settings]')?.textContent ?? '{}'),
+      committedAdvancedSettings: JSON.parse(document.querySelector('[data-committed-advanced-settings]')?.textContent ?? '{}'),
     };
   })()`);
 }
@@ -244,12 +246,36 @@ async function exerciseCompatibilityDisclosure(window) {
   })()`);
 }
 
+async function exerciseAdvancedApplyRetry(window) {
+  await loadFixture(window, 'speech', 'ready', true);
+  return window.webContents.executeJavaScript(`(async () => {
+    const flush = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const button = document.querySelector('[data-fixture-advanced-apply]');
+    button?.click();
+    await flush();
+    const stagedAfterFailure = JSON.parse(document.querySelector('[data-pending-engine-settings]')?.textContent ?? '{}');
+    const errorShownAfterFailure = !!document.querySelector('[data-fixture-advanced-error]');
+    const retryLabel = button?.textContent?.trim() ?? '';
+    button?.click();
+    await flush();
+    return {
+      firstPatch: JSON.parse(document.querySelector('[data-advanced-apply-patches]')?.textContent ?? '[]')[0] ?? {},
+      stagedAfterFailure,
+      errorShownAfterFailure,
+      retryLabel,
+      retryPatch: JSON.parse(document.querySelector('[data-advanced-apply-patches]')?.textContent ?? '[]')[1] ?? {},
+      stagedAfterRetry: JSON.parse(document.querySelector('[data-pending-engine-settings]')?.textContent ?? '{}'),
+    };
+  })()`);
+}
+
 async function main() {
   let window = null;
   const measurements = [];
   const screenshots = [];
   let interactions = [];
   let modelSheetDraftInteraction = null;
+  let advancedApplyRetryInteraction = null;
   let disclosureInteraction = null;
   await app.whenReady();
   try {
@@ -288,11 +314,12 @@ async function main() {
     disclosureInteraction = await exerciseCompatibilityDisclosure(window);
     interactions = await exerciseModelSelection(window);
     modelSheetDraftInteraction = await exerciseModelSheetDraft(window);
+    advancedApplyRetryInteraction = await exerciseAdvancedApplyRetry(window);
   } finally {
     if (window && !window.isDestroyed()) await window.close();
   }
 
-  process.stdout.write(JSON.stringify({ measurements, screenshots, interactions, disclosureInteraction, modelSheetDraftInteraction, userDataPath: userData }));
+  process.stdout.write(JSON.stringify({ measurements, screenshots, interactions, disclosureInteraction, modelSheetDraftInteraction, advancedApplyRetryInteraction, userDataPath: userData }));
   app.quit();
 }
 

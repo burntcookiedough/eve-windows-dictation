@@ -20,7 +20,14 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
     shouldRetryServerSettings,
   } from '../server-settings-recovery';
   import { optionsForDraftWhisperDevice } from '../server-setting-options';
-  import { enginePreparationPhase, shouldDisableEngineRevert, shouldRefreshCommittedSettings } from '../engine-settings-transaction';
+  import {
+    clearAppliedEngineSettings,
+    enginePreparationPhase,
+    engineSettingsPatchMatches,
+    mergeEngineSettingsPatch,
+    shouldDisableEngineRevert,
+    shouldRefreshCommittedSettings,
+  } from '../engine-settings-transaction';
   import { toast } from '$lib/toast.svelte';
   import { DEFAULT_SETTINGS, type Settings, type Hotkey, type EngineStatus, type GpuPackState, type ModelCatalogItem, type ServerSetting, type ServerSettingOption } from '$shared/types';
   import { HOTWORDS_WARNING_THRESHOLD, formatHotwordsCsl, parseHotwordsCsl } from '$shared/hotwords';
@@ -119,6 +126,7 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
   let enginePreparationRequested = $state(false);
   let enginePreparationActive = $state(false);
   let enginePreparationObserved = $state(false);
+  let enginePreparationPatch = $state<Record<string, unknown>>({});
   let refreshingCommittedSettings = $state(false);
   let engineApplyError = $state('');
 
@@ -539,6 +547,7 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
         enginePreparationRequested = recovery.requested;
         enginePreparationActive = recovery.active;
         enginePreparationObserved = recovery.observed;
+        enginePreparationPatch = {};
         engineApplying = recovery.applying;
         if (recovery.message) engineApplyError = recovery.message;
       }
@@ -674,9 +683,10 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
   }
 
   function selectPreset(preset: SpeechModelPreset): void {
-    pendingEngine = { ...pendingEngine, ...presetPatch(preset) };
+    const patch = presetPatch(preset);
+    pendingEngine = mergeEngineSettingsPatch(pendingEngine, patch);
     engineApplyError = '';
-    void applyEngineSettings();
+    void applyEngineSettings(patch);
   }
 
   function revertEngineSettings(): void {
@@ -685,23 +695,28 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
     enginePreparationRequested = false;
     enginePreparationActive = false;
     enginePreparationObserved = false;
+    enginePreparationPatch = {};
     engineApplyError = '';
     void loadServerSettings();
   }
 
-  async function applyEngineSettings() {
-    if (engineApplying || Object.keys(pendingEngine).length === 0) return;
+  async function applyEngineSettings(requestedPatch: Record<string, unknown> = pendingEngine) {
+    if (engineApplying || enginePreparationActive || Object.keys(requestedPatch).length === 0) return;
+    enginePreparationRequested = false;
+    enginePreparationObserved = false;
+    enginePreparationPatch = {};
     engineApplying = true;
     engineApplyError = '';
 
     try {
       // Svelte $state objects are Proxies; IPC requires plain cloneable values.
-      const patch = Object.fromEntries(Object.entries(pendingEngine));
+      const patch = Object.fromEntries(Object.entries(requestedPatch));
       const response = await window.murmurMain.updateServerSettings(patch);
       serverSettings = response.settings;
       modelCatalog = response.model_catalog ?? [];
       engineStatus = response.engine_status;
       if (response.reload_started) {
+        enginePreparationPatch = patch;
         enginePreparationRequested = true;
         enginePreparationActive = true;
         enginePreparationObserved = response.engine_status.status === 'loading' || !!response.engine_status.pending;
@@ -709,7 +724,9 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
           await confirmEnginePreparationStatus();
         }
       } else if (response.engine_status.status === 'ready' && !response.engine_status.pending) {
-        pendingEngine = {};
+        if (engineSettingsPatchMatches(patch, serverSettings)) {
+          pendingEngine = clearAppliedEngineSettings(pendingEngine, patch);
+        }
       }
     } catch (error) {
       // Keep pending changes on failure so user can retry
@@ -733,14 +750,12 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
       return;
     }
     if (phase === 'ready') {
-      const candidateCommitted = Object.entries(pendingEngine).every(
-        ([key, value]) => serverSettings?.[key]?.value === value,
-      );
-      if (!candidateCommitted) return;
-      pendingEngine = {};
+      if (!engineSettingsPatchMatches(enginePreparationPatch, serverSettings)) return;
+      pendingEngine = clearAppliedEngineSettings(pendingEngine, enginePreparationPatch);
       enginePreparationRequested = false;
       enginePreparationActive = false;
       enginePreparationObserved = false;
+      enginePreparationPatch = {};
       engineApplyError = '';
     }
   }
@@ -772,10 +787,12 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
     refreshingCommittedSettings = true;
     try {
       if (await loadServerSettings()) {
-        pendingEngine = {};
+        if (!engineSettingsPatchMatches(enginePreparationPatch, serverSettings)) return;
+        pendingEngine = clearAppliedEngineSettings(pendingEngine, enginePreparationPatch);
         enginePreparationRequested = false;
         enginePreparationActive = false;
         enginePreparationObserved = false;
+        enginePreparationPatch = {};
         engineApplyError = '';
       }
     } finally {
@@ -946,8 +963,8 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
                   <p>Compatibility changes require an engine reload.</p>
                   {#if !stagedPreset}
                     <div class="settings-action-row">
-                      <button type="button" class="settings-link" onclick={applyEngineSettings} disabled={engineApplying}>
-                        {engineApplying ? 'preparing…' : preparationFailed ? 'retry changes' : 'apply changes'}
+                      <button type="button" class="settings-link" onclick={() => applyEngineSettings()} disabled={engineApplying || enginePreparationActive}>
+                        {engineApplying || enginePreparationActive ? 'preparing…' : preparationFailed ? 'retry changes' : 'apply changes'}
                       </button>
                       <button type="button" class="settings-link settings-secondary-link" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled}>revert</button>
                     </div>

@@ -42,6 +42,9 @@ const historyFixtureCalls = {
   copyRequests: [] as string[],
   rejectNextCopy: false,
   singleDeleteRequests: [] as string[],
+  singleDeleteGate: null as Promise<void> | null,
+  releaseSingleDelete: null as (() => void) | null,
+  failNextSingleDelete: false,
   bulkDeleteRequests: [] as string[][],
 };
 
@@ -90,6 +93,14 @@ Object.assign(window, {
     },
     deleteHistoryEntry: async (id: string) => {
       historyFixtureCalls.singleDeleteRequests.push(id);
+      if (historyFixtureCalls.singleDeleteGate) {
+        await historyFixtureCalls.singleDeleteGate;
+        historyFixtureCalls.singleDeleteGate = null;
+      }
+      if (historyFixtureCalls.failNextSingleDelete) {
+        historyFixtureCalls.failNextSingleDelete = false;
+        throw new Error('Synthetic history delete failure');
+      }
       removeEntries([id]);
     },
     deleteHistoryEntries: async (ids: string[]) => {

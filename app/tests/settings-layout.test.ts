@@ -78,7 +78,8 @@ describe('Settings redesign contracts', () => {
     expect(settings).toContain("activeSheet = 'model';");
     expect(settings).toContain('presets={speechModelPresets}');
     expect(settings).toContain('onUse={selectPreset}');
-    expect(settings).toContain('function applyEngineSettings()');
+    expect(settings).toContain('async function applyEngineSettings(requestedPatch: Record<string, unknown> = pendingEngine)');
+    expect(settings).toContain('onclick={() => applyEngineSettings()}');
     expect(settings).toContain('function revertEngineSettings()');
     expect(modelSheet).toContain('data-model-sheet-actions');
     expect(modelSheet).toContain('description="Runs on this machine. Nothing you say leaves it."');

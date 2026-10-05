@@ -58,10 +58,12 @@ describe('Settings engine and speech controls', () => {
 
   test('stages model choices and retains explicit apply, retry, and revert behavior', () => {
     expect(settings).toContain('function selectPreset(preset: SpeechModelPreset)');
-    expect(settings).toContain('pendingEngine = { ...pendingEngine, ...presetPatch(preset) }');
-    expect(settings).toContain('function applyEngineSettings()');
+    expect(settings).toContain('const patch = presetPatch(preset);');
+    expect(settings).toContain('pendingEngine = mergeEngineSettingsPatch(pendingEngine, patch);');
+    expect(settings).toContain('async function applyEngineSettings(requestedPatch: Record<string, unknown> = pendingEngine)');
+    expect(settings).toContain('onclick={() => applyEngineSettings()}');
     expect(settings).toContain('function revertEngineSettings()');
-    expect(settings).toContain('void applyEngineSettings();');
+    expect(settings).toContain('void applyEngineSettings(patch);');
     expect(modelSheet).toContain('onUse(draftPreset);');
     expect(modelSheet).toContain("? 'retry preparation' : 'use model'");
     expect(modelSheet).toContain("applying || preparationActive ? 'preparing…'");

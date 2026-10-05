@@ -100,6 +100,14 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
     expect(settingsMarkup).not.toContain('nemotron_device');
   });
 
+  test('routes model Use through only the selected preset patch', () => {
+    expect(settingsViewSource).toContain('const patch = presetPatch(preset);');
+    expect(settingsViewSource).toContain('pendingEngine = mergeEngineSettingsPatch(pendingEngine, patch);');
+    expect(settingsViewSource).toContain('void applyEngineSettings(patch);');
+    expect(settingsViewSource).toContain('onclick={() => applyEngineSettings()}');
+    expect(settingsViewSource).not.toContain('onclick={applyEngineSettings}');
+  });
+
   test('keeps the General and Speech fixture inside one page scroll owner at all zooms', () => {
     expect(measurements.length).toBe(30);
     for (const measurement of measurements) {
@@ -202,7 +210,22 @@ describe('rendered Phase 2 Settings/Speech fixture', () => {
       useEnabledAfterSelection: true,
       pendingAfterUse: 'large-v3',
       startedAfterUse: 'large-v3',
-      selectedAfterUseLabel: 'Maximum Multilingual Accuracy, Selected · Preparing',
+      closedAfterUse: true,
+      submittedPatch: { whisper_model: 'large-v3' },
+      pendingEngineSettings: { whisper_device: 'cuda', whisper_language: 'en', whisper_model: 'large-v3' },
+      committedAdvancedSettings: { whisper_device: 'cpu', whisper_language: 'auto' },
+    });
+  });
+
+  test('submits staged Advanced settings on Apply and retries the same patch after failure', () => {
+    const advancedPatch = { whisper_device: 'cuda', whisper_language: 'en' };
+    expect(result.advancedApplyRetryInteraction).toEqual({
+      firstPatch: advancedPatch,
+      stagedAfterFailure: advancedPatch,
+      errorShownAfterFailure: true,
+      retryLabel: 'Retry compatibility changes',
+      retryPatch: advancedPatch,
+      stagedAfterRetry: {},
     });
   });
 

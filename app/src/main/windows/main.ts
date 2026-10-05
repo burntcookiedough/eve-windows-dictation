@@ -10,10 +10,40 @@ const isDev = ['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase(
 const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173'}`;
 
 let isQuitting = false;
+let quitFlushPending = false;
+let mainWindowForQuit: BrowserWindow | null = null;
 
-// Set up app quit handler once
-app.on('before-quit', () => {
-  isQuitting = true;
+// Wait for deferred History deletes before the app closes its database services.
+app.on('before-quit', (event) => {
+  if (isQuitting) return;
+  const window = mainWindowForQuit;
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
+    isQuitting = true;
+    return;
+  }
+
+  event.preventDefault();
+  if (quitFlushPending) return;
+  quitFlushPending = true;
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timeout = setTimeout(() => resolve('timeout'), 5000);
+  });
+  const flushed = window.webContents
+    .executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')
+    .then(() => 'flushed' as const);
+
+  void Promise.race([flushed, timedOut]).then((result) => {
+    if (result === 'timeout') console.warn('History delete flush timed out during app shutdown.');
+  }).catch((error: unknown) => {
+    console.error('Failed to flush History deletes during app shutdown:', error);
+  }).finally(() => {
+    if (timeout !== undefined) clearTimeout(timeout);
+    isQuitting = true;
+    quitFlushPending = false;
+    app.quit();
+  });
 });
 
 export interface CreateMainWindowOptions {
@@ -65,6 +95,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
       sandbox: false,
     },
   });
+  mainWindowForQuit = mainWindow;
   mainWindow.setBounds(fittedBounds);
 
   // Save window bounds when moved or resized
@@ -109,6 +140,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
   screen.on('display-removed', refitOnDisplayChange);
   screen.on('display-metrics-changed', refitOnDisplayChange);
   mainWindow.once('closed', () => {
+    if (mainWindowForQuit === mainWindow) mainWindowForQuit = null;
     screen.off('display-added', refitOnDisplayChange);
     screen.off('display-removed', refitOnDisplayChange);
     screen.off('display-metrics-changed', refitOnDisplayChange);
