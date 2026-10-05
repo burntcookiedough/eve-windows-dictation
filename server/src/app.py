@@ -25,6 +25,7 @@ from config import (
 )
 from diagnostics import collect_diagnostics
 from legacy_settings import migrate_raw_settings
+from request_boundary import LocalRequestBoundary
 from session.manager import get_session_manager
 from transcription.catalog import model_catalog_payload
 from transcription.factory import (
@@ -236,6 +237,7 @@ def create_app() -> FastAPI:
         version=SERVER_VERSION,
         lifespan=lifespan,
     )
+    app.add_middleware(LocalRequestBoundary)
 
     def serialize_engine_status(status: Any) -> dict[str, Any]:
         """Keep the historical transport name while using runtime statuses."""

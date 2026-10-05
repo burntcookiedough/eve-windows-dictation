@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   lifecycle:
-    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/eve-alpha6-candidate')
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/eve-alpha7-candidate')
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -41,19 +41,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:OS -ne 'Windows_NT') { throw 'This installer gate requires a disposable GitHub-hosted Windows runner.' }
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            if ($env:GITHUB_HEAD_REF -ne 'codex/eve-alpha6-candidate') { throw 'Only the Eve alpha.6 candidate PR may run this expensive gate.' }
-          } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha6-candidate', 'refs/heads/trunk')) {
+            if ($env:GITHUB_HEAD_REF -ne 'codex/eve-alpha7-candidate') { throw 'Only the Eve alpha.7 candidate PR may run this expensive gate.' }
+          } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha7-candidate', 'refs/heads/trunk')) {
             throw "Unexpected ref for installer gate: $env:GITHUB_REF"
           }
           if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the workflow event commit.' }
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
+        with:
+          version: '0.12.23'
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -61,11 +58,11 @@ jobs:
       - name: Prepare release server dependencies
         shell: pwsh
         working-directory: server
-        run: uv sync --python 3.11 --no-dev --extra release --frozen
+        run: uv sync --python 3.11.17 --no-dev --extra release --frozen
 
       - name: Prepare relocatable Python runtime
         shell: pwsh
-        run: ./scripts/prepare-python-runtime.ps1
+        run: ./scripts/prepare-python-runtime.ps1 -PythonVersion 3.11.17
 
       - name: Install app dependencies
         shell: pwsh
@@ -74,7 +71,7 @@ jobs:
 
       - name: Check candidate version
         shell: pwsh
-        run: python scripts/version.py check --tag v0.8.2-alpha.6
+        run: uv run --no-project --python 3.11.17 python scripts/version.py check --tag v0.8.2-alpha.7
 
       - name: Build candidate Windows web installer
         shell: pwsh

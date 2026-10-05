@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 let clipboardText = '';
 let clipboardFormats: string[] = [];
 let clipboardWrites: string[] = [];
+const clipboardReadText = mock(async () => clipboardText);
+const clipboardRead = mock(async () => [{ types: [...clipboardFormats] }]);
+const clipboardWriteText = mock(async (text: string) => {
+  clipboardText = text;
+  clipboardFormats = ['text/plain'];
+  clipboardWrites.push(text);
+});
 const execFile = mock((
   command: string,
   args: string[],
@@ -22,13 +29,9 @@ mock.module('electron', () => ({
     getPath: () => process.env.TEMP ?? '.',
   },
   clipboard: {
-    readText: () => clipboardText,
-    availableFormats: () => [...clipboardFormats],
-    writeText: (text: string) => {
-      clipboardText = text;
-      clipboardFormats = ['text/plain'];
-      clipboardWrites.push(text);
-    },
+    readText: clipboardReadText,
+    read: clipboardRead,
+    writeText: clipboardWriteText,
   },
 }));
 
@@ -37,14 +40,150 @@ mock.module('child_process', () => ({
   spawn,
 }));
 
-const { buildSendInputScriptContent, getForegroundWindowHandle, pasteText, simulatePaste } = await import('../src/main/services/clipboard.js');
+const {
+  buildSendInputScriptContent,
+  copyToClipboard,
+  getForegroundWindowHandle,
+  pasteText,
+  readFromClipboard,
+  simulatePaste,
+} = await import('../src/main/services/clipboard.js');
 
 describe('pasteText', () => {
   beforeEach(() => {
     clipboardText = 'previous';
     clipboardFormats = ['text/plain'];
     clipboardWrites = [];
+    clipboardReadText.mockClear();
+    clipboardReadText.mockImplementation(async () => clipboardText);
+    clipboardRead.mockClear();
+    clipboardRead.mockImplementation(async () => [{ types: [...clipboardFormats] }]);
+    clipboardWriteText.mockClear();
+    clipboardWriteText.mockImplementation(async (text: string) => {
+      clipboardText = text;
+      clipboardFormats = ['text/plain'];
+      clipboardWrites.push(text);
+    });
     execFile.mockClear();
+  });
+
+  test('waits for Electron to finish a clipboard write before resolving copy', async () => {
+    let finishWrite: (() => void) | undefined;
+    clipboardWriteText.mockImplementationOnce((text: string) => new Promise((resolve) => {
+      finishWrite = () => {
+        clipboardText = text;
+        clipboardFormats = ['text/plain'];
+        clipboardWrites.push(text);
+        resolve();
+      };
+    }));
+
+    let copied = false;
+    const copy = copyToClipboard('copied text').then(() => { copied = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(copied).toBe(false);
+    expect(clipboardWrites).toEqual([]);
+    finishWrite?.();
+    await copy;
+
+    expect(copied).toBe(true);
+    expect(clipboardWrites).toEqual(['copied text']);
+  });
+
+  test('rejects copy when Electron rejects the clipboard write', async () => {
+    clipboardWriteText.mockImplementationOnce(async () => {
+      throw new Error('synthetic write failure');
+    });
+
+    await expect(copyToClipboard('copied text')).rejects.toThrow('Could not write to clipboard.');
+    expect(clipboardWrites).toEqual([]);
+  });
+
+  test('returns Electron clipboard text asynchronously', async () => {
+    clipboardText = 'synthetic clipboard text';
+
+    await expect(readFromClipboard()).resolves.toBe('synthetic clipboard text');
+  });
+
+  test('handles a rejected delayed restore write without exposing its error', async () => {
+    await pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    });
+    clipboardWriteText.mockImplementationOnce(async () => {
+      throw new Error('synthetic restore failure');
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardWrites).toEqual(['new text']);
+    expect(clipboardText).toBe('new text');
+  });
+
+  test('does not write or simulate paste when a clipboard read fails', async () => {
+    clipboardReadText.mockImplementationOnce(async () => {
+      throw new Error('synthetic read failure');
+    });
+
+    await expect(pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    })).rejects.toThrow('synthetic read failure');
+
+    expect(clipboardWrites).toEqual([]);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('does not restore after a newer paste starts while an ownership read is pending', async () => {
+    await pasteText('first text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    });
+
+    let finishRead: ((text: string) => void) | undefined;
+    clipboardReadText.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRead = resolve;
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(finishRead).toBeDefined();
+
+    const secondPaste = pasteText('second text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    });
+    finishRead?.('first text');
+    await secondPaste;
+
+    expect(clipboardWrites).toEqual(['first text', 'second text']);
+    expect(clipboardText).toBe('second text');
+  });
+
+  test('does not restore over a manual clipboard change observed by an async read', async () => {
+    await pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    });
+
+    let finishRead: ((text: string) => void) | undefined;
+    clipboardReadText.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRead = resolve;
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(finishRead).toBeDefined();
+
+    clipboardText = 'user text';
+    clipboardFormats = ['text/plain', 'text/html'];
+    finishRead?.(clipboardText);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(clipboardWrites).toEqual(['new text']);
+    expect(clipboardText).toBe('user text');
   });
 
   test('keeps pasted text on the clipboard long enough before restoring', async () => {

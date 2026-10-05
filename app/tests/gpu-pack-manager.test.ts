@@ -6,6 +6,7 @@ import path from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
 import {
   createGpuPackManager,
+  PINNED_GPU_PACK_DESCRIPTOR,
   type GpuPackAssetDescriptor,
   type GpuPackDescriptor,
   type GpuPackIdentity,
@@ -98,6 +99,48 @@ function managerFor(
 }
 
 describe('GPU pack manager', () => {
+  test('production descriptor accepts alpha.7 and rejects a different app identity', async () => {
+    const appPackage = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { version: string };
+    const root = await temporaryRoot();
+    const productionIdentity: GpuPackIdentity = {
+      appBuildId: appPackage.version,
+      ctranslate2BuildId: PINNED_GPU_PACK_DESCRIPTOR.ctranslate2BuildId,
+      platform: PINNED_GPU_PACK_DESCRIPTOR.platform,
+    };
+    let assetRequests = 0;
+    const source = async () => {
+      assetRequests += 1;
+      throw new Error('The production descriptor check must not download assets');
+    };
+
+    expect(PINNED_GPU_PACK_DESCRIPTOR.appBuildId).toBe('0.8.2-alpha.7');
+    const compatible = createGpuPackManager({
+      root,
+      descriptor: PINNED_GPU_PACK_DESCRIPTOR,
+      identity: productionIdentity,
+      source,
+    });
+    expect((await compatible.getState()).status).toBe('missing');
+
+    const incompatible = createGpuPackManager({
+      root: `${root}-wrong-identity`,
+      descriptor: PINNED_GPU_PACK_DESCRIPTOR,
+      identity: { ...productionIdentity, appBuildId: '0.8.2-alpha.6' },
+      source,
+    });
+    expect(await incompatible.getState()).toEqual({
+      status: 'unavailable',
+      code: 'incompatible_build',
+    });
+    expect(await incompatible.install()).toEqual({
+      status: 'unavailable',
+      code: 'incompatible_build',
+    });
+    expect(assetRequests).toBe(0);
+  });
+
   test('missing pinned descriptor is unavailable and does not touch disk or network', async () => {
     const root = await temporaryRoot();
     const data = fixture();
