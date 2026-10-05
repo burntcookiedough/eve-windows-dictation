@@ -41,7 +41,7 @@ describe('shared primary-page and dropdown foundation', () => {
     expect(appCss).toContain('max-width: 600px;');
     expect(appCss).toContain('overflow-y: auto;');
     expect(appCss).toContain('overscroll-behavior: contain;');
-    expect(appCss).toContain('scrollbar-gutter: stable;');
+    expect(appCss).toContain('scrollbar-width: none;');
     expect(primaryPage).toContain('data-scroll-owner={scrollOwner}');
     expect(appCss).toMatch(/html,\s*body,\s*#app\s*\{[\s\S]*?overflow: hidden;/);
     expect(history).not.toContain('flex-1 overflow-y-auto');
