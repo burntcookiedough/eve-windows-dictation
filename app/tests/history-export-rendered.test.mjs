@@ -162,11 +162,13 @@ describe('rendered History export controls', () => {
     });
     expect(result.historyControls.singleDelete.retainedSelection.historyRequests)
       .toBe(result.historyControls.singleDelete.requestsBeforeBackgroundCommit);
-    expect(result.historyControls.queueFlush).toEqual({
-      waitedForAcknowledgement: true,
-      completed: true,
-      recovery: { entryRestored: true, undoHidden: true, failureToast: 'Delete failed; transcription restored' },
-    });
+    for (const lifecycleEvent of ['visibilitychange', 'pagehide']) {
+      expect(result.historyControls.queueFlush[lifecycleEvent]).toEqual({
+        waitedForAcknowledgement: true,
+        completed: true,
+        recovery: { entryRestored: true, undoHidden: true, failureToast: 'Delete failed; transcription restored' },
+      });
+    }
   });
 
   test('selects the current filtered IDs and confirms bulk deletion through the bridge', () => {

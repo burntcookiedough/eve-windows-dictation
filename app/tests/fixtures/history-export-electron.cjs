@@ -239,48 +239,58 @@ async function main() {
       },
     };
 
-    fixtureStep = 'visibility delete failure restores History';
-    await window.webContents.executeJavaScript(`(() => {
-      window.historyFixtureCalls.failNextSingleDelete = true;
-      window.historyFixtureCalls.singleDeleteGate = new Promise((resolve) => {
-        window.historyFixtureCalls.releaseSingleDelete = resolve;
-      });
-    })()`);
-    await clickSelector(window, '[data-history-entry="fixture-1"] .entry-preview');
-    await clickSelector(window, '[data-history-entry="fixture-1"] [data-history-entry-delete]');
-    await window.webContents.executeJavaScript(`(() => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-      document.dispatchEvent(new Event('visibilitychange'));
-    })()`);
-    await waitForFixtureState(window, 'window.historyFixtureCalls.singleDeleteRequests.at(-1) ?? null', (id) => id === 'fixture-1', 'hidden-page delete flush');
-    await window.webContents.executeJavaScript(`(() => {
-      window.historyFixtureCalls.flushSettled = false;
-      window.__historyQuitFlushPromise = window.__flushDeferredHistoryDeletesOnQuit();
-      window.__historyQuitFlushPromise.then(() => { window.historyFixtureCalls.flushSettled = true; });
-    })()`);
-    const waitedForQueueAcknowledgement = await window.webContents.executeJavaScript('new Promise((resolve) => setTimeout(() => resolve(!window.historyFixtureCalls.flushSettled), 100))');
-    if (!waitedForQueueAcknowledgement) throw new Error('History flush resolved before the pending delete was acknowledged');
-    await window.webContents.executeJavaScript('window.historyFixtureCalls.releaseSingleDelete()');
-    const visibilityFailureRecovery = await waitForFixtureState(window, `({
-      entryRestored: !!document.querySelector('[data-history-entry="fixture-1"]'),
-      undoHidden: !document.querySelector('.undo-list button'),
-      failureToast: window.historyToastState().at(-1)?.message ?? null,
-      flushSettled: window.historyFixtureCalls.flushSettled,
-    })`, (state) => state?.entryRestored && state?.undoHidden && state?.flushSettled && state?.failureToast === 'Delete failed; transcription restored', 'failed delete restores entry after flush acknowledgement');
-    historyControls.queueFlush = {
-      waitedForAcknowledgement: waitedForQueueAcknowledgement,
-      completed: visibilityFailureRecovery.flushSettled,
-      recovery: {
-        entryRestored: visibilityFailureRecovery.entryRestored,
-        undoHidden: visibilityFailureRecovery.undoHidden,
-        failureToast: visibilityFailureRecovery.failureToast,
-      },
-    };
-    await window.webContents.executeJavaScript(`(() => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
-      document.dispatchEvent(new Event('visibilitychange'));
-    })()`);
-    await waitForEntryIds(window, ['fixture-1'], 'History after quit-flush visibility recovery');
+    historyControls.queueFlush = {};
+    for (const lifecycleEvent of ['visibilitychange', 'pagehide']) {
+      fixtureStep = `${lifecycleEvent} delete failure restores History`;
+      const requestsBeforeFlush = await window.webContents.executeJavaScript('window.historyFixtureCalls.singleDeleteRequests.length');
+      await window.webContents.executeJavaScript(`(() => {
+        window.historyFixtureCalls.failNextSingleDelete = true;
+        window.historyFixtureCalls.singleDeleteGate = new Promise((resolve) => {
+          window.historyFixtureCalls.releaseSingleDelete = resolve;
+        });
+      })()`);
+      const entryExpanded = await window.webContents.executeJavaScript(`!!document.querySelector('[data-history-entry="fixture-1"] [data-history-entry-delete]')`);
+      if (!entryExpanded) await clickSelector(window, '[data-history-entry="fixture-1"] .entry-preview');
+      await clickSelector(window, '[data-history-entry="fixture-1"] [data-history-entry-delete]');
+      await window.webContents.executeJavaScript(`(() => {
+        if (${JSON.stringify(lifecycleEvent)} === 'pagehide') {
+          window.dispatchEvent(new Event('pagehide'));
+          window.dispatchEvent(new Event('pagehide'));
+        } else {
+          Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+          document.dispatchEvent(new Event('visibilitychange'));
+        }
+      })()`);
+      await waitForFixtureState(window, 'window.historyFixtureCalls.singleDeleteRequests.length', (count) => count === requestsBeforeFlush + 1, `${lifecycleEvent} delete flush`);
+      await window.webContents.executeJavaScript(`(() => {
+        window.historyFixtureCalls.flushSettled = false;
+        window.__historyQuitFlushPromise = window.__flushDeferredHistoryDeletesOnQuit();
+        window.__historyQuitFlushPromise.then(() => { window.historyFixtureCalls.flushSettled = true; });
+      })()`);
+      const waitedForQueueAcknowledgement = await window.webContents.executeJavaScript('new Promise((resolve) => setTimeout(() => resolve(!window.historyFixtureCalls.flushSettled), 100))');
+      if (!waitedForQueueAcknowledgement) throw new Error('History flush resolved before the pending delete was acknowledged');
+      await window.webContents.executeJavaScript('window.historyFixtureCalls.releaseSingleDelete()');
+      const visibilityFailureRecovery = await waitForFixtureState(window, `({
+        entryRestored: !!document.querySelector('[data-history-entry="fixture-1"]'),
+        undoHidden: !document.querySelector('.undo-list button'),
+        failureToast: window.historyToastState().at(-1)?.message ?? null,
+        flushSettled: window.historyFixtureCalls.flushSettled,
+      })`, (state) => state?.entryRestored && state?.undoHidden && state?.flushSettled && state?.failureToast === 'Delete failed; transcription restored', 'failed delete restores entry after flush acknowledgement');
+      historyControls.queueFlush[lifecycleEvent] = {
+        waitedForAcknowledgement: waitedForQueueAcknowledgement,
+        completed: visibilityFailureRecovery.flushSettled,
+        recovery: {
+          entryRestored: visibilityFailureRecovery.entryRestored,
+          undoHidden: visibilityFailureRecovery.undoHidden,
+          failureToast: visibilityFailureRecovery.failureToast,
+        },
+      };
+      await window.webContents.executeJavaScript(`(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        document.dispatchEvent(new Event('visibilitychange'));
+      })()`);
+      await waitForEntryIds(window, ['fixture-1'], 'History after quit-flush visibility recovery');
+    }
 
     allExportRequest = await window.webContents.executeJavaScript(`(() => {
       document.querySelector('[data-history-export-all]')?.click();

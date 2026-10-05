@@ -104,3 +104,7 @@ function dispatchDeleteCommitted(id: string, deleted: boolean): void {
 
 const quitFlushWindow = window as Window & { __flushDeferredHistoryDeletesOnQuit?: () => Promise<void> };
 quitFlushWindow.__flushDeferredHistoryDeletesOnQuit = flushDeferredHistoryDeletes;
+
+window.addEventListener('pagehide', () => {
+  void flushDeferredHistoryDeletes();
+});
