@@ -69,7 +69,7 @@ async function main() {
       backgroundColor: '#08090a',
       webPreferences: { contextIsolation: true, nodeIntegration: false, offscreen: true },
     });
-    window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    window.webContents.on('console-message', ({ level, message, lineNumber: line, sourceId }) => {
       process.stderr.write(`renderer console ${level} ${sourceId}:${line}: ${message}\n`);
     });
     window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {

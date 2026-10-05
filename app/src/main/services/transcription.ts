@@ -207,7 +207,7 @@ export class TranscriptionService {
   private handleMessage(data: string): void {
     const frame = parseServerFrame(data);
     if (!frame) {
-      log.warn('Failed to parse server frame', { data });
+      log.warn('Failed to parse server frame', { dataLength: data.length });
       return;
     }
 

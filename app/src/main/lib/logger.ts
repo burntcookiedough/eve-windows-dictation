@@ -14,7 +14,7 @@
  *   error - Failures (always on)
  *
  * Output format (slog-style):
- *   [2024-01-15 14:32:07] INFO  [Clipboard] Writing text length=12 text="Hello"
+ *   [2024-01-15 14:32:07] DEBUG [Clipboard] Writing text length=12
  */
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';

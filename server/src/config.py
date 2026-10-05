@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from contextvars import ContextVar
 from pathlib import Path
@@ -64,7 +65,7 @@ def _load_settings_json() -> dict[str, Any]:
                     logger.warning(
                         "Could not persist migrated settings; continuing with in-memory values."
                     )
-            return outcome.values
+            return _normalize_trusted_partial_interval(outcome.values)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read settings.json: %s", e)
     return {}
@@ -83,7 +84,7 @@ def _load_environment_settings(env_settings: Any) -> dict[str, Any]:
     outcome = legacy_settings.migrate_raw_settings(values)
     if outcome.migrated and outcome.diagnostic:
         logger.warning("Environment settings migration: %s", outcome.diagnostic)
-    return outcome.values
+    return _normalize_trusted_partial_interval(outcome.values)
 
 
 def _load_dotenv_settings(dotenv_settings: Any) -> dict[str, Any]:
@@ -92,7 +93,22 @@ def _load_dotenv_settings(dotenv_settings: Any) -> dict[str, Any]:
     outcome = legacy_settings.migrate_raw_settings(dict(dotenv_settings()))
     if outcome.migrated and outcome.diagnostic:
         logger.warning("Dotenv settings migration: %s", outcome.diagnostic)
-    return outcome.values
+    return _normalize_trusted_partial_interval(outcome.values)
+
+
+def _normalize_trusted_partial_interval(values: dict[str, Any]) -> dict[str, Any]:
+    """Clamp finite positive persisted values to the current supported range."""
+    normalized = dict(values)
+    raw = normalized.get("partial_emission_interval")
+    if isinstance(raw, bool):
+        return normalized
+    try:
+        interval = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return normalized
+    if math.isfinite(interval) and interval > 0:
+        normalized["partial_emission_interval"] = min(2.0, max(0.1, interval))
+    return normalized
 
 
 class Settings(BaseSettings):
@@ -147,7 +163,7 @@ class Settings(BaseSettings):
     whisper_vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
     # Transcription settings
-    partial_emission_interval: float = Field(default=0.25, gt=0.0)
+    partial_emission_interval: float = Field(default=0.25, ge=0.1, le=2.0)
     min_audio_for_transcription: float = 0.15
     transcription_max_workers: int = Field(default=1, ge=1, le=4)
     allow_overlapping_inference: bool = False
@@ -163,6 +179,13 @@ class Settings(BaseSettings):
     _requested_whisper_compute_type: str = PrivateAttr(default="auto")
     _effective_whisper_config: EffectiveWhisperConfig | None = PrivateAttr(default=None)
     _explicit_patch_keys: frozenset[str] | None = PrivateAttr(default=None)
+
+    @field_validator("partial_emission_interval", mode="before")
+    @classmethod
+    def reject_boolean_partial_interval(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("Partial emission interval must be a number.")
+        return value
 
     @field_validator("whisper_language", mode="before")
     @classmethod

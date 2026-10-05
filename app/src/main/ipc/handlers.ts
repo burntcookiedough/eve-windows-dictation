@@ -86,21 +86,21 @@ export function setupIpcHandlers(
 
   // Handle clipboard copy requests
   ipcMain.on(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: string) => {
-    copyToClipboard(text);
+    void copyToClipboard(text).catch(() => {});
   });
-  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, (_event, text: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, async (_event, text: unknown) => {
     if (typeof text !== 'string') throw new TypeError('Clipboard text must be a string.');
-    copyToClipboard(text);
+    await copyToClipboard(text);
   });
 
-  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS, () => {
+  ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS, async () => {
     const report = formatDiagnosticsReport({
       appVersion: app.getVersion(),
       windowsRelease: release(),
       architecture: arch(),
       serverState: serverManagerRef?.getState(),
     });
-    copyToClipboard(report);
+    await copyToClipboard(report);
   });
 
   // Handle settings requests

@@ -222,7 +222,7 @@ const events = [];
     const eveRoot = path.join(appData, 'Eve');
     const { electronVersion, ...smokeState } = smoke;
 
-    expect(electronVersion).toMatch(/^40\./);
+    expect(electronVersion).toMatch(/^44\./);
     expect(smokeState).toEqual({
       loaded: true,
       events: [
@@ -281,7 +281,7 @@ const events = [];
     };
     const qaEveRoot = path.join(qaCanonicalAppData, 'Eve');
     const { electronVersion: qaElectronVersion, ...qaSmokeState } = qaSmoke;
-    expect(qaElectronVersion).toMatch(/^40\./);
+    expect(qaElectronVersion).toMatch(/^44\./);
     expect(qaSmokeState).toEqual({
       loaded: true,
       events: [

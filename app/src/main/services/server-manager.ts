@@ -698,6 +698,7 @@ export class ServerManager {
       const childEnv = buildChildEnvironment(process.env, serverCmd.env, {
         MURMUR_PID_FILE: this.getPidFilePath(),
         MURMUR_SETTINGS_FILE: path.join(app.getPath('userData'), 'server-settings.json'),
+        MURMUR_HOST: '127.0.0.1',
         MURMUR_PORT: '0',
       });
       if (!expectedRuntime?.gpuRuntime) {

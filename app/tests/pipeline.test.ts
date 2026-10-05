@@ -3,7 +3,7 @@ import type { TextFrameFinal } from '../src/shared/protocol.js';
 import type { Settings, TranscriptionEntry } from '../src/shared/types.js';
 
 const pasteText = mock(async () => {});
-const copyToClipboard = mock(() => {});
+const copyToClipboard = mock(async () => {});
 
 mock.module('../src/main/services/clipboard.js', () => ({
   pasteText,
@@ -83,6 +83,27 @@ describe('processFinalTranscription', () => {
 
     expect(pasteText).not.toHaveBeenCalled();
     expect(copyToClipboard).toHaveBeenCalledWith('Hello from murmur.');
+  });
+
+  test('keeps auto-copy dispatch pending until the clipboard write resolves', async () => {
+    let finishCopy: (() => void) | undefined;
+    copyToClipboard.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCopy = resolve;
+    }));
+
+    let completed = false;
+    const dispatch = processFinalTranscription(
+      frame,
+      { ...settings, autoPaste: false, autoCopy: true },
+      null,
+      'quick'
+    ).then(() => { completed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(completed).toBe(false);
+    finishCopy?.();
+    await dispatch;
+    expect(completed).toBe(true);
   });
 
   test('copies text when auto-paste fails and auto-copy is enabled', async () => {

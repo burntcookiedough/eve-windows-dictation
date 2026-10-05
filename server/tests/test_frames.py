@@ -65,6 +65,24 @@ class TestStartFrame:
         with pytest.raises(ValidationError):
             StartFrame(silence_timeout=-1.0)
 
+    def test_partial_emission_interval_matches_supported_range(self) -> None:
+        """Reject client values that can spin or oversleep the partial loop."""
+        assert StartFrame(
+            silence_timeout=5.0,
+            partial_emission_interval=0.1,
+        ).partial_emission_interval == 0.1
+        assert StartFrame(
+            silence_timeout=5.0,
+            partial_emission_interval=2.0,
+        ).partial_emission_interval == 2.0
+
+        for value in (1e-300, 0.099, 2.001):
+            with pytest.raises(ValidationError):
+                StartFrame(
+                    silence_timeout=5.0,
+                    partial_emission_interval=value,
+                )
+
     def test_start_frame_serialization(self) -> None:
         """Start frame serializes correctly."""
         frame = StartFrame(silence_timeout=5.0)

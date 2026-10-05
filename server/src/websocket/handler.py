@@ -25,6 +25,7 @@ from transcription.processor import TranscriptionProcessor
 from websocket.sender import FrameSender
 
 logger = logging.getLogger(__name__)
+FIRST_AUDIO_TIMEOUT_SECONDS = 30.0
 
 
 async def websocket_handler(websocket: WebSocket) -> None:
@@ -408,11 +409,9 @@ async def _partial_emission_loop(
                 "[%s] Error in partial emission: %s", context.session_id, e
             )
 
-        # Adaptive sleep: only wait for remaining time to hit min_interval
+        # Adaptive sleep: yield even when transcription took longer than the interval.
         elapsed = time.monotonic() - cycle_start
-        remaining = min_interval - elapsed
-        if remaining > 0:
-            await asyncio.sleep(remaining)
+        await asyncio.sleep(max(0.0, min_interval - elapsed))
 
 
 async def _silence_monitor_loop(
@@ -423,10 +422,15 @@ async def _silence_monitor_loop(
 ) -> None:
     """Background task for monitoring silence and audio reception timeouts.
 
-    Two timeout conditions are checked:
-    1. Speech-based silence: No speech detected for silence_timeout seconds
-    2. Audio reception: No audio frames received for silence_timeout seconds
+    Three timeout conditions are checked:
+    1. The client sent start but never sent its first audio frame
+    2. Speech-based silence: No speech detected for silence_timeout seconds
+    3. Audio reception: No audio frames received for silence_timeout seconds
     """
+    # The managed client waits for server readiness before asking the renderer
+    # to open the microphone, which can include a first-use permission prompt.
+    first_audio_timeout = FIRST_AUDIO_TIMEOUT_SECONDS
+
     while context.state_machine.is_active():
         await asyncio.sleep(0.5)  # Check every 500ms
 
@@ -462,6 +466,28 @@ async def _silence_monitor_loop(
         # Check 2: Speech-based silence timeout
         # Only check after we've received some audio
         if not context.audio_buffer.has_audio():
+            if (
+                context.started_at is not None
+                and now - context.started_at >= first_audio_timeout
+            ):
+                logger.info(
+                    "[%s] First audio frame timeout (no audio within %.1fs)",
+                    context.session_id,
+                    first_audio_timeout,
+                )
+                try:
+                    await _finalize_session(
+                        sender, context, processor, ClosingReason.SILENCE_TIMEOUT
+                    )
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        logger.debug(
+                            "[%s] WebSocket already closed after first-audio timeout",
+                            context.session_id,
+                        )
+                return
             continue
 
         # Calculate silence duration based on speech detection

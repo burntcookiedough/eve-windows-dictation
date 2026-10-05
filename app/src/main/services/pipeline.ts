@@ -91,7 +91,7 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
     appendPeriod: settings.appendPeriod,
     appendSpace: settings.appendSpace,
     dictationMode: settings.dictationMode,
-    input: rawText,
+    inputLength: rawText.length,
   });
 
   text = applyDictationMode(text, settings.dictationMode);
@@ -109,7 +109,7 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
     text += ' ';
   }
 
-  log.debug('Post-processing complete', { output: text });
+  log.debug('Post-processing complete', { outputLength: text.length });
 
   return {
     ...entry,
@@ -141,14 +141,22 @@ export async function dispatchToOutputs(
         method: settings.pasteMethod,
         targetWindowHandle: pasteTargetWindowHandle,
       });
-    } catch (err) {
-      log.error('Auto-paste failed', { error: err as Error });
+    } catch {
+      log.error('Auto-paste failed');
       if (settings.autoCopy) {
-        copyToClipboard(entry.text);
+        try {
+          await copyToClipboard(entry.text);
+        } catch {
+          log.error('Automatic clipboard fallback failed');
+        }
       }
     }
   } else if (settings.autoCopy && entry.text) {
-    copyToClipboard(entry.text);
+    try {
+      await copyToClipboard(entry.text);
+    } catch {
+      log.error('Automatic clipboard copy failed');
+    }
   }
 
   // Save to history

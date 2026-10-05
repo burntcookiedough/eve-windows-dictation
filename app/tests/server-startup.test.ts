@@ -96,13 +96,14 @@ describe('packaged server startup timing', () => {
       {
         Path: 'system-path',
         KEEP_ME: 'base-value',
+        MURMUR_HOST: '0.0.0.0',
       },
       {
         PATH: 'torch-path;system-path',
         path: 'stale-case-variant',
         SERVER_ONLY: 'server-value',
       },
-      { MURMUR_PORT: '0' },
+      { MURMUR_HOST: '127.0.0.1', MURMUR_PORT: '0' },
     );
 
     const pathKeys = Object.keys(childEnvironment).filter(
@@ -112,6 +113,13 @@ describe('packaged server startup timing', () => {
     expect(childEnvironment.PATH).toBe('torch-path;system-path');
     expect(childEnvironment.KEEP_ME).toBe('base-value');
     expect(childEnvironment.SERVER_ONLY).toBe('server-value');
+    expect(childEnvironment.MURMUR_HOST).toBe('127.0.0.1');
     expect(childEnvironment.MURMUR_PORT).toBe('0');
+
+    const managerSource = readFileSync(
+      new URL('../src/main/services/server-manager.ts', import.meta.url),
+      'utf8',
+    );
+    expect(managerSource).toContain("MURMUR_HOST: '127.0.0.1'");
   });
 });

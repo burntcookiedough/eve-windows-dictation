@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $script:ProductGuid = '0204d005-75b3-5b31-b1f6-ef2831e2b204'
 $script:BaselineTag = 'v0.8.2-alpha.5'
 $script:BaselineVersion = '0.8.2-alpha.5'
-$script:CandidateVersion = '0.8.2-alpha.6'
+$script:CandidateVersion = '0.8.2-alpha.7'
 $script:Repository = 'burntcookiedough/eve-windows-dictation'
 $script:OwnedAppPid = $null
 $script:OwnedServerPid = $null
@@ -43,8 +43,8 @@ function Assert-CiHost {
         throw 'Runner temp and checkout must share a volume so build artifacts can be moved without duplicate payload copies.'
     }
     if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-        if ($env:GITHUB_HEAD_REF -ne 'codex/eve-alpha6-candidate') { throw 'Only the approved candidate PR may run this installer gate.' }
-    } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha6-candidate', 'refs/heads/trunk')) {
+        if ($env:GITHUB_HEAD_REF -ne 'codex/eve-alpha7-candidate') { throw 'Only the approved candidate PR may run this installer gate.' }
+    } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha7-candidate', 'refs/heads/trunk')) {
         throw "Unexpected ref for installer execution: $env:GITHUB_REF"
     }
 }
@@ -399,10 +399,10 @@ function Assert-SyntheticSentinels {
     $userData = Join-Path $script:ProfileRoot 'Eve'
     $profileSentinel = Join-Path $userData 'installer-lifecycle-sentinel.txt'
     $cacheSentinel = Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt'
-    if (-not (Test-Path -LiteralPath $profileSentinel -PathType Leaf) -or (Get-Content -LiteralPath $profileSentinel -Raw) -ne 'eve-alpha6-profile-sentinel') {
+    if (-not (Test-Path -LiteralPath $profileSentinel -PathType Leaf) -or (Get-Content -LiteralPath $profileSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') {
         throw 'Synthetic Eve profile sentinel was removed or changed.'
     }
-    if (-not (Test-Path -LiteralPath $cacheSentinel -PathType Leaf) -or (Get-Content -LiteralPath $cacheSentinel -Raw) -ne 'eve-alpha6-cache-sentinel') {
+    if (-not (Test-Path -LiteralPath $cacheSentinel -PathType Leaf) -or (Get-Content -LiteralPath $cacheSentinel -Raw) -ne 'eve-alpha7-cache-sentinel') {
         throw 'Synthetic model cache sentinel was removed or changed.'
     }
 }
@@ -443,7 +443,7 @@ function Invoke-InstalledCpuInference {
     $sitePackages = Join-Path $serverRoot '.venv\Lib\site-packages'
     $audioPath = Join-Path $script:RepoRoot 'server\tests\ui\test_audio.wav'
     if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf) -or -not (Test-Path -LiteralPath $sitePackages -PathType Container)) {
-        throw 'Installed alpha.6 bundled Python or Faster-Whisper environment is missing.'
+        throw 'Installed alpha.7 bundled Python or Faster-Whisper environment is missing.'
     }
     if (-not (Test-Path -LiteralPath $audioPath -PathType Leaf) -or -not (Assert-PathWithin -Path $audioPath -Root $script:RepoRoot)) {
         throw 'The repository-controlled transcription fixture is missing or outside the checkout.'
@@ -513,10 +513,10 @@ print(json.dumps({
     if ($LASTEXITCODE -ne 0) { throw "Bundled CPU transcription probe failed with exit code $LASTEXITCODE." }
     $report = ($output | Out-String | ConvertFrom-Json -Depth 10)
     if ($report.has_text -ne $true -or [int]$report.segment_count -le 0 -or [int]$report.character_count -le 0) {
-        throw 'Installed alpha.6 CPU inference returned no transcription text.'
+        throw 'Installed alpha.7 CPU inference returned no transcription text.'
     }
     if (@($report.nvidia_modules).Count -ne 0) { throw "CPU inference loaded NVIDIA modules: $(@($report.nvidia_modules) -join ', ')" }
-    Write-Step "Installed alpha.6 CPU inference produced text (segments=$($report.segment_count), characters=$($report.character_count)); no cuBLAS/nvcuda modules loaded."
+    Write-Step "Installed alpha.7 CPU inference produced text (segments=$($report.segment_count), characters=$($report.character_count)); no cuBLAS/nvcuda modules loaded."
 }
 
 function Uninstall-Current {
@@ -552,8 +552,8 @@ function Move-And-CleanBuildOutput {
         Move-Item -LiteralPath $path -Destination $CandidateDir
     }
     $latest = Get-Content -LiteralPath (Join-Path $CandidateDir 'latest.yml') -Raw
-    if ($latest -notmatch [regex]::Escape($script:CandidateVersion) -or $latest -notmatch 'murmur-0\.8\.2-alpha\.6-x64\.nsis\.7z') {
-        throw 'Candidate latest.yml does not identify the alpha.6 setup and payload.'
+    if ($latest -notmatch [regex]::Escape($script:CandidateVersion) -or $latest -notmatch 'murmur-0\.8\.2-alpha\.7-x64\.nsis\.7z') {
+        throw 'Candidate latest.yml does not identify the alpha.7 setup and payload.'
     }
     foreach ($relative in @('app\release', 'app\node_modules', 'server\.venv', 'server\.runtime')) {
         $path = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..') $relative))
@@ -565,7 +565,7 @@ function Move-And-CleanBuildOutput {
 
 Assert-CiHost
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$script:RunRoot = Join-Path $env:RUNNER_TEMP "eve-alpha6-installer-lifecycle-$env:GITHUB_RUN_ID"
+$script:RunRoot = Join-Path $env:RUNNER_TEMP "eve-alpha7-installer-lifecycle-$env:GITHUB_RUN_ID"
 if (Test-Path -LiteralPath $script:RunRoot) { throw 'Unique runner temp lifecycle directory already exists; refusing to clear it.' }
 New-Item -ItemType Directory -Path $script:RunRoot | Out-Null
 if (-not (Assert-PathWithin -Path $script:RunRoot -Root $env:RUNNER_TEMP)) { throw 'Lifecycle scratch directory escaped runner temp.' }
@@ -591,7 +591,7 @@ Download-VerifiedBaseline -Destination $script:BaselineArtifactDir
 
 $profileSentinel = Join-Path $script:ProfileRoot 'Eve\installer-lifecycle-sentinel.txt'
 $cacheSentinel = Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt'
-Set-Content -LiteralPath $cacheSentinel -Value 'eve-alpha6-cache-sentinel' -NoNewline
+Set-Content -LiteralPath $cacheSentinel -Value 'eve-alpha7-cache-sentinel' -NoNewline
 $env:HF_HOME = $script:CacheRoot
 $env:HF_HUB_CACHE = Join-Path $script:CacheRoot 'hub'
 $env:MURMUR_ENGINE = 'whisper'
@@ -602,9 +602,9 @@ $env:CUDA_VISIBLE_DEVICES = '-1'
 $env:PYTHONNOUSERSITE = '1'
 
 $baselineInstaller = Join-Path $script:BaselineArtifactDir 'Eve.Web.Setup.0.8.2-alpha.5.exe'
-$candidateInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.6.exe'
+$candidateInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.7.exe'
 $baselinePayload = Join-Path $script:BaselineArtifactDir 'murmur-0.8.2-alpha.5-x64.nsis.7z'
-$candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.6-x64.nsis.7z'
+$candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.7-x64.nsis.7z'
 foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $candidatePayload)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Verified installer or web payload is missing: $path" }
 }
@@ -614,10 +614,10 @@ try {
     Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir
     Assert-Installed -Version $script:BaselineVersion
     Launch-And-Verify -Version $script:BaselineVersion | Out-Null
-    Set-Content -LiteralPath $profileSentinel -Value 'eve-alpha6-profile-sentinel' -NoNewline
+    Set-Content -LiteralPath $profileSentinel -Value 'eve-alpha7-profile-sentinel' -NoNewline
     Assert-SyntheticSentinels
 
-    Write-Step 'Upgrading alpha.5 in place to the locally built alpha.6 candidate.'
+    Write-Step 'Upgrading alpha.5 in place to the locally built alpha.7 candidate.'
     Invoke-Installer -Installer $candidateInstaller -InstallDir $script:InstallDir
     Assert-Installed -Version $script:CandidateVersion
     Assert-SyntheticSentinels
@@ -625,7 +625,7 @@ try {
     Assert-SyntheticSentinels
     Invoke-InstalledCpuInference
 
-    Write-Step 'Rolling back by uninstalling alpha.6 and reinstalling the published alpha.5 baseline.'
+    Write-Step 'Rolling back by uninstalling alpha.7 and reinstalling the published alpha.5 baseline.'
     Uninstall-Current -Version $script:CandidateVersion
     Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir
     Assert-Installed -Version $script:BaselineVersion
@@ -635,7 +635,7 @@ try {
 
     Write-Step 'Uninstalling the rolled-back baseline.'
     Uninstall-Current -Version $script:BaselineVersion
-    Write-Step 'PASS: clean CPU install, alpha.5 to alpha.6 upgrade, alpha.5 rollback, and uninstall completed.'
+    Write-Step 'PASS: clean CPU install, alpha.5 to alpha.7 upgrade, alpha.5 rollback, and uninstall completed.'
     Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'
 } finally {
     Stop-TestProcesses

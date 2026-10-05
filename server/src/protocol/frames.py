@@ -28,7 +28,8 @@ class StartFrame(ControlFrameBase):
         float | None,
         Field(
             default=None,
-            gt=0,
+            ge=0.1,
+            le=2.0,
             description="Minimum seconds between partial emissions (uses server default if not provided)",
         ),
     ] = None
