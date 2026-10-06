@@ -659,7 +659,7 @@ def mark_model_loading() -> None:
 
 @contextmanager
 def track_huggingface_download_progress() -> Iterator[None]:
-    """Temporarily bridge huggingface_hub byte progress into Murmur state."""
+    """Temporarily bridge huggingface_hub byte progress into Eve state."""
     with _TQDM_PATCH_LOCK:
         try:
             tqdm_module = importlib.import_module("huggingface_hub.utils.tqdm")
@@ -668,47 +668,47 @@ def track_huggingface_download_progress() -> Iterator[None]:
             yield
             return
 
-        if getattr(original_tqdm, "_murmur_progress_bridge", False):
+        if getattr(original_tqdm, "_eve_progress_bridge", False):
             yield
             return
 
         class ReportingTqdm(original_tqdm):
-            _murmur_progress_bridge = True
+            _eve_progress_bridge = True
 
             def __init__(self, *args, **kwargs):
-                self._murmur_transfer_id = _next_transfer_id()
-                self._murmur_description = kwargs.get("desc")
-                self._murmur_unit = str(kwargs.get("unit", "it"))
-                self._murmur_is_byte_transfer = self._murmur_unit.lower() in {
+                self._eve_transfer_id = _next_transfer_id()
+                self._eve_description = kwargs.get("desc")
+                self._eve_unit = str(kwargs.get("unit", "it"))
+                self._eve_is_byte_transfer = self._eve_unit.lower() in {
                     "b",
                     "byte",
                     "bytes",
                 }
-                self._murmur_last_n = int(kwargs.get("initial", 0) or 0)
+                self._eve_last_n = int(kwargs.get("initial", 0) or 0)
                 super().__init__(*args, **kwargs)
                 register_model_download_transfer(
-                    self._murmur_transfer_id,
+                    self._eve_transfer_id,
                     total=int(self.total) if self.total is not None else None,
                     initial=int(self.n),
-                    description=self._murmur_description,
-                    unit=self._murmur_unit,
+                    description=self._eve_description,
+                    unit=self._eve_unit,
                 )
-                self._murmur_last_n = int(self.n)
+                self._eve_last_n = int(self.n)
 
             def update(self, n=1):
                 result = super().update(n)
                 if getattr(self, "disable", False):
                     delta = max(0, int(n))
-                    self._murmur_last_n += delta
+                    self._eve_last_n += delta
                 else:
                     current_n = int(self.n)
-                    delta = max(0, current_n - self._murmur_last_n)
-                    self._murmur_last_n = current_n
-                if self._murmur_is_byte_transfer:
+                    delta = max(0, current_n - self._eve_last_n)
+                    self._eve_last_n = current_n
+                if self._eve_is_byte_transfer:
                     report_model_download_bytes(
-                        self._murmur_transfer_id,
+                        self._eve_transfer_id,
                         delta,
-                        description=self._murmur_description,
+                        description=self._eve_description,
                     )
                 return result
 
@@ -728,7 +728,7 @@ def track_huggingface_download_progress() -> Iterator[None]:
 
         patched_modules: list[tuple[object, str, object]] = []
         for module, attribute, original in modules:
-            if getattr(original, "_murmur_progress_bridge", False):
+            if getattr(original, "_eve_progress_bridge", False):
                 continue
             setattr(module, attribute, ReportingTqdm)
             patched_modules.append((module, attribute, original))

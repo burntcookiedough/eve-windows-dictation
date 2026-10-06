@@ -140,7 +140,7 @@ app.on('will-quit', (event) => {
         buildApi.onLoad({ filter: /.*/, namespace: 'shutdown-ack-test' }, ({ path: module }) => ({
           contents: module === 'settings'
             ? 'export const getMainWindowBounds = () => undefined; export const setMainWindowBounds = () => {}; export const getSettings = () => ({ appearance: "dark" });'
-            : 'export const getMurmurIcon = () => undefined;',
+            : 'export const getEveIcon = () => undefined;',
           loader: 'js',
         }));
       },

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage Murmur version consistency across app/server/user-facing files."""
+"""Manage Eve version consistency across app/server/user-facing files."""
 
 from __future__ import annotations
 
@@ -232,7 +232,7 @@ def bump_version(version: str, dry_run: bool = False) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Manage Murmur version consistency.")
+    parser = argparse.ArgumentParser(description="Manage Eve version consistency.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check_parser = subparsers.add_parser(

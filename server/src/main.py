@@ -1,4 +1,4 @@
-"""Entry point for running the murmur with uvicorn."""
+"""Entry point for running the Eve server with uvicorn."""
 
 import logging
 import os
@@ -34,7 +34,7 @@ def configure_logging(log_level: str) -> None:
 
 
 def main() -> None:
-    """Run the murmur."""
+    """Run the Eve server."""
     import uvicorn
 
     settings = get_settings()
@@ -42,7 +42,7 @@ def main() -> None:
     # Configure logging before uvicorn starts
     configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
-    logger.info("Murmur server version %s", SERVER_VERSION)
+    logger.info("Eve server version %s", SERVER_VERSION)
 
     # Uvicorn log level: use app level only if log_binary is enabled,
     # otherwise keep uvicorn at INFO to suppress WebSocket frame spam

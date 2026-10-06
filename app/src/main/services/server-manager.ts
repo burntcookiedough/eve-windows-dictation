@@ -16,7 +16,7 @@ import type {
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 import {
-  isOwnedMurmurServerProcess,
+  isOwnedEveServerProcess,
   parseServerPidFile,
   parseHealthyResponse,
   matchesExpectedRuntime,
@@ -261,7 +261,7 @@ export class ServerManager {
       ) {
         return false;
       }
-      return isOwnedMurmurServerProcess(
+      return isOwnedEveServerProcess(
         {
           processId: snapshot.ProcessId,
           creationTimeMs: snapshot.CreationTimeMs,
@@ -654,7 +654,7 @@ export class ServerManager {
         this.startHealthPolling(existingPid.port);
         return;
       }
-      log.warn('Existing owned Murmur server is unhealthy or uses a different runtime; terminating it');
+      log.warn('Existing owned Eve server is unhealthy or uses a different runtime; terminating it');
       try {
         process.kill(existingPid.pid, 'SIGTERM');
         const exited = await this.waitForProcessExit(existingPid.pid, 5000);
