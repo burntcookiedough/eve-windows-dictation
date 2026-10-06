@@ -73,7 +73,7 @@ jobs:
 
       - name: Check candidate version
         shell: pwsh
-        run: uv run --no-project --python 3.11.17 python scripts/version.py check --tag v0.8.2-alpha.7
+        run: uv run --no-project --python 3.11.17 python scripts/version.py check --tag v0.8.2-alpha.8
 
       - name: Build candidate Windows web installer
         shell: pwsh
