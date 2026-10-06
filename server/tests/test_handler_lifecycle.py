@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import threading
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -20,6 +21,15 @@ from session.context import SessionContext
 from session.manager import SessionManager
 from session.state import SessionState
 from transcription.processor import TranscriptionResult, TranscribeResult
+
+
+async def _wait_until(predicate: Callable[[], bool]) -> None:
+    """Fail promptly if the handler never reaches the expected test state."""
+    async def poll() -> None:
+        while not predicate():
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(poll(), timeout=2.0)
 
 
 class TrackedAudioBuffer(AudioBuffer):
@@ -228,8 +238,7 @@ async def test_handler_capture_cancellation_cleans_storage_and_leases(
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
     # Wait on explicit event for first audio frame append
-    while not lifecycle_env.tracked_buffers:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
     buf = lifecycle_env.tracked_buffers[0]
     await buf.first_append_event.wait()
 
@@ -277,8 +286,7 @@ async def test_handler_finalization_cancellation_cleans_storage_and_leases(
 
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
-    while not created_processors:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(created_processors))
     processor = created_processors[0]
     buf = lifecycle_env.tracked_buffers[0]
 
@@ -376,8 +384,7 @@ async def test_handler_storage_append_error_cleans_storage_and_leases(
 
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
-    while not lifecycle_env.tracked_buffers:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
     buf = lifecycle_env.tracked_buffers[0]
     await buf.first_append_event.wait()
 
@@ -426,8 +433,7 @@ async def test_handler_final_inference_error_cleans_storage_and_leases(
 
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
-    while not lifecycle_env.tracked_buffers:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
     buf = lifecycle_env.tracked_buffers[0]
     await buf.first_append_event.wait()
 
@@ -473,8 +479,7 @@ async def test_handler_silence_timeout_cleans_backing_storage_and_leases(
 
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
-    while not lifecycle_env.tracked_buffers:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
     buf = lifecycle_env.tracked_buffers[0]
     await buf.first_append_event.wait()
 
@@ -532,8 +537,7 @@ async def test_handler_background_exception_guarantees_lease_closure_and_cleanup
 
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
-    while not lifecycle_env.tracked_buffers:
-        await asyncio.sleep(0.005)
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
     buf = lifecycle_env.tracked_buffers[0]
     await buf.first_append_event.wait()
 
@@ -635,8 +639,7 @@ async def test_inflight_partial_processor_await_probe_with_concurrent_buffer_clo
     task = asyncio.create_task(processor.transcribe_partial())
 
     # Wait until model thread begins executing
-    while not inference_started.is_set():
-        await asyncio.sleep(0.005)
+    await _wait_until(inference_started.is_set)
 
     # Concurrently close the audio buffer while inference is in flight
     context.audio_buffer.close()
