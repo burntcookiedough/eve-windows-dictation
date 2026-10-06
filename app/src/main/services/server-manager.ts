@@ -16,7 +16,7 @@ import type {
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
 import {
-  isOwnedMurmurServerProcess,
+  isOwnedEveServerProcess,
   parseServerPidFile,
   parseHealthyResponse,
   matchesExpectedRuntime,
@@ -261,7 +261,7 @@ export class ServerManager {
       ) {
         return false;
       }
-      return isOwnedMurmurServerProcess(
+      return isOwnedEveServerProcess(
         {
           processId: snapshot.ProcessId,
           creationTimeMs: snapshot.CreationTimeMs,

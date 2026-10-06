@@ -173,7 +173,7 @@ export function parseHealthyResponse(data: unknown): HealthState {
   };
 }
 
-export function isMurmurServerCommandLine(commandLine: string): boolean {
+export function isEveServerCommandLine(commandLine: string): boolean {
   const normalized = commandLine.replaceAll('/', '\\').toLowerCase();
   return (
     /python(?:w)?\.exe/.test(normalized) &&
@@ -185,7 +185,7 @@ function normalizeWindowsPath(value: string): string {
   return value.replaceAll('/', '\\').replace(/^"|"$/g, '').toLowerCase();
 }
 
-export function isOwnedMurmurServerProcess(
+export function isOwnedEveServerProcess(
   snapshot: ServerProcessSnapshot,
   pid: number,
   recordedStartedAt: number
@@ -206,7 +206,7 @@ export function isOwnedMurmurServerProcess(
   const commandLine = snapshot.commandLine.replaceAll('/', '\\').toLowerCase();
   const executablePrefix = commandLine.startsWith(`${executablePath} `)
     || commandLine.startsWith(`"${executablePath}" `);
-  if (!executablePrefix || !isMurmurServerCommandLine(snapshot.commandLine)) {
+  if (!executablePrefix || !isEveServerCommandLine(snapshot.commandLine)) {
     return false;
   }
 

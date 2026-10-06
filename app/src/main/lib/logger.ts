@@ -1,5 +1,5 @@
 /**
- * Minimal structured logging for Murmur.
+ * Minimal structured logging for Eve.
  *
  * Usage:
  *   import { createLogger } from '../lib/logger.js';

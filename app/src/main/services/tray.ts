@@ -1,5 +1,5 @@
 import { Tray, Menu, app, nativeTheme } from 'electron';
-import { getMurmurTrayIcon, type TrayIconVariant } from './app-icon.js';
+import { getEveTrayIcon, type TrayIconVariant } from './app-icon.js';
 
 let tray: Tray | null = null;
 
@@ -11,7 +11,7 @@ function getTrayIconVariant(): TrayIconVariant {
 }
 
 function getTrayIcon(): Electron.NativeImage {
-  const icon = getMurmurTrayIcon(getTrayIconVariant());
+  const icon = getEveTrayIcon(getTrayIconVariant());
   if (!icon) {
     throw new Error('Eve tray icon resource is missing or invalid');
   }

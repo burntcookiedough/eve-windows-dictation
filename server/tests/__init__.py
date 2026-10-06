@@ -1,1 +1,1 @@
-"""Tests for murmur."""
+"""Tests for Eve server."""

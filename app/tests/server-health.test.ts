@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  isOwnedMurmurServerProcess,
-  isMurmurServerCommandLine,
+  isOwnedEveServerProcess,
+  isEveServerCommandLine,
   matchesExpectedRuntime,
   parseHealthyResponse,
   parseServerPidFile,
@@ -114,20 +114,20 @@ describe('server process ownership', () => {
 
   test('recognizes the packaged Murmur Python entry point', () => {
     expect(
-      isMurmurServerCommandLine(
+      isEveServerCommandLine(
         '"C:\\Program Files\\Murmur\\resources\\server\\.runtime\\python.exe" "C:\\Program Files\\Murmur\\resources\\server\\src\\main.py"'
       )
     ).toBe(true);
   });
 
   test('rejects unrelated Python processes', () => {
-    expect(isMurmurServerCommandLine('python.exe C:\\work\\unrelated.py')).toBe(false);
-    expect(isMurmurServerCommandLine('notepad.exe')).toBe(false);
+    expect(isEveServerCommandLine('python.exe C:\\work\\unrelated.py')).toBe(false);
+    expect(isEveServerCommandLine('notepad.exe')).toBe(false);
   });
 
   test('accepts an exact live-process snapshot matching the PID record epoch', () => {
     expect(
-      isOwnedMurmurServerProcess(
+      isOwnedEveServerProcess(
         {
           processId: 1234,
           creationTimeMs: 10_000,
@@ -148,14 +148,14 @@ describe('server process ownership', () => {
       commandLine,
     };
 
-    expect(isOwnedMurmurServerProcess(snapshot, 4321, 100_250)).toBe(false);
-    expect(isOwnedMurmurServerProcess(snapshot, 1234, 10_000)).toBe(false);
-    expect(isOwnedMurmurServerProcess(snapshot, 1234, 200_000)).toBe(false);
+    expect(isOwnedEveServerProcess(snapshot, 4321, 100_250)).toBe(false);
+    expect(isOwnedEveServerProcess(snapshot, 1234, 10_000)).toBe(false);
+    expect(isOwnedEveServerProcess(snapshot, 1234, 200_000)).toBe(false);
   });
 
   test('rejects unowned executable and command-line combinations', () => {
     expect(
-      isOwnedMurmurServerProcess(
+      isOwnedEveServerProcess(
         {
           processId: 1234,
           creationTimeMs: 10_000,
@@ -167,7 +167,7 @@ describe('server process ownership', () => {
       )
     ).toBe(false);
     expect(
-      isOwnedMurmurServerProcess(
+      isOwnedEveServerProcess(
         {
           processId: 1234,
           creationTimeMs: 10_000,
@@ -188,8 +188,8 @@ describe('server process ownership', () => {
       commandLine,
     };
 
-    expect(isOwnedMurmurServerProcess(restarted, 1234, 10_250)).toBe(false);
-    expect(isOwnedMurmurServerProcess(restarted, 1234, 20_100)).toBe(true);
+    expect(isOwnedEveServerProcess(restarted, 1234, 10_250)).toBe(false);
+    expect(isOwnedEveServerProcess(restarted, 1234, 20_100)).toBe(true);
   });
 });
 
