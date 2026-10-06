@@ -211,28 +211,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
-    logger.info("Starting murmur...")
+    logger.info("Starting Eve...")
     logger.info("Initializing Faster-Whisper model runtime (load in background)...")
 
     runtime = init_model_runtime(settings)
     _schedule_runtime_start(runtime)
 
-    logger.info("Murmur ready")
+    logger.info("Eve ready")
     try:
         yield
     finally:
-        logger.info("Shutting down murmur...")
+        logger.info("Shutting down Eve...")
         # Runtime shutdown joins native preparation and drains every generation
         # before returning.  No one-second timeout can strand native work.
         await shutdown_model_runtime()
         await _await_runtime_tasks()
         shutdown_executor()
-        logger.info("Murmur stopped")
+        logger.info("Eve stopped")
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Murmur",
+        title="Eve",
         description="WebSocket-based live voice transcription server",
         version=SERVER_VERSION,
         lifespan=lifespan,

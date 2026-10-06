@@ -220,7 +220,8 @@ async def test_processor_owns_idempotent_runtime_lease(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-async def test_lifespan_awaits_runtime_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_lifespan_awaits_runtime_shutdown(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    caplog.set_level("INFO", logger="app")
     events: list[str] = []
 
     class FakeRuntime:
@@ -246,6 +247,11 @@ async def test_lifespan_awaits_runtime_shutdown(monkeypatch: pytest.MonkeyPatch)
         events.append("yield")
 
     assert events == ["scheduled", "yield", "shutdown", "executor"]
+    assert "Starting Eve..." in caplog.messages
+    assert "Eve ready" in caplog.messages
+    assert "Shutting down Eve..." in caplog.messages
+    assert "Eve stopped" in caplog.messages
+    assert all("murmur" not in message.lower() for message in caplog.messages)
 
 
 def test_replacement_status_keeps_current_model_admissible() -> None:
