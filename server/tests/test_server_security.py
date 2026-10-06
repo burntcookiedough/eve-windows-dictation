@@ -431,3 +431,56 @@ async def test_started_session_without_audio_closes_and_releases_slot(
     assert manager.active_count == 0
     replacement = manager.create_session()
     manager.remove_session(replacement.session_id)
+
+
+def test_server_long_dictation_settings_match_supported_range() -> None:
+    assert config_module._normalize_trusted_partial_interval(
+        {"long_dictation_threshold_s": 0.5}
+    )["long_dictation_threshold_s"] == 0.5
+    assert Settings.model_validate(
+        {"long_dictation_threshold_s": 5.0}
+    ).long_dictation_threshold_s == 5.0
+    assert Settings.model_validate(
+        {"long_dictation_threshold_s": 120.0}
+    ).long_dictation_threshold_s == 120.0
+    assert Settings.model_validate(
+        {"long_dictation_chunk_s": 5.0}
+    ).long_dictation_chunk_s == 5.0
+    assert Settings.model_validate(
+        {"long_dictation_chunk_s": 60.0}
+    ).long_dictation_chunk_s == 60.0
+
+    for value in (0.0, -1.0, 120.1, float("nan"), float("inf"), float("-inf"), True):
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"long_dictation_threshold_s": value})
+
+    for value in (1.0, 0.5, 60.1, float("nan"), float("inf"), float("-inf"), True):
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"long_dictation_chunk_s": value})
+
+
+def test_persisted_long_dictation_settings_are_clamped_without_discarding_other_settings(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr(config_module, "get_settings_file_path", lambda: settings_path)
+    monkeypatch.setattr(
+        config_module.legacy_settings,
+        "migrate_persisted_settings",
+        _no_migration,
+    )
+
+    settings_path.write_text(
+        json.dumps({
+            "long_dictation_threshold_s": 8000.0,
+            "long_dictation_chunk_s": 8000.0,
+            "whisper_language": "ja",
+        }),
+        encoding="utf-8",
+    )
+    settings = Settings.model_validate(config_module._load_settings_json())
+
+    assert settings.long_dictation_threshold_s == 120.0
+    assert settings.long_dictation_chunk_s == 60.0
+    assert settings.whisper_language == "ja"

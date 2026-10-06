@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from audio.buffer import AudioBuffer
 from protocol.constants import AUDIO_SAMPLE_RATE
 
 
@@ -38,7 +39,7 @@ class AudioChunk:
 
 
 def plan_chunks(
-    audio: NDArray[np.float32],
+    audio: NDArray[np.float32] | AudioBuffer,
     *,
     chunk_s: float,
     overlap_s: float,
@@ -104,7 +105,7 @@ def stitch_text(chunks: list[str]) -> str:
 
 
 def _find_quiet_boundary(
-    audio: NDArray[np.float32],
+    audio: NDArray[np.float32] | AudioBuffer,
     target_sample: int,
     *,
     sample_rate: int,
@@ -113,16 +114,26 @@ def _find_quiet_boundary(
 ) -> int:
     radius = max(1, int(search_s * sample_rate))
     window = max(1, int(window_s * sample_rate))
+    total_samples = len(audio)
     lo = max(window, target_sample - radius)
-    hi = min(len(audio) - window, target_sample + radius)
+    hi = min(total_samples - window, target_sample + radius)
     if lo >= hi:
         return target_sample
+
+    # Bounded cached search window: one read covers [lo - window : hi + window]
+    search_start = lo - window
+    search_end = hi + window
+    if isinstance(audio, AudioBuffer):
+        window_audio = audio.get_audio_range_float32(search_start, search_end)
+    else:
+        window_audio = audio[search_start:search_end]
 
     best_pos = target_sample
     best_score: tuple[float, int] | None = None
     step = max(1, window // 2)
     for pos in range(lo, hi + 1, step):
-        segment = audio[pos - window:pos + window]
+        rel = pos - search_start
+        segment = window_audio[rel - window:rel + window]
         rms = float(np.sqrt(np.mean(np.square(segment), dtype=np.float64)))
         distance = abs(pos - target_sample)
         score = (rms, distance)

@@ -100,14 +100,32 @@ def _normalize_trusted_partial_interval(values: dict[str, Any]) -> dict[str, Any
     """Clamp finite positive persisted values to the current supported range."""
     normalized = dict(values)
     raw = normalized.get("partial_emission_interval")
-    if isinstance(raw, bool):
-        return normalized
-    try:
-        interval = float(raw)
-    except (TypeError, ValueError, OverflowError):
-        return normalized
-    if math.isfinite(interval) and interval > 0:
-        normalized["partial_emission_interval"] = min(2.0, max(0.1, interval))
+    if not isinstance(raw, bool):
+        try:
+            interval = float(raw)
+            if math.isfinite(interval) and interval > 0:
+                normalized["partial_emission_interval"] = min(2.0, max(0.1, interval))
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    raw_thresh = normalized.get("long_dictation_threshold_s")
+    if not isinstance(raw_thresh, bool):
+        try:
+            thresh = float(raw_thresh)
+            if math.isfinite(thresh) and thresh > 0:
+                normalized["long_dictation_threshold_s"] = min(120.0, thresh)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    raw_chunk = normalized.get("long_dictation_chunk_s")
+    if not isinstance(raw_chunk, bool):
+        try:
+            chunk = float(raw_chunk)
+            if math.isfinite(chunk) and chunk > 1.0:
+                normalized["long_dictation_chunk_s"] = min(60.0, chunk)
+        except (TypeError, ValueError, OverflowError):
+            pass
+
     return normalized
 
 
@@ -167,8 +185,8 @@ class Settings(BaseSettings):
     min_audio_for_transcription: float = 0.15
     transcription_max_workers: int = Field(default=1, ge=1, le=4)
     allow_overlapping_inference: bool = False
-    long_dictation_threshold_s: float = Field(default=30.0, gt=0.0)
-    long_dictation_chunk_s: float = Field(default=25.0, gt=1.0)
+    long_dictation_threshold_s: float = Field(default=30.0, gt=0.0, le=120.0)
+    long_dictation_chunk_s: float = Field(default=25.0, gt=1.0, le=60.0)
     long_dictation_overlap_s: float = Field(default=0.75, ge=0.0, le=5.0)
 
     # Logging
@@ -180,11 +198,11 @@ class Settings(BaseSettings):
     _effective_whisper_config: EffectiveWhisperConfig | None = PrivateAttr(default=None)
     _explicit_patch_keys: frozenset[str] | None = PrivateAttr(default=None)
 
-    @field_validator("partial_emission_interval", mode="before")
+    @field_validator("partial_emission_interval", "long_dictation_threshold_s", "long_dictation_chunk_s", mode="before")
     @classmethod
-    def reject_boolean_partial_interval(cls, value: Any) -> Any:
+    def reject_boolean_transcription_numbers(cls, value: Any) -> Any:
         if isinstance(value, bool):
-            raise ValueError("Partial emission interval must be a number.")
+            raise ValueError("Numeric transcription settings must be numbers.")
         return value
 
     @field_validator("whisper_language", mode="before")
@@ -409,7 +427,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     },
     "long_dictation_threshold_s": {
         "label": "Long Dictation Threshold",
-        "description": "Seconds before final transcription switches to chunked long dictation mode.",
+        "description": "Seconds before final transcription switches to chunked long dictation mode (clamped to at most 120s for memory safety).",
         "type": "number",
         "range": [5, 120],
         "requires_reload": False,
@@ -417,7 +435,7 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
     },
     "long_dictation_chunk_s": {
         "label": "Long Dictation Chunk",
-        "description": "Target seconds per local batch chunk for long dictation.",
+        "description": "Target seconds per local batch chunk for long dictation (clamped to at most 60s for memory safety).",
         "type": "number",
         "range": [5, 60],
         "requires_reload": False,

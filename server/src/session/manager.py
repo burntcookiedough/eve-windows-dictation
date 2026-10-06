@@ -68,20 +68,28 @@ class SessionManager:
             return context
 
     def remove_session(self, session_id: str) -> None:
-        """Remove a session.
+        """Remove a session and ensure its resources are closed.
 
         Args:
             session_id: ID of session to remove.
         """
         with self._lock:
-            if session_id in self._sessions:
-                del self._sessions[session_id]
+            context = self._sessions.pop(session_id, None)
+            if context is not None:
                 logger.info(
                     "Session removed: %s (active: %d/%d)",
                     session_id,
                     len(self._sessions),
                     self._max_sessions,
                 )
+                try:
+                    context.audio_buffer.close()
+                except Exception as e:
+                    logger.debug(
+                        "Error closing audio buffer for removed session %s: %s",
+                        session_id,
+                        e,
+                    )
 
     def get_session(self, session_id: str) -> SessionContext | None:
         """Get a session by ID.

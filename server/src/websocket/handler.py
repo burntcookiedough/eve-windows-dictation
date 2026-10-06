@@ -99,19 +99,13 @@ async def websocket_handler(websocket: WebSocket) -> None:
             # Main message loop
             await _message_loop(websocket, sender, context, processor)
         finally:
-            # Cancel background tasks
+            # Cancel background tasks and ensure processor lease is closed even on exception
             partial_task.cancel()
             silence_task.cancel()
             try:
-                await partial_task
-            except asyncio.CancelledError:
-                pass
-            try:
-                await silence_task
-            except asyncio.CancelledError:
-                pass
-            # Release per-session engine resources
-            processor.close()
+                await asyncio.gather(partial_task, silence_task, return_exceptions=True)
+            finally:
+                processor.close()
 
     except WebSocketDisconnect:
         logger.info("[%s] Client disconnected", context.session_id)
@@ -123,9 +117,19 @@ async def websocket_handler(websocket: WebSocket) -> None:
             pass
     finally:
         # Clean up session (only transition if not already closed)
-        if context.state_machine.state != SessionState.CLOSED:
-            context.state_machine.transition_to(SessionState.CLOSED)
-        manager.remove_session(context.session_id)
+        try:
+            if context.state_machine.state != SessionState.CLOSED:
+                context.state_machine.transition_to(SessionState.CLOSED)
+        except Exception:
+            logger.debug("[%s] Failed to transition to closed state during teardown", context.session_id, exc_info=True)
+        try:
+            manager.remove_session(context.session_id)
+        except Exception:
+            logger.debug("[%s] Failed to remove session from manager during teardown", context.session_id, exc_info=True)
+        try:
+            context.audio_buffer.close()
+        except Exception:
+            logger.debug("[%s] Failed to close audio buffer during teardown", context.session_id, exc_info=True)
         try:
             await websocket.close()
         except Exception:
@@ -590,6 +594,13 @@ async def _finalize_session(
                     "[%s] Falling back to last partial as terminal text after finalization error",
                     context.session_id,
                 )
+
+        # Clear backing audio immediately upon completing final transcription,
+        # before waiting further on network socket transmission.
+        try:
+            context.audio_buffer.close()
+        except Exception as e:
+            logger.debug("[%s] Error closing audio buffer in finalize: %s", context.session_id, e)
 
         try:
             await sender.send_final(
