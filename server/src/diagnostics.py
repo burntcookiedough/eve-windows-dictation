@@ -271,8 +271,8 @@ def build_warnings(
         warnings.append(
             DiagnosticWarning(
                 code="vc_redist_missing",
-                message="Microsoft Visual C++ Redistributable is required for Murmur to run.",
-                action="Install the Visual C++ Redistributable (x64), then restart Murmur.",
+                message="Microsoft Visual C++ Redistributable is required for Eve to run.",
+                action="Install the Visual C++ Redistributable (x64), then restart Eve.",
                 url=vc_redist.url,
             )
         )
@@ -311,7 +311,7 @@ def build_warnings(
                 DiagnosticWarning(
                     code="nvidia_driver_old",
                     message=f"NVIDIA driver {version} is below the required {minimum}.",
-                    action="Update your NVIDIA driver and restart Murmur.",
+                    action="Update your NVIDIA driver and restart Eve.",
                     url=NVIDIA_DRIVER_URL,
                 )
             )

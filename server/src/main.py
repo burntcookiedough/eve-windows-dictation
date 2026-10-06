@@ -42,7 +42,7 @@ def main() -> None:
     # Configure logging before uvicorn starts
     configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
-    logger.info("Murmur server version %s", SERVER_VERSION)
+    logger.info("Eve server version %s", SERVER_VERSION)
 
     # Uvicorn log level: use app level only if log_binary is enabled,
     # otherwise keep uvicorn at INFO to suppress WebSocket frame spam

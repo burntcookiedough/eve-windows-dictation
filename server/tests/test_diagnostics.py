@@ -119,6 +119,17 @@ def test_build_warnings_includes_expected_codes() -> None:
     assert "vc_redist_missing" in codes
     assert "cuda_dll_missing" in codes
     assert "nvidia_driver_old" in codes
+    by_code = {warning.code: warning for warning in warnings}
+    vc_redist = by_code["vc_redist_missing"]
+    assert vc_redist.message == "Microsoft Visual C++ Redistributable is required for Eve to run."
+    assert vc_redist.action == "Install the Visual C++ Redistributable (x64), then restart Eve."
+    assert vc_redist.url == "x"
+    assert vc_redist.severity == "warning"
+    driver = by_code["nvidia_driver_old"]
+    assert driver.action == "Update your NVIDIA driver and restart Eve."
+    assert driver.url == diagnostics.NVIDIA_DRIVER_URL
+    assert driver.severity == "warning"
+    assert all("murmur" not in f"{warning.message} {warning.action}".lower() for warning in warnings)
 
 
 def test_collect_diagnostics_payload_shape(monkeypatch) -> None:
