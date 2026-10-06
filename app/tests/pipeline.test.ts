@@ -36,7 +36,7 @@ const settings: Settings = {
 const frame: TextFrameFinal = {
   frame: 'text',
   type: 'final',
-  text: 'hello from murmur',
+  text: 'hello from eve',
   confidence: 0.95,
   transcription_time: 1.2,
   audio_duration: 3,
@@ -60,7 +60,7 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).toHaveBeenCalledTimes(1);
-    expect(pasteText).toHaveBeenCalledWith('Hello from murmur.', {
+    expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: false,
       restoreDelayMs: 250,
       method: 'sendinput',
@@ -68,7 +68,7 @@ describe('processFinalTranscription', () => {
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
-    expect(saved[0]?.text).toBe('Hello from murmur.');
+    expect(saved[0]?.text).toBe('Hello from eve.');
     expect(saved[0]?.wordCount).toBe(3);
     expect(result.entryWithGroup.dateGroup).toBe('Today');
   });
@@ -82,7 +82,7 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).not.toHaveBeenCalled();
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from murmur.');
+    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.');
   });
 
   test('keeps auto-copy dispatch pending until the clipboard write resolves', async () => {
@@ -120,7 +120,7 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).toHaveBeenCalledTimes(1);
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from murmur.');
+    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.');
   });
 
   test('honors clipboard restore only when auto-copy is disabled', async () => {
@@ -132,7 +132,7 @@ describe('processFinalTranscription', () => {
       12345
     );
 
-    expect(pasteText).toHaveBeenCalledWith('Hello from murmur.', {
+    expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: true,
       restoreDelayMs: 250,
       method: 'sendinput',

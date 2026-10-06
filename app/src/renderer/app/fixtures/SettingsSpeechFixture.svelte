@@ -226,7 +226,7 @@
                   <div data-fixture-hotwords-editor class="p-4">
                     <label for="fixture-hotwords" class="block text-sm text-zinc-200">Custom hotwords (comma-separated)</label>
                     <p id="fixture-hotwords-help" class="mt-1 text-xs leading-5 text-zinc-500">Add product names, acronyms, and proper nouns that are often transcribed incorrectly.</p>
-                    <textarea id="fixture-hotwords" aria-describedby="fixture-hotwords-help" class="mt-3 min-h-24 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" rows="3">Eve, Murmur, Svelte, Whisper</textarea>
+                    <textarea id="fixture-hotwords" aria-describedby="fixture-hotwords-help" class="mt-3 min-h-24 w-full max-w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-sm text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100" rows="3">Eve, Electron, Svelte, Whisper</textarea>
                     <div class="mt-3 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p class="min-w-0 text-xs text-amber-300">4 terms · Recognition quality may degrade with very long lists.</p>
                       <div class="flex min-w-0 flex-wrap gap-2">
