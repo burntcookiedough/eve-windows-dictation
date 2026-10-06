@@ -1,4 +1,4 @@
-"""Entry point for running the murmur with uvicorn."""
+"""Entry point for running the Eve server with uvicorn."""
 
 import logging
 import os
@@ -34,7 +34,7 @@ def configure_logging(log_level: str) -> None:
 
 
 def main() -> None:
-    """Run the murmur."""
+    """Run the Eve server."""
     import uvicorn
 
     settings = get_settings()

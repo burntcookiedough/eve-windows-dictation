@@ -10,7 +10,7 @@ function iconCandidates(fileName: string): string[] {
   ];
 }
 
-export function getMurmurIcon(fileName = 'icon.ico'): Electron.NativeImage | undefined {
+export function getEveIcon(fileName = 'icon.ico'): Electron.NativeImage | undefined {
   for (const iconPath of iconCandidates(fileName)) {
     if (!existsSync(iconPath)) continue;
     const icon = nativeImage.createFromPath(iconPath);
@@ -24,13 +24,13 @@ export function getMurmurIcon(fileName = 'icon.ico'): Electron.NativeImage | und
 
 export type TrayIconVariant = 'light' | 'dark' | 'high-contrast';
 
-export function getMurmurTrayIcon(
+export function getEveTrayIcon(
   variant: TrayIconVariant = 'dark'
 ): Electron.NativeImage | undefined {
   const icon =
-    getMurmurIcon(`tray-${variant}.ico`) ??
-    getMurmurIcon('icon.ico') ??
-    getMurmurIcon('icon.png');
+    getEveIcon(`tray-${variant}.ico`) ??
+    getEveIcon('icon.ico') ??
+    getEveIcon('icon.png');
   if (!icon || icon.isEmpty()) {
     return undefined;
   }

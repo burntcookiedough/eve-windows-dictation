@@ -20,11 +20,7 @@ describe('Eve visible identity', () => {
   test('keeps legacy branding out of active user-facing surfaces', () => {
     for (const relativePath of VISIBLE_PRODUCT_FILES) {
       const contents = readFileSync(path.join(APP_ROOT, relativePath), 'utf8');
-      const withoutAllowedInternalNames = contents.replaceAll(
-        'getMurmurTrayIcon',
-        'getCompatibilityTrayIcon'
-      );
-      expect(withoutAllowedInternalNames).not.toContain('Murmur');
+      expect(contents).not.toContain('Murmur');
     }
   });
 

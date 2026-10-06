@@ -2,7 +2,7 @@ import { app, BrowserWindow, screen } from 'electron';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getMainWindowBounds, setMainWindowBounds, getSettings } from '../services/settings.js';
-import { getMurmurIcon } from '../services/app-icon.js';
+import { getEveIcon } from '../services/app-icon.js';
 import { fitMainWindowBounds } from './main-window-bounds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -80,7 +80,7 @@ export async function createMainWindow(options: CreateMainWindowOptions = {}): P
     },
     transparent: false,
     backgroundColor: lightAppearance ? '#f4f4f2' : '#0b0b0b',
-    icon: getMurmurIcon('icon.ico'),
+    icon: getEveIcon('icon.ico'),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
