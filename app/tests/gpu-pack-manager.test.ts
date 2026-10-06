@@ -99,7 +99,7 @@ function managerFor(
 }
 
 describe('GPU pack manager', () => {
-  test('production descriptor accepts alpha.7 and rejects a different app identity', async () => {
+  test('production descriptor accepts the current release and rejects a different app identity', async () => {
     const appPackage = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { version: string };
@@ -115,7 +115,7 @@ describe('GPU pack manager', () => {
       throw new Error('The production descriptor check must not download assets');
     };
 
-    expect(PINNED_GPU_PACK_DESCRIPTOR.appBuildId).toBe('0.8.2-alpha.7');
+    expect(PINNED_GPU_PACK_DESCRIPTOR.appBuildId).toBe(appPackage.version);
     const compatible = createGpuPackManager({
       root,
       descriptor: PINNED_GPU_PACK_DESCRIPTOR,

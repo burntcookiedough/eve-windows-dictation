@@ -305,6 +305,8 @@ async def test_concurrent_finalization_has_single_owner() -> None:
     assert sender.finals == 1
     assert sender.closings == 1
     assert context.state_machine.state == SessionState.CLOSED
+    assert context.audio_buffer.sample_count == 0
+    assert context.audio_buffer._file is None
 
 
 class _ClosingWebSocket:
@@ -329,6 +331,8 @@ async def test_silence_finalization_closes_websocket() -> None:
 
     assert websocket.closed is True
     assert context.state_machine.state == SessionState.CLOSED
+    assert context.audio_buffer.sample_count == 0
+    assert context.audio_buffer._file is None
 
 
 class _FailingFinalSender(_FinalSender):
@@ -353,3 +357,5 @@ async def test_silence_send_failure_still_closes_websocket() -> None:
 
     assert websocket.closed is True
     assert context.state_machine.state == SessionState.CLOSED
+    assert context.audio_buffer.sample_count == 0
+    assert context.audio_buffer._file is None

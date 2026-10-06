@@ -1,6 +1,6 @@
 # Eve for Windows
 
-<p><img src="https://img.shields.io/badge/v0.8.2-alpha.7-orange?style=flat-square" alt="v0.8.2-alpha.7"> <strong>Under construction · v0.8.2-alpha.7 Windows pre-release</strong></p>
+<p><img src="https://img.shields.io/badge/v0.8.2-alpha.8-orange?style=flat-square" alt="v0.8.2-alpha.8"> <strong>Under construction · v0.8.2-alpha.8 Windows pre-release</strong></p>
 
 Eve is a local-first Windows dictation app: speak with a hotkey and send recognized
 text to the clipboard and local History.

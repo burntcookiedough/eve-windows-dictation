@@ -6,8 +6,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Awaitable, Callable, TYPE_CHECKING
+from typing import Awaitable, Callable, Final, TYPE_CHECKING
 
+from audio.buffer import AudioBuffer
 from config import get_settings
 from protocol.constants import AUDIO_SAMPLE_RATE
 from transcription.contracts import ModelSession, SessionId
@@ -20,6 +21,11 @@ if TYPE_CHECKING:
     from session.context import SessionContext
 
 logger = logging.getLogger(__name__)
+
+# Bounded configuration invariants for inference memory safety
+MAX_LONG_DICTATION_THRESHOLD_S: Final[float] = 120.0
+MAX_LONG_DICTATION_CHUNK_S: Final[float] = 60.0
+MIN_LONG_DICTATION_CHUNK_S: Final[float] = 1.0
 
 # Shared thread pool for transcription
 _executor: ThreadPoolExecutor | None = None
@@ -93,15 +99,18 @@ class TranscriptionProcessor:
 
     @property
     def _long_dictation_threshold_s(self) -> float:
-        return float(getattr(self._settings, "long_dictation_threshold_s", 30.0))
+        val = float(getattr(self._settings, "long_dictation_threshold_s", 30.0))
+        return min(val, MAX_LONG_DICTATION_THRESHOLD_S)
 
     @property
     def _long_dictation_chunk_s(self) -> float:
-        return float(getattr(self._settings, "long_dictation_chunk_s", 25.0))
+        val = float(getattr(self._settings, "long_dictation_chunk_s", 25.0))
+        return max(MIN_LONG_DICTATION_CHUNK_S, min(val, MAX_LONG_DICTATION_CHUNK_S))
 
     @property
     def _long_dictation_overlap_s(self) -> float:
-        return float(getattr(self._settings, "long_dictation_overlap_s", 0.75))
+        val = float(getattr(self._settings, "long_dictation_overlap_s", 0.75))
+        return max(0.0, min(val, 5.0))
 
     async def transcribe_partial(self) -> TranscriptionResult | None:
         if (
@@ -168,10 +177,10 @@ class TranscriptionProcessor:
         progress_callback: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> TranscriptionResult:
         start_time = time.perf_counter()
-        audio_duration = self._context.audio_buffer.duration_seconds
+        audio_buffer = self._context.audio_buffer
+        audio_duration = audio_buffer.duration_seconds
 
-        audio = self._context.audio_buffer.get_audio_float32()
-        if len(audio) == 0:
+        if audio_duration <= 0.0:
             return TranscriptionResult(
                 text="",
                 confidence=0.0,
@@ -185,10 +194,20 @@ class TranscriptionProcessor:
         try:
             if audio_duration >= self._long_dictation_threshold_s:
                 result = await self._transcribe_long_final(
-                    audio,
+                    audio_buffer,
                     progress_callback=progress_callback,
                 )
             else:
+                audio = audio_buffer.get_audio_float32()
+                if len(audio) == 0:
+                    return TranscriptionResult(
+                        text="",
+                        confidence=0.0,
+                        is_empty=True,
+                        transcription_time=0.0,
+                        audio_duration=0.0,
+                        last_speech_end=None,
+                    )
                 result = await self._run_transcribe(audio, loop=loop)
         except VramExhaustedError as error:
             logger.warning(
@@ -256,17 +275,18 @@ class TranscriptionProcessor:
 
     async def _transcribe_long_final(
         self,
-        audio,
+        audio_buffer: AudioBuffer,
         *,
         progress_callback: Callable[[int, int], Awaitable[None]] | None,
     ) -> TranscribeResult:
         chunks = plan_chunks(
-            audio,
+            audio_buffer,
             chunk_s=self._long_dictation_chunk_s,
             overlap_s=self._long_dictation_overlap_s,
         )
         if len(chunks) <= 1:
             loop = asyncio.get_running_loop()
+            audio = audio_buffer.get_audio_float32()
             return await self._run_transcribe(audio, loop=loop)
 
         texts: list[str] = []
@@ -283,7 +303,9 @@ class TranscriptionProcessor:
         for chunk in chunks:
             if progress_callback is not None:
                 await progress_callback(chunk.index, chunk.total)
-            chunk_audio = audio[chunk.start_sample:chunk.end_sample]
+            chunk_audio = audio_buffer.get_audio_range_float32(
+                chunk.start_sample, chunk.end_sample
+            )
             try:
                 result = await self._run_transcribe(chunk_audio, loop=loop, options=options)
             except VramExhaustedError:
