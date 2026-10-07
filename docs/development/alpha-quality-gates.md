@@ -185,4 +185,3 @@ replay and regression rules are implemented; current CPU measurement and paired
 before/after evidence pending, no safe optimization supported yet. Task 3 this
 runbook defines gates; applying accepted numerical bounds to product evidence is
 pending. B4 is not complete and this runbook makes no alpha-ready claim.
-
