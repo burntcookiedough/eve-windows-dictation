@@ -31,6 +31,13 @@ class SessionContext:
     created_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
 
+    # Perf tracing monotonic timestamps
+    last_audio_received_at: float | None = None
+    stop_received_at: float | None = None
+    partial_in_flight: bool = False
+    partial_task_active_at_stop: bool | None = None
+    trace_id: str | None = None
+
     # Speech timing for silence detection
     audio_start_time: float | None = None  # Monotonic time when first audio arrived
     last_speech_time: float | None = (

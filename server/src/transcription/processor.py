@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Final, TYPE_CHECKING
 
+from perf_trace import ServerPerfTiming, is_perf_trace_enabled, sanitize_correlation_id
 from audio.buffer import AudioBuffer
 from config import get_settings
 from protocol.constants import AUDIO_SAMPLE_RATE
@@ -76,6 +77,7 @@ class TranscriptionResult:
     transcription_time: float
     audio_duration: float
     last_speech_end: float | None
+    perf: ServerPerfTiming | None = None
 
 
 class TranscriptionProcessor:
@@ -179,6 +181,7 @@ class TranscriptionProcessor:
         start_time = time.perf_counter()
         audio_buffer = self._context.audio_buffer
         audio_duration = audio_buffer.duration_seconds
+        perf_collector: dict[str, float] | None = {} if is_perf_trace_enabled() else None
 
         if audio_duration <= 0.0:
             return TranscriptionResult(
@@ -196,6 +199,7 @@ class TranscriptionProcessor:
                 result = await self._transcribe_long_final(
                     audio_buffer,
                     progress_callback=progress_callback,
+                    perf_collector=perf_collector,
                 )
             else:
                 audio = audio_buffer.get_audio_float32()
@@ -208,7 +212,11 @@ class TranscriptionProcessor:
                         audio_duration=0.0,
                         last_speech_end=None,
                     )
-                result = await self._run_transcribe(audio, loop=loop)
+                result = await self._run_transcribe(
+                    audio,
+                    loop=loop,
+                    perf_collector=perf_collector,
+                )
         except VramExhaustedError as error:
             logger.warning(
                 "[%s] VRAM exhausted during final transcription; "
@@ -219,6 +227,28 @@ class TranscriptionProcessor:
 
         transcription_time = time.perf_counter() - start_time
 
+        perf: ServerPerfTiming | None = None
+        if perf_collector is not None:
+            stop_rcvd = getattr(self._context, "stop_received_at", None)
+            last_audio = getattr(self._context, "last_audio_received_at", None)
+            last_audio_offset = (
+                (stop_rcvd - last_audio) * 1000.0
+                if (stop_rcvd is not None and last_audio is not None)
+                else None
+            )
+            perf = ServerPerfTiming(
+                session_id=sanitize_correlation_id(self._context.trace_id),
+                last_audio_offset_ms=round(last_audio_offset, 3) if last_audio_offset is not None else None,
+                stop_to_lock_wait_ms=perf_collector.get("stop_to_lock_wait_ms"),
+                lock_wait_ms=perf_collector.get("lock_wait_ms"),
+                outstanding_partial_wait_ms=None,
+                partial_task_active_at_stop=self._context.partial_task_active_at_stop,
+                executor_queue_wait_ms=perf_collector.get("executor_queue_wait_ms"),
+                final_inference_start_offset_ms=(perf_collector["inference_started_at"] - start_time) * 1000 if "inference_started_at" in perf_collector else None,
+                final_inference_end_offset_ms=(perf_collector["inference_ended_at"] - start_time) * 1000 if "inference_ended_at" in perf_collector else None,
+                model_inference_ms=perf_collector.get("model_inference_ms"),
+            )
+
         return TranscriptionResult(
             text=result.text,
             confidence=result.confidence,
@@ -226,6 +256,7 @@ class TranscriptionProcessor:
             transcription_time=transcription_time,
             audio_duration=audio_duration,
             last_speech_end=result.last_speech_end,
+            perf=perf,
         )
 
     async def _transcribe_long_partial_window(
@@ -278,6 +309,7 @@ class TranscriptionProcessor:
         audio_buffer: AudioBuffer,
         *,
         progress_callback: Callable[[int, int], Awaitable[None]] | None,
+        perf_collector: dict[str, float] | None = None,
     ) -> TranscribeResult:
         chunks = plan_chunks(
             audio_buffer,
@@ -287,7 +319,7 @@ class TranscriptionProcessor:
         if len(chunks) <= 1:
             loop = asyncio.get_running_loop()
             audio = audio_buffer.get_audio_float32()
-            return await self._run_transcribe(audio, loop=loop)
+            return await self._run_transcribe(audio, loop=loop, perf_collector=perf_collector)
 
         texts: list[str] = []
         total_weight = 0.0
@@ -307,7 +339,7 @@ class TranscriptionProcessor:
                 chunk.start_sample, chunk.end_sample
             )
             try:
-                result = await self._run_transcribe(chunk_audio, loop=loop, options=options)
+                result = await self._run_transcribe(chunk_audio, loop=loop, options=options, perf_collector=perf_collector)
             except VramExhaustedError:
                 logger.warning(
                     "[%s] VRAM exhausted during long dictation chunk %d/%d; "
@@ -334,6 +366,7 @@ class TranscriptionProcessor:
                         chunk_audio,
                         loop=loop,
                         options=retry_options,
+                        perf_collector=perf_collector,
                     )
                 except VramExhaustedError:
                     logger.warning(
@@ -367,16 +400,55 @@ class TranscriptionProcessor:
         *,
         loop: asyncio.AbstractEventLoop,
         options: TranscribeOptions | None = None,
+        perf_collector: dict[str, float] | None = None,
     ) -> TranscribeResult:
         if self._allow_overlapping_inference:
             executor = await get_executor(self._transcription_max_workers)
+            if perf_collector is not None:
+                t_q_start = time.perf_counter()
+                def _worker_overlap():
+                    t_exec = time.perf_counter()
+                    q_wait = (t_exec - t_q_start) * 1000.0
+                    t_inf = time.perf_counter()
+                    res = self._call_session_transcribe(audio, options=options)
+                    t_end = time.perf_counter()
+                    perf_collector.setdefault("inference_started_at", t_inf)
+                    perf_collector["inference_ended_at"] = t_end
+                    return res, q_wait, (t_end - t_inf) * 1000.0
+                res, q_wait, inf_ms = await loop.run_in_executor(executor, _worker_overlap)
+                perf_collector["executor_queue_wait_ms"] = perf_collector.get("executor_queue_wait_ms", 0.0) + q_wait
+                perf_collector["model_inference_ms"] = perf_collector.get("model_inference_ms", 0.0) + inf_ms
+                return res
             return await loop.run_in_executor(
                 executor,
                 lambda: self._call_session_transcribe(audio, options=options),
             )
 
+        t_lock_start = time.perf_counter() if perf_collector is not None else None
+        if perf_collector is not None and self._context.stop_received_at is not None:
+            perf_collector.setdefault("stop_to_lock_wait_ms", (t_lock_start - self._context.stop_received_at) * 1000)
         async with get_inference_lock():
+            if perf_collector is not None:
+                lock_wait = (time.perf_counter() - t_lock_start) * 1000.0
+                perf_collector["lock_wait_ms"] = perf_collector.get("lock_wait_ms", 0.0) + lock_wait
+
             executor = await get_executor(1)
+            if perf_collector is not None:
+                t_q_start = time.perf_counter()
+                def _worker_exclusive():
+                    t_exec = time.perf_counter()
+                    q_wait = (t_exec - t_q_start) * 1000.0
+                    t_inf = time.perf_counter()
+                    res = self._call_session_transcribe(audio, options=options)
+                    t_end = time.perf_counter()
+                    perf_collector.setdefault("inference_started_at", t_inf)
+                    perf_collector["inference_ended_at"] = t_end
+                    return res, q_wait, (t_end - t_inf) * 1000.0
+                res, q_wait, inf_ms = await loop.run_in_executor(executor, _worker_exclusive)
+                perf_collector["executor_queue_wait_ms"] = perf_collector.get("executor_queue_wait_ms", 0.0) + q_wait
+                perf_collector["model_inference_ms"] = perf_collector.get("model_inference_ms", 0.0) + inf_ms
+                return res
+
             return await loop.run_in_executor(
                 executor,
                 lambda: self._call_session_transcribe(audio, options=options),

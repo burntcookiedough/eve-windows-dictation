@@ -412,10 +412,15 @@ async def test_handler_storage_append_error_cleans_storage_and_leases(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("trace_enabled", [False, True])
 async def test_handler_final_inference_error_cleans_storage_and_leases(
-    lifecycle_env, monkeypatch: pytest.MonkeyPatch
+    lifecycle_env, trace_enabled, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Model inference failure during finalization clears backing file and releases leases."""
+    """Inference failure still delivers one final and cleans storage, with diagnostics on/off."""
+    if trace_enabled:
+        monkeypatch.setenv("MURMUR_PERF_TRACE", "1")
+    else:
+        monkeypatch.delenv("MURMUR_PERF_TRACE", raising=False)
     created_processors: list[_LifecycleProcessor] = []
 
     def make_processor(ctx):
@@ -450,6 +455,11 @@ async def test_handler_final_inference_error_cleans_storage_and_leases(
     processor = created_processors[0]
     assert processor.closed is True
     assert lifecycle_env.manager.active_count == 0
+
+    frames = [json.loads(message) for message in ws.sent_messages if isinstance(message, str)]
+    finals = [frame for frame in frames if frame.get("type") == "final"]
+    assert len(finals) == 1
+    assert ("perf" in finals[0]) == trace_enabled
 
     # Backing file unlinked despite final inference error
     assert not os.path.exists(path)

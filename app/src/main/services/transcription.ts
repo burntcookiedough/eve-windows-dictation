@@ -17,6 +17,7 @@ import type {
   DictationSessionMode,
 } from '../../shared/types.js';
 import { createLogger } from '../lib/logger.js';
+import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
 
 const log = createLogger('Transcription');
 
@@ -37,7 +38,7 @@ export class TranscriptionService {
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
-  private onFinalCallback: ((frame: TextFrameFinal) => void) | null = null;
+  private onFinalCallback: ((frame: TextFrameFinal, receivedAt?: number) => void) | null = null;
   private onCloseCallback: (() => void) | null = null;
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
   private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
@@ -55,7 +56,8 @@ export class TranscriptionService {
     silenceTimeout: number,
     overlayWindow: BrowserWindow,
     hotwords?: string,
-    sessionMode: DictationSessionMode = 'quick'
+    sessionMode: DictationSessionMode = 'quick',
+    private readonly perfTraceId?: string
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
@@ -129,6 +131,7 @@ export class TranscriptionService {
     if (this.hotwords) {
       frame.hotwords = this.hotwords;
     }
+    if (isPerfTraceEnabled() && this.perfTraceId) frame.trace_id = this.perfTraceId;
 
     this.ws?.send(JSON.stringify(frame));
   }
@@ -170,7 +173,7 @@ export class TranscriptionService {
     this.ws.send(JSON.stringify(frame));
   }
 
-  onFinal(callback: (frame: TextFrameFinal) => void): void {
+  onFinal(callback: (frame: TextFrameFinal, receivedAt?: number) => void): void {
     this.onFinalCallback = callback;
   }
 
@@ -273,22 +276,25 @@ export class TranscriptionService {
   }
 
   private handleTextFrame(frame: TextFrame): void {
+    const receivedAt = this.perfTraceId ? performance.now() : undefined;
     this.lastTextFrame = frame;
     const payload: TranscriptionPayload = {
       type: frame.type,
       text: frame.text,
       confidence: frame.confidence,
     };
+    if (isPerfTraceEnabled() && this.perfTraceId) payload.perfTraceId = this.perfTraceId;
 
     this.broadcastToOverlay(IPC_CHANNELS.STATE_TRANSCRIPTION, payload);
     this.onTranscriptionCallback?.(payload);
 
     if (frame.type === 'partial') {
+      perfTraceManager.mark(this.perfTraceId, 'firstPartialReceivedAt', receivedAt);
       this.sendRecordingState('transcribing');
     } else if (frame.type === 'final') {
       this.didReceiveFinal = true;
       this.sendRecordingState('success');
-      this.onFinalCallback?.(frame);
+      this.onFinalCallback?.(frame, receivedAt);
     }
   }
 

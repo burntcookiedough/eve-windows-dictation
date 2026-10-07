@@ -7,6 +7,7 @@ import type {
   RecordingWarningPayload,
   RecordingStatusPayload,
   AudioCaptureErrorPayload,
+  OverlayPerfObservation,
 } from '../../shared/types.js';
 
 // Define the API exposed to the renderer
@@ -53,8 +54,8 @@ const murmurAPI = {
   },
 
   // Recording commands (Main → Renderer, tells overlay to start/stop audio capture)
-  onStartRecording: (callback: (deviceId?: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, deviceId?: string) => callback(deviceId);
+  onStartRecording: (callback: (deviceId?: string, perfTraceId?: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, deviceId?: string, perfTraceId?: string) => callback(deviceId, perfTraceId);
     ipcRenderer.on(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
   },
@@ -72,6 +73,10 @@ const murmurAPI = {
 
   reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => {
     ipcRenderer.send(IPC_CHANNELS.AUDIO_CAPTURE_ERROR, payload);
+  },
+
+  reportPerfObservation: (payload: OverlayPerfObservation) => {
+    ipcRenderer.send(IPC_CHANNELS.PERF_OVERLAY_EVENT, payload);
   },
 
   // Commands (Renderer → Main)

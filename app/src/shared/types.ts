@@ -160,6 +160,19 @@ export interface TranscriptionPayload {
   type: 'partial' | 'final';
   text: string;
   confidence: number;
+  perfTraceId?: string;
+}
+
+export interface OverlayPerfObservation {
+  traceId: string;
+  clockDomain: 'overlay_performance_now';
+  captureStartedAt: number | null;
+  captureReadyAt: number | null;
+  lastAudioAt: number | null;
+  stopRequestedAt: number | null;
+  firstPartialReceivedAt: number | null;
+  finalReceivedAt: number | null;
+  finalDomCommittedAt: number | null;
 }
 
 export interface RecordingDebugState {
