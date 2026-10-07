@@ -83,6 +83,7 @@ class PerfTraceManager {
     if (!trace || raw.session_id !== id || raw.clock_domain !== 'python_perf_counter') return;
     const safe: ServerPerfTiming = { session_id: id, clock_domain: 'python_perf_counter' };
     for (const field of serverDurations) safe[field] = finite(raw[field]) ? raw[field] : null;
+    safe.partial_task_active_at_stop = typeof raw.partial_task_active_at_stop === 'boolean' ? raw.partial_task_active_at_stop : null;
     trace.serverTimings = safe;
   }
 
@@ -104,6 +105,7 @@ class PerfTraceManager {
     if (!isPerfTraceEnabled() || !id) return;
     const trace = this.traces.get(id);
     if (!trace) return;
+    if (trace.status === 'complete' && status === 'closed') return;
     trace.status = status;
     this.emit(id);
   }
