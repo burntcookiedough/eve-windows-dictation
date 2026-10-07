@@ -9,6 +9,6 @@ Before reporting a problem:
 3. Use the app's bounded diagnostics summary where available. Review it before sharing.
 4. Remove transcript text, clipboard contents, device labels, tokens, usernames, and full local paths.
 
-Public issue tracking is currently closed. Source fixes can be proposed with a focused draft pull request. Security-sensitive reports must use the private process in [SECURITY.md](SECURITY.md), not a public pull request.
+Report bugs and problems through GitHub Issues. Source fixes can be proposed with a focused pull request targeting `trunk`. Security-sensitive reports must use the private process in [SECURITY.md](SECURITY.md), not public issues or pull requests.
 
-The public v0.7.0 Eve release keeps the frozen internal Murmur-compatible install chain while using `%APPDATA%\Eve` as its active profile. The legacy `%APPDATA%\murmur` profile is preserved, never automatically imported or inspected, and must not be renamed or moved manually. v0.8 remains unreleased.
+Eve releases keep the frozen internal Murmur-compatible install chain while using `%APPDATA%\Eve` as the active profile. The legacy `%APPDATA%\murmur` profile is preserved, never automatically imported or inspected, and must not be renamed or moved manually. Published pre-releases, including v0.8.2-alpha.8, are available on [GitHub Releases](https://github.com/burntcookiedough/eve-windows-dictation/releases).

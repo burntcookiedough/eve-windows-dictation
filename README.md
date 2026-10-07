@@ -10,6 +10,6 @@ The unsigned `nsis-web` installer needs internet access. Model weights download 
 Hugging Face on first use. Speech processing and transcripts stay on your device;
 the optional NVIDIA pack is a separate download.
 
-[Privacy](PRIVACY.md) · [Support](.github/SUPPORT.md) · [MIT License](LICENSE) · [NOTICE](NOTICE.md)
+[Privacy](PRIVACY.md) · [Support](.github/SUPPORT.md) · [Security](.github/SECURITY.md) · [Contributing](.github/CONTRIBUTING.md) · [MIT License](LICENSE) · [NOTICE](NOTICE.md)
 
-Build guide: [Windows developer and release setup](docs/development/building.md).
+Documentation: [Eve documentation](docs/README.md) · [Windows developer and release setup](docs/development/building.md).
