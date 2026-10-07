@@ -228,6 +228,7 @@ def test_pid_path_platform_matrix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Fallback operations share one Eve path and leave valid legacy state untouched."""
     environment = {"LOCALAPPDATA": str(tmp_path / "local-data")} if local_app_data else {}
     if override is not None:
         environment["MURMUR_PID_FILE"] = override
@@ -263,6 +264,7 @@ def test_pid_path_platform_matrix(
 def test_pid_override_preserves_path_semantics(
     os_name: str, platform: str, override: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Explicit launcher paths take precedence without expansion or trimming."""
     monkeypatch.setattr(pidfile, "os", SimpleNamespace(name=os_name, environ={
         "MURMUR_PID_FILE": override, "LOCALAPPDATA": "unused"
     }))
@@ -271,6 +273,7 @@ def test_pid_override_preserves_path_semantics(
 
 
 def test_pid_override_write_read_remove(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """All PID operations honor the same exact launcher-provided path and JSON."""
     target = tmp_path / "launcher-profile" / "server.pid"
     monkeypatch.setenv("MURMUR_PID_FILE", str(target))
     monkeypatch.setattr(pidfile.time, "time", lambda: 1234.567)
@@ -287,6 +290,7 @@ def test_pid_override_write_read_remove(tmp_path: Path, monkeypatch: pytest.Monk
 def test_pid_invalid_json_remains_unreadable(
     contents: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Malformed or incomplete JSON stays unreadable but remains safe to remove."""
     target = tmp_path / "server.pid"
     monkeypatch.setenv("MURMUR_PID_FILE", str(target))
     target.write_text(contents, encoding="utf-8")
@@ -301,6 +305,7 @@ def test_pid_invalid_json_remains_unreadable(
 def test_server_exit_cleans_resolved_pid(
     override: bool, failure: bool, port: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Normal and failed serving runs clean both override and fallback PID state."""
     import main as server_main
     import uvicorn
 
@@ -318,6 +323,7 @@ def test_server_exit_cleans_resolved_pid(
     monkeypatch.setattr(pidfile.atexit, "register", callbacks.append)
 
     def run(*args, **kwargs):
+        """Observe live PID state at the serving boundary before return or failure."""
         data = pidfile.read_pid_file()
         assert data is not None
         assert data["pid"] == server_main.os.getpid()
@@ -352,6 +358,7 @@ def test_server_exit_cleans_resolved_pid(
 def test_standalone_launch_command_cleanup(
     launch: str, override: bool, failure: bool, tmp_path: Path
 ) -> None:
+    """Real script and CLI processes remove their isolated PID on success or failure."""
     # Stub only the serving boundary: exercise the real command, resolver and exit.
     (tmp_path / "uvicorn.py").write_text(
         "import os\n"
