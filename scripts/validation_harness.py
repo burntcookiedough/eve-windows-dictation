@@ -61,6 +61,7 @@ SCHEMA: Dict[str, Any] = {
     },
 }
 def validate_spec(val: Any, spec: Any, path: str, errors: List[str]) -> None:
+    """Collect schema errors using only trusted field names, never input values."""
     if isinstance(spec, dict):
         if not isinstance(val, dict):
             errors.append(f"Field '{path}': must be an object" if path else "Root: must be an object"); return
@@ -102,6 +103,7 @@ def validate_spec(val: Any, spec: Any, path: str, errors: List[str]) -> None:
         elif val.strip().lower() in DISALLOWED_MIC_NAMES:
             errors.append(f"Field '{path}': generic placeholder names are not permitted")
 def _check_rate(ev: Dict[str, Any], r_k: str, e_k: str, rate_k: str, frac_k: str, errors: List[str]) -> None:
+    """Require scored rates and fraction displays to match their count denominators."""
     rc, ec, rate, frac = ev.get(r_k), ev.get(e_k), ev.get(rate_k), ev.get(frac_k)
     if rc is None or rc == 0 or ec is None:
         if rate is not None: errors.append(f"Field 'evaluation.{rate_k}': must be null when unscored")
@@ -114,6 +116,7 @@ def _check_rate(ev: Dict[str, Any], r_k: str, e_k: str, rate_k: str, frac_k: str
         if frac not in (f"{ec}/{rc}", f"{ec}/{rc} = {ec / rc:.1%}"):
             errors.append(f"Field 'evaluation.{frac_k}': invalid fraction string")
 def validate_record_dict(rec: Any) -> List[str]:
+    """Validate a safe trial record without reading or returning speech content."""
     errors: List[str] = []
     if not isinstance(rec, dict): return ["Root: record must be a JSON object"]
     validate_spec(rec, SCHEMA, "", errors)
@@ -128,6 +131,7 @@ def validate_record_dict(rec: Any) -> List[str]:
         _check_rate(ev, "reference_char_count", "char_errors", "cer", "cer_fraction", errors)
     return errors
 def get_duration_bin(duration_s: float) -> str:
+    """Separate short and sustained trials using declared audio duration."""
     if duration_s < 5.0: return "quick_<5s"
     elif duration_s <= 15.0: return "standard_5-15s"
     elif duration_s <= 30.0: return "medium_15-30s"
@@ -143,8 +147,11 @@ class StratumKey:
     evidence_type: str; speaker_stratum: str; content_domain: str; edge_case_type: Optional[str]
     duration_bin: str; scoring_normalization: str
     background_load_id: str; runtime_settings_id: str; measurement_policy_id: str
-    def to_display_dict(self) -> Dict[str, Any]: return dataclasses.asdict(self)
+    def to_display_dict(self) -> Dict[str, Any]:
+        """Return the full sanitized provenance for a compatible reporting stratum."""
+        return dataclasses.asdict(self)
 def get_stratum_key(rec: Dict[str, Any]) -> StratumKey:
+    """Build the grouping identity for a schema-validated trial."""
     b, e, c, t, ev = rec["build_info"], rec["environment"], rec["configuration"], rec["trial_metadata"], rec["evaluation"]
     return StratumKey(
         commit=b["commit"], artifact_name=b["artifact_name"], artifact_sha256=b["artifact_sha256"],
@@ -162,11 +169,13 @@ def get_stratum_key(rec: Dict[str, Any]) -> StratumKey:
         measurement_policy_id=rec["stage_timings"]["measurement_policy_id"],
     )
 def check_pooling_compatibility(records: Sequence[Dict[str, Any]]) -> None:
+    """Reject records whose hardware, corpus, settings, or policies differ."""
     if len(records) <= 1: return
     k0 = get_stratum_key(records[0])
     differing = [f.name for f in dataclasses.fields(StratumKey) if any(getattr(k0, f.name) != getattr(get_stratum_key(r), f.name) for r in records[1:])]
     if differing: raise IncompatiblePoolingError(f"Incompatible pooling: records differ in stratum dimensions: {differing}")
 def nearest_rank_percentile(values: Sequence[float], p: float) -> Optional[float]:
+    """Return the one-based ceil(p*n/100) observation, or None without samples."""
     if not values: return None
     if not (0.0 <= p <= 100.0) or math.isnan(p) or math.isinf(p): raise ValueError("Invalid percentile")
     for v in values:
@@ -175,6 +184,7 @@ def nearest_rank_percentile(values: Sequence[float], p: float) -> Optional[float
     rank = math.ceil((p / 100.0) * len(sorted_vals))
     return float(sorted_vals[max(0, min(rank - 1, len(sorted_vals) - 1))])
 def levenshtein_distance(seq1: Sequence[Any], seq2: Sequence[Any]) -> int:
+    """Count insertions, deletions, and substitutions with one rolling row."""
     if not seq1 or not seq2: return len(seq1) or len(seq2)
     dp = list(range(len(seq2) + 1))
     for i, item1 in enumerate(seq1, 1):
@@ -184,8 +194,10 @@ def levenshtein_distance(seq1: Sequence[Any], seq2: Sequence[Any]) -> int:
             prev = dp[j]; dp[j] = cur
     return dp[-1]
 def normalize_text(text: str) -> str:
+    """Lowercase and replace punctuation with spaces before collapsing whitespace."""
     return WHITESPACE_REGEX.sub(" ", PUNCT_REGEX.sub(" ", text.lower())).strip()
 def compute_wer(ref_text: str, hyp_text: str, normalize: bool = True) -> Tuple[int, int, Optional[float], Optional[str]]:
+    """Score whitespace-delimited words; an empty reference has no rate."""
     r_words = (normalize_text(ref_text) if normalize else ref_text.strip()).split()
     h_words = (normalize_text(hyp_text) if normalize else hyp_text.strip()).split()
     if not r_words: return 0, 0, None, None
@@ -193,6 +205,7 @@ def compute_wer(ref_text: str, hyp_text: str, normalize: bool = True) -> Tuple[i
     wer = errs / len(r_words)
     return errs, len(r_words), wer, f"{errs}/{len(r_words)} = {wer:.1%}"
 def compute_cer(ref_text: str, hyp_text: str, normalize: bool = True) -> Tuple[int, int, Optional[float], Optional[str]]:
+    """Score non-whitespace characters; an empty reference has no rate."""
     r_chars = [c for c in (normalize_text(ref_text) if normalize else ref_text.strip()) if not c.isspace()]
     h_chars = [c for c in (normalize_text(hyp_text) if normalize else hyp_text.strip()) if not c.isspace()]
     if not r_chars: return 0, 0, None, None
@@ -216,11 +229,13 @@ class StratumSummary:
     pooled_cer: Optional[float]; cer_fraction: str
     critical_entity_errors_count: Optional[int]; timings: Dict[str, TimingSummary]
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize aggregate counts and timings with their complete stratum identity."""
         d = dataclasses.asdict(self)
         d["stratum_key"] = self.key.to_display_dict()
         return d
 
 def _score_pool(measured: Sequence[Dict[str, Any]], err_k: str, ref_k: str) -> Tuple[int, Optional[int], int, Optional[float], str]:
+    """Pool only assessed positive-reference trials and retain scored sample counts."""
     scored = [r for r in measured if r["evaluation"].get(err_k) is not None and (r["evaluation"].get(ref_k) or 0) > 0]
     n = len(scored)
     tot_err = sum(r["evaluation"][err_k] for r in scored) if n else None
@@ -229,6 +244,7 @@ def _score_pool(measured: Sequence[Dict[str, Any]], err_k: str, ref_k: str) -> T
     return n, tot_err, tot_ref, pooled, (f"{tot_err}/{tot_ref} = {pooled:.1%}" if pooled is not None else "unavailable")
 
 def summarize_stratum(key: StratumKey, records: Sequence[Dict[str, Any]]) -> StratumSummary:
+    """Validate compatibility, exclude warm-ups, and summarize observed values only."""
     for r in records:
         if validate_record_dict(r): raise ValidationError("Record violates schema constraints")
         if get_stratum_key(r) != key: raise IncompatiblePoolingError("Incompatible pooling: record does not match stratum key")
@@ -266,6 +282,7 @@ def summarize_stratum(key: StratumKey, records: Sequence[Dict[str, Any]]) -> Str
     )
 
 def stratify_and_summarize(records: Sequence[Dict[str, Any]]) -> List[StratumSummary]:
+    """Validate records and produce separate summaries for every canonical stratum."""
     for r in records:
         if validate_record_dict(r): raise ValidationError("Record violates schema constraints")
     groups: Dict[StratumKey, List[Dict[str, Any]]] = {}
@@ -273,8 +290,10 @@ def stratify_and_summarize(records: Sequence[Dict[str, Any]]) -> List[StratumSum
     return [summarize_stratum(k, grp) for k, grp in groups.items()]
 
 def format_ms(val: Optional[float]) -> str:
+    """Display missing observations distinctly from measured zero milliseconds."""
     return "-" if val is None else f"{val:.1f} ms"
 def format_summary_markdown(summaries: Sequence[StratumSummary]) -> str:
+    """Render reviewed aggregate provenance, denominators, and latency sample counts."""
     lines = ["# Eve B4 Validation Stratified Summary Report", "", f"Total strata: {len(summaries)}", ""]
     for idx, s in enumerate(summaries, 1):
         k = s.key
@@ -307,6 +326,7 @@ def format_summary_markdown(summaries: Sequence[StratumSummary]) -> str:
     return "\n".join(lines)
 
 def ensure_safe_external_path(path: Path) -> Path:
+    """Reject repository inputs and linked or reparse-point path components."""
     for component in (path.absolute(), *path.absolute().parents):
         if component.is_symlink():
             raise ValueError("Symlink paths are rejected")
@@ -325,6 +345,7 @@ def ensure_safe_external_path(path: Path) -> Path:
     return resolved
 
 def load_records_file(file_path: Path) -> List[Dict[str, Any]]:
+    """Read external UTF-8 JSON objects, arrays, or NDJSON, accepting a UTF-8 BOM."""
     safe_path = ensure_safe_external_path(file_path)
     if not safe_path.exists(): raise FileNotFoundError("Input file not found")
     content = safe_path.read_text(encoding="utf-8-sig").strip()
@@ -378,6 +399,7 @@ BASE_FIXTURE_RECORD: Dict[str, Any] = {
 }
 
 def generate_fixture_demonstration_records() -> List[Dict[str, Any]]:
+    """Create labeled synthetic schema examples with no product timing evidence."""
     records = []
     w = copy.deepcopy(BASE_FIXTURE_RECORD)
     w["run_id"] = "fixture_warmup_00"; w["trial_metadata"]["trial_id"] = "trial_fixture_warmup"; w["trial_metadata"]["is_warmup"] = True
@@ -398,6 +420,7 @@ def generate_fixture_demonstration_records() -> List[Dict[str, Any]]:
     return records
 
 def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate external records while keeping error paths and content private."""
     try: records = load_records_file(Path(args.input_file))
     except Exception:
         sys.stderr.write("Error loading records: failed to load input file\n"); return 1
@@ -410,6 +433,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_score(args: argparse.Namespace) -> int:
+    """Read explicit external test texts and print only scoring counts and rates."""
     try:
         ref_path, hyp_path = ensure_safe_external_path(Path(args.reference_file)), ensure_safe_external_path(Path(args.hypothesis_file))
         ref_text, hyp_text = ref_path.read_text(encoding="utf-8-sig"), hyp_path.read_text(encoding="utf-8-sig")
@@ -422,6 +446,7 @@ def cmd_score(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_aggregate(args: argparse.Namespace) -> int:
+    """Summarize validated external records, optionally enforcing a single stratum."""
     try: records = load_records_file(Path(args.input_file))
     except Exception:
         sys.stderr.write("Error loading records: failed to load input file\n"); return 1
@@ -442,6 +467,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_baseline(args: argparse.Namespace) -> int:
+    """Report the source baseline and pending physical evidence without invented trials."""
     print("=" * 72 + "\nEve B4 Milestone Alpha Validation Baseline Status\n" + "=" * 72)
     print("Source baseline: 3146b3a3057ff7c55c35e6eeb63b98943f145e13 (not a B4 candidate artifact)")
     print("Physical evidence sample count: n = 0 (PENDING)")
@@ -452,6 +478,7 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_demo(args: argparse.Namespace) -> int:
+    """Exercise the schema and reporter with clearly labeled non-product fixtures."""
     print("Running Eve B4 validation schema fixture demonstration...")
     records = generate_fixture_demonstration_records()
     for idx, r in enumerate(records, 1):
@@ -465,6 +492,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_template(args: argparse.Namespace) -> int:
+    """Emit an unscored synthetic template whose missing measurements are null."""
     template = copy.deepcopy(BASE_FIXTURE_RECORD)
     for field in ("reference_word_count", "word_errors", "wer", "wer_fraction", "reference_char_count", "char_errors", "cer", "cer_fraction", "critical_entity_errors"):
         template["evaluation"][field] = None
@@ -472,6 +500,7 @@ def cmd_template(args: argparse.Namespace) -> int:
     return 0
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """Dispatch offline commands without recording audio or launching the application."""
     parser = argparse.ArgumentParser(description="Eve B4 Offline Validation, Scoring, and Reporting Harness (Python stdlib)")
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
     p_val = subparsers.add_parser("validate", help="Validate JSON/NDJSON records against schema")

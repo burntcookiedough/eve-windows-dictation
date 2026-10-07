@@ -30,6 +30,7 @@ from scripts.validation_harness import (
 )
 
 def _sample_valid_record(**kwargs: Any) -> Dict[str, Any]:
+    """Create synthetic trial records with consistent rates for targeted regressions."""
     rec = copy.deepcopy(BASE_FIXTURE_RECORD)
     for k, v in kwargs.items():
         if k in rec: rec[k] = v
@@ -49,6 +50,7 @@ def _sample_valid_record(**kwargs: Any) -> Dict[str, Any]:
     return rec
 
 def test_schema_valid_and_bounds() -> None:
+    """Reject malformed identities, non-finite measurements, and invalid repetitions."""
     rec = _sample_valid_record()
     assert validate_record_dict(rec) == []
     k = get_stratum_key(rec)
@@ -78,6 +80,7 @@ def test_schema_valid_and_bounds() -> None:
     assert any("mic_model" in e for e in validate_record_dict(bad))
 
 def test_unknown_keys_generic_and_unhashable_enum() -> None:
+    """Reject hostile keys and wrong enum types without leaking values or crashing."""
     rec = _sample_valid_record()
     rec["leaked_private_token_secret"] = "top_secret_data"
     errs = validate_record_dict(rec)
@@ -100,6 +103,7 @@ def test_unknown_keys_generic_and_unhashable_enum() -> None:
     assert any("device_category" in e for e in errs4)
 
 def test_scoring_normalization_and_unscored_rates() -> None:
+    """Keep raw scoring distinct and reject false-perfect or inconsistent score displays."""
     errs, count, wer, frac = compute_wer("", "some hypothesis text")
     assert count == 0 and wer is None and frac is None
 
@@ -118,6 +122,7 @@ def test_scoring_normalization_and_unscored_rates() -> None:
         assert any("wer_fraction" in error for error in validate_record_dict(rec))
 
 def test_pooling_dimensions_and_summarize_rejects_mismatched_records() -> None:
+    """Prove direct summaries cannot combine incompatible speech and edge trials."""
     rec1 = _sample_valid_record(run_id="r1", cpu="Intel i7-13700H")
     rec2 = _sample_valid_record(run_id="r2", cpu="Intel i7-13700H")
     check_pooling_compatibility([rec1, rec2])
@@ -142,6 +147,7 @@ def test_pooling_dimensions_and_summarize_rejects_mismatched_records() -> None:
         summarize_stratum(speech_key, [speech_rec, silence_rec])
 
 def test_stratification_isolates_warmups_and_reports_word_and_char_counts() -> None:
+    """Check warm-up exclusion, scored denominators, and unavailable edge-case metrics."""
     r_warm = _sample_valid_record(run_id="w1", is_warmup=True, word_errors=5, reference_word_count=10)
     r1 = _sample_valid_record(run_id="m1", is_warmup=False, word_errors=1, reference_word_count=10, char_errors=2, reference_char_count=50)
     r2 = _sample_valid_record(run_id="m2", is_warmup=False, word_errors=2, reference_word_count=10, char_errors=3, reference_char_count=50)
@@ -170,6 +176,7 @@ def test_stratification_isolates_warmups_and_reports_word_and_char_counts() -> N
     assert all(stage.observed_count == 0 and stage.p95_ms is None for stage in silence_sum.timings.values())
 
 def test_nearest_rank_percentile() -> None:
+    """Verify empirical p95 indexing and rejection of invalid numeric observations."""
     assert nearest_rank_percentile([], 50.0) is None
     assert nearest_rank_percentile([42.0], 0.0) == 42.0
     assert nearest_rank_percentile([42.0], 50.0) == 42.0
@@ -180,6 +187,7 @@ def test_nearest_rank_percentile() -> None:
     with pytest.raises(ValueError): nearest_rank_percentile([True], 50.0)
 
 def test_load_records_file_and_security_guards(tmp_path: Path) -> None:
+    """Exercise external JSON and NDJSON loading while rejecting repository inputs."""
     repo_file = REPO_ROOT / "docs" / "README.md"
     with pytest.raises(ValueError) as exc: ensure_safe_external_path(repo_file)
     assert "inside the repository" in str(exc.value)
@@ -200,6 +208,7 @@ def test_load_records_file_and_security_guards(tmp_path: Path) -> None:
     assert len(loaded_ndjson) == len(records)
 
 def test_cli_subcommands(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Run the public offline commands on synthetic external files."""
     assert main(["demo"]) == 0
     assert "Eve B4 Validation Stratified Summary Report" in capsys.readouterr().out
     assert main(["baseline"]) == 0
@@ -223,6 +232,7 @@ def test_cli_subcommands(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
 
 
 def test_invalid_score_counts_and_unreadable_inputs_do_not_leak(tmp_path, capsys):
+    """Reject malformed score counts and unreadable paths without traceback disclosure."""
     record = _sample_valid_record()
     record["evaluation"]["reference_word_count"] = "secret"
     record["evaluation"]["word_errors"] = {}
@@ -237,6 +247,7 @@ def test_invalid_score_counts_and_unreadable_inputs_do_not_leak(tmp_path, capsys
 
 
 def test_reparse_guard_rejects_parent_and_policy_changes_split_strata(tmp_path, monkeypatch):
+    """Prove parent reparse points and changed measurement policies cannot pass silently."""
     import scripts.validation_harness as harness
     from types import SimpleNamespace
     original = harness.os.lstat
@@ -245,6 +256,7 @@ def test_reparse_guard_rejects_parent_and_policy_changes_split_strata(tmp_path, 
     child = parent / "records.json"
     child.write_text("[]", encoding="utf-8")
     def mocked_lstat(path, *args, **kwargs):
+        """Expose a simulated Windows parent reparse flag through the real path guard."""
         if Path(path) == parent:
             return SimpleNamespace(st_file_attributes=0x400, st_mode=original(path).st_mode)
         return original(path, *args, **kwargs)
