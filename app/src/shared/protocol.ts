@@ -76,6 +76,7 @@ export interface ServerPerfTiming {
   stop_to_lock_wait_ms?: number | null;
   lock_wait_ms?: number | null;
   outstanding_partial_wait_ms?: number | null;
+  partial_task_active_at_stop?: boolean | null;
   executor_queue_wait_ms?: number | null;
   final_inference_start_offset_ms?: number | null;
   final_inference_end_offset_ms?: number | null;

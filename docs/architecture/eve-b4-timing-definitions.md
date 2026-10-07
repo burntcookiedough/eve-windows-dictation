@@ -165,4 +165,3 @@ on representative CPUs with declared settings/load/warm-up, profile dominant
 spans, and apply only the smallest evidence-supported change. Compare identical
 inputs and reject guardrail regressions. Do not use smaller models or disabled
 partials as implementation speedups.
-

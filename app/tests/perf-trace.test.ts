@@ -35,6 +35,24 @@ describe('passive correlated diagnostics', () => {
     expect(JSON.stringify(trace)).not.toContain('PRIVATE_CANARY');
     manager.mark('trial', 'stopRequestedAt', NaN); expect(manager.getRecentTraces()[0].main.stopRequestedAt).toBeNull();
   });
+  it('preserves partial-task observations without coercing unavailable or invalid values', () => {
+    manager.startTrace('trial');
+    for (const value of [true, false, null, undefined, 1, 'true']) {
+      manager.server('trial', { session_id: 'trial', clock_domain: 'python_perf_counter', partial_task_active_at_stop: value });
+      expect((manager.getRecentTraces()[0].serverTimings as unknown as Record<string, unknown>).partial_task_active_at_stop)
+        .toBe(typeof value === 'boolean' ? value : null);
+    }
+  });
+  it('preserves successful completion across socket close while retaining early-close outcomes', () => {
+    manager.startTrace('successful'); manager.startTrace('early-close');
+    manager.completeTrace('successful'); manager.completeTrace('successful', 'closed');
+    manager.completeTrace('early-close', 'closed');
+    const [successful, earlyClose] = manager.getRecentTraces();
+    expect(successful.status).toBe('complete'); expect(earlyClose.status).toBe('closed');
+    // A final callback can finish asynchronous output after the socket has closed.
+    manager.completeTrace('early-close');
+    expect(manager.getRecentTraces()[1].status).toBe('complete');
+  });
   it('keeps fixed renderer fields in their own clock domain', () => {
     manager.startTrace('trial'); const overlay = new OverlayPerfObserver('trial', 500);
     overlay.mark('finalReceivedAt', 600); overlay.mark('finalDomCommittedAt', 608);
