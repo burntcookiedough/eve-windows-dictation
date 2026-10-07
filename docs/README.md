@@ -18,10 +18,12 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [GPU pack provenance](architecture/eve-gpu-pack-provenance.md): Provenance and SHA-256 verification of optional NVIDIA runtime DLLs.
 - [CPU first-run decision](architecture/eve-cpu-first-run-decision.md): Architectural decision for CPU-first dictation on Windows.
 - [CPU dictation benchmark](architecture/eve-cpu-dictation-benchmark.md): Historical measurements supporting the first-run decision.
+- [Milestone B4 validation baseline](architecture/eve-b4-validation-baseline.md): Alpha validation status ($n = 0$ physical candidate evidence) and historical replay comparison.
 
 ## Development and releases
 
 - [Agent workflow](development/agent-workflow.md): Branching, testing, and verification procedures for contributors and agents.
+- [Microphone validation protocol](development/microphone-validation-protocol.md): Consented physical microphone testing procedure, prompt cards, and offline scoring harness.
 - [v0.8.2-alpha.8 release notes](releases/eve-v0.8.2-alpha.8-release-notes.md): Current published alpha release notes.
 
 ## History and archive
