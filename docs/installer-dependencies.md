@@ -174,5 +174,5 @@ release actions. This document does not authorize any of them.
 - [CTranslate2 installation guide](https://opennmt.net/CTranslate2/installation.html)
 - [faster-whisper requirements](https://github.com/SYSTRAN/faster-whisper#requirements)
 - [NVIDIA CUDA compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/)
-- [electron-builder nsis-web documentation](https://www.electron.build/nsis-web.html)
+- [electron-builder nsis-web documentation](https://www.electron.build/v26/docs/nsis/#web-installer)
 - [PyTorch CUDA 12.4 wheels](https://download.pytorch.org/whl/cu124)
