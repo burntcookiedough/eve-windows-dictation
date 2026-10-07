@@ -111,7 +111,7 @@ def _check_rate(ev: Dict[str, Any], r_k: str, e_k: str, rate_k: str, frac_k: str
             errors.append(f"Field 'evaluation.{rate_k}': must be a non-negative number")
         elif abs(rate - (ec / rc)) > 1e-4:
             errors.append(f"Field 'evaluation.{rate_k}': does not match {e_k} / {r_k}")
-        if not isinstance(frac, str) or not frac.startswith(f"{ec}/{rc}"):
+        if frac not in (f"{ec}/{rc}", f"{ec}/{rc} = {ec / rc:.1%}"):
             errors.append(f"Field 'evaluation.{frac_k}': invalid fraction string")
 def validate_record_dict(rec: Any) -> List[str]:
     errors: List[str] = []

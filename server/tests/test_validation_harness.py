@@ -112,6 +112,10 @@ def test_scoring_normalization_and_unscored_rates() -> None:
     # Unscored trial with non-null wer is rejected
     unscored = _sample_valid_record(reference_word_count=0, word_errors=None, wer=0.0)
     assert any("Field 'evaluation.wer'" in e for e in validate_record_dict(unscored))
+    for fraction in ("1/100", "1/10 = 90.0%", "1/10 extra"):
+        rec = _sample_valid_record()
+        rec["evaluation"]["wer_fraction"] = fraction
+        assert any("wer_fraction" in error for error in validate_record_dict(rec))
 
 def test_pooling_dimensions_and_summarize_rejects_mismatched_records() -> None:
     rec1 = _sample_valid_record(run_id="r1", cpu="Intel i7-13700H")
