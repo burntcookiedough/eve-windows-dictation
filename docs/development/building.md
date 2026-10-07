@@ -21,8 +21,52 @@ bun run build
 Set-Location ../server
 uv sync --extra whisper --group dev --frozen
 uv run pytest
-uv run python -m src.main
+uv run --no-sync python (Resolve-Path src/main.py).Path
 ```
+
+### Standalone PID ownership
+
+Without a nonempty `MURMUR_PID_FILE`, the Python server uses these standalone
+defaults. The platform roots are retained; `Eve/standalone` separates unmanaged
+PID ownership from Electron's profile even where the roots coincide.
+
+| Platform | Standalone PID path |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\Eve\standalone\server.pid` |
+| Windows without `LOCALAPPDATA` (or with an empty value) | `~/AppData/Local/Eve/standalone/server.pid` |
+| macOS | `~/Library/Application Support/Eve/standalone/server.pid` |
+| Linux | `~/.local/share/Eve/standalone/server.pid` |
+
+A nonempty `MURMUR_PID_FILE` takes precedence unchanged: relative paths remain
+relative to the process working directory, `~` is not expanded, and whitespace
+is not trimmed. Empty or unset values select the fallback. Write, read, normal
+exit, failure cleanup, and the registered exit hook use the same resolver. The
+JSON fields remain `pid`, `port`, and `startedAt` (Unix milliseconds). No fallback
+operation searches, adopts, migrates, or removes legacy Murmur files. Concurrent
+standalone instances need distinct explicit PID paths.
+
+The installed `uv run --no-sync murmur` CLI also calls `main:main` and uses this
+resolver. `bun run dev` starts Vite and Electron, not Python. Electron development
+detection still reads `<userData>/server.pid`, and packaged launches supply that
+exact path through `MURMUR_PID_FILE`; neither uses the standalone default.
+Release verification supplies its own isolated `release-verify-server.pid`.
+
+To make a manually started server discoverable by Electron development mode on
+Windows, run from `server/` in PowerShell:
+
+```powershell
+$env:MURMUR_PID_FILE = Join-Path $env:APPDATA 'Eve\server.pid'
+uv run --no-sync python (Resolve-Path src/main.py).Path
+```
+
+This matches the normal Eve `userData` path. If Electron's appData root is
+explicitly isolated for QA, supply that instance's exact `<userData>/server.pid`
+instead. Use the absolute Python script path above: the process ownership check
+requires a Python command line naming `server/src/main.py`; the CLI and
+`python -m src.main` forms do not satisfy that check. The PID override alone does
+not bypass process ownership or health validation. Remove the override from the
+shell with `Remove-Item Env:MURMUR_PID_FILE` after the manual server exits if
+subsequent launches should use the standalone default.
 
 Use `uv sync --python 3.11 --no-dev --extra release --frozen` when preparing the
 shipped Faster-Whisper closure. Pinning the sync interpreter keeps compiled

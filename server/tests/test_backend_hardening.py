@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import time
@@ -207,30 +210,194 @@ def test_whisper_uncached_model_reports_downloading(
 
 
 @pytest.mark.parametrize(
-    ("os_name", "platform", "environment", "expected_suffix"),
+    ("os_name", "platform", "local_app_data", "root_suffix"),
     [
-        ("nt", "win32", {"LOCALAPPDATA": r"C:\Users\friend\AppData\Local"}, Path("murmur/server.pid")),
-        ("posix", "darwin", {}, Path("Library/Application Support/murmur/server.pid")),
-        ("posix", "linux", {}, Path(".local/share/murmur/server.pid")),
+        ("nt", "win32", True, "local-data"),
+        ("nt", "win32", False, "home/AppData/Local"),
+        ("posix", "darwin", False, "home/Library/Application Support"),
+        ("posix", "linux", False, "home/.local/share"),
     ],
 )
+@pytest.mark.parametrize("override", [None, ""])
 def test_pid_path_platform_matrix(
     os_name: str,
     platform: str,
-    environment: dict[str, str],
-    expected_suffix: Path,
+    local_app_data: bool,
+    root_suffix: str,
+    override: str | None,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_environment = dict(environment)
-    monkeypatch.setattr(pidfile, "os", SimpleNamespace(name=os_name, environ=fake_environment))
-    monkeypatch.setattr(pidfile.sys, "platform", platform)
-    monkeypatch.setattr(
-        pidfile.Path, "home", classmethod(lambda cls: Path("C:/Users/friend"))
+    """Fallback operations share one Eve path and leave valid legacy state untouched."""
+    environment = {"LOCALAPPDATA": str(tmp_path / "local-data")} if local_app_data else {}
+    if override is not None:
+        environment["MURMUR_PID_FILE"] = override
+    monkeypatch.setattr(pidfile, "os", SimpleNamespace(name=os_name, environ=environment))
+    monkeypatch.setattr(pidfile, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(pidfile.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    root = tmp_path / root_suffix
+    expected = root / "Eve" / "standalone" / "server.pid"
+    legacy = root / "murmur"
+    legacy.mkdir(parents=True)
+    sentinels = {"server.pid": '{"pid": 999, "port": 9999, "startedAt": 1}',
+                 "sentinel.txt": "synthetic legacy sentinel"}
+    for name, contents in sentinels.items():
+        (legacy / name).write_text(contents, encoding="utf-8")
+
+    assert pidfile.get_pid_file_path() == expected
+    # Neither read nor cleanup adopts a valid legacy PID when the new file is absent.
+    assert pidfile.read_pid_file() is None
+    pidfile.remove_pid_file()
+    monkeypatch.setattr(pidfile.time, "time", lambda: 1234.567)
+    pidfile.write_pid_file(123, 4567)
+    data = {"pid": 123, "port": 4567, "startedAt": 1234567}
+    assert json.loads(expected.read_text(encoding="utf-8")) == data
+    assert pidfile.read_pid_file() == data
+    pidfile.remove_pid_file()
+    pidfile.remove_pid_file()
+    assert not expected.exists()
+    assert {p.name: p.read_text(encoding="utf-8") for p in legacy.iterdir()} == sentinels
+
+
+@pytest.mark.parametrize("os_name,platform", [("nt", "win32"), ("posix", "darwin"), ("posix", "linux")])
+@pytest.mark.parametrize("override", ["relative/server.pid", "~/literal/server.pid", " spaced /server.pid"])
+def test_pid_override_preserves_path_semantics(
+    os_name: str, platform: str, override: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicit launcher paths take precedence without expansion or trimming."""
+    monkeypatch.setattr(pidfile, "os", SimpleNamespace(name=os_name, environ={
+        "MURMUR_PID_FILE": override, "LOCALAPPDATA": "unused"
+    }))
+    monkeypatch.setattr(pidfile, "sys", SimpleNamespace(platform=platform))
+    assert pidfile.get_pid_file_path() == Path(override)
+
+
+def test_pid_override_write_read_remove(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """All PID operations honor the same exact launcher-provided path and JSON."""
+    target = tmp_path / "launcher-profile" / "server.pid"
+    monkeypatch.setenv("MURMUR_PID_FILE", str(target))
+    monkeypatch.setattr(pidfile.time, "time", lambda: 1234.567)
+    pidfile.write_pid_file(123, 4567)
+    assert pidfile.get_pid_file_path() == target
+    assert pidfile.read_pid_file() == {"pid": 123, "port": 4567, "startedAt": 1234567}
+    assert json.loads(target.read_text(encoding="utf-8")) == pidfile.read_pid_file()
+    pidfile.remove_pid_file()
+    pidfile.remove_pid_file()
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("contents", ["{invalid-json", '{"pid": 123, "port": 4567}'])
+def test_pid_invalid_json_remains_unreadable(
+    contents: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed or incomplete JSON stays unreadable but remains safe to remove."""
+    target = tmp_path / "server.pid"
+    monkeypatch.setenv("MURMUR_PID_FILE", str(target))
+    target.write_text(contents, encoding="utf-8")
+    assert pidfile.read_pid_file() is None
+    pidfile.remove_pid_file()
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("port", [0, 8765])
+def test_server_exit_cleans_resolved_pid(
+    override: bool, failure: bool, port: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normal and failed serving runs clean both override and fallback PID state."""
+    import main as server_main
+    import uvicorn
+
+    monkeypatch.delenv("MURMUR_PID_FILE", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(pidfile.Path, "home", classmethod(lambda cls: tmp_path))
+    if override:
+        monkeypatch.setenv("MURMUR_PID_FILE", str(tmp_path / "launcher" / "server.pid"))
+    target = pidfile.get_pid_file_path()
+    monkeypatch.setattr(server_main, "get_settings", lambda: SimpleNamespace(
+        host="127.0.0.1", port=port, log_level="INFO", log_binary=False
+    ))
+    monkeypatch.setattr(server_main, "configure_logging", lambda _level: None)
+    callbacks = []
+    monkeypatch.setattr(pidfile.atexit, "register", callbacks.append)
+
+    def run(*args, **kwargs):
+        """Observe live PID state at the serving boundary before return or failure."""
+        data = pidfile.read_pid_file()
+        assert data is not None
+        assert data["pid"] == server_main.os.getpid()
+        assert isinstance(data["startedAt"], int)
+        if port == 0:
+            assert data["port"] == kwargs["sockets"][0].getsockname()[1] > 0
+        else:
+            assert data["port"] == port
+        assert target.exists()
+        if failure:
+            raise RuntimeError("synthetic uvicorn failure")
+
+    monkeypatch.setattr(uvicorn, "run", run)
+    monkeypatch.setattr(uvicorn.Server, "run", run)
+    if failure:
+        with pytest.raises(RuntimeError, match="synthetic uvicorn failure"):
+            server_main.main()
+    else:
+        server_main.main()
+    assert not target.exists()
+    assert callbacks == [pidfile.remove_pid_file]
+    # Exercise the registered exit hook on real state, including duplicate cleanup.
+    pidfile.write_pid_file(123, 4567)
+    callbacks[0]()
+    callbacks[0]()
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("launch", ["script", "cli"])
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+def test_standalone_launch_command_cleanup(
+    launch: str, override: bool, failure: bool, tmp_path: Path
+) -> None:
+    """Real script and CLI processes remove their isolated PID on success or failure."""
+    # Stub only the serving boundary: exercise the real command, resolver and exit.
+    (tmp_path / "uvicorn.py").write_text(
+        "import os\n"
+        "import pidfile\n"
+        "def run(*args, **kwargs):\n"
+        "    data = pidfile.read_pid_file()\n"
+        "    assert data['pid'] == os.getpid()\n"
+        "    assert data['port'] == 8765\n"
+        "    assert isinstance(data['startedAt'], int)\n"
+        "    if os.environ['PID_TEST_FAILURE'] == '1':\n"
+        "        raise RuntimeError('synthetic serving failure')\n",
+        encoding="utf-8",
     )
-
-    path = pidfile.get_pid_file_path()
-
-    assert str(path).replace("\\", "/").endswith(str(expected_suffix).replace("\\", "/"))
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.upper().startswith("MURMUR_")}
+    environment.update({
+        "PYTHONPATH": str(tmp_path),
+        "LOCALAPPDATA": str(tmp_path),
+        "HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path),
+        "MURMUR_SETTINGS_FILE": str(tmp_path / "absent-settings.json"),
+        "MURMUR_PORT": "8765",
+        "PID_TEST_FAILURE": "1" if failure else "0",
+    })
+    if override:
+        environment["MURMUR_PID_FILE"] = str(tmp_path / "launcher" / "server.pid")
+    main_path = Path(__file__).resolve().parents[1] / "src" / "main.py"
+    if launch == "script":
+        command = [sys.executable, str(main_path)]
+    else:
+        cli = shutil.which("murmur")
+        assert cli is not None, "Run tests in the synced server environment"
+        command = [cli]
+    result = subprocess.run(command, cwd=tmp_path, env=environment,
+                            capture_output=True, text=True, timeout=30)
+    assert (result.returncode != 0) == failure, result.stderr
+    if failure:
+        assert "synthetic serving failure" in result.stderr
+    assert list(tmp_path.rglob("server.pid")) == []
 
 
 @pytest.mark.asyncio
