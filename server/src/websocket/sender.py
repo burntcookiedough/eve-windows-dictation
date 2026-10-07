@@ -1,6 +1,8 @@
 """Helper for sending protocol frames over WebSocket."""
 
 import logging
+import time
+from perf_trace import ServerPerfTiming, record_server_perf, is_perf_trace_enabled
 from typing import Any
 
 from fastapi import WebSocket
@@ -116,10 +118,9 @@ class FrameSender:
         )
         await self._ws.send_json(frame.model_dump())
         logger.debug(
-            "[%s] Sent partial (%d chars): ...%r (conf=%.2f, time=%.3fs)",
+            "[%s] Sent partial (%d chars, conf=%.2f, time=%.3fs)",
             self._session_id,
             len(text),
-            text[-60:],
             confidence,
             transcription_time,
         )
@@ -130,6 +131,7 @@ class FrameSender:
         confidence: float,
         transcription_time: float,
         audio_duration: float,
+        perf: ServerPerfTiming | None = None,
     ) -> None:
         """Send a final text frame.
 
@@ -138,18 +140,31 @@ class FrameSender:
             confidence: Confidence score (0.0 to 1.0).
             transcription_time: Time in seconds for transcription processing.
             audio_duration: Duration in seconds of the audio transcribed.
+            perf: Optional opt-in server performance measurements.
         """
+        perf = perf if is_perf_trace_enabled() else None
         frame = FinalTextFrame(
             text=text,
             confidence=confidence,
             transcription_time=transcription_time,
             audio_duration=audio_duration,
+            perf=perf,
         )
-        await self._ws.send_json(frame.model_dump())
+        payload = frame.model_dump()
+        if frame.perf is None:
+            payload.pop("perf", None)
+
+        t_send_start = time.perf_counter() if perf is not None else None
+        await self._ws.send_json(payload)
+        if perf is not None and t_send_start is not None:
+            send_duration_ms = (time.perf_counter() - t_send_start) * 1000.0
+            perf.ws_send_duration_ms = round(send_duration_ms, 3)
+            record_server_perf(perf)
+
         logger.info(
-            "[%s] Sent final: %r (conf=%.2f, time=%.3fs)",
+            "[%s] Sent final (%d chars, conf=%.2f, time=%.3fs)",
             self._session_id,
-            text[:100],
+            len(text),
             confidence,
             transcription_time,
         )

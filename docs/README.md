@@ -19,6 +19,7 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [CPU first-run decision](architecture/eve-cpu-first-run-decision.md): Architectural decision for CPU-first dictation on Windows.
 - [CPU dictation benchmark](architecture/eve-cpu-dictation-benchmark.md): Historical measurements supporting the first-run decision.
 - [Milestone B4 validation baseline](architecture/eve-b4-validation-baseline.md): Alpha validation status ($n = 0$ physical candidate evidence) and historical replay comparison.
+- [Milestone B4 timing definitions](architecture/eve-b4-timing-definitions.md): Monotonic timing boundaries, privacy guarantees, and safe stage measurement.
 
 ## Development and releases
 
