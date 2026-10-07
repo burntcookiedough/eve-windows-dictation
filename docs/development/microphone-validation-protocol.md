@@ -132,7 +132,8 @@ ends at final receipt by that observer. Final-to-History ends when save returns;
 clipboard completion ends when write returns; actual insertion ends when the
 isolated editor observes expected test text. DOM commit differs from paint;
 server send completion differs from receipt. Unobserved stages stay unavailable.
-Task 2 will define runtime events; do not estimate unobserved stages by subtraction.
+Use the [B4 timing definitions](../architecture/eve-b4-timing-definitions.md) for
+runtime events; do not estimate unobserved stages by subtraction.
 
 ## Offline commands and result format
 
