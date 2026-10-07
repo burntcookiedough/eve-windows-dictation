@@ -62,5 +62,5 @@ git diff --check
 
 See [installer dependencies](../installer-dependencies.md), the
 [protocol](../protocol.md), and the [lean-runtime release plan](../architecture/eve-lean-runtime-release-plan.md)
-for this candidate's release-specific requirements. Historical Gate 6 evidence remains
+for the retained release controls; each new release needs its own authorization. Historical Gate 6 evidence remains
 in [its release plan](../architecture/eve-gate-6-release-plan.md).

@@ -1,6 +1,20 @@
 # Eve lean runtime architecture
 
-Status: implementation candidate. Companion to [the System Design document](eve-lean-runtime-system-design.docx), [measured plan](eve-lean-runtime-plan.md), [blast-radius review](eve-lean-runtime-blast-radius.md), and [GPU pack provenance record](eve-gpu-pack-provenance.md). This is not a shipped installer or an approved GPU distribution.
+> **Architecture reference and historical proposed design**: The CPU base and
+> build-matched optional GPU pack remain the distribution model. The design
+> sketches and migration findings below record the initial candidate; they are
+> not current interface definitions. For implemented runtime behavior, refer to:
+> - [Speech-model selection](../speech-model-selection.md)
+> - [Installer dependencies](../installer-dependencies.md)
+> - [Building and packaging](../development/building.md)
+
+Status: architecture reference and candidate design. Companion to [the System Design document](eve-lean-runtime-system-design.docx), [measured plan](eve-lean-runtime-plan.md), [blast-radius review](eve-lean-runtime-blast-radius.md), and [GPU pack provenance record](eve-gpu-pack-provenance.md).
+
+The current [GPU pack manager](../../app/src/main/services/gpu-pack-manager.ts)
+pins two Brotli assets with compressed and decompressed hashes. The archive/member
+descriptor sketched below is historical. The production pack supplies cuBLAS DLLs;
+the base retains the exact pinned CTranslate2 cuDNN dispatcher. The provenance record
+retains the hardware-validation limits separately from download availability.
 
 ## Caller view
 
@@ -20,7 +34,7 @@ Choose a CPU base plus a separately downloaded, immutable, build-matched CUDA/cu
 
 The structurally different alternative is two complete installer editions. It reuses the current GPU closure but retains the multi-gigabyte PyTorch footprint for GPU users and complicates CPU/GPU upgrades. It remains a fallback if the native pack cannot pass legal review or real NVIDIA inference. CPU-only releases omit the user's requested optional NVIDIA path. Depending on a machine-wide CUDA Toolkit creates unreliable prerequisites. Shipping Torch in every base install conflicts with the measured default-size goal.
 
-## Design sketch
+## Historical design sketch and candidate findings
 
 ```ts
 type GpuPackState =

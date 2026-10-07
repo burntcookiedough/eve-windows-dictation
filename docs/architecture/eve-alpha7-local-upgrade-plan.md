@@ -1,4 +1,6 @@
-# Eve v0.8.2-alpha.7 local upgrade plan
+# [Historical] Eve v0.8.2-alpha.7 local upgrade plan
+
+> **Historical candidate plan**: This document was the security-focused candidate upgrade plan for the v0.8.2-alpha.7 milestone. Eve v0.8.2-alpha.8 is now published. Retained for planning provenance; see the current [documentation index](../README.md) and [roadmap](../project/roadmap.md).
 
 **Status:** Candidate plan. This authorizes no public tag, upload, release, or publication.
 

@@ -43,7 +43,7 @@ The intended outcome is a calm, trustworthy Windows dictation experience with:
 
 ### Application board
 
-![Gate 5 application reference](assets/eve-gate-5-application-reference.png)
+![Gate 5 application reference](../../../architecture/assets/eve-gate-5-application-reference.png)
 
 - File: `docs/architecture/assets/eve-gate-5-application-reference.png`
 - SHA-256: `37A983FA4BA295347E4FEBB28DAB428570DFB997E27209A002BBF7E74806DC4C`
@@ -54,7 +54,7 @@ The intended outcome is a calm, trustworthy Windows dictation experience with:
 
 ### Overlay board
 
-![Gate 5 overlay reference](assets/eve-gate-5-overlay-reference.png)
+![Gate 5 overlay reference](../../../architecture/assets/eve-gate-5-overlay-reference.png)
 
 - File: `docs/architecture/assets/eve-gate-5-overlay-reference.png`
 - SHA-256: `60CC848D4837BB83307C9F750D1DD3D9F6D83B364707780A363E86D971EDF742`

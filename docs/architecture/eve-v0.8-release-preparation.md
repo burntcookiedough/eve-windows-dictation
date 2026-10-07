@@ -1,4 +1,6 @@
-# Eve v0.8.2-alpha.4 release preparation
+# [Historical] Eve v0.8.2-alpha.4 release preparation
+
+> **Historical release preparation**: This document governed the authorized v0.8.2-alpha.4 release candidate (Faster-Whisper cutover). Eve v0.8.2-alpha.8 is now published. Retained as frozen release authority and gate history; see the current [documentation index](../README.md) and [roadmap](../project/roadmap.md).
 
 Status: authorized release candidate. The user authorized integration, exact-head
 packaging, lifecycle validation, and publication on 2026-09-18. Every later action remains

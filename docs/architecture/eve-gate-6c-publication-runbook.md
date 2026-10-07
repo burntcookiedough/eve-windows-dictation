@@ -1,5 +1,9 @@
 # Gate 6C publication runbook
 
+> Historical v0.7.0 publication runbook. These steps record the Gate 6 process;
+> they do not authorize a new release. Current release controls are linked from
+> the [documentation index](../README.md).
+
 1. Merge the reviewed preparation PR and freeze its exact commit.
 2. Run the single authorized final-head package and full lifecycle validation; stop on failure.
 3. Generate the seven-asset manifest/checksum set and rehash it independently.

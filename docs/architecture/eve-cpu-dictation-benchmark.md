@@ -1,5 +1,9 @@
 # Packaged Eve CPU dictation benchmark
 
+> Historical September 2026 candidate measurements supporting the
+> [CPU first-run decision](eve-cpu-first-run-decision.md). These results are not
+> new measurements of the current release.
+
 Measured on 2026-09-25/26 with the local unpacked Windows CPU candidate, not a development virtual environment. The host was a Ryzen 7 5800H (8 physical / 16 logical cores), 14.9 GB usable RAM, and an RTX 3060 Laptop GPU. Existing desktop processes remained running. The benchmark candidate's web installer payload is 178,039,346 bytes and its fresh unpacked application is 685,806,043 bytes. After packaged-runtime tests, that same unpacked directory measured 701,433,965 bytes; the exact 15,627,922-byte increase was generated `.pyc` files. Model weights are downloaded separately. A source-matched package rebuilt after review fixes measured 178,039,362 bytes for the payload and 685,806,297 bytes fresh unpacked; its packaged CPU and GPU-pack transcription smoke tests and release verifier passed. Those smoke tests are functional checks, not a new latency sample set.
 
 ## Method

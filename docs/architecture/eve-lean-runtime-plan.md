@@ -1,4 +1,6 @@
-# Eve lean runtime plan
+# [Historical] Eve lean runtime plan
+
+> **Historical design and measurement baseline**: This document recorded initial size measurements and candidate proposals for the lean runtime transition (2026-09-25). Shipped release controls and runtime implementations are documented in [building](../development/building.md), [speech-model selection](../speech-model-selection.md), and [installer dependencies](../installer-dependencies.md).
 
 Status: design and measurement baseline. This is a proposal for a future release candidate, not a released installer or an approved GPU binary set.
 

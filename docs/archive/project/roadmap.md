@@ -1,0 +1,63 @@
+> Historical roadmap retained from the B1 baseline (`92d97b86`). Release status
+> and research below reflect that earlier document, not current guidance. See the
+> [current roadmap](../../project/roadmap.md).
+
+# Roadmap
+
+This roadmap separates shipped behavior from design and research. It is not a release-date promise.
+
+## Current baseline
+
+Eve v0.7.0 is public. The latest public download is Eve v0.7.0; historical Murmur
+v0.6.3 assets remain immutable. The Eve source
+retains the frozen Murmur installer chain while using the Eve product identity, an
+isolated Eve profile, the approved visual/accessibility system, and packaged cactus
+resources. Its portable Python runtime and separately downloaded models remain subject to
+their existing release gates.
+
+The repository is standalone under `burntcookiedough/eve-windows-dictation`, and its
+release configuration targets that repository. The approved cutovers use the Eve
+product identity, AppUserModelID `io.github.burntcookiedough.eve`, and isolated
+`%APPDATA%\Eve` profile. The frozen Murmur installer chain and GUID, update
+compatibility, and internal compatibility interfaces remain unchanged.
+
+## Completed: application identity and visual system
+
+The technical contract is documented in [ADR-001](../../architecture/adr-001-eve-application-identity-migration.md).
+Gates 1–4 completed the compatibility, fresh-profile, visible-identity, and
+AppUserModelID cutover. Gates 5A and 5B completed the approved renderer/accessibility
+system and cactus Windows resources. Trademark work remains separate and incomplete.
+
+The v0.7.0 publication gates were completed under the separate Gate 6 record. Future
+work continues to preserve the established identity, profile, installer, and privacy boundaries.
+
+The completed gates established a fresh Eve profile that does not automatically import
+Murmur History, settings, hotwords, browser storage, credentials, or external-server
+configuration. Gate 6 completed the public v0.7.0 lifecycle without changing those
+privacy boundaries.
+
+## Current alpha: Faster-Whisper-only model runtime
+
+Eve v0.8.2-alpha.4 narrows the supported runtime to Faster-Whisper, removes the retired
+Nemotron implementation and dependencies, and retains curated model choices with explicit
+first-use preparation. The bundled runtime remains separate from downloaded model weights.
+It does not add engine packs, an updater, cache management, signing, or thin-client
+distribution.
+
+## Later: component-based distribution
+
+The measured installer payload is dominated by portable Python and the Faster-Whisper
+runtime. The planned direction is a thin core client with separately versioned model
+adapters, while model weights remain separate first-use downloads.
+
+Required properties include resumable downloads, signed or checksum-verified manifests, exact size and disk preflight, atomic staging and activation, compatibility metadata, rollback, repair, offline behavior, and uninstall rules that preserve user data and model caches.
+
+## Later: future model adapters
+
+The current release keeps Faster-Whisper as the only supported model family. A future
+family can be evaluated in an isolated adapter with deterministic offline decoding,
+then promoted only after it passes accuracy, latency, memory, packaging, recovery, and
+component-lifecycle gates on target Windows hardware. Model-family experiments must
+not add discovery or fallback policy to the current adapter.
+
+Do not ship vLLM inside the native Windows client. Benchmark raw ASR output separately from optional cleanup, and preserve model downloads as a different lifecycle from runtime/engine packs.
