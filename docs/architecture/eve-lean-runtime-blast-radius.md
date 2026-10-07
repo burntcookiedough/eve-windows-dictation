@@ -1,4 +1,6 @@
-# Eve lean runtime blast-radius review
+# [Historical] Eve lean runtime blast-radius review
+
+> **Historical review evidence**: This document captures the blast-radius review and verification evidence conducted during the alpha.6 lean runtime evaluation (2026-10-02). Eve v0.8.2-alpha.8 is now published. Retained as frozen verification evidence; see the current [documentation index](../README.md) and [roadmap](../project/roadmap.md).
 
 Status: updated 2026-10-02. The alpha.6 candidate pins the public optional GPU pack; the Eve app release remains unpublished. Hosted Windows CPU install, upgrade, rollback, uninstall, transcription, and synthetic-profile preservation passed at `a83438fed1270b97f24e686b8e2044c5a2416b5b` in [the installer lifecycle run](https://github.com/burntcookiedough/eve-windows-dictation/actions/runs/37037443453). Separate clean NVIDIA-machine evidence remains open. Licensing and notices are handled separately under the owner's scope decision. Paths below refer to the current checkout.
 

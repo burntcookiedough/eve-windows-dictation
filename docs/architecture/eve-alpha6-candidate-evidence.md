@@ -1,4 +1,6 @@
-# Eve v0.8.2-alpha.6 candidate evidence
+# [Historical] Eve v0.8.2-alpha.6 candidate evidence
+
+> **Historical candidate evidence**: This document records local preflight and candidate verification evidence for the v0.8.2-alpha.6 milestone. Eve v0.8.2-alpha.8 is now published. Retained as frozen measurement evidence; see the current [documentation index](../README.md) and [roadmap](../project/roadmap.md).
 
 Status: local preparation, not a published release. The candidate branch depends on PRs #87 and #88. This record distinguishes the local package preflight from the final exact-head release candidate.
 

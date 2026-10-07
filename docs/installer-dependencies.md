@@ -1,15 +1,17 @@
-# Eve installer: end-user dependency research
+# Eve installer dependencies
 
-> Original research: February 2026. Lean-runtime candidate updated September 2026.
-> Scope: packaged Windows dependencies in this checkout. The lean candidate has not been released.
+> Current dependency reference for the alpha.8 source baseline. Size figures below
+> retain September 2026 candidate measurements; they are not new alpha.8 artifact measurements.
 
 ## Executive summary
 
 The `nsis-web` installer contains the Electron client and a self-contained Python
 runtime. Eve currently ships one speech model family: Faster-Whisper through the
-CTranslate2 adapter. The lean candidate's `release` closure is CPU-capable and omits
-PyTorch; a local two-DLL NVIDIA pack has passed synthetic GPU inference but is not
-hosted or enabled for production downloads. Model
+CTranslate2 adapter. The `release` closure is CPU-capable and omits
+PyTorch. The optional two-DLL NVIDIA pack is hosted as a separate prerelease and
+pinned by the app's descriptor; installation is an explicit Settings action. See
+[GPU-pack provenance](architecture/eve-gpu-pack-provenance.md) for exact bytes,
+hashes, and the limits of the recorded hardware evidence. Model
 weights are downloaded on first run, not embedded in the installer.
 
 The release verifier checks the actual prepared payload: Faster-Whisper and CTranslate2
@@ -56,10 +58,10 @@ The installer does not contain:
 | Internet | Required for `nsis-web` payloads and first-use model download |
 | Visual C++ Redistributable | Required by Electron native modules and Python extensions; Eve links to the official installer when missing |
 
-CPU mode works without a GPU. The proposed NVIDIA pack requires a supported driver
-and sufficient VRAM. The local candidate pack is 494,950,029 bytes compressed and
-771,188,224 bytes installed; clean-machine support and distribution remain release
-gates. The adapter must report actual effective device and
+CPU mode works without a GPU. The optional NVIDIA pack requires a supported driver
+and sufficient VRAM. The pinned pack is 494,950,029 bytes compressed and
+771,188,224 bytes installed. Publication does not establish support on every NVIDIA
+machine; retain the hardware-evidence limits in its provenance record. The adapter reports effective device and
 precision; `auto` is the safest default.
 
 ## 3. Self-contained Python runtime
@@ -87,14 +89,15 @@ the bundled runtime.
 
 ## 4. Optional CUDA runtime and diagnostics
 
-The previous release included `torch==2.6.0+cu124` to supply CUDA DLLs under `torch/lib`.
-The lean candidate removes it from the default release closure. A separate, reviewed
-GPU pack must be proven with real inference and registered before CTranslate2 initializes
-before this candidate can offer optional NVIDIA acceleration.
+Earlier releases included `torch==2.6.0+cu124` to supply CUDA DLLs under `torch/lib`.
+The current release closure excludes it. Electron downloads and validates the pinned
+GPU pack before passing its directory to the managed server. Python registers that
+directory before CTranslate2 initializes. Pack integrity and actual GPU capability
+are separate states; a saved CUDA preference does not guarantee acceleration.
 
 | Build command | GPU closure | Intended use |
 | --- | --- | --- |
-| `uv sync --python 3.11 --no-dev --extra release --frozen` | CPU Faster-Whisper/CTranslate2 | Candidate packaged Windows runtime |
+| `uv sync --python 3.11 --no-dev --extra release --frozen` | CPU Faster-Whisper/CTranslate2 | Packaged Windows runtime |
 | `uv sync --extra whisper --group dev --frozen` | CPU Faster-Whisper/CTranslate2 | Development and CPU tests |
 | `uv sync --group dev --frozen` | No speech runtime unless requested | General server development |
 

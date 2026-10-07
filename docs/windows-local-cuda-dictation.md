@@ -1,4 +1,10 @@
-# Windows local CUDA dictation setup
+# [Historical] Windows local CUDA dictation setup (Murmur v0.6.3)
+
+> **Historical machine-specific setup**: This document records a machine-specific local development and CUDA verification setup for historical Murmur v0.6.3 on an RTX 3060 Laptop. It is not the current quickstart or installation guide for Eve. For current building, packaging, model selection, and dependency documentation, see:
+> - [Building and packaging](development/building.md)
+> - [Speech-model selection](speech-model-selection.md)
+> - [Installer dependencies](installer-dependencies.md)
+> - [Documentation index](README.md)
 
 This document is the historical, machine-specific recovery record for the published
 v0.6.3 Murmur release. Its Murmur paths are intentionally unchanged. Current source
