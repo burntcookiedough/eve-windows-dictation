@@ -87,7 +87,7 @@ export class ServerManager {
   }
 
   /**
-   * Get the path to the PID file (matches Python pidfile.py logic).
+   * Get Electron's PID path, supplied verbatim to Python via MURMUR_PID_FILE.
    */
   private getPidFilePath(): string {
     return path.join(app.getPath('userData'), 'server.pid');
@@ -573,7 +573,7 @@ export class ServerManager {
       };
     } else {
       // Development mode - this shouldn't be called, but provide fallback
-      // In dev, the user should run the server manually with `just start`
+      // In dev, run Python manually with the matching MURMUR_PID_FILE override.
       log.warn('getServerCommand called in development mode');
       return null;
     }

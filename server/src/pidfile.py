@@ -1,7 +1,8 @@
 """PID file management for server lifecycle coordination with Electron app.
 
-The PID file is stored in the Electron userData directory so both processes
-can find it. On Windows this is %LOCALAPPDATA%/murmur/server.pid.
+Electron supplies its exact userData PID path through MURMUR_PID_FILE.
+Unmanaged launches use a separate Eve/standalone directory under the existing
+platform data root; they do not discover or modify legacy Murmur PID files.
 """
 
 import atexit
@@ -37,17 +38,17 @@ def get_pid_file_path() -> Path:
         return Path(override)
 
     if os.name == "nt":
-        # Windows: %LOCALAPPDATA%/murmur
+        # Windows: retain the local data root, separate from Electron's profile.
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
-            return Path(local_app_data) / "murmur" / "server.pid"
+            return Path(local_app_data) / "Eve" / "standalone" / "server.pid"
         # Fallback if LOCALAPPDATA not set
-        return Path.home() / "AppData" / "Local" / "murmur" / "server.pid"
+        return Path.home() / "AppData" / "Local" / "Eve" / "standalone" / "server.pid"
     else:
-        # Linux/macOS: ~/.local/share/murmur or ~/Library/Application Support/murmur
+        # Retain the existing macOS/Linux roots; do not adopt legacy PID state.
         if sys.platform == "darwin":
-            return Path.home() / "Library" / "Application Support" / "murmur" / "server.pid"
-        return Path.home() / ".local" / "share" / "murmur" / "server.pid"
+            return Path.home() / "Library" / "Application Support" / "Eve" / "standalone" / "server.pid"
+        return Path.home() / ".local" / "share" / "Eve" / "standalone" / "server.pid"
 
 
 def write_pid_file(pid: int, port: int) -> None:
