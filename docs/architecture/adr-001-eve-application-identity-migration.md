@@ -90,7 +90,7 @@ Eve may reuse an already verified standard model cache to avoid a multi-gigabyte
 | Python package and CLI | `murmur`, `murmur-testui` | Keep during the installed-product rename. |
 | Renderer bridge globals | `window.murmurMain` and the overlay bridge | Keep. Renaming internal preload contracts adds risk without changing public ownership. |
 | Internal types and helpers | `MurmurMainAPI`, logger text, helper names | Rename only when a focused cleanup provides value. |
-| Dormant homepage | old Murmur copy and base path | Keep unpublished until the visual/public-site phase. |
+| Dormant homepage | old Murmur copy and base path | Historical: kept unpublished during identity cutover; subsequently removed entirely with no replacement along with obsolete /murmur/ public route and Pages workflow. |
 | Icons and color system | current Murmur assets | Handle after identity and installer compatibility are proven. |
 
 ## Launch-on-login risk
@@ -254,7 +254,7 @@ After the compatibility window, internal `MURMUR_*`, Python package, preload bri
 - Changing AppUserModelID can reset notification permissions or taskbar grouping.
 - Reusing shared model caches must not be confused with importing personal Murmur data.
 - Internal `MURMUR_*` churn can break development scripts without improving user-facing identity.
-- The dormant homepage contains old product copy and must remain unpublished until redesigned.
+- The dormant homepage package and obsolete /murmur/ public route have been removed entirely with no replacement (historical guidance kept it unpublished until retired).
 
 ## Explicit no-go actions
 
