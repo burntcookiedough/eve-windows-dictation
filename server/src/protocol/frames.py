@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, Field
 
 from protocol.errors import ErrorCode
+from perf_trace import ServerPerfTiming
 
 
 # --- Control Frames ---
@@ -21,6 +22,7 @@ class StartFrame(ControlFrameBase):
     """Client -> Server: Initiates a transcription session."""
 
     type: Literal["start"] = "start"
+    trace_id: Annotated[str | None, Field(pattern=r"^[a-zA-Z0-9_.-]{1,64}$", strict=True, exclude_if=lambda value: value is None)] = None
     silence_timeout: Annotated[
         float, Field(gt=0, description="Seconds of silence before auto-stop")
     ]
@@ -154,6 +156,7 @@ class FinalTextFrame(TextFrameBase):
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
     transcription_time: Annotated[float, Field(ge=0.0)]
     audio_duration: Annotated[float, Field(ge=0.0)]
+    perf: ServerPerfTiming | None = None
 
 
 # Union type for all text frames

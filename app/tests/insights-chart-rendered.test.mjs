@@ -1,10 +1,23 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
-const vitePort = 53800 + (process.pid % 100);
+// Let Windows select an available port outside its reserved ranges. Vite's
+// strictPort setting still fails loudly if another process wins the handoff.
+const portProbe = createServer();
+await new Promise((resolveListen, rejectListen) => {
+  portProbe.once('error', rejectListen);
+  portProbe.listen(0, '127.0.0.1', resolveListen);
+});
+const address = portProbe.address();
+await new Promise((resolveClose, rejectClose) => {
+  portProbe.close((error) => error ? rejectClose(error) : resolveClose());
+});
+if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
+const vitePort = address.port;
 const fixtureTimeoutMs = 45_000;
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/insights-chart-fixture.html`;
 const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1'], {

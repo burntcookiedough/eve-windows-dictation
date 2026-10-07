@@ -1,11 +1,21 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
 const screenshotDir = resolve(tmpdir(), `eve-history-export-screenshots-${process.pid}`);
-const vitePort = 53600 + (process.pid % 100);
+// Ask Windows for an available port rather than assuming a fixed range is free.
+const probe = createServer();
+await new Promise((resolve, reject) => {
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', resolve);
+});
+const address = probe.address();
+await new Promise((resolve, reject) => probe.close(error => error ? reject(error) : resolve()));
+if (!address || typeof address === 'string') throw new Error('Expected an ephemeral port');
+const vitePort = address.port;
 const fixtureTimeoutMs = 45_000;
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/history-export-fixture.html`;
 const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1'], {
@@ -29,7 +39,7 @@ afterAll(stopVite);
 let result;
 try {
   let fixtureReady = false;
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     try {
       if ((await fetch(fixtureUrl)).ok) {
         fixtureReady = true;

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
 from protocol.errors import ErrorCode
+from perf_trace import ServerPerfTiming, is_perf_trace_enabled, sanitize_correlation_id
 from protocol.frames import ClosingReason, StartFrame, StatusKind, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
@@ -183,12 +184,14 @@ async def _wait_for_start(
 
     try:
         start_frame = StartFrame.model_validate(data)
-    except ValidationError as e:
-        await sender.send_error(ErrorCode.INVALID_START, f"Invalid start frame: {e}")
+    except ValidationError:
+        await sender.send_error(ErrorCode.INVALID_START, "Invalid start frame")
         await websocket.close()
         return False
 
     # Update context with start frame config
+    if is_perf_trace_enabled():
+        context.trace_id = sanitize_correlation_id(start_frame.trace_id)
     context.silence_timeout = start_frame.silence_timeout
     context.partial_emission_interval = start_frame.partial_emission_interval
     context.hotwords = (
@@ -283,6 +286,8 @@ async def _handle_audio_frame(
         return
 
     # Add to buffer
+    if is_perf_trace_enabled():
+        context.last_audio_received_at = time.perf_counter()
     context.audio_buffer.append(frame.sequence, frame.samples)
     audio_duration = context.audio_buffer.duration_seconds
 
@@ -333,6 +338,9 @@ async def _handle_control_frame(
 
     # Handle stop
     if msg_type == "stop":
+        if is_perf_trace_enabled():
+            context.stop_received_at = time.perf_counter()
+            context.partial_task_active_at_stop = context.partial_in_flight
         logger.info("[%s] Received stop frame from client", context.session_id)
         await _finalize_session(sender, context, processor, ClosingReason.STOP_RECEIVED)
         await websocket.close()
@@ -370,7 +378,11 @@ async def _partial_emission_loop(
             continue
 
         try:
-            result = await processor.transcribe_partial()
+            context.partial_in_flight = True
+            try:
+                result = await processor.transcribe_partial()
+            finally:
+                context.partial_in_flight = False
             if result is not None:
                 # Update last speech time if speech was detected
                 if (
@@ -550,6 +562,9 @@ async def _finalize_session(
         final_confidence = 0.0
         final_transcription_time = 0.0
         final_audio_duration = context.audio_buffer.duration_seconds
+        final_perf = (ServerPerfTiming(session_id=sanitize_correlation_id(context.trace_id),
+                      partial_task_active_at_stop=context.partial_task_active_at_stop)
+                      if is_perf_trace_enabled() else None)
 
         try:
             result = await processor.transcribe_final(
@@ -565,6 +580,7 @@ async def _finalize_session(
             final_confidence = result.confidence
             final_transcription_time = result.transcription_time
             final_audio_duration = result.audio_duration
+            final_perf = getattr(result, "perf", None) or final_perf
 
             if result.is_empty and context.last_partial_text:
                 logger.warning(
@@ -576,9 +592,9 @@ async def _finalize_session(
 
             if final_text:
                 logger.info(
-                    "[%s] Final transcription: %r (%.1fs audio)",
+                    "[%s] Final transcription (%d chars, %.1fs audio)",
                     context.session_id,
-                    final_text[:100] if len(final_text) > 100 else final_text,
+                    len(final_text),
                     final_audio_duration,
                 )
             else:
@@ -608,6 +624,7 @@ async def _finalize_session(
                 final_confidence,
                 final_transcription_time,
                 final_audio_duration,
+                perf=final_perf,
             )
         except Exception:
             logger.debug("[%s] Failed to send final frame", context.session_id, exc_info=True)

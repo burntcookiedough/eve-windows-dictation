@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import Pill from './components/Pill.svelte';
   import TextDisplay from './components/TextDisplay.svelte';
   import { audioCapture } from './audio-capture';
+  import { OverlayPerfObserver } from './perf-observation';
   import { AUDIO_CONFIG } from '../../shared/constants';
   import type {
     RecordingState,
@@ -25,12 +26,20 @@
   let warningTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let cleanupFns: Array<() => void> = [];
+  let perfObserver: OverlayPerfObserver | null = null;
+
+  function reportPerf(observer: OverlayPerfObserver | null) {
+    if (!observer) return;
+    try { window.murmur.reportPerfObservation?.(observer.snapshot()); } catch { /* diagnostic only */ }
+  }
 
   async function startAudioCapture(deviceId?: string) {
+    const observer = perfObserver;
     try {
       await audioCapture.start(
         // On audio data - send to main process
         (buffer) => {
+          observer?.mark('lastAudioAt');
           window.murmur.sendAudioData(buffer);
         },
         // On levels - update waveform
@@ -38,7 +47,10 @@
           audioLevels = levels;
         },
         // Options with device ID
-        { deviceId }
+        { deviceId, ...(observer ? { onCaptureReady: (timestamp: number) => {
+          observer.mark('captureReadyAt', timestamp);
+          reportPerf(observer);
+        } } : {}) }
       );
     } catch (error) {
       console.error('Failed to start audio capture:', error);
@@ -57,7 +69,9 @@
   }
 
   function stopAudioCapture() {
+    perfObserver?.mark('stopRequestedAt');
     audioCapture.stop();
+    reportPerf(perfObserver);
     audioLevels = new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0);
   }
 
@@ -89,10 +103,25 @@
     // Subscribe to transcription updates
     cleanupFns.push(
       window.murmur.onTranscription((payload: TranscriptionPayload) => {
+        const observer = payload.perfTraceId === perfObserver?.snapshot().traceId ? perfObserver : null;
+        if (payload.type === 'partial') {
+          if (observer?.snapshot().firstPartialReceivedAt === null) {
+            observer.mark('firstPartialReceivedAt');
+            reportPerf(observer);
+          }
+        } else {
+          observer?.mark('finalReceivedAt');
+        }
         transcriptionText = payload.text;
         transcriptionType = payload.type;
         if (payload.type === 'final') {
           statusMessage = '';
+          if (observer) {
+            void tick().then(() => {
+              observer.mark('finalDomCommittedAt');
+              reportPerf(observer);
+            });
+          }
         }
       })
     );
@@ -127,7 +156,8 @@
 
     // Subscribe to start/stop commands from main process
     cleanupFns.push(
-      window.murmur.onStartRecording((deviceId) => {
+      window.murmur.onStartRecording((deviceId, traceId) => {
+        perfObserver = traceId && /^[a-zA-Z0-9_.-]{1,64}$/.test(traceId) ? new OverlayPerfObserver(traceId) : null;
         startAudioCapture(deviceId);
       })
     );
