@@ -6,4 +6,4 @@ Do not publish exploit details, secrets, private audio, transcript text, clipboa
 
 A useful report includes the affected version, Windows version, whether the packaged or development build was used, a minimal reproduction, and the security impact. Redact user data from screenshots and diagnostics.
 
-The current Windows release is unsigned. Verify downloads against the SHA-256 digests published by GitHub Releases and repeated in the repository README. Signing remains a separate release-infrastructure decision.
+The current Windows release is unsigned. Verify downloads against the SHA-256 digests published with [GitHub Releases](https://github.com/burntcookiedough/eve-windows-dictation/releases). Signing remains a separate release-infrastructure decision.
