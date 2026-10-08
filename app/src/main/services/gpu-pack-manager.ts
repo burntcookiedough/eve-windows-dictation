@@ -404,7 +404,7 @@ function parseCanonicalPartialMetadata(
       !isSha256(value.compressedSha256) ||
       typeof value.verifiedBytes !== 'number' ||
       !Number.isSafeInteger(value.verifiedBytes) ||
-      value.verifiedBytes <= 0 ||
+      value.verifiedBytes < 0 ||
       value.verifiedBytes > (value.compressedBytes as number) ||
       !isSha256(value.prefixSha256)
     ) {
@@ -751,6 +751,7 @@ async function hashFile(filePath: string): Promise<{ bytes: number; sha256: stri
 
 async function hashFilePrefix(filePath: string, length: number): Promise<string> {
   const hash = createHash('sha256');
+  if (length === 0) return hash.digest('hex');
   let read = 0;
   for await (const chunk of fs.createReadStream(filePath, { start: 0, end: length - 1 })) {
     const buf = toBuffer(chunk);
@@ -790,7 +791,7 @@ async function writePartialMeta(
     prefixSha256,
   };
   const tmpPath = `${metaPath}.tmp-${randomUUID()}`;
-  const handle = await fs.promises.open(tmpPath, 'w', 0o600);
+  const handle = await fs.promises.open(tmpPath, 'wx', 0o600);
   try {
     await handle.writeFile(`${JSON.stringify(meta)}\n`, 'utf8');
     await handle.sync();
@@ -1354,6 +1355,17 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     try {
       resetIdleTimeout();
 
+      if (initialVerifiedBytes === 0) {
+        const existingMetaText = await readBoundedUtf8File(metaPath);
+        const existingMeta = existingMetaText
+          ? parseCanonicalPartialMetadata(existingMetaText, descriptor, index) : null;
+        if (!existingMeta || existingMeta.verifiedBytes !== 0) {
+          const initialFile = await fs.promises.open(partPath, 'wx', 0o600);
+          await initialFile.close();
+        }
+        await writePartialMeta(metaPath, asset, index, 0, createHash('sha256').digest('hex'), descriptor!);
+      }
+
       let stream: AsyncIterable<Uint8Array>;
       if (options.source) {
         stream = await options.source(asset.url, controller.signal);
@@ -1505,9 +1517,10 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
       await checkFreeDiskSpace(asset.compressedBytes - verifiedBytes + BOUNDED_TEMP_METADATA_BYTES + SAFETY_MARGIN_BYTES);
       fileHandle = await fs.promises.open(
         partPath,
-        verifiedBytes > 0 && isResumed ? 'a' : 'w',
+        verifiedBytes > 0 && isResumed ? 'a' : 'r+',
         0o600,
       );
+      if (verifiedBytes === 0) await fileHandle.truncate(0);
       onProgress(receivedBefore + writeOffset, true);
 
       // Running prefix hash from offset 0
@@ -1996,13 +2009,13 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
           }
           // 4. Owned partials
           else if (
-            (/^\.gpu-partial-/.test(entry.name) || /^asset-/.test(entry.name)) &&
-            entry.name.endsWith('.meta')
+            /^(?:\.gpu-partial|asset)-[01](?:-[a-zA-Z0-9_-]+)?\.meta$/.test(entry.name)
           ) {
             try {
               const raw = await readBoundedUtf8File(fullPath);
               if (raw) {
-                const meta = parseCanonicalPartialMetadata(raw);
+                const indexMatch = entry.name.match(/^(?:\.gpu-partial|asset)-([01])/);
+                const meta = parseCanonicalPartialMetadata(raw, undefined, Number(indexMatch?.[1]));
                 if (meta) {
                   const matchingPart = fullPath.slice(0, -5) + '.part';
                   try {
@@ -2168,13 +2181,12 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
               throw new Error('Invalid server PID');
             }
             const write = leaseWrites.then(async () => {
-            leaseData.serverPid = serverPid;
-            const tmpPath = path.join(root, `${leaseFileName}.tmp-${randomUUID()}`);
-            await fs.promises.writeFile(tmpPath, `${JSON.stringify(leaseData)}\n`, {
-              encoding: 'utf8',
-              mode: 0o600,
-            });
-            await fs.promises.rename(tmpPath, leasePath);
+              leaseData.serverPid = serverPid;
+              const tmpPath = path.join(root, `${leaseFileName}.tmp-${randomUUID()}`);
+              await fs.promises.writeFile(tmpPath, `${JSON.stringify(leaseData)}\n`, {
+                encoding: 'utf8', flag: 'wx', mode: 0o600,
+              });
+              await fs.promises.rename(tmpPath, leasePath);
             });
             leaseWrites = write.catch(() => {});
             await write;
