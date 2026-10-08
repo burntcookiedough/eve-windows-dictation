@@ -585,6 +585,22 @@ function isStrictlyContainedInRoot(root: string, target: string): boolean {
   );
 }
 
+async function assertRegularDirectoryTarget(directory: string): Promise<void> {
+  const requested = await fs.promises.lstat(directory, { bigint: true });
+  if (!requested.isDirectory() || requested.isSymbolicLink()) {
+    throw new GpuPackError('storage_failed', 'Unsafe directory target');
+  }
+  const resolvedPath = await fs.promises.realpath(directory);
+  if (path.relative(resolvedPath, path.resolve(directory)) === '') return;
+  // Windows short names may resolve to a different spelling of the same
+  // directory. Compare full-width filesystem IDs, never just path text.
+  const resolved = await fs.promises.lstat(resolvedPath, { bigint: true });
+  if (!resolved.isDirectory() || resolved.isSymbolicLink() || requested.ino === 0n ||
+      requested.dev !== resolved.dev || requested.ino !== resolved.ino) {
+    throw new GpuPackError('storage_failed', 'Directory target identity changed');
+  }
+}
+
 async function inspectManagerOwnedPackDirectory(
   directory: string,
 ): Promise<ManagerOwnedPackDirectory | null> {
@@ -625,7 +641,7 @@ async function removeOwnedPackDirectory(
   packDir: string,
   owned: ManagerOwnedPackDirectory,
 ): Promise<void> {
-    if (path.relative(await fs.promises.realpath(packDir), path.resolve(packDir)) !== '') throw new GpuPackError('storage_failed', 'Unsafe pack target');
+    await assertRegularDirectoryTarget(packDir);
     const current = await inspectManagerOwnedPackDirectory(packDir);
     if (!current || current.manifest.packId !== owned.manifest.packId) throw new GpuPackError('storage_failed', 'Pack ownership changed');
     const files = [...owned.manifest.files.map((f) => f.fileName), GPU_PACK_MANIFEST_NAME];
@@ -682,7 +698,7 @@ async function removeOwnedStageDirectory(
   stageDir: string,
   owned: { entries: string[] },
 ): Promise<void> {
-    if (path.relative(await fs.promises.realpath(stageDir), path.resolve(stageDir)) !== '') throw new GpuPackError('storage_failed', 'Unsafe stage target');
+    await assertRegularDirectoryTarget(stageDir);
     const current = await inspectManagerOwnedStageDirectory(stageDir);
     if (!current || JSON.stringify(current.entries) !== JSON.stringify(owned.entries)) throw new GpuPackError('storage_failed', 'Stage ownership changed');
     for (const entry of [...owned.entries.filter((entry) => entry !== STAGE_MARKER_NAME), STAGE_MARKER_NAME]) {
@@ -868,13 +884,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
       if (path.dirname(ancestor) === ancestor) break;
     }
     await fs.promises.mkdir(root, { recursive: true, mode: 0o700 });
-    const stats = await fs.promises.lstat(root);
-    if (!stats.isDirectory() || stats.isSymbolicLink()) {
-      throw new GpuPackError('storage_failed', 'GPU pack root is not a regular directory');
-    }
-    if (path.relative(await fs.promises.realpath(root), root) !== '') {
-      throw new GpuPackError('storage_failed', 'GPU pack root resolves through a link');
-    }
+    await assertRegularDirectoryTarget(root);
   };
 
   const checkFreeDiskSpace = async (neededBytes: number): Promise<void> => {
@@ -1098,10 +1108,9 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
   const verifyPackDirectory = async (
     directory: string,
-    customDescriptor?: NormalizedDescriptor,
     stageMarker?: StageMarkerRecord,
   ): Promise<ExistingPackResult> => {
-    const targetDesc = customDescriptor ?? descriptor;
+    const targetDesc = descriptor;
     if (!targetDesc) return 'invalid';
 
     let directoryStats: fs.Stats;
@@ -1851,7 +1860,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         },
       );
 
-      const staged = await verifyPackDirectory(stagePath, undefined, marker);
+      const staged = await verifyPackDirectory(stagePath, marker);
       if (staged !== 'valid') {
         throw new GpuPackError('integrity_failed', 'Staged GPU pack failed validation');
       }
@@ -1881,12 +1890,9 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         // replacement marker. Unknown entries still block bounded cleanup.
         try {
           await ensureRoot();
-          const stats = await fs.promises.lstat(stagePath);
-          if (stats.isDirectory() && !stats.isSymbolicLink() &&
-              path.relative(await fs.promises.realpath(stagePath), path.resolve(stagePath)) === '') {
-            await fs.promises.writeFile(path.join(stagePath, STAGE_MARKER_NAME), `${JSON.stringify(marker)}\n`,
-              { flag: 'wx', mode: 0o600 });
-          }
+          await assertRegularDirectoryTarget(stagePath);
+          await fs.promises.writeFile(path.join(stagePath, STAGE_MARKER_NAME), `${JSON.stringify(marker)}\n`,
+            { flag: 'wx', mode: 0o600 });
         } catch {}
         const appeared = await verifyPackDirectory(destination);
         if (appeared === 'valid') {

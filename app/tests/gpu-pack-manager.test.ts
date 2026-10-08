@@ -1898,6 +1898,40 @@ function createFixtureHttpServer(
     });
   }
 
+  test('accepts a resolved Windows directory alias only when its filesystem identity matches', async () => {
+    const root = await temporaryRoot();
+    const originalRealpath = fs.promises.realpath.bind(fs.promises);
+    const realpathSpy = spyOn(fs.promises, 'realpath').mockImplementation(async (target) =>
+      path.toNamespacedPath(await originalRealpath(target)));
+    try {
+      const { manager, data } = managerFor(root);
+      expect((await manager.install()).status).toBe('ready');
+      const runtime = await manager.getValidatedRuntime();
+      if (!runtime) throw new Error('Runtime missing');
+      await writeFile(path.join(runtime.directory, data.files[0].fileName), 'corrupt owned bytes');
+      expect((await manager.repair()).status).toBe('ready');
+      expect(await readFile(path.join(runtime.directory, data.files[0].fileName))).toEqual(data.files[0].contents);
+      expect((await manager.remove()).status).toBe('missing');
+    } finally { realpathSpy.mockRestore(); }
+  });
+
+  test('rejects a resolved directory with a different filesystem identity without touching it', async () => {
+    const root = await temporaryRoot();
+    const outside = path.join(path.dirname(root), 'unrelated-directory');
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'sentinel.txt'), 'unknown bytes');
+    const originalRealpath = fs.promises.realpath.bind(fs.promises);
+    const realpathSpy = spyOn(fs.promises, 'realpath').mockImplementation(async (target) =>
+      path.resolve(String(target)) === path.resolve(root) ? outside : originalRealpath(target));
+    try {
+      const { manager, data } = managerFor(root);
+      expect(await manager.install()).toEqual({ status: 'failed', code: 'storage_failed', retryable: true });
+      expect(data.calls).toEqual([]);
+      expect(await readFile(path.join(outside, 'sentinel.txt'), 'utf8')).toBe('unknown bytes');
+      expect(await readdir(outside)).toEqual(['sentinel.txt']);
+    } finally { realpathSpy.mockRestore(); }
+  });
+
   test('refuses writes through a junction in root ancestry', async () => {
     const root = await temporaryRoot();
     const outside = path.join(path.dirname(root), 'sentinel-volume');

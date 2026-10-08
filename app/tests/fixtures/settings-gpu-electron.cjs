@@ -8,7 +8,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function main() {
   await app.whenReady();
   const window = new BrowserWindow({ width: 960, height: 900, show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, offscreen: true } });
+    webPreferences: { contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
   window.webContents.on('console-message', (_event, details) => {
     if (details.level === 'error') process.stderr.write(`Renderer fixture error: ${details.message}\n`);
   });
@@ -25,6 +25,9 @@ async function main() {
   };
   try {
     await window.loadURL(process.argv[2]);
+    window.webContents.debugger.attach('1.3');
+    await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    window.webContents.focus();
     await waitFor(`!!window.gpuFixture && !!document.querySelector('[data-gpu-pack-repair]')`);
     await evaluate(`document.querySelector('summary').click()`);
     await wait(250);
@@ -98,7 +101,12 @@ async function main() {
       }
     }
     process.stdout.write(JSON.stringify({ userDataPath: userData, ready, confirmation, cancelled, repairing, fallback, deviceUnknown, removed, interrupted, broken, repairedBroken, rejectedRepair, rejectedRemove, layouts }));
-  } finally { window.destroy(); }
+  } finally {
+    try {
+      if (window.webContents.debugger.isAttached()) window.webContents.debugger.detach();
+    } catch {}
+    if (!window.isDestroyed()) window.destroy();
+  }
   app.quit();
 }
 main().catch((error) => { process.stderr.write(error.stack || String(error)); app.exit(1); });
