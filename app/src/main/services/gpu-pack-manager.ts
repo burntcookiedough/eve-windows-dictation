@@ -1696,14 +1696,13 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     try {
       await ensureRoot();
       lock = await acquireMutationLock('install');
+      await recoverAbandonedOwnedStages(root);
 
       const existing = await verifyPackDirectory(packDirectory());
       if (existing === 'valid') {
         await pruneOldPackDirectories();
         return setState({ status: 'ready', packId: descriptor!.packId, restartRequired: true });
       }
-
-      await recoverAbandonedOwnedStages(root);
 
       const destination = packDirectory();
       let destinationStats: fs.Stats | null = null;
@@ -1924,6 +1923,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     try {
       await ensureRoot();
       lock = await acquireMutationLock('repair');
+      await recoverAbandonedOwnedStages(root);
 
       const destination = packDirectory();
       const existing = await verifyPackDirectory(destination);

@@ -57,6 +57,14 @@ caught interruption. A complete compressed asset retains its verified checkpoint
 until publication, so interruption of the second asset does not redownload the
 first. Metadata reads are capped at 64 KiB.
 
+Owned interrupted partials are retained until successful publication or explicit
+Remove. A descriptor change makes older partials ineligible for resume; they stay
+available for an exact rollback until Remove clears identified component data.
+There is no automatic age-based partial deletion in this batch. Failed integrity
+verification discards that operation's corrupt complete transfer so Retry starts
+fresh. Repeat install and Repair recover bounded abandoned stages even when the
+installed pack is healthy, without rewriting its files.
+
 ## Disk space and publication
 
 Before large writes, probe free space on the actual manager destination

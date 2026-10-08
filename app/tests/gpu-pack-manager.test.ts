@@ -631,8 +631,8 @@ function createFixtureHttpServer(
 
     // Write a valid partial prefix
     const firstAsset = data.assets[0]!;
-    const partPath = path.join(root, 'asset-0.part');
-    const metaPath = path.join(root, 'asset-0.meta');
+    const partPath = path.join(root, '.gpu-partial-0.part');
+    const metaPath = path.join(root, '.gpu-partial-0.meta');
     const prefixBytes = data.compressed[0]!.subarray(0, 15);
     await writeFile(partPath, prefixBytes);
     const meta = {
@@ -674,6 +674,7 @@ function createFixtureHttpServer(
     expect(remainingInRoot.some((e) => e.endsWith('.part'))).toBe(false);
     expect(remainingInRoot.some((e) => e.endsWith('.meta'))).toBe(false);
 
+    expect(srv.getRequestedRanges()).toEqual([`bytes=15-${data.compressed[0]!.length - 1}`, null]);
     await srv.close();
   });
 
@@ -687,9 +688,9 @@ function createFixtureHttpServer(
     const packId = initState.status === 'missing' ? initState.packId : '';
 
     const firstAsset = data.assets[0]!;
-    const partPath = path.join(root, `asset-0.part`);
-    const metaPath = path.join(root, `asset-0.meta`);
-    const prefixBytes = data.compressed[0]!.subarray(0, 30);
+    const partPath = path.join(root, `.gpu-partial-0.part`);
+    const metaPath = path.join(root, `.gpu-partial-0.meta`);
+    const prefixBytes = data.compressed[0]!.subarray(0, 15);
     await writeFile(partPath, prefixBytes);
     const meta = {
       schemaVersion: 1,
@@ -701,7 +702,7 @@ function createFixtureHttpServer(
       fileName: firstAsset.fileName,
       compressedBytes: firstAsset.compressedBytes,
       compressedSha256: firstAsset.compressedSha256,
-      verifiedBytes: 30,
+      verifiedBytes: 15,
       prefixSha256: sha256(prefixBytes),
     };
     await writeFile(metaPath, JSON.stringify(meta));
@@ -727,6 +728,7 @@ function createFixtureHttpServer(
     });
     expect(await manager.getValidatedRuntime()).not.toBeNull();
 
+    expect(srv.getRequestedRanges()).toEqual([`bytes=15-${data.compressed[0]!.length - 1}`, null]);
     await srv.close();
   });
 
@@ -740,9 +742,9 @@ function createFixtureHttpServer(
     const packId = initState.status === 'missing' ? initState.packId : '';
 
     const firstAsset = data.assets[0]!;
-    const partPath = path.join(root, `asset-0.part`);
-    const metaPath = path.join(root, `asset-0.meta`);
-    const prefixBytes = data.compressed[0]!.subarray(0, 30);
+    const partPath = path.join(root, `.gpu-partial-0.part`);
+    const metaPath = path.join(root, `.gpu-partial-0.meta`);
+    const prefixBytes = data.compressed[0]!.subarray(0, 15);
     await writeFile(partPath, prefixBytes);
     const meta = {
       schemaVersion: 1,
@@ -754,7 +756,7 @@ function createFixtureHttpServer(
       fileName: firstAsset.fileName,
       compressedBytes: firstAsset.compressedBytes,
       compressedSha256: firstAsset.compressedSha256,
-      verifiedBytes: 30,
+      verifiedBytes: 15,
       prefixSha256: sha256(prefixBytes),
     };
     await writeFile(metaPath, JSON.stringify(meta));
@@ -780,6 +782,7 @@ function createFixtureHttpServer(
     });
     expect(await manager.getValidatedRuntime()).not.toBeNull();
 
+    expect(srv.getRequestedRanges()).toEqual([`bytes=15-${data.compressed[0]!.length - 1}`, null, null]);
     await srv.close();
   });
 
@@ -793,8 +796,8 @@ function createFixtureHttpServer(
     const packId = initState.status === 'missing' ? initState.packId : '';
 
     const firstAsset = data.assets[0]!;
-    const partPath = path.join(root, `asset-0.part`);
-    const metaPath = path.join(root, `asset-0.meta`);
+    const partPath = path.join(root, `.gpu-partial-0.part`);
+    const metaPath = path.join(root, `.gpu-partial-0.meta`);
     await writeFile(partPath, Buffer.from('corrupted prefix bytes not matching'));
     const meta = {
       schemaVersion: 1,
@@ -830,6 +833,7 @@ function createFixtureHttpServer(
     });
     expect(await manager.getValidatedRuntime()).not.toBeNull();
 
+    expect(srv.getRequestedRanges()).toEqual([null, null]);
     await srv.close();
   });
 
@@ -1720,6 +1724,22 @@ function createFixtureHttpServer(
     // Foreign stage directory was preserved!
     expect(entries.includes('.gpu-stage-foreign-5678')).toBe(true);
     expect(await readFile(path.join(foreignStageDir, 'unowned_file.txt'), 'utf8')).toBe('do not touch');
+    const runtime = await manager.getValidatedRuntime();
+    if (!runtime) throw new Error('Runtime missing');
+    const lease = await manager.acquireRuntime();
+    if (!lease) throw new Error('Lease missing');
+    await lease.bindServerPid(process.pid);
+    for (const operation of ['install', 'repair'] as const) {
+      await mkdir(ownedStageDir);
+      await writeFile(path.join(ownedStageDir, '.stage-marker.json'), JSON.stringify(marker));
+      await writeFile(path.join(ownedStageDir, '.gpu-partial-0.part'), 'abandoned bytes');
+      expect((await manager[operation]()).status).toBe('ready');
+      expect((await readdir(root)).includes(path.basename(ownedStageDir))).toBeFalse();
+      expect(await readFile(path.join(runtime.directory, data.files[0].fileName))).toEqual(data.files[0].contents);
+      expect(await readFile(path.join(foreignStageDir, 'unowned_file.txt'), 'utf8')).toBe('do not touch');
+    }
+    expect(data.calls).toHaveLength(2);
+    await lease.release();
   });
 
   test('acquireRuntime acquires mutation lock preventing concurrent remove race', async () => {
