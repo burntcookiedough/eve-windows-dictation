@@ -98,6 +98,14 @@ or a UI status change cannot release that protection. Release follows confirmed
 process termination. A living server remains protected if its parent app exits;
 uncertain liveness is treated conservatively.
 
+The durable record retains every bound wrapper and daemon PID, so rebinding to
+the verified server never loses protection for a surviving wrapper. An abandoned
+lease with no bound PID is also uncertain: the app may have died between spawn
+and the first bind. It blocks destructive actions until an operator confirms
+that no component consumer survives and removes that identified lease record.
+An ordinary completed bind expires only after the app and all recorded processes
+are confirmed dead. PID reuse can conservatively delay cleanup.
+
 Remove defers while a runtime may still be using component files. For a managed
 server, stop it and retry after confirmed exit. Stop an external/detected server
 through its owner. Remove does not interrupt active dictation automatically.

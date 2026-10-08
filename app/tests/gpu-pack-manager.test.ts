@@ -1064,6 +1064,45 @@ function createFixtureHttpServer(
     expect(await manager2.getValidatedRuntime()).not.toBeNull();
   });
 
+  test('all bound wrapper and daemon PIDs remain protected after the app dies', async () => {
+    const root = await temporaryRoot();
+    const { data, manager } = managerFor(root);
+    await manager.install();
+    const lease = await manager.acquireRuntime();
+    if (!lease) throw new Error('Lease missing');
+    await lease.bindServerPid(88881);
+    await lease.bindServerPid(88882);
+    const leaseFile = (await readdir(root)).find((name) => name.startsWith('.gpu-lease-'))!;
+    const leasePath = path.join(root, leaseFile);
+    const record = JSON.parse(await readFile(leasePath, 'utf8'));
+    expect(record.serverPids).toEqual([88881, 88882]);
+    record.pid = 88880;
+    await writeFile(leasePath, JSON.stringify(record));
+    const wrapperAlive = createGpuPackManager({ root, descriptor: data.descriptor, identity,
+      source: data.source, isProcessAlive: (pid) => pid === 88881 });
+    expect(await wrapperAlive.remove()).toEqual({ status: 'failed', code: 'busy', retryable: true });
+    const allDead = createGpuPackManager({ root, descriptor: data.descriptor, identity,
+      source: data.source, isProcessAlive: () => false });
+    expect((await allDead.remove()).status).toBe('missing');
+  });
+
+  test('an abandoned unbound lease fails closed across the spawn-before-bind crash window', async () => {
+    const root = await temporaryRoot();
+    const { data, manager } = managerFor(root);
+    await manager.install();
+    await manager.acquireRuntime();
+    const leaseFile = (await readdir(root)).find((name) => name.startsWith('.gpu-lease-'))!;
+    const leasePath = path.join(root, leaseFile);
+    const record = JSON.parse(await readFile(leasePath, 'utf8'));
+    record.pid = 88880;
+    await writeFile(leasePath, JSON.stringify(record));
+    const restarted = createGpuPackManager({ root, descriptor: data.descriptor, identity,
+      source: data.source, isProcessAlive: () => false });
+    expect(await restarted.remove()).toEqual({ status: 'failed', code: 'busy', retryable: true });
+    expect(await restarted.getValidatedRuntime()).not.toBeNull();
+    expect(await readFile(leasePath, 'utf8')).toBe(JSON.stringify(record));
+  });
+
   test('retention prunes older packs but keeps current, newest validated prior, and any actively leased pack', async () => {
     const root = await temporaryRoot();
 

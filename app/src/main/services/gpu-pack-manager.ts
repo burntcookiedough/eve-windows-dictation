@@ -211,6 +211,8 @@ interface RuntimeLeaseRecord {
   readonly leaseId: string;
   readonly pid: number;
   serverPid: number | null;
+  /** All bound wrapper/daemon PIDs, retained until the lease is released. */
+  serverPids: number[];
   readonly createdAt: number;
 }
 
@@ -938,7 +940,9 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
           parsed.packId !== entryPackId ||
           !Number.isSafeInteger(parsed.pid) || (parsed.pid as number) <= 0 ||
           parsed.leaseId !== match[2] ||
-          (parsed.serverPid !== null && (!Number.isSafeInteger(parsed.serverPid) || (parsed.serverPid as number) <= 0))
+          (parsed.serverPid !== null && (!Number.isSafeInteger(parsed.serverPid) || (parsed.serverPid as number) <= 0)) ||
+          (parsed.serverPids !== undefined && (!Array.isArray(parsed.serverPids) ||
+            parsed.serverPids.length > 16 || parsed.serverPids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)))
         ) {
           // Fail closed on malformed matching lease JSON
           return true;
@@ -946,9 +950,12 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
         const appAlive = isProcessAlive(parsed.pid as number);
         const serverPid = typeof parsed.serverPid === 'number' ? parsed.serverPid : null;
-        const serverAlive = serverPid !== null && isProcessAlive(serverPid);
+        const serverPids = Array.isArray(parsed.serverPids) ? parsed.serverPids as number[] : [];
+        const serverAlive = (serverPid !== null && isProcessAlive(serverPid)) || serverPids.some(isProcessAlive);
 
-        if (appAlive || serverAlive) {
+        // An app can die between spawn and the first durable bind. Without a
+        // recorded child identity, absence of a live server cannot be proven.
+        if (appAlive || serverAlive || (serverPid === null && serverPids.length === 0)) {
           return true;
         } else {
           // Both app and server confirmed dead -> expired lease
@@ -1986,26 +1993,10 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
             }
           }
         } else if (entry.isFile()) {
-          // 3. Stale leases
-          if (/^\.gpu-lease-([a-f0-9]{64})-(.+)\.json$/.test(entry.name)) {
-            try {
-              const raw = await readBoundedUtf8File(fullPath);
-              if (raw) {
-                const leaseData = JSON.parse(raw);
-                if (
-                  isRecord(leaseData) &&
-                  leaseData.schemaVersion === 1 &&
-                  typeof leaseData.pid === 'number'
-                ) {
-                  const appAlive = isProcessAlive(leaseData.pid);
-                  const serverAlive =
-                    typeof leaseData.serverPid === 'number' && isProcessAlive(leaseData.serverPid);
-                  if (!appAlive && !serverAlive) {
-                    await fs.promises.unlink(fullPath);
-                  }
-                }
-              }
-            } catch {}
+          // 3. Stale leases use the same bounded identity/liveness validation.
+          const leaseMatch = entry.name.match(/^\.gpu-lease-([a-f0-9]{64})-(.+)\.json$/);
+          if (leaseMatch) {
+            await isPackLeased(leaseMatch[1]);
           }
           // 4. Owned partials
           else if (
@@ -2153,6 +2144,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
           leaseId,
           pid: process.pid,
           serverPid: null,
+          serverPids: [],
           createdAt: Date.now(),
         };
 
@@ -2181,6 +2173,10 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
               throw new Error('Invalid server PID');
             }
             const write = leaseWrites.then(async () => {
+              if (!leaseData.serverPids.includes(serverPid)) {
+                if (leaseData.serverPids.length >= 16) throw new Error('Runtime lease PID bound exceeded');
+                leaseData.serverPids.push(serverPid);
+              }
               leaseData.serverPid = serverPid;
               const tmpPath = path.join(root, `${leaseFileName}.tmp-${randomUUID()}`);
               await fs.promises.writeFile(tmpPath, `${JSON.stringify(leaseData)}\n`, {
