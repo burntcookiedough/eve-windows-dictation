@@ -45,10 +45,39 @@ const HEALTH_REQUEST_TIMEOUT_MS = 2500;
 const STOP_TIMEOUT_MS = 10000;
 const execFileAsync = promisify(execFile);
 
+export interface ServerManagerDeps {
+  spawn?: typeof spawn;
+  isProcessAlive?: (pid: number) => boolean;
+  isOwnedServerProcess?: (pid: number, recordedStartedAt: number) => Promise<boolean>;
+  getHealthState?: (port: number, timeoutMs?: number) => Promise<HealthState>;
+  getServerCommand?: (gpuRuntime: ValidatedGpuRuntime | null) => {
+    command: string;
+    args: string[];
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+  } | null;
+  waitForPidFile?: (
+    readFn: () => ServerPidFile | null,
+    timeoutMs: number,
+    spawnStartedAt?: number,
+  ) => Promise<ServerPidFile | null>;
+  waitForHealth?: (port: number, timeoutMs: number) => Promise<HealthState | null>;
+  waitForProcessExit?: (pid: number, timeoutMs: number) => Promise<boolean>;
+  readPidFile?: (requireCurrentApp?: boolean) => ServerPidFile | null;
+  appVersion?: string;
+  isPackaged?: boolean;
+}
+
 export class ServerManager {
-  constructor(private readonly gpuPackManager?: GpuPackManager) {}
+  constructor(
+    private readonly gpuPackManager?: GpuPackManager,
+    private readonly deps?: ServerManagerDeps,
+  ) {}
 
   private status: ServerStatus = 'idle';
+  private currentError: string | null = null;
+  private activeRuntimeLease: RuntimeLease | null = null;
+  private processGeneration = 0;
   private startInFlight: Promise<void> | null = null;
   private lifecycleTail: Promise<void> = Promise.resolve();
   private lastLifecycleRequest: { kind: 'start' | 'stop' | 'restart' | 'cleanup'; promise: Promise<void> } | null = null;
@@ -75,7 +104,7 @@ export class ServerManager {
     gpuRuntime: ValidatedGpuRuntime | null;
   }> {
     const gpuRuntime = await this.gpuPackManager?.getValidatedRuntime() ?? null;
-    const build = app.getVersion();
+    const build = this.deps?.appVersion ?? app.getVersion();
     return {
       identity: { app_build: build, server_build: build, pack_id: gpuRuntime?.packId ?? null },
       gpuRuntime,
@@ -97,6 +126,7 @@ export class ServerManager {
    * Read and parse the PID file.
    */
   private readPidFile(strict = true): ServerPidFile | null {
+    if (this.deps?.readPidFile) return this.deps.readPidFile(strict);
     const pidPath = this.getPidFilePath();
     try {
       const content = fs.readFileSync(pidPath, 'utf-8');
@@ -117,6 +147,7 @@ export class ServerManager {
    * Check if a process is alive by attempting to send signal 0.
    */
   private isProcessAlive(pid: number): boolean {
+    if (this.deps?.isProcessAlive) return this.deps.isProcessAlive(pid);
     try {
       process.kill(pid, 0);
       return true;
@@ -132,6 +163,7 @@ export class ServerManager {
     port: number,
     timeoutMs = HEALTH_REQUEST_TIMEOUT_MS,
   ): Promise<HealthState> {
+    if (this.deps?.getHealthState) return this.deps.getHealthState(port, timeoutMs);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -157,9 +189,27 @@ export class ServerManager {
   private startHealthPolling(port: number): void {
     this.stopHealthPolling();
     const generation = this.healthPollGeneration;
+    const serverPid = this.pidFile?.pid;
+    const childPid = this.childProcess?.pid;
+    const lease = this.activeRuntimeLease;
     this.healthPollInterval = setInterval(async () => {
       const health = await this.getHealthState(port);
       if (generation !== this.healthPollGeneration) return;
+      if (serverPid && !this.isProcessAlive(serverPid) && (!childPid || !this.isProcessAlive(childPid))) {
+        this.stopHealthPolling();
+        this.childProcess = null;
+        this.pidFile = null;
+        this.setRuntime(undefined);
+        this.setEngineStatus(undefined);
+        this.setModelDownload(undefined);
+        this.setDiagnostics(undefined);
+        this.updateStatus('error', 'Server process exited unexpectedly');
+        if (lease && this.activeRuntimeLease === lease) {
+          this.activeRuntimeLease = null;
+          try { await lease.release(); } catch (error) { log.warn('Failed to release terminated runtime lease', { error }); }
+        }
+        return;
+      }
       if (!health.healthy) {
         if (this.status === 'running') {
           log.warn('Server health check failed');
@@ -173,7 +223,7 @@ export class ServerManager {
       }
 
       if (
-        app.isPackaged
+        (this.deps?.isPackaged ?? app.isPackaged)
         && this.runningRuntimeIdentity
         && !matchesExpectedRuntime(health.runtime, this.runningRuntimeIdentity)
       ) {
@@ -185,6 +235,7 @@ export class ServerManager {
       const recovered = this.status === 'error';
       if (recovered) {
         this.status = 'running';
+        this.currentError = null;
       }
       const diagnosticsChanged = this.setDiagnostics(health.diagnostics);
       const downloadChanged = this.setModelDownload(health.modelDownload);
@@ -234,6 +285,7 @@ export class ServerManager {
 
   private async isOwnedServerProcess(pid: number, recordedStartedAt: number): Promise<boolean> {
     if (this.childProcess?.pid === pid) return true;
+    if (this.deps?.isOwnedServerProcess) return this.deps.isOwnedServerProcess(pid, recordedStartedAt);
     if (process.platform !== 'win32') return false;
 
     try {
@@ -357,6 +409,7 @@ export class ServerManager {
    */
   private updateStatus(status: ServerStatus, error?: string): void {
     this.status = status;
+    this.currentError = status === 'error' ? (error ?? null) : null;
     this.broadcastState(error);
   }
 
@@ -394,7 +447,7 @@ export class ServerManager {
       port: this.pidFile?.port,
       version: this.serverVersion ?? undefined,
       uptime,
-      error: errorOverride,
+      error: errorOverride ?? (this.currentError ?? undefined),
       wsUrl: this.pidFile?.port
         ? `ws://localhost:${this.pidFile.port}/transcribe`
         : undefined,
@@ -466,11 +519,47 @@ export class ServerManager {
       return false;
     }
 
-    const expected = app.isPackaged ? (await this.expectedRuntime()).identity : null;
+    const isPackaged = this.deps?.isPackaged ?? app.isPackaged;
+    const expected = isPackaged ? (await this.expectedRuntime()).identity : null;
     if (expected && !matchesExpectedRuntime(health.runtime, expected)) {
       log.warn('Detected server runtime does not match this Eve build');
       this.updateStatus('error', 'Existing server uses a different runtime; start Eve server to replace it');
       return false;
+    }
+
+    let adoptedLease: RuntimeLease | null = null;
+    if (health.runtime?.pack_id) {
+      if (!this.gpuPackManager || typeof this.gpuPackManager.acquireRuntime !== 'function') {
+        log.warn('Detected server requires GPU pack but GpuPackManager is unavailable; refusing adoption');
+        this.updateStatus('error', 'GPU runtime lease unavailable for existing server');
+        return false;
+      }
+      try {
+        adoptedLease = await this.gpuPackManager.acquireRuntime();
+      } catch (err) {
+        log.warn('Failed to acquire runtime lease for detected server', { error: err });
+        this.updateStatus('error', 'GPU runtime lease unavailable for existing server');
+        return false;
+      }
+      if (!adoptedLease) {
+        log.warn('Failed to acquire runtime lease for detected server; refusing adoption');
+        this.updateStatus('error', 'GPU runtime lease unavailable for existing server');
+        return false;
+      }
+      if (adoptedLease.runtime.packId !== health.runtime.pack_id) {
+        log.warn('Acquired lease packId does not match detected server packId; releasing and refusing adoption');
+        try { await adoptedLease.release(); } catch {}
+        this.updateStatus('error', 'GPU runtime mismatch for existing server');
+        return false;
+      }
+      try {
+        await adoptedLease.bindServerPid(pidData.pid);
+      } catch (bindErr) {
+        log.warn('Failed to bind server PID to acquired lease; retaining protection and refusing adoption', { error: bindErr });
+        this.activeRuntimeLease = adoptedLease;
+        this.updateStatus('error', 'Failed to bind GPU lease to existing server');
+        return false;
+      }
     }
 
     // Found a healthy server
@@ -483,6 +572,8 @@ export class ServerManager {
     this.setRuntime(health.runtime);
     this.runningRuntimeIdentity = expected;
     this.managed = false; // The server was detected rather than spawned by Eve.
+    this.processGeneration += 1;
+    this.activeRuntimeLease = adoptedLease;
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
 
@@ -515,6 +606,7 @@ export class ServerManager {
     cwd: string;
     env: NodeJS.ProcessEnv;
   } | null {
+    if (this.deps?.getServerCommand) return this.deps.getServerCommand(gpuRuntime);
     // In production, the server is bundled with the app
     // The exact path depends on how the app is packaged
 
@@ -618,7 +710,8 @@ export class ServerManager {
       return;
     }
 
-    const expectedRuntime = app.isPackaged ? await this.expectedRuntime() : null;
+    const isPackaged = this.deps?.isPackaged ?? app.isPackaged;
+    const expectedRuntime = isPackaged ? await this.expectedRuntime() : null;
     if (this.cleaningUp) return;
 
     // Check for existing server first
@@ -634,38 +727,82 @@ export class ServerManager {
         return;
       }
 
+      let adoptedLease: RuntimeLease | null = null;
+      let leaseOk = true;
       const health = await this.getHealthState(existingPid.port);
       if (this.cleaningUp) return;
       if (
         health.healthy
         && (!expectedRuntime || matchesExpectedRuntime(health.runtime, expectedRuntime.identity))
       ) {
-        log.info('Found existing healthy server, adopting');
-        this.pidFile = existingPid;
-        this.startedAt = existingPid.startedAt;
-        this.serverVersion = health.version ?? null;
-        this.setDiagnostics(health.diagnostics);
-        this.setModelDownload(health.modelDownload);
-        this.setEngineStatus(health.engineStatus);
-        this.setRuntime(health.runtime);
-        this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
-        this.managed = false;
-        this.updateStatus('running');
-        this.startHealthPolling(existingPid.port);
-        return;
+        if (health.runtime?.pack_id) {
+          if (this.gpuPackManager && typeof this.gpuPackManager.acquireRuntime === 'function') {
+            try {
+              adoptedLease = await this.gpuPackManager.acquireRuntime();
+              if (adoptedLease) {
+                if (adoptedLease.runtime.packId !== health.runtime.pack_id) {
+                  leaseOk = false;
+                } else {
+                  try {
+                    await adoptedLease.bindServerPid(existingPid.pid);
+                  } catch {
+                    leaseOk = false;
+                  }
+                }
+              } else {
+                leaseOk = false;
+              }
+            } catch {
+              leaseOk = false;
+            }
+          } else {
+            leaseOk = false;
+          }
+        }
+
+        if (leaseOk) {
+          log.info('Found existing healthy server, adopting');
+          this.pidFile = existingPid;
+          this.startedAt = existingPid.startedAt;
+          this.serverVersion = health.version ?? null;
+          this.setDiagnostics(health.diagnostics);
+          this.setModelDownload(health.modelDownload);
+          this.setEngineStatus(health.engineStatus);
+          this.setRuntime(health.runtime);
+          this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
+          this.managed = false;
+          this.processGeneration += 1;
+          this.activeRuntimeLease = adoptedLease;
+          this.updateStatus('running');
+          this.startHealthPolling(existingPid.port);
+          return;
+        }
+
+        log.warn('Existing server GPU pack could not be leased; terminating it to avoid unleased GPU runtime');
       }
+
       log.warn('Existing owned Eve server is unhealthy or uses a different runtime; terminating it');
       try {
-        process.kill(existingPid.pid, 'SIGTERM');
+        try { process.kill(existingPid.pid, 'SIGTERM'); } catch {}
         const exited = await this.waitForProcessExit(existingPid.pid, 5000);
-        if (this.cleaningUp) return;
-        if (!exited) {
-          this.updateStatus('error', 'Existing server did not stop');
+        if (this.cleaningUp) {
           return;
+        }
+        if (!exited) {
+          try { process.kill(existingPid.pid, 'SIGKILL'); } catch {}
+          const forceExited = await this.waitForProcessExit(existingPid.pid, 2000);
+          if (!forceExited) {
+            this.updateStatus('error', 'Existing server did not stop');
+            return;
+          }
         }
       } catch {
         this.updateStatus('error', 'Existing server could not be stopped');
         return;
+      } finally {
+        if (adoptedLease && !this.isProcessAlive(existingPid.pid)) {
+          try { await adoptedLease.release(); } catch {}
+        }
       }
       this.cleanupStalePidFile();
     } else if (existingPid) {
@@ -676,8 +813,38 @@ export class ServerManager {
     // No asynchronous work remains between this check and spawn().
     if (this.cleaningUp) return;
 
-    const serverCmd = this.getServerCommand(expectedRuntime?.gpuRuntime ?? null);
+    let processLease: RuntimeLease | null = null;
+    let effectiveGpuRuntime: ValidatedGpuRuntime | null = null;
+    if (this.gpuPackManager && typeof this.gpuPackManager.acquireRuntime === 'function') {
+      try {
+        processLease = await this.gpuPackManager.acquireRuntime();
+        if (processLease) {
+          effectiveGpuRuntime = processLease.runtime;
+        } else {
+          effectiveGpuRuntime = null;
+        }
+      } catch (err) {
+        log.warn('Failed to acquire GPU runtime lease; falling back to CPU', { error: err });
+        processLease = null;
+        effectiveGpuRuntime = null;
+      }
+    }
+
+    if (this.cleaningUp) {
+      if (processLease) {
+        try { await processLease.release(); } catch {}
+      }
+      return;
+    }
+
+    const serverCmd = this.getServerCommand(effectiveGpuRuntime);
+    const effectiveExpectedIdentity: ExpectedRuntimeIdentity | null = isPackaged
+      ? { app_build: this.deps?.appVersion ?? app.getVersion(), server_build: this.deps?.appVersion ?? app.getVersion(), pack_id: effectiveGpuRuntime?.packId ?? null }
+      : null;
     if (!serverCmd) {
+      if (processLease) {
+        try { await processLease.release(); } catch {}
+      }
       this.updateStatus('error', 'Cannot find server executable');
       return;
     }
@@ -692,7 +859,12 @@ export class ServerManager {
     this.setRuntime(undefined);
     this.clearPendingLogDelivery();
     this.logs = []; // Clear logs for new session
+    this.activeRuntimeLease = processLease;
 
+    let childPid: number | undefined;
+    let boundServerPid: number | undefined;
+    let verifiedServerKnown = false;
+    const processGeneration = ++this.processGeneration;
     try {
       const spawnStartedAt = Date.now();
       const childEnv = buildChildEnvironment(process.env, serverCmd.env, {
@@ -701,7 +873,7 @@ export class ServerManager {
         MURMUR_HOST: '127.0.0.1',
         MURMUR_PORT: '0',
       });
-      if (!expectedRuntime?.gpuRuntime) {
+      if (!effectiveGpuRuntime) {
         // Never inherit a user-supplied DLL path or pack ID into the CPU server.
         delete childEnv.MURMUR_GPU_RUNTIME_DIR;
         delete childEnv.MURMUR_GPU_PACK_ID;
@@ -710,7 +882,8 @@ export class ServerManager {
       // standard Hugging Face cache discovery continue to work normally.
       delete childEnv.TRANSFORMERS_CACHE;
 
-      this.childProcess = spawn(serverCmd.command, serverCmd.args, {
+      const spawnFn = this.deps?.spawn ?? spawn;
+      this.childProcess = spawnFn(serverCmd.command, serverCmd.args, {
         cwd: serverCmd.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
@@ -747,10 +920,84 @@ export class ServerManager {
         emitFramedLogs(stderrFramer, 'stderr');
       });
 
-      // Handle process exit
-      this.childProcess.on('exit', (code, signal) => {
-        log.info('Server process exited', { code, signal });
-        this.childProcess = null;
+      const child = this.childProcess;
+      childPid = child.pid;
+
+      let leaseReleased = false;
+      let leaseOpQueue: Promise<void> = Promise.resolve();
+
+      const safeBindServerPid = async (pid: number, role: 'wrapper' | 'server' = 'server') => {
+        const op = leaseOpQueue.then(async () => {
+          if (leaseReleased) {
+            throw new Error('Runtime lease already released');
+          }
+          if (!processLease) return;
+          boundServerPid = pid;
+          await processLease.bindServerPid(pid, role);
+        });
+        leaseOpQueue = op.catch(() => {});
+        return op;
+      };
+
+      const releaseProcessLease = async (force = false) => {
+        const op = leaseOpQueue.then(async () => {
+          if (leaseReleased || !processLease) return;
+          // A launcher can exit before its daemon writes the PID file.
+          // Until discovery completes, its exit cannot prove all consumers died.
+          if (childPid && !verifiedServerKnown) return;
+          if (!force) {
+            const isChildAlive = childPid ? this.isProcessAlive(childPid) : false;
+            const serverPid = boundServerPid;
+            const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
+            if (isChildAlive || isServerAlive) {
+              log.warn('Refusing to release runtime lease while process is still alive', {
+                childPid,
+                isChildAlive,
+                serverPid,
+                isServerAlive,
+              });
+              return;
+            }
+          }
+          leaseReleased = true;
+          if (this.activeRuntimeLease === processLease) {
+            this.activeRuntimeLease = null;
+          }
+          try {
+            await processLease.release();
+          } catch (leaseErr) {
+            log.warn('Failed to release runtime lease on process exit', { error: leaseErr });
+          }
+        });
+        leaseOpQueue = op.catch(() => {});
+        return op;
+      };
+
+      // Handle process exit - registered before any await so child death is never missed
+      child.on('exit', (code, signal) => {
+        log.info('Server process exited', { code, signal, childPid });
+
+        if (processGeneration !== this.processGeneration) {
+          log.info('Ignoring exit from stale child process', { childPid });
+          void releaseProcessLease();
+          return;
+        }
+
+        const actualServerPid = boundServerPid;
+        const isWrapperExit = actualServerPid !== undefined && actualServerPid !== childPid;
+        const isServerStillAlive = isWrapperExit && this.isProcessAlive(actualServerPid);
+
+        if (isServerStillAlive) {
+          log.info('Wrapper process exited but server process is still alive', { childPid, actualServerPid });
+          if (this.childProcess === child) {
+            this.childProcess = null;
+          }
+          return;
+        }
+
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
         this.stopHealthPolling();
         this.pidFile = null;
         this.startedAt = null;
@@ -760,27 +1007,75 @@ export class ServerManager {
         this.setEngineStatus(undefined);
         this.setRuntime(undefined);
 
+        void releaseProcessLease();
+
         if (this.status !== 'stopping') {
-          // Preserve explicit startup/runtime errors already set by start()/stop() logic.
           if (this.status !== 'error') {
-            this.updateStatus(
-              'error',
-              `Server exited unexpectedly (code: ${String(code)}, signal: ${String(signal)})`
-            );
+            this.updateStatus('error', 'Server process exited unexpectedly');
           }
         } else {
           this.updateStatus('stopped');
         }
       });
 
-      this.childProcess.on('error', (error) => {
-        log.error('Failed to start server process', { error });
-        this.childProcess = null;
-        this.updateStatus('error', `Failed to start: ${error.message}`);
+      child.on('error', (error) => {
+        log.error('Failed to start server process or child stream error', { error });
+
+        if (processGeneration !== this.processGeneration) {
+          log.info('Ignoring error from stale child process', { childPid });
+          void releaseProcessLease();
+          return;
+        }
+
+        const isChildAlive = childPid ? this.isProcessAlive(childPid) : false;
+        const serverPid = boundServerPid;
+        const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
+        const isLiving = isChildAlive || isServerAlive;
+
+        if (isLiving) {
+          log.warn('Child process emitted error while process is still alive; retaining refs and lease', {
+            childPid,
+            serverPid,
+          });
+          this.updateStatus('error', 'Server process error');
+          return;
+        }
+
+        if (this.childProcess === child) {
+          this.childProcess = null;
+        }
+        this.stopHealthPolling();
+        this.pidFile = null;
+        this.startedAt = null;
+        this.serverVersion = null;
+        this.setDiagnostics(undefined);
+        this.setModelDownload(undefined);
+        this.setEngineStatus(undefined);
+        this.setRuntime(undefined);
+
+        void releaseProcessLease(true);
+
+        this.updateStatus('error', 'Failed to start server');
       });
 
+      if (childPid && processLease) {
+        try {
+          await safeBindServerPid(childPid, 'wrapper');
+        } catch (bindErr) {
+          log.error('Failed to bind child process PID to runtime lease; stopping child', { error: bindErr });
+          try { child.kill('SIGTERM'); } catch {}
+          const confirmedExited = await this.waitForProcessExit(childPid, 5000);
+          if (!confirmedExited) {
+            try { child.kill('SIGKILL'); } catch {}
+            await this.waitForProcessExit(childPid, 2000);
+          }
+          throw new Error('Failed to bind runtime lease to server PID');
+        }
+      }
+
       // Wait for PID file to appear (indicates server is ready)
-      const pidData = await waitForPidFile(
+      const waitPidFileFn = this.deps?.waitForPidFile ?? waitForPidFile;
+      const pidData = await waitPidFileFn(
         () => this.readPidFile(false),
         START_PID_TIMEOUT_MS,
         spawnStartedAt,
@@ -792,14 +1087,45 @@ export class ServerManager {
       if (!(await this.isOwnedServerProcess(pidData.pid, pidData.startedAt))) {
         throw new Error('Server process ownership could not be verified');
       }
+      this.pidFile = pidData;
+      boundServerPid = pidData.pid;
+      verifiedServerKnown = true;
+
+      if (pidData.pid && processLease) {
+        try {
+          await safeBindServerPid(pidData.pid);
+        } catch (bindErr) {
+          log.error('Failed to bind PID file PID to runtime lease; stopping child', { error: bindErr });
+          try { child.kill('SIGTERM'); } catch {}
+          try { process.kill(pidData.pid, 'SIGTERM'); } catch {}
+          if (childPid) {
+            const confirmedChild = await this.waitForProcessExit(childPid, 5000);
+            if (!confirmedChild) {
+              try { child.kill('SIGKILL'); } catch {}
+              await this.waitForProcessExit(childPid, 2000);
+            }
+          }
+          const confirmedServer = await this.waitForProcessExit(pidData.pid, 5000);
+          if (!confirmedServer) {
+            try { process.kill(pidData.pid, 'SIGKILL'); } catch {}
+            await this.waitForProcessExit(pidData.pid, 2000);
+          }
+          throw new Error('Failed to bind runtime lease to server PID');
+        }
+      }
 
       // Wait for health check to pass
       const health = await this.waitForHealth(pidData.port, START_HEALTH_TIMEOUT_MS);
       if (!health) {
         throw new Error('Server health check did not pass within timeout');
       }
-      if (expectedRuntime && !matchesExpectedRuntime(health.runtime, expectedRuntime.identity)) {
+      if (effectiveExpectedIdentity && !matchesExpectedRuntime(health.runtime, effectiveExpectedIdentity)) {
         throw new Error('Server runtime identity did not match this Eve build');
+      }
+
+      const isStillAlive = this.isProcessAlive(pidData.pid);
+      if (!isStillAlive) {
+        throw new Error('Server process exited before startup completed');
       }
 
       this.pidFile = pidData;
@@ -809,19 +1135,49 @@ export class ServerManager {
       this.setModelDownload(health.modelDownload);
       this.setEngineStatus(health.engineStatus);
       this.setRuntime(health.runtime);
-      this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
+      this.runningRuntimeIdentity = effectiveExpectedIdentity;
       this.updateStatus('running');
       this.startHealthPolling(pidData.port);
 
       log.info('Server started successfully', { pid: pidData.pid, port: pidData.port });
     } catch (error) {
       log.error('Failed to start server', { error: error as Error });
-      this.updateStatus('error', (error as Error).message);
+      const rawMsg = (error as Error)?.message ?? '';
+      const safeMsg = rawMsg.includes('PID file')
+        ? 'Server did not write PID file within timeout'
+        : rawMsg.includes('health check')
+        ? 'Server health check did not pass within timeout'
+        : rawMsg.includes('ownership')
+        ? 'Server process ownership could not be verified'
+        : rawMsg.includes('identity')
+        ? 'Server runtime identity did not match this Eve build'
+        : rawMsg.includes('bind')
+        ? 'Failed to bind runtime lease to server process'
+        : 'Failed to start server';
+
+      this.updateStatus('error', safeMsg);
 
       // Kill the process if it's still running
       if (this.childProcess) {
-        this.childProcess.kill('SIGTERM');
-        this.childProcess = null;
+        try { this.childProcess.kill('SIGTERM'); } catch {}
+        if (childPid) {
+          const exited = await this.waitForProcessExit(childPid, 5000);
+          if (!exited) {
+            try { this.childProcess.kill('SIGKILL'); } catch {}
+            await this.waitForProcessExit(childPid, 2000);
+          }
+        }
+        if (!childPid || !this.isProcessAlive(childPid)) this.childProcess = null;
+      }
+
+      const isChildAlive = childPid ? this.isProcessAlive(childPid) : false;
+      const serverPid = boundServerPid;
+      const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
+      if (!isChildAlive && !isServerAlive && (verifiedServerKnown || !childPid) && this.activeRuntimeLease) {
+        try {
+          await this.activeRuntimeLease.release();
+        } catch {}
+        this.activeRuntimeLease = null;
       }
     }
   }
@@ -830,6 +1186,7 @@ export class ServerManager {
    * Wait for health check to pass.
    */
   private async waitForHealth(port: number, timeoutMs: number): Promise<HealthState | null> {
+    if (this.deps?.waitForHealth) return this.deps.waitForHealth(port, timeoutMs);
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const remainingMs = deadline - Date.now();
@@ -865,6 +1222,7 @@ export class ServerManager {
    * Wait for a process to exit.
    */
   private async waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+    if (this.deps?.waitForProcessExit) return this.deps.waitForProcessExit(pid, timeoutMs);
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       if (!this.isProcessAlive(pid)) {
@@ -896,6 +1254,15 @@ export class ServerManager {
     this.updateStatus('stopping');
     this.stopHealthPolling();
 
+    // Snapshot references before any await or kill
+    const child = this.childProcess;
+    const childPid = child?.pid;
+    const daemonPid = this.pidFile?.pid;
+    const daemonStartedAt = this.pidFile?.startedAt ?? 0;
+    const lease = this.activeRuntimeLease;
+
+    let stoppedGracefully = false;
+
     try {
       // Try graceful shutdown via API first
       if (this.pidFile?.port) {
@@ -909,53 +1276,60 @@ export class ServerManager {
           });
           clearTimeout(timeout);
 
-          // Wait for process to exit
-          if (this.pidFile?.pid) {
-            const exited = await this.waitForProcessExit(this.pidFile.pid, STOP_TIMEOUT_MS);
-            if (exited) {
-              log.info('Server stopped gracefully');
-              this.childProcess = null;
-              this.pidFile = null;
-              this.startedAt = null;
-              this.serverVersion = null;
-              this.setDiagnostics(undefined);
-              this.setModelDownload(undefined);
-              this.setEngineStatus(undefined);
-              this.setRuntime(undefined);
-              this.updateStatus('stopped');
-              return;
-            }
+          // Wait for both processes to exit
+          const childExited = childPid ? await this.waitForProcessExit(childPid, STOP_TIMEOUT_MS) : true;
+          const daemonExited = daemonPid ? await this.waitForProcessExit(daemonPid, STOP_TIMEOUT_MS) : true;
+
+          if (childExited && daemonExited) {
+            stoppedGracefully = true;
           }
         } catch (error) {
           log.warn('Graceful shutdown failed', { error: error as Error });
         }
       }
 
-      // Force kill if graceful shutdown failed
-      if (this.childProcess) {
+      if (!stoppedGracefully) {
+        // Force kill if graceful shutdown failed
         log.info('Force killing server process');
-        this.childProcess.kill('SIGTERM');
+
+        if (child) {
+          try { child.kill('SIGTERM'); } catch {}
+        }
+        if (daemonPid && daemonPid !== childPid) {
+          if (await this.isOwnedServerProcess(daemonPid, daemonStartedAt)) {
+            try { process.kill(daemonPid, 'SIGTERM'); } catch {}
+          } else {
+            log.warn('Refusing to stop unverified PID', { pid: daemonPid });
+          }
+        }
 
         // Wait a bit for SIGTERM
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
         // If still running, SIGKILL
-        if (this.childProcess) {
-          this.childProcess.kill('SIGKILL');
+        if (child && childPid && this.isProcessAlive(childPid)) {
+          try { child.kill('SIGKILL'); } catch {}
         }
-      } else if (this.pidFile?.pid) {
-        // No child process ref but have PID (shouldn't happen but handle it)
-        if (await this.isOwnedServerProcess(this.pidFile.pid, this.pidFile.startedAt)) {
-          try {
-            process.kill(this.pidFile.pid, 'SIGTERM');
-          } catch {
-            // Process may already be gone
+        if (daemonPid && daemonPid !== childPid && this.isProcessAlive(daemonPid)) {
+          if (await this.isOwnedServerProcess(daemonPid, daemonStartedAt)) {
+            try { process.kill(daemonPid, 'SIGKILL'); } catch {}
           }
-        } else {
-          log.warn('Refusing to stop unverified PID', { pid: this.pidFile.pid });
+        }
+
+        const childDead = childPid ? await this.waitForProcessExit(childPid, 2000) : true;
+        const daemonDead = daemonPid ? await this.waitForProcessExit(daemonPid, 2000) : true;
+
+        if (!childDead || !daemonDead) {
+          log.error('Failed to stop: process is still running', { childPid, daemonPid, childDead, daemonDead });
+          this.updateStatus('error', 'Failed to stop: server process is still running');
+          return;
         }
       }
 
+      if (lease && !daemonPid) {
+        this.updateStatus('error', 'Server identity could not be confirmed; GPU support remains protected');
+        return;
+      }
       this.childProcess = null;
       this.pidFile = null;
       this.startedAt = null;
@@ -964,10 +1338,20 @@ export class ServerManager {
       this.setModelDownload(undefined);
       this.setEngineStatus(undefined);
       this.setRuntime(undefined);
+      this.activeRuntimeLease = null;
+
+      if (lease) {
+        try {
+          await lease.release();
+        } catch (leaseErr) {
+          log.warn('Failed to release runtime lease on stop', { error: leaseErr });
+        }
+      }
+
       this.updateStatus('stopped');
     } catch (error) {
       log.error('Error stopping server', { error: error as Error });
-      this.updateStatus('error', `Failed to stop: ${(error as Error).message}`);
+      this.updateStatus('error', 'Failed to stop server');
     }
   }
 

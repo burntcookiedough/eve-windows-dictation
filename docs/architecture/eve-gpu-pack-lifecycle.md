@@ -100,8 +100,9 @@ uncertain liveness is treated conservatively.
 
 The durable record retains every bound wrapper and daemon PID, so rebinding to
 the verified server never loses protection for a surviving wrapper. An abandoned
-lease with no bound PID is also uncertain: the app may have died between spawn
-and the first bind. It blocks destructive actions until an operator confirms
+lease without a verified server bind is also uncertain: the app may have died
+between spawn and daemon discovery, even if a launcher PID was recorded. Failed
+startup without an identified daemon retains the same protection. It blocks destructive actions until an operator confirms
 that no component consumer survives and removes that identified lease record.
 An ordinary completed bind expires only after the app and all recorded processes
 are confirmed dead. PID reuse can conservatively delay cleanup.

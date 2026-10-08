@@ -1116,6 +1116,23 @@ function createFixtureHttpServer(
     expect(await manager.remove()).toEqual({ status: 'failed', code: 'busy', retryable: true });
   });
 
+  test('a dead launcher alone does not expire a lease before verified daemon discovery', async () => {
+    const root = await temporaryRoot();
+    const { manager, data } = managerFor(root);
+    await manager.install();
+    const lease = await manager.acquireRuntime();
+    if (!lease) throw new Error('Lease missing');
+    await lease.bindServerPid(88881, 'wrapper');
+    const leaseFile = (await readdir(root)).find((name) => name.startsWith('.gpu-lease-'))!;
+    const record = JSON.parse(await readFile(path.join(root, leaseFile), 'utf8'));
+    record.pid = 88880;
+    await writeFile(path.join(root, leaseFile), JSON.stringify(record));
+    const restarted = createGpuPackManager({ root, descriptor: data.descriptor, identity,
+      source: data.source, isProcessAlive: () => false });
+    expect(await restarted.remove()).toEqual({ status: 'failed', code: 'busy', retryable: true });
+    expect(await restarted.getValidatedRuntime()).not.toBeNull();
+  });
+
   test('retention prunes older packs but keeps current, newest validated prior, and any actively leased pack', async () => {
     const root = await temporaryRoot();
 

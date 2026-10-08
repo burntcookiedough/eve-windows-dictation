@@ -141,7 +141,7 @@ export interface ValidatedGpuRuntime {
 export interface RuntimeLease {
   readonly runtime: ValidatedGpuRuntime;
   /** Binds the spawned or adopted server process PID to the durable lease record. */
-  bindServerPid(pid: number): Promise<void>;
+  bindServerPid(pid: number, role?: 'wrapper' | 'server'): Promise<void>;
   /** Releases the runtime lease and removes the durable lease record. */
   release(): Promise<void> | void;
 }
@@ -213,6 +213,7 @@ interface RuntimeLeaseRecord {
   serverPid: number | null;
   /** All bound wrapper/daemon PIDs, retained until the lease is released. */
   serverPids: number[];
+  serverBound: boolean;
   readonly createdAt: number;
 }
 
@@ -937,7 +938,8 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         if (
           !isRecord(parsed) ||
           parsed.schemaVersion !== 1 ||
-          Object.keys(parsed).some((key) => !['schemaVersion', 'packId', 'leaseId', 'pid', 'serverPid', 'serverPids', 'createdAt'].includes(key)) ||
+          Object.keys(parsed).some((key) => !['schemaVersion', 'packId', 'leaseId', 'pid', 'serverPid', 'serverPids', 'serverBound', 'createdAt'].includes(key)) ||
+          (parsed.serverBound !== undefined && typeof parsed.serverBound !== 'boolean') ||
           parsed.packId !== entryPackId ||
           !Number.isSafeInteger(parsed.createdAt) || (parsed.createdAt as number) <= 0 ||
           !Number.isSafeInteger(parsed.pid) || (parsed.pid as number) <= 0 ||
@@ -957,7 +959,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
         // An app can die between spawn and the first durable bind. Without a
         // recorded child identity, absence of a live server cannot be proven.
-        if (appAlive || serverAlive || (serverPid === null && serverPids.length === 0)) {
+        if (appAlive || serverAlive || parsed.serverBound === false || (serverPid === null && serverPids.length === 0)) {
           return true;
         } else {
           // Both app and server confirmed dead -> expired lease
@@ -2149,6 +2151,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
           pid: process.pid,
           serverPid: null,
           serverPids: [],
+          serverBound: false,
           createdAt: Date.now(),
         };
 
@@ -2171,7 +2174,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
         return {
           runtime,
-          async bindServerPid(serverPid: number): Promise<void> {
+          async bindServerPid(serverPid: number, role: 'wrapper' | 'server' = 'server'): Promise<void> {
             if (released) throw new Error('Runtime lease has been released');
             if (!Number.isSafeInteger(serverPid) || serverPid <= 0) {
               throw new Error('Invalid server PID');
@@ -2183,6 +2186,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
                 leaseData.serverPids.push(serverPid);
               }
               leaseData.serverPid = serverPid;
+              if (role === 'server') leaseData.serverBound = true;
               const tmpPath = path.join(root, `${leaseFileName}.tmp-${randomUUID()}`);
               await fs.promises.writeFile(tmpPath, `${JSON.stringify(leaseData)}\n`, {
                 encoding: 'utf8', flag: 'wx', mode: 0o600,
