@@ -30,10 +30,10 @@ async function main() {
     await wait(250);
     const ready = await evaluate(`({status: document.querySelector('[data-gpu-pack-status]').textContent, repair: !!document.querySelector('[data-gpu-pack-repair]')})`);
     await evaluate(`document.querySelector('[data-gpu-pack-remove]').focus(); document.querySelector('[data-gpu-pack-remove]').click()`);
-    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]')`);
+    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]') && document.activeElement === document.querySelector('.sheet-layer.open [data-sheet-initial-focus]')`);
     const confirmation = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.textContent.trim(), dialog: document.querySelector('.sheet-layer.open [role="dialog"]')?.textContent})`);
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
-    await waitFor(`!document.querySelector('.sheet-layer.open [role="dialog"]')`);
+    await waitFor(`!document.querySelector('.sheet-layer.open [role="dialog"]') && document.activeElement?.hasAttribute?.('data-gpu-pack-remove')`);
     const cancelled = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.hasAttribute('data-gpu-pack-remove')})`);
     await evaluate(`document.querySelector('[data-gpu-pack-repair]').click(); document.querySelector('[data-gpu-pack-repair]')?.click()`);
     await waitFor(`document.querySelector('[data-gpu-pack-status]').textContent.includes('Verifying')`);
@@ -60,6 +60,32 @@ async function main() {
     const repairedBroken = await evaluate(`gpuFixture.calls.slice()`);
     await evaluate(`gpuFixture.finish()`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-repair]')`);
+    await evaluate(`gpuFixture.rejectNext('repair', false)`);
+    await evaluate(`document.querySelector('[data-gpu-pack-repair]').click()`);
+    await waitFor(`document.querySelector('[data-gpu-pack-card] [role="alert"]')?.textContent.includes('could not be repaired') && !document.querySelector('[data-gpu-pack-repair]').disabled`);
+    const rejectedRepair = await evaluate(`({
+      alert: document.querySelector('[data-gpu-pack-card] [role="alert"]')?.textContent?.trim(),
+      hasRepair: !!document.querySelector('[data-gpu-pack-repair]'),
+      hasRemove: !!document.querySelector('[data-gpu-pack-remove]'),
+      hasAction: !!document.querySelector('[data-gpu-pack-action]'),
+      repairDisabled: document.querySelector('[data-gpu-pack-repair]')?.disabled,
+      calls: [...gpuFixture.calls],
+    })`);
+    await evaluate(`gpuFixture.rejectNext('remove', true)`);
+    await evaluate(`document.querySelector('[data-gpu-pack-remove]').click()`);
+    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]')`);
+    await evaluate(`document.querySelector('[data-gpu-pack-confirm-remove]').click()`);
+    await waitFor(`!document.querySelector('.sheet-layer.open [role="dialog"]')`);
+    await waitFor(`document.querySelector('[data-gpu-pack-card] [role="alert"]')?.textContent.includes('could not be removed') && !document.querySelector('[data-gpu-pack-remove]').disabled`);
+    const rejectedRemove = await evaluate(`({
+      alert: document.querySelector('[data-gpu-pack-card] [role="alert"]')?.textContent?.trim(),
+      hasRepair: !!document.querySelector('[data-gpu-pack-repair]'),
+      hasRemove: !!document.querySelector('[data-gpu-pack-remove]'),
+      hasAction: !!document.querySelector('[data-gpu-pack-action]'),
+      removeDisabled: document.querySelector('[data-gpu-pack-remove]')?.disabled,
+      sheetOpen: !!document.querySelector('.sheet-layer.open [role="dialog"]'),
+      calls: [...gpuFixture.calls],
+    })`);
     await evaluate(`gpuFixture.publish({status:'downloading',packId:'a'.repeat(64),receivedBytes:62,totalBytes:100})`);
     await waitFor(`document.querySelector('[data-gpu-pack-card] progress')?.value === 62`);
     const layouts = [];
@@ -71,7 +97,7 @@ async function main() {
         layouts.push(await evaluate(`(() => { const card=document.querySelector('[data-gpu-pack-card]');const bar=card.querySelector('progress');return {width:innerWidth,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth, local:!!bar,value:bar.value, height:getComputedStyle(bar).height, color:getComputedStyle(card).color}; })()`));
       }
     }
-    process.stdout.write(JSON.stringify({ userDataPath: userData, ready, confirmation, cancelled, repairing, fallback, deviceUnknown, removed, interrupted, broken, repairedBroken, layouts }));
+    process.stdout.write(JSON.stringify({ userDataPath: userData, ready, confirmation, cancelled, repairing, fallback, deviceUnknown, removed, interrupted, broken, repairedBroken, rejectedRepair, rejectedRemove, layouts }));
   } finally { window.destroy(); }
   app.quit();
 }

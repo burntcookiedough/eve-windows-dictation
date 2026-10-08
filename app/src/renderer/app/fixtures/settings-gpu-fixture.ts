@@ -10,12 +10,20 @@ const calls: string[] = [];
 const listeners = new Set<(state: GpuPackState) => void>();
 let state: GpuPackState = { status: 'ready', packId, restartRequired: true };
 let complete: (() => void) | null = null;
+let rejectedAction: 'repair' | 'remove' | null = null;
+let rejectStateReload = false;
+function rejectActionIfRequested(action: 'repair' | 'remove') {
+  if (rejectedAction !== action) return;
+  rejectedAction = null;
+  throw new Error('Synthetic rejected GPU action');
+}
 function publish(next: GpuPackState) {
   state = next;
   for (const listener of listeners) listener(next);
 }
 function repair() {
   calls.push('repair');
+  rejectActionIfRequested('repair');
   publish({ status: 'validating', packId });
   return new Promise<GpuPackState>((resolve) => {
     complete = () => {
@@ -31,7 +39,10 @@ const api = {
   getHotkeyDisplayName: async () => 'Ctrl+Win',
   getServerSettings: async () => { throw new Error('Synthetic offline server'); },
   getServerLogs: async () => [],
-  getGpuPackState: async () => state,
+  getGpuPackState: async () => {
+    if (rejectStateReload) { rejectStateReload = false; throw new Error('Synthetic unavailable state'); }
+    return state;
+  },
   onGpuPackStateChange: (listener: (state: GpuPackState) => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -40,6 +51,7 @@ const api = {
   installGpuPack: async () => { calls.push('install'); return state; },
   removeGpuPack: async () => {
     calls.push('remove');
+    rejectActionIfRequested('remove');
     publish({ status: 'missing', packId, downloadBytes: 100 });
     return state;
   },
@@ -59,6 +71,10 @@ Object.defineProperty(navigator, 'mediaDevices', { value: {
 Object.assign(window, { gpuFixture: {
   calls,
   publish,
+  rejectNext: (action: 'repair' | 'remove', reloadFails = false) => {
+    rejectedAction = action;
+    rejectStateReload = reloadFails;
+  },
   finish: () => complete?.(),
   cpuFallback: () => serverStatusState.set({ phase: 'ready', announcement: '', state: {
     status: 'running', managed: false,

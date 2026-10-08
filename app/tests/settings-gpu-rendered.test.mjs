@@ -59,6 +59,20 @@ test('production Settings GPU controls work offline, confirm removal, preserve p
   expect(result.interrupted).toBeTrue();
   expect(result.broken).toEqual({ repair: true, remove: true });
   expect(result.repairedBroken).toEqual(['repair', 'remove', 'repair']);
+  expect(result.rejectedRepair.alert).toContain('could not be repaired');
+  expect(result.rejectedRepair.repairDisabled).toBeFalse();
+  expect(result.rejectedRepair.calls).toEqual(['repair', 'remove', 'repair', 'repair']);
+  expect(result.rejectedRemove.alert).toContain('could not be removed');
+  expect(result.rejectedRemove.removeDisabled).toBeFalse();
+  expect(result.rejectedRemove.sheetOpen).toBeFalse();
+  expect(result.rejectedRemove.calls).toEqual(['repair', 'remove', 'repair', 'repair', 'remove']);
+  for (const rejected of [result.rejectedRepair, result.rejectedRemove]) {
+    expect(rejected.hasAction).toBeFalse();
+    expect(rejected.hasRepair).toBeTrue();
+    expect(rejected.hasRemove).toBeTrue();
+    expect(rejected.calls).not.toContain('install');
+    expect(rejected.calls).not.toContain('updateSetting');
+  }
   for (const layout of result.layouts) {
     expect(layout.overflow).toBeFalse();
     expect(layout.local).toBeTrue();

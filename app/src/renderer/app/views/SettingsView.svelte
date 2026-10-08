@@ -436,8 +436,8 @@
     try {
       gpuPackState = await window.murmurMain.repairGpuPack();
     } catch {
-      gpuPackState = { status: 'failed', code: 'storage_failed', retryable: true };
       gpuPackActionError = 'GPU support could not be repaired. Try again.';
+      try { gpuPackState = await window.murmurMain.getGpuPackState(); } catch {}
     } finally {
       gpuPackOperating = false;
     }
@@ -457,8 +457,8 @@
       closeSettingsSheet();
       gpuPackState = await window.murmurMain.removeGpuPack();
     } catch {
-      gpuPackState = { status: 'failed', code: 'storage_failed', retryable: true };
       gpuPackActionError = 'GPU support could not be removed. Try again.';
+      try { gpuPackState = await window.murmurMain.getGpuPackState(); } catch {}
     } finally {
       gpuPackOperating = false;
     }

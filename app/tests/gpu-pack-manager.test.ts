@@ -1847,6 +1847,57 @@ function createFixtureHttpServer(
     expect((await next.remove()).status).toBe('missing');
   });
 
+  test('accepts Windows path casing differences through install, repair and removal', async () => {
+    const root = await temporaryRoot();
+    await mkdir(root, { recursive: true });
+    const differentlyCasedRoot = process.platform === 'win32' ? root.toUpperCase() : root;
+    const { manager, data } = managerFor(differentlyCasedRoot);
+    expect((await manager.getState()).status).toBe('missing');
+    expect((await manager.install()).status).toBe('ready');
+    const runtime = await manager.getValidatedRuntime();
+    if (!runtime) throw new Error('Runtime missing');
+    await writeFile(path.join(runtime.directory, data.files[0].fileName), 'corrupt owned bytes');
+    expect((await manager.repair()).status).toBe('ready');
+    expect(await readFile(path.join(runtime.directory, data.files[0].fileName))).toEqual(data.files[0].contents);
+    expect((await manager.remove()).status).toBe('missing');
+  });
+
+  for (const injectUnknown of [false, true]) {
+    test(`failed publication restores stage ownership and ${injectUnknown ? 'preserves unknown data' : 'cleans owned data'}`, async () => {
+      const root = await temporaryRoot();
+      const { manager, data } = managerFor(root);
+      expect((await manager.install()).status).toBe('ready');
+      const current = await manager.getValidatedRuntime();
+      if (!current) throw new Error('Runtime missing');
+      const nextDescriptor = { ...data.descriptor, appBuildId: 'eve-failed-publication-test' };
+      const next = createGpuPackManager({ root, descriptor: nextDescriptor,
+        identity: { ...identity, appBuildId: nextDescriptor.appBuildId }, source: data.source });
+      const originalRename = fs.promises.rename.bind(fs.promises);
+      let failedStage = '';
+      const renameSpy = spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+        if (path.basename(String(from)).startsWith('.gpu-stage-') && path.basename(String(to)).startsWith('gpu-pack-')) {
+          failedStage = String(from);
+          if (injectUnknown) await writeFile(path.join(failedStage, 'unknown.txt'), 'sentinel');
+          throw Object.assign(new Error('Synthetic publication failure'), { code: 'EPERM' });
+        }
+        return originalRename(from, to);
+      });
+      try {
+        expect(await next.install()).toEqual({ status: 'failed', code: 'storage_failed', retryable: true });
+      } finally { renameSpy.mockRestore(); }
+      expect(failedStage).not.toBe('');
+      expect(await readFile(path.join(current.directory, data.files[0].fileName))).toEqual(data.files[0].contents);
+      expect(await manager.getValidatedRuntime()).not.toBeNull();
+      if (injectUnknown) {
+        expect(JSON.parse(await readFile(path.join(failedStage, '.stage-marker.json'), 'utf8')).schemaVersion).toBe(1);
+        expect((await manager.install()).status).toBe('ready');
+        expect(await readFile(path.join(failedStage, 'unknown.txt'), 'utf8')).toBe('sentinel');
+      } else {
+        expect((await readdir(root)).includes(path.basename(failedStage))).toBeFalse();
+      }
+    });
+  }
+
   test('refuses writes through a junction in root ancestry', async () => {
     const root = await temporaryRoot();
     const outside = path.join(path.dirname(root), 'sentinel-volume');

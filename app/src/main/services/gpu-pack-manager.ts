@@ -625,7 +625,7 @@ async function removeOwnedPackDirectory(
   packDir: string,
   owned: ManagerOwnedPackDirectory,
 ): Promise<void> {
-    if (path.resolve(await fs.promises.realpath(packDir)) !== path.resolve(packDir)) throw new GpuPackError('storage_failed', 'Unsafe pack target');
+    if (path.relative(await fs.promises.realpath(packDir), path.resolve(packDir)) !== '') throw new GpuPackError('storage_failed', 'Unsafe pack target');
     const current = await inspectManagerOwnedPackDirectory(packDir);
     if (!current || current.manifest.packId !== owned.manifest.packId) throw new GpuPackError('storage_failed', 'Pack ownership changed');
     const files = [...owned.manifest.files.map((f) => f.fileName), GPU_PACK_MANIFEST_NAME];
@@ -682,7 +682,7 @@ async function removeOwnedStageDirectory(
   stageDir: string,
   owned: { entries: string[] },
 ): Promise<void> {
-    if (path.resolve(await fs.promises.realpath(stageDir)) !== path.resolve(stageDir)) throw new GpuPackError('storage_failed', 'Unsafe stage target');
+    if (path.relative(await fs.promises.realpath(stageDir), path.resolve(stageDir)) !== '') throw new GpuPackError('storage_failed', 'Unsafe stage target');
     const current = await inspectManagerOwnedStageDirectory(stageDir);
     if (!current || JSON.stringify(current.entries) !== JSON.stringify(owned.entries)) throw new GpuPackError('storage_failed', 'Stage ownership changed');
     for (const entry of [...owned.entries.filter((entry) => entry !== STAGE_MARKER_NAME), STAGE_MARKER_NAME]) {
@@ -872,7 +872,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     if (!stats.isDirectory() || stats.isSymbolicLink()) {
       throw new GpuPackError('storage_failed', 'GPU pack root is not a regular directory');
     }
-    if (path.resolve(await fs.promises.realpath(root)) !== root) {
+    if (path.relative(await fs.promises.realpath(root), root) !== '') {
       throw new GpuPackError('storage_failed', 'GPU pack root resolves through a link');
     }
   };
@@ -1099,6 +1099,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
   const verifyPackDirectory = async (
     directory: string,
     customDescriptor?: NormalizedDescriptor,
+    stageMarker?: StageMarkerRecord,
   ): Promise<ExistingPackResult> => {
     const targetDesc = customDescriptor ?? descriptor;
     if (!targetDesc) return 'invalid';
@@ -1116,11 +1117,16 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
       const expectedNames = [
         GPU_PACK_MANIFEST_NAME,
         ...targetDesc.assets.map((asset) => asset.fileName),
+        ...(stageMarker ? [STAGE_MARKER_NAME] : []),
       ];
       if (
         entries.length !== expectedNames.length ||
         entries.some((entry) => !expectedNames.includes(entry))
       ) {
+        return 'invalid';
+      }
+
+      if (stageMarker && await readBoundedUtf8File(path.join(directory, STAGE_MARKER_NAME)) !== `${JSON.stringify(stageMarker)}\n`) {
         return 'invalid';
       }
 
@@ -1845,11 +1851,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         },
       );
 
-      try {
-        await fs.promises.unlink(path.join(stagePath, STAGE_MARKER_NAME));
-      } catch {}
-
-      const staged = await verifyPackDirectory(stagePath);
+      const staged = await verifyPackDirectory(stagePath, undefined, marker);
       if (staged !== 'valid') {
         throw new GpuPackError('integrity_failed', 'Staged GPU pack failed validation');
       }
@@ -1871,9 +1873,21 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         await removeOwnedPackDirectory(destination, ownedAtPublish);
       }
 
+      await fs.promises.unlink(path.join(stagePath, STAGE_MARKER_NAME));
       try {
         await fs.promises.rename(stagePath, destination);
       } catch (error) {
+        // Restore this operation's ownership record without overwriting a
+        // replacement marker. Unknown entries still block bounded cleanup.
+        try {
+          await ensureRoot();
+          const stats = await fs.promises.lstat(stagePath);
+          if (stats.isDirectory() && !stats.isSymbolicLink() &&
+              path.relative(await fs.promises.realpath(stagePath), path.resolve(stagePath)) === '') {
+            await fs.promises.writeFile(path.join(stagePath, STAGE_MARKER_NAME), `${JSON.stringify(marker)}\n`,
+              { flag: 'wx', mode: 0o600 });
+          }
+        } catch {}
         const appeared = await verifyPackDirectory(destination);
         if (appeared === 'valid') {
           await pruneOldPackDirectories();
