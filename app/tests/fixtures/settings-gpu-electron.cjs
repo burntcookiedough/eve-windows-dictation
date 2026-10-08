@@ -21,7 +21,13 @@ async function main() {
       if (await evaluate(expression)) return;
       await wait(25);
     }
-    throw new Error(`Fixture state did not settle: ${expression}`);
+    const focus = await evaluate(`(() => { const target = document.querySelector('.sheet-layer.open [data-sheet-initial-focus]'); return {
+      hasFocus: document.hasFocus(), active: document.activeElement?.outerHTML?.slice(0, 500),
+      target: target?.outerHTML, disabled: target?.disabled, inert: !!target?.closest('[inert]'),
+      visibility: target ? getComputedStyle(target).visibility : null,
+      panel: document.querySelector('.sheet-layer.open [role="dialog"]')?.outerHTML?.slice(0, 1500),
+    }; })()`);
+    throw new Error(`Fixture state did not settle: ${expression}; focus=${JSON.stringify(focus)}`);
   };
   try {
     await window.loadURL(process.argv[2]);
