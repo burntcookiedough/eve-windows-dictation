@@ -259,7 +259,9 @@
                   ? sharedServerState?.runtime?.pack_id === gpuPackState.packId
                     ? sharedServerState.runtime?.effective_device === 'cuda'
                       ? 'Installed · GPU active'
-                      : 'Installed · CPU fallback'
+                      : sharedServerState.runtime?.effective_device === 'cpu'
+                        ? 'Installed · CPU fallback'
+                        : 'Installed · device not reported'
                     : 'Installed · restart Eve to use'
                   : gpuPackState.code === 'busy'
                     ? 'In use · cannot modify'
@@ -1134,7 +1136,9 @@
                   {sharedServerState?.runtime?.pack_id === gpuPackState.packId
                     ? sharedServerState.runtime?.effective_device === 'cuda'
                       ? 'Installed · GPU active.'
-                      : 'Installed · CPU fallback is active. Your device preference is unchanged.'
+                      : sharedServerState.runtime?.effective_device === 'cpu'
+                        ? 'Installed · CPU fallback is active. Your device preference is unchanged.'
+                        : 'Installed · the speech server has not reported its active device.'
                     : 'Installed · restart the speech server to use GPU support.'}
                 {:else if gpuPackState.code === 'busy'}
                   Another operation or running speech server is using GPU support. Stop the server through its owner, then retry.

@@ -64,6 +64,10 @@ Object.assign(window, { gpuFixture: {
     status: 'running', managed: false,
     runtime: { app_build: 'fixture', server_build: 'fixture', pack_id: packId, effective_device: 'cpu' },
   } }),
+  deviceUnknown: () => serverStatusState.set({ phase: 'ready', announcement: '', state: {
+    status: 'running', managed: false,
+    runtime: { app_build: 'fixture', server_build: 'fixture', pack_id: packId, effective_device: null },
+  } }),
 } });
 const target = document.querySelector('#fixture-root');
 if (!target) throw new Error('GPU fixture root missing');

@@ -77,6 +77,8 @@ export class ServerManager {
   private status: ServerStatus = 'idle';
   private currentError: string | null = null;
   private activeRuntimeLease: RuntimeLease | null = null;
+  private activeRuntimeConsumers: { pids: number[]; identified: boolean } = { pids: [], identified: false };
+  private retainedRuntimeLeases = new Map<RuntimeLease, { pids: number[]; identified: boolean }>();
   private processGeneration = 0;
   private startInFlight: Promise<void> | null = null;
   private lifecycleTail: Promise<void> = Promise.resolve();
@@ -151,8 +153,23 @@ export class ServerManager {
     try {
       process.kill(pid, 0);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    }
+  }
+
+  private async replaceRuntimeLease(next: RuntimeLease | null, pids: number[], identified: boolean): Promise<void> {
+    const previous = this.activeRuntimeLease;
+    if (previous && previous !== next) this.retainedRuntimeLeases.set(previous, this.activeRuntimeConsumers);
+    this.activeRuntimeLease = next;
+    this.activeRuntimeConsumers = { pids, identified };
+    for (const [lease, consumers] of this.retainedRuntimeLeases) {
+      if (consumers.identified && consumers.pids.length > 0 && consumers.pids.every((pid) => !this.isProcessAlive(pid))) {
+        try {
+          await lease.release();
+          this.retainedRuntimeLeases.delete(lease);
+        } catch (error) { log.warn('Failed to release prior runtime lease', { error }); }
+      }
     }
   }
 
@@ -208,6 +225,7 @@ export class ServerManager {
           this.activeRuntimeLease = null;
           try { await lease.release(); } catch (error) { log.warn('Failed to release terminated runtime lease', { error }); }
         }
+        await this.replaceRuntimeLease(null, [], false);
         return;
       }
       if (!health.healthy) {
@@ -556,13 +574,14 @@ export class ServerManager {
         await adoptedLease.bindServerPid(pidData.pid);
       } catch (bindErr) {
         log.warn('Failed to bind server PID to acquired lease; retaining protection and refusing adoption', { error: bindErr });
-        this.activeRuntimeLease = adoptedLease;
+        await this.replaceRuntimeLease(adoptedLease, [pidData.pid], true);
         this.updateStatus('error', 'Failed to bind GPU lease to existing server');
         return false;
       }
     }
 
     // Found a healthy server
+    await this.replaceRuntimeLease(adoptedLease, [pidData.pid], true);
     this.pidFile = pidData;
     this.startedAt = pidData.startedAt;
     this.serverVersion = health.version ?? null;
@@ -573,7 +592,6 @@ export class ServerManager {
     this.runningRuntimeIdentity = expected;
     this.managed = false; // The server was detected rather than spawned by Eve.
     this.processGeneration += 1;
-    this.activeRuntimeLease = adoptedLease;
     this.updateStatus('running');
     this.startHealthPolling(pidData.port);
 
@@ -762,6 +780,7 @@ export class ServerManager {
 
         if (leaseOk) {
           log.info('Found existing healthy server, adopting');
+          await this.replaceRuntimeLease(adoptedLease, [existingPid.pid], true);
           this.pidFile = existingPid;
           this.startedAt = existingPid.startedAt;
           this.serverVersion = health.version ?? null;
@@ -772,7 +791,6 @@ export class ServerManager {
           this.runningRuntimeIdentity = expectedRuntime?.identity ?? null;
           this.managed = false;
           this.processGeneration += 1;
-          this.activeRuntimeLease = adoptedLease;
           this.updateStatus('running');
           this.startHealthPolling(existingPid.port);
           return;
@@ -782,6 +800,7 @@ export class ServerManager {
       }
 
       log.warn('Existing owned Eve server is unhealthy or uses a different runtime; terminating it');
+      if (adoptedLease) await this.replaceRuntimeLease(adoptedLease, [existingPid.pid], true);
       try {
         try { process.kill(existingPid.pid, 'SIGTERM'); } catch {}
         const exited = await this.waitForProcessExit(existingPid.pid, 5000);
@@ -802,6 +821,7 @@ export class ServerManager {
       } finally {
         if (adoptedLease && !this.isProcessAlive(existingPid.pid)) {
           try { await adoptedLease.release(); } catch {}
+          if (this.activeRuntimeLease === adoptedLease) this.activeRuntimeLease = null;
         }
       }
       this.cleanupStalePidFile();
@@ -859,7 +879,12 @@ export class ServerManager {
     this.setRuntime(undefined);
     this.clearPendingLogDelivery();
     this.logs = []; // Clear logs for new session
-    this.activeRuntimeLease = processLease;
+    await this.replaceRuntimeLease(processLease, [], false);
+    if (this.cleaningUp) {
+      if (processLease) await processLease.release();
+      if (this.activeRuntimeLease === processLease) this.activeRuntimeLease = null;
+      return;
+    }
 
     let childPid: number | undefined;
     let boundServerPid: number | undefined;
@@ -922,6 +947,7 @@ export class ServerManager {
 
       const child = this.childProcess;
       childPid = child.pid;
+      this.activeRuntimeConsumers = { pids: childPid ? [childPid] : [], identified: false };
 
       let leaseReleased = false;
       let leaseOpQueue: Promise<void> = Promise.resolve();
@@ -1090,6 +1116,7 @@ export class ServerManager {
       this.pidFile = pidData;
       boundServerPid = pidData.pid;
       verifiedServerKnown = true;
+      this.activeRuntimeConsumers = { pids: [...new Set([childPid, pidData.pid].filter((pid): pid is number => pid !== undefined))], identified: true };
 
       if (pidData.pid && processLease) {
         try {
@@ -1347,6 +1374,7 @@ export class ServerManager {
           log.warn('Failed to release runtime lease on stop', { error: leaseErr });
         }
       }
+      await this.replaceRuntimeLease(null, [], false);
 
       this.updateStatus('stopped');
     } catch (error) {

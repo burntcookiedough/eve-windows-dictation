@@ -348,6 +348,22 @@ describe('GPU pack manager', () => {
     expect(await readdir(root)).toEqual([]);
   });
 
+  test('a compressed hash failure discards the owned transfer and retries HTTP from zero', async () => {
+    const root = await temporaryRoot();
+    const data = fixture();
+    const http = await createFixtureHttpServer(data.assets, data.compressed, { corruptFirstResponse: true });
+    try {
+      const manager = createGpuPackManager({ root, identity, descriptor: data.descriptor,
+        fetch: (url, init) => fetch(`${http.baseUrl}/${path.basename(new URL(url).pathname)}`, init),
+      });
+      expect((await manager.install())).toMatchObject({ status: 'failed', code: 'integrity_failed' });
+      expect((await readdir(root)).filter((name) => name.startsWith('.gpu-partial-0'))).toEqual([]);
+      expect((await manager.install()).status).toBe('ready');
+      expect(http.getRequestedAssets()).toEqual([0, 0, 1]);
+      expect(http.getRequestedRanges()).toEqual([null, null, null]);
+    } finally { await http.close(); }
+  });
+
   test('rejects a decompressed size overflow and leaves no publishable files', async () => {
     const root = await temporaryRoot();
     const data = fixture();
@@ -459,6 +475,7 @@ function createFixtureHttpServer(
     simulateGzipEncoding?: boolean;
     simulateWrongContentLength?: boolean;
     simulateOversizedBody?: boolean;
+    corruptFirstResponse?: boolean;
   } = {},
 ): Promise<{
   server: Server;
@@ -466,12 +483,14 @@ function createFixtureHttpServer(
   close: () => Promise<void>;
   getRequestCount: () => number;
   getRequestedAssets: () => number[];
+  getRequestedRanges: () => (string | null)[];
 }> {
   return new Promise((resolve) => {
     let requestCount = 0;
     let did416 = false;
     let didInterrupt = false;
     const requestedAssets: number[] = [];
+    const requestedRanges: (string | null)[] = [];
 
     const server = createServer((req, res) => {
       requestCount++;
@@ -485,6 +504,13 @@ function createFixtureHttpServer(
       requestedAssets.push(assetIndex);
       const data = compressed[assetIndex]!;
       const rangeHeader = req.headers['range'];
+      requestedRanges.push(rangeHeader ?? null);
+      if (serverOptions.corruptFirstResponse && requestCount === 1) {
+        const corrupt = Buffer.from(data);
+        corrupt[0] = corrupt[0]! ^ 1;
+        res.end(corrupt);
+        return;
+      }
 
       if (serverOptions.simulate201Created && !rangeHeader) {
         res.statusCode = 201;
@@ -588,6 +614,7 @@ function createFixtureHttpServer(
         close: () => new Promise<void>((r) => server.close(() => r())),
         getRequestCount: () => requestCount,
         getRequestedAssets: () => requestedAssets.slice(),
+        getRequestedRanges: () => requestedRanges.slice(),
       });
     });
   });

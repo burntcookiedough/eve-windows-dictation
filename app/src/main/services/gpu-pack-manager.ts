@@ -1594,6 +1594,12 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
 
       const finalHash = runningHash.digest('hex');
       if (finalHash !== asset.compressedSha256) {
+        // This operation created/verified these owned paths. A corrupt complete
+        // transfer is not a resumable checkpoint and must retry from zero.
+        writeOffset = 0;
+        await ensureRoot();
+        await fs.promises.unlink(partPath);
+        await fs.promises.unlink(metaPath);
         throw new GpuPackError('integrity_failed', 'Compressed GPU asset failed pinned integrity checks');
       }
 

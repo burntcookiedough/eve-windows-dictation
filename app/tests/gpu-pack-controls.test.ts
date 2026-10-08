@@ -27,5 +27,8 @@ describe('B6 GPU Pack Controls isolated child runner', () => {
     }
 
     expect(exitCode).toBe(0);
+    const passed = Number(stderr.match(/(\d+) pass/)?.[1] ?? 0);
+    expect(passed).toBeGreaterThanOrEqual(20);
+    console.log(`GPU_CONTROLS_PROOF=${JSON.stringify({ passed, exitCode })}`);
   }, 60000);
 });

@@ -2,9 +2,16 @@ import { afterAll, expect, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, relative, isAbsolute, basename } from 'node:path';
+import { createServer } from 'node:net';
 
 const appRoot = resolve(import.meta.dir, '..');
-const port = 52300 + (process.pid % 100);
+const portProbe = createServer();
+await new Promise((resolvePort, rejectPort) => {
+  portProbe.once('error', rejectPort);
+  portProbe.listen(0, '127.0.0.1', resolvePort);
+});
+const port = portProbe.address().port;
+await new Promise((resolveClose, rejectClose) => portProbe.close((error) => error ? rejectClose(error) : resolveClose()));
 const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1'], {
   cwd: appRoot, env: { ...process.env, MURMUR_DEV_PORT: String(port) }, stdout: 'ignore', stderr: 'pipe', windowsHide: true,
 });
@@ -13,9 +20,14 @@ afterAll(async () => { vite.kill(); await vite.exited; });
 test('production Settings GPU controls work offline, confirm removal, preserve preferences and keep progress local', async () => {
   const url = `http://127.0.0.1:${port}/app/fixtures/settings-gpu-fixture.html`;
   let available = false;
-  for (let attempt = 0; attempt < 60; attempt++) {
+  for (let attempt = 0; attempt < 150; attempt++) {
     try { if ((await fetch(url)).ok) { available = true; break; } } catch {}
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  if (!available) {
+    vite.kill();
+    await vite.exited;
+    throw new Error(`GPU fixture server did not start: ${await new Response(vite.stderr).text()}`);
   }
   expect(available).toBeTrue();
   const env = { ...process.env };
@@ -40,6 +52,8 @@ test('production Settings GPU controls work offline, confirm removal, preserve p
   expect(result.repairing.enabled).toBeFalse();
   expect(result.repairing.status).toContain('Verifying');
   expect(result.fallback).toContain('CPU fallback');
+  expect(result.deviceUnknown).toContain('not reported');
+  expect(result.deviceUnknown).not.toContain('CPU fallback');
   expect(result.removed.calls).toEqual(['repair', 'remove']);
   expect(result.removed.download).toBeTrue();
   expect(result.interrupted).toBeTrue();

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { IPC_CHANNELS } from '../../src/shared/constants.js';
@@ -11,6 +11,11 @@ import type {
 } from '../../src/main/services/server-manager.js';
 
 (process as any).resourcesPath = process.cwd();
+// Synthetic process ownership never authorizes a signal to a real host PID.
+// Keep signal-0 probes real for the manager's own lease tests.
+const originalKill = process.kill;
+process.kill = ((pid, signal) => signal === 0 ? originalKill(pid, signal) : true) as typeof process.kill;
+afterAll(() => { process.kill = originalKill; });
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const electronMock = {
@@ -174,6 +179,34 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
   });
 
   describe('ServerManager mock ChildProcess EventEmitter runtime lifecycle', () => {
+    test('process liveness fails closed on permission or unknown probe failures', () => {
+      const manager = new ServerManager();
+      const kill = spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+      try {
+        expect((manager as any).isProcessAlive(88888)).toBeTrue();
+        kill.mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
+        expect((manager as any).isProcessAlive(88888)).toBeFalse();
+      } finally { kill.mockRestore(); }
+    });
+
+    test('lease replacement retains living prior consumers and releases them only after confirmed death', async () => {
+      const living = new Set([8101, 8102]);
+      let released = 0;
+      const lease: RuntimeLease = { runtime: { directory: 'E:/fixture', packId: 'fixture' } as ValidatedGpuRuntime,
+        bindServerPid: async () => {}, release: async () => { released++; } };
+      const manager = new ServerManager(undefined, { isProcessAlive: (pid) => living.has(pid) });
+      await (manager as any).replaceRuntimeLease(lease, [8101, 8102], true);
+      await (manager as any).replaceRuntimeLease(null, [], false);
+      expect(released).toBe(0);
+      expect((manager as any).retainedRuntimeLeases.size).toBe(1);
+      living.delete(8101);
+      await (manager as any).replaceRuntimeLease(null, [], false);
+      expect(released).toBe(0);
+      living.delete(8102);
+      await (manager as any).replaceRuntimeLease(null, [], false);
+      expect(released).toBe(1);
+      expect((manager as any).retainedRuntimeLeases.size).toBe(0);
+    });
     test('ServerManager falls back to CPU and strips GPU env vars when acquireRuntime returns null', async () => {
       let spawnedEnv: NodeJS.ProcessEnv | undefined;
       const mockChild = new MockChildProcess(101);
