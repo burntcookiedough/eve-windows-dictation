@@ -25,6 +25,7 @@ async function main() {
       hasFocus: document.hasFocus(), active: document.activeElement?.outerHTML?.slice(0, 500),
       target: target?.outerHTML, disabled: target?.disabled, inert: !!target?.closest('[inert]'),
       visibility: target ? getComputedStyle(target).visibility : null,
+      calls: window.gpuFocusTrace,
       panel: document.querySelector('.sheet-layer.open [role="dialog"]')?.outerHTML?.slice(0, 1500),
     }; })()`);
     throw new Error(`Fixture state did not settle: ${expression}; focus=${JSON.stringify(focus)}`);
@@ -38,6 +39,19 @@ async function main() {
     await evaluate(`document.querySelector('summary').click()`);
     await wait(250);
     const ready = await evaluate(`({status: document.querySelector('[data-gpu-pack-status]').textContent, repair: !!document.querySelector('[data-gpu-pack-repair]')})`);
+    await evaluate(`(() => {
+      window.gpuFocusTrace = [];
+      const original = HTMLElement.prototype.focus;
+      HTMLElement.prototype.focus = function (...args) {
+        const trace = { target: this.outerHTML.slice(0, 250), connected: this.isConnected,
+          inert: !!this.closest('[inert]'), visibility: getComputedStyle(this).visibility,
+          rects: this.getClientRects().length, before: document.activeElement?.outerHTML?.slice(0, 250) };
+        const result = original.apply(this, args);
+        trace.after = document.activeElement?.outerHTML?.slice(0, 250);
+        if (window.gpuFocusTrace.length < 12) window.gpuFocusTrace.push(trace);
+        return result;
+      };
+    })()`);
     await evaluate(`document.querySelector('[data-gpu-pack-remove]').focus(); document.querySelector('[data-gpu-pack-remove]').click()`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]') && document.activeElement === document.querySelector('.sheet-layer.open [data-sheet-initial-focus]')`);
     const confirmation = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.textContent.trim(), dialog: document.querySelector('.sheet-layer.open [role="dialog"]')?.textContent})`);
