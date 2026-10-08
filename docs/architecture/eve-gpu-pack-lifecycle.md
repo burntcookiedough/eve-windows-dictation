@@ -21,7 +21,7 @@ conflicting submissions.
 | Ready | `ready`; repeated installation or Repair revalidates without downloading a healthy exact pack. The server must start with the validated runtime to use it. |
 | Failed | `failed`; integrity, ownership, storage, or compatibility errors never publish unverified files. Retryable errors expose a recovery action. |
 | Repairing | The Repair action revalidates the exact pack, or follows downloading/validating for a staged restoration. Unknown data at the destination is preserved. |
-| Removing | The confirmed Remove action deletes identified owned component data only, then reports `missing`. An operation conflict or living runtime lease returns a safe retryable refusal. |
+| Removing | The confirmed Remove action deletes identified owned component data only and reports `missing` only if the exact pack path is absent. Preserved unknown data at that path reports `failed` / `pack_invalid`. An operation conflict or living runtime lease returns a safe retryable refusal. |
 
 An absent, malformed, or incompatible descriptor reports `unavailable` without
 downloading. Renderer-facing state carries enum codes, byte counts, and pack IDs;

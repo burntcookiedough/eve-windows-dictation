@@ -2057,6 +2057,10 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         }
       }
 
+      // Unowned data at the exact pack path is preserved, not successfully removed.
+      if (await verifyPackDirectory(packDirectory()) !== 'missing') {
+        return setState({ status: 'failed', code: 'pack_invalid', retryable: false });
+      }
       return setState({
         status: 'missing',
         packId: descriptor!.packId,

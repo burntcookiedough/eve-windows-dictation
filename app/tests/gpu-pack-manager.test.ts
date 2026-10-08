@@ -1679,9 +1679,10 @@ function createFixtureHttpServer(
     });
     expect(await readFile(path.join(packDir, 'foreign_secret.bin'), 'utf8')).toBe('secret contents');
 
-    // remove() also leaves foreign file untouched
+    // remove() preserves foreign data and must not report successful removal.
     const removeRes = await manager.remove();
-    expect(removeRes.status).toBe('missing');
+    expect(removeRes).toMatchObject({ status: 'failed', code: 'pack_invalid', retryable: false });
+    expect(await manager.getState()).toMatchObject({ status: 'failed', code: 'pack_invalid' });
     expect(await readFile(path.join(packDir, 'foreign_secret.bin'), 'utf8')).toBe('secret contents');
   });
 
