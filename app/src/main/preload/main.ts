@@ -208,6 +208,14 @@ const murmurMainAPI = {
     return ipcRenderer.invoke(IPC_CHANNELS.GPU_PACK_INSTALL);
   },
 
+  repairGpuPack: (): Promise<GpuPackState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GPU_PACK_REPAIR);
+  },
+
+  removeGpuPack: (): Promise<GpuPackState> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.GPU_PACK_REMOVE);
+  },
+
   onGpuPackStateChange: (callback: (state: GpuPackState) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: GpuPackState) => {
       callback(state);

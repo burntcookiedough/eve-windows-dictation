@@ -95,6 +95,18 @@ const result = await runElectron();
 const { measurements } = result;
 
 describe('rendered Settings layout fixture', () => {
+  test('uses compact monochrome model progress with accessible transfer progress', () => {
+    for (const { progress } of measurements) {
+      expect(progress.background).toBe('rgba(0, 0, 0, 0)');
+      expect(progress.borderWidth).toBe('0px');
+      expect(progress.height).toBe('2px');
+      expect(progress.value).toBe(62);
+      expect(progress.label).toContain('62%');
+      const channels = progress.color.match(/\d+/g).map(Number);
+      expect(Math.max(...channels) - Math.min(...channels)).toBeLessThanOrEqual(5);
+    }
+  });
+
   test('keeps the status strip in flow and preserves one page scroll owner', () => {
     for (const measurement of measurements) {
       expect(measurement.status.position).toBe('static');
