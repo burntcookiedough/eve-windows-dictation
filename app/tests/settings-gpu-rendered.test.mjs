@@ -45,6 +45,8 @@ test('production Settings GPU controls work offline, confirm removal, preserve p
   expect(result.ready.repair).toBeTrue();
   expect(result.confirmation.calls).toEqual([]);
   expect(result.confirmation.focus).toBe('cancel');
+  expect(result.confirmation.reducedMotion).toBeTrue();
+  expect(result.removed.normalMotionFocus).toBeTrue();
   expect(result.confirmation.dialog).toContain('settings and downloaded models are not changed');
   expect(result.cancelled.calls).toEqual([]);
   expect(result.cancelled.focus).toBeTrue();

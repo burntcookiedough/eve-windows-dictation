@@ -25,7 +25,6 @@ async function main() {
       hasFocus: document.hasFocus(), active: document.activeElement?.outerHTML?.slice(0, 500),
       target: target?.outerHTML, disabled: target?.disabled, inert: !!target?.closest('[inert]'),
       visibility: target ? getComputedStyle(target).visibility : null,
-      calls: window.gpuFocusTrace,
       panel: document.querySelector('.sheet-layer.open [role="dialog"]')?.outerHTML?.slice(0, 1500),
     }; })()`);
     throw new Error(`Fixture state did not settle: ${expression}; focus=${JSON.stringify(focus)}`);
@@ -34,27 +33,17 @@ async function main() {
     await window.loadURL(process.argv[2]);
     window.webContents.debugger.attach('1.3');
     await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+    });
     window.webContents.focus();
     await waitFor(`!!window.gpuFixture && !!document.querySelector('[data-gpu-pack-repair]')`);
     await evaluate(`document.querySelector('summary').click()`);
     await wait(250);
     const ready = await evaluate(`({status: document.querySelector('[data-gpu-pack-status]').textContent, repair: !!document.querySelector('[data-gpu-pack-repair]')})`);
-    await evaluate(`(() => {
-      window.gpuFocusTrace = [];
-      const original = HTMLElement.prototype.focus;
-      HTMLElement.prototype.focus = function (...args) {
-        const trace = { target: this.outerHTML.slice(0, 250), connected: this.isConnected,
-          inert: !!this.closest('[inert]'), visibility: getComputedStyle(this).visibility,
-          rects: this.getClientRects().length, before: document.activeElement?.outerHTML?.slice(0, 250) };
-        const result = original.apply(this, args);
-        trace.after = document.activeElement?.outerHTML?.slice(0, 250);
-        if (window.gpuFocusTrace.length < 12) window.gpuFocusTrace.push(trace);
-        return result;
-      };
-    })()`);
     await evaluate(`document.querySelector('[data-gpu-pack-remove]').focus(); document.querySelector('[data-gpu-pack-remove]').click()`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]') && document.activeElement === document.querySelector('.sheet-layer.open [data-sheet-initial-focus]')`);
-    const confirmation = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.textContent.trim(), dialog: document.querySelector('.sheet-layer.open [role="dialog"]')?.textContent})`);
+    const confirmation = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.textContent.trim(), reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, dialog: document.querySelector('.sheet-layer.open [role="dialog"]')?.textContent})`);
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     await waitFor(`!document.querySelector('.sheet-layer.open [role="dialog"]') && document.activeElement?.hasAttribute?.('data-gpu-pack-remove')`);
     const cancelled = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.hasAttribute('data-gpu-pack-remove')})`);
@@ -67,11 +56,15 @@ async function main() {
     await evaluate(`gpuFixture.deviceUnknown()`);
     await waitFor(`document.querySelector('[data-gpu-pack-status]').textContent.includes('not reported')`);
     const deviceUnknown = await evaluate(`document.querySelector('[data-gpu-pack-status]').textContent`);
+    await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+    });
     await evaluate(`document.querySelector('[data-gpu-pack-remove]').click()`);
-    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]')`);
+    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]') && document.activeElement === document.querySelector('.sheet-layer.open [data-sheet-initial-focus]')`);
+    const normalMotionFocus = await evaluate(`!matchMedia('(prefers-reduced-motion: reduce)').matches && document.activeElement.textContent.trim() === 'cancel'`);
     await evaluate(`document.querySelector('[data-gpu-pack-confirm-remove]').click(); document.querySelector('[data-gpu-pack-confirm-remove]')?.click()`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-action]')`);
-    const removed = await evaluate(`({calls: [...gpuFixture.calls], status: document.querySelector('[data-gpu-pack-status]').textContent, download: !!document.querySelector('[data-gpu-pack-action]')})`);
+    const removed = { ...await evaluate(`({calls: [...gpuFixture.calls], status: document.querySelector('[data-gpu-pack-status]').textContent, download: !!document.querySelector('[data-gpu-pack-action]')})`), normalMotionFocus };
     await evaluate(`gpuFixture.publish({status:'failed',code:'download_failed',retryable:true})`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-remove]')`);
     const interrupted = await evaluate(`!!document.querySelector('[data-gpu-pack-remove]')`);

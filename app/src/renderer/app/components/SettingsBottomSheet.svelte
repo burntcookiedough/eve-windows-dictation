@@ -182,9 +182,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .sheet-layer,
-    .sheet-scrim,
-    .sheet-panel {
-      transition-duration: 1ms;
+    .sheet-layer.open,
+    .sheet-layer :global(*) {
+      transition-property: none;
     }
   }
 </style>
