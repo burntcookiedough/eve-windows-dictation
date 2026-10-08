@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
 
   interface Props {
     open: boolean;
@@ -32,7 +32,7 @@
     if (open && !wasOpen) {
       const generation = ++focusGeneration;
       returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      queueMicrotask(() => {
+      void tick().then(() => {
         if (!open || generation !== focusGeneration) return;
         const first = panel?.querySelector<HTMLElement>('[data-sheet-initial-focus]') ?? focusableElements()[0];
         (first ?? panel)?.focus({ preventScroll: true });
@@ -40,7 +40,7 @@
     } else if (!open && wasOpen) {
       const generation = ++focusGeneration;
       const opener = returnFocus;
-      queueMicrotask(() => {
+      void tick().then(() => {
         if (open || generation !== focusGeneration) return;
         if (opener?.isConnected) opener.focus({ preventScroll: true });
         if (returnFocus === opener) returnFocus = null;
@@ -182,9 +182,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .sheet-layer,
-    .sheet-scrim,
-    .sheet-panel {
-      transition-duration: 1ms;
+    .sheet-layer.open,
+    .sheet-layer :global(*) {
+      transition-property: none;
     }
   }
 </style>

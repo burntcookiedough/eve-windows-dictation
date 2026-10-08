@@ -2,9 +2,17 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { createServer } from 'node:net';
 
 const appRoot = resolve(import.meta.dir, '..');
-const vitePort = 53800 + (process.pid % 100);
+// Let Windows choose a usable port rather than landing in a reserved range.
+const portProbe = createServer();
+await new Promise((resolvePort, rejectPort) => {
+  portProbe.once('error', rejectPort);
+  portProbe.listen(0, '127.0.0.1', resolvePort);
+});
+const vitePort = portProbe.address().port;
+await new Promise((resolveClose, rejectClose) => portProbe.close((error) => error ? rejectClose(error) : resolveClose()));
 const fixtureTimeoutMs = 45_000;
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/insights-chart-fixture.html`;
 const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1'], {

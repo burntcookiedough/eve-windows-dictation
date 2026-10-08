@@ -70,6 +70,8 @@ export const IPC_CHANNELS = {
   // Optional GPU runtime pack - independent from server connectivity
   GPU_PACK_GET_STATE: 'gpu-pack:get-state',
   GPU_PACK_INSTALL: 'gpu-pack:install',
+  GPU_PACK_REPAIR: 'gpu-pack:repair',
+  GPU_PACK_REMOVE: 'gpu-pack:remove',
   GPU_PACK_STATE_CHANGE: 'gpu-pack:state-change',
 
   // Server settings (REST API proxy)
