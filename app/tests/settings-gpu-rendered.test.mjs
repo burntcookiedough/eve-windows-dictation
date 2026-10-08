@@ -43,6 +43,8 @@ test('production Settings GPU controls work offline, confirm removal, preserve p
   expect(result.removed.calls).toEqual(['repair', 'remove']);
   expect(result.removed.download).toBeTrue();
   expect(result.interrupted).toBeTrue();
+  expect(result.broken).toEqual({ repair: true, remove: true });
+  expect(result.repairedBroken).toEqual(['repair', 'remove', 'repair']);
   for (const layout of result.layouts) {
     expect(layout.overflow).toBeFalse();
     expect(layout.local).toBeTrue();

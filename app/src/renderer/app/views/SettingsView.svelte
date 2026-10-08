@@ -1087,8 +1087,14 @@
                       remove
                     </button>
                   </div>
-                {:else if gpuPackState?.status === 'failed' && gpuPackState.retryable}
+                {:else if gpuPackState?.status === 'failed'}
                   <div class="settings-gpu-actions">
+                    {#if gpuPackState.code === 'pack_invalid' || gpuPackState.code === 'integrity_failed'}
+                      <button type="button" data-gpu-pack-repair class="settings-link settings-gpu-action"
+                        onclick={repairGpuPack} disabled={gpuPackOperating} aria-busy={gpuPackOperating}>
+                        {gpuPackOperating ? 'working…' : 'repair'}
+                      </button>
+                    {:else if gpuPackState.retryable}
                     <button
                       type="button"
                       data-gpu-pack-action
@@ -1099,6 +1105,7 @@
                     >
                       {gpuPackOperating ? 'starting…' : 'try again'}
                     </button>
+                    {/if}
                       <button
                         type="button"
                         data-gpu-pack-remove

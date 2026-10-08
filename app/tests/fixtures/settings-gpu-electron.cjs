@@ -36,6 +36,13 @@ async function main() {
     await evaluate(`gpuFixture.publish({status:'failed',code:'download_failed',retryable:true})`);
     await wait(80);
     const interrupted = await evaluate(`!!document.querySelector('[data-gpu-pack-remove]')`);
+    await evaluate(`gpuFixture.publish({status:'failed',code:'integrity_failed',retryable:false})`);
+    await wait(80);
+    const broken = await evaluate(`({repair:!!document.querySelector('[data-gpu-pack-repair]'),remove:!!document.querySelector('[data-gpu-pack-remove]')})`);
+    await evaluate(`document.querySelector('[data-gpu-pack-repair]').click()`);
+    await wait(80);
+    const repairedBroken = await evaluate(`gpuFixture.calls.slice()`);
+    await evaluate(`gpuFixture.finish()`);
     await evaluate(`gpuFixture.publish({status:'downloading',packId:'a'.repeat(64),receivedBytes:62,totalBytes:100})`);
     await wait(80);
     const layouts = [];
@@ -47,7 +54,7 @@ async function main() {
         layouts.push(await evaluate(`(() => { const card=document.querySelector('[data-gpu-pack-card]');const bar=card.querySelector('progress');return {width:innerWidth,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth, local:!!bar,value:bar.value, height:getComputedStyle(bar).height, color:getComputedStyle(card).color}; })()`));
       }
     }
-    process.stdout.write(JSON.stringify({ userDataPath: userData, ready, confirmation, cancelled, repairing, fallback, removed, interrupted, layouts }));
+    process.stdout.write(JSON.stringify({ userDataPath: userData, ready, confirmation, cancelled, repairing, fallback, removed, interrupted, broken, repairedBroken, layouts }));
   } finally { window.destroy(); }
   app.quit();
 }
