@@ -937,7 +937,9 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         if (
           !isRecord(parsed) ||
           parsed.schemaVersion !== 1 ||
+          Object.keys(parsed).some((key) => !['schemaVersion', 'packId', 'leaseId', 'pid', 'serverPid', 'serverPids', 'createdAt'].includes(key)) ||
           parsed.packId !== entryPackId ||
+          !Number.isSafeInteger(parsed.createdAt) || (parsed.createdAt as number) <= 0 ||
           !Number.isSafeInteger(parsed.pid) || (parsed.pid as number) <= 0 ||
           parsed.leaseId !== match[2] ||
           (parsed.serverPid !== null && (!Number.isSafeInteger(parsed.serverPid) || (parsed.serverPid as number) <= 0)) ||
@@ -960,6 +962,8 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         } else {
           // Both app and server confirmed dead -> expired lease
           try {
+            await ensureRoot();
+            if (await readBoundedUtf8File(leasePath) !== raw) return true;
             await fs.promises.unlink(leasePath);
           } catch {}
         }
@@ -2173,6 +2177,7 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
               throw new Error('Invalid server PID');
             }
             const write = leaseWrites.then(async () => {
+              await ensureRoot();
               if (!leaseData.serverPids.includes(serverPid)) {
                 if (leaseData.serverPids.length >= 16) throw new Error('Runtime lease PID bound exceeded');
                 leaseData.serverPids.push(serverPid);
@@ -2191,6 +2196,12 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
             released = true;
             await leaseWrites;
             try {
+              await ensureRoot();
+              const raw = await readBoundedUtf8File(leasePath);
+              if (!raw) return;
+              const record = JSON.parse(raw);
+              if (!isRecord(record) || record.packId !== leaseData.packId ||
+                  record.leaseId !== leaseData.leaseId || record.pid !== leaseData.pid) return;
               await fs.promises.unlink(leasePath);
             } catch {}
           },

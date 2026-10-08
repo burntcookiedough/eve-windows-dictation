@@ -1103,6 +1103,19 @@ function createFixtureHttpServer(
     expect(await readFile(leasePath, 'utf8')).toBe(JSON.stringify(record));
   });
 
+  test('a lease release preserves a replaced unknown record', async () => {
+    const root = await temporaryRoot();
+    const { manager } = managerFor(root);
+    await manager.install();
+    const lease = await manager.acquireRuntime();
+    if (!lease) throw new Error('Lease missing');
+    const leaseFile = (await readdir(root)).find((name) => name.startsWith('.gpu-lease-'))!;
+    await writeFile(path.join(root, leaseFile), 'unknown sentinel');
+    await lease.release();
+    expect(await readFile(path.join(root, leaseFile), 'utf8')).toBe('unknown sentinel');
+    expect(await manager.remove()).toEqual({ status: 'failed', code: 'busy', retryable: true });
+  });
+
   test('retention prunes older packs but keeps current, newest validated prior, and any actively leased pack', async () => {
     const root = await temporaryRoot();
 
