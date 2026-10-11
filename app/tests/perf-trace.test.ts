@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { isPerfTraceEnabled, perfTraceManager as manager, validateCorrelationId } from '../src/main/services/perf-trace.js';
 import { OverlayPerfObserver } from '../src/renderer/overlay/perf-observation.js';
 import { IsolatedEditorObserver } from '../src/renderer/app/fixtures/isolated-editor-observer.js';
+import { addTransport } from '../src/main/lib/logger.js';
+import type { ClientPerfTrace } from '../src/main/services/perf-trace.js';
+const loggedTraces: ClientPerfTrace[] = [];
+addTransport(entry => {
+  if (entry.context === 'Performance' && entry.message === 'B4_PERF' && typeof entry.data?.trace === 'string') {
+    loggedTraces.push(JSON.parse(entry.data.trace));
+  }
+});
 const saved = process.env.MURMUR_PERF_TRACE;
-beforeEach(() => { manager.clear(); process.env.MURMUR_PERF_TRACE = '1'; });
+beforeEach(() => { manager.clear(); loggedTraces.length = 0; process.env.MURMUR_PERF_TRACE = '1'; });
 afterEach(() => { manager.clear(); if (saved === undefined) delete process.env.MURMUR_PERF_TRACE; else process.env.MURMUR_PERF_TRACE = saved; });
 describe('passive correlated diagnostics', () => {
   it('does nothing by default and rejects unsafe identifiers', () => {
@@ -62,6 +70,33 @@ describe('passive correlated diagnostics', () => {
     const trace = manager.getRecentTraces()[0];
     expect(trace.clientClockDomain).toBe('electron_main_performance_now'); expect(trace.main.finalReceivedAt).toBeNull();
     expect(trace.renderer!.finalDomCommittedAt! - trace.renderer!.finalReceivedAt!).toBe(8);
+  });
+  it('exports completed output after renderer updates exhaust the snapshot budget', () => {
+    manager.startTrace('busy');
+    const overlay = new OverlayPerfObserver('busy', 10);
+    for (let i = 0; i < 40; i++) expect(manager.renderer(overlay.snapshot())).toBe(true);
+    manager.completeTrace('busy', 'closed');
+    manager.mark('busy', 'finalReceivedAt', 100);
+    manager.output('busy', 'history', 4, 104);
+    manager.output('busy', 'clipboard', 2, 106);
+    manager.completeTrace('busy');
+    const completed = loggedTraces.at(-1)!;
+    expect(completed.status).toBe('complete');
+    expect(completed.main.finalReceivedAt).toBe(100);
+    expect(completed.historyCommitMs).toBe(4);
+    expect(completed.clipboardWriteMs).toBe(2);
+    for (let i = 0; i < 40; i++) { manager.completeTrace('busy'); manager.renderer(overlay.snapshot()); }
+    expect(loggedTraces.filter(trace => trace.status === 'complete')).toHaveLength(1);
+    expect(loggedTraces.length).toBeLessThanOrEqual(8);
+  });
+  it('exports cancellation once even after renderer updates exhaust the snapshot budget', () => {
+    manager.startTrace('cancelled');
+    const overlay = new OverlayPerfObserver('cancelled', 10);
+    for (let i = 0; i < 40; i++) manager.renderer(overlay.snapshot());
+    for (let i = 0; i < 40; i++) manager.completeTrace('cancelled', 'cancelled');
+    expect(loggedTraces.at(-1)!.status).toBe('cancelled');
+    expect(loggedTraces.filter(trace => trace.status === 'cancelled')).toHaveLength(1);
+    expect(loggedTraces.length).toBeLessThanOrEqual(8);
   });
   it('bounds retained traces and returns independent snapshots', () => {
     for (let i = 0; i < 80; i++) manager.startTrace(`trace-${i}`);

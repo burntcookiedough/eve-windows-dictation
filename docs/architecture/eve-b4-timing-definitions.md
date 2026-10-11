@@ -47,7 +47,10 @@ this setting. Preserve the usual capture notice and agreement for every trial.
 The start frame carries optional `trace_id`; final `perf.session_id` echoes it.
 Main and server log fixed-field `B4_PERF` records only while enabled; retain them
 outside the repository. Each process retains at most 50 in-memory records; main
-exports at most eight snapshots per trial. Normal wire frames omit diagnostics.
+exports at most eight snapshots per trial: five ordinary updates plus one reserved
+record for each of closed, cancelled, and complete. Renderer updates cannot exhaust
+the terminal-record budget; repeated terminal states do not produce duplicate exports.
+Normal wire frames omit diagnostics.
 Renderer IPC is accepted only from the overlay and only with the fixed schema.
 Later snapshots may include output/DOM stages absent from an earlier snapshot.
 Select the latest observed fields by correlation ID within their clock domain.

@@ -39,6 +39,7 @@ export interface ClientPerfTrace {
 class PerfTraceManager {
   private readonly traces = new Map<string, ClientPerfTrace>();
   private readonly emitted = new Map<string, number>();
+  private readonly emittedTerminalStates = new Map<string, Set<ClientPerfTrace['status']>>();
 
   startTrace(correlationId?: string): ClientPerfTrace | null {
     if (!isPerfTraceEnabled()) return null;
@@ -51,10 +52,12 @@ class PerfTraceManager {
     };
     this.traces.set(id, trace);
     this.emitted.set(id, 0);
+    this.emittedTerminalStates.set(id, new Set());
     if (this.traces.size > 50) {
       const oldest = this.traces.keys().next().value!;
       this.traces.delete(oldest);
       this.emitted.delete(oldest);
+      this.emittedTerminalStates.delete(oldest);
     }
     return structuredClone(trace);
   }
@@ -107,20 +110,29 @@ class PerfTraceManager {
     if (!trace) return;
     if (trace.status === 'complete' && status === 'closed') return;
     trace.status = status;
-    this.emit(id);
+    this.emit(id, status !== 'open');
   }
 
-  emit(id: string): void {
+  private emit(id: string, terminal = false): void {
     if (!isPerfTraceEnabled()) return;
     const trace = this.traces.get(id);
+    if (!trace) return;
+    if (terminal) {
+      const states = this.emittedTerminalStates.get(id)!;
+      if (states.has(trace.status)) return;
+      states.add(trace.status);
+      log.info('B4_PERF', { trace: JSON.stringify(trace) });
+      return;
+    }
     const count = this.emitted.get(id) ?? 0;
-    if (trace && count < 8) {
+    // Reserve one export for each terminal state, including completion after close.
+    if (count < 5) {
       this.emitted.set(id, count + 1);
       log.info('B4_PERF', { trace: JSON.stringify(trace) });
     }
   }
 
   getRecentTraces(): ClientPerfTrace[] { return structuredClone([...this.traces.values()]); }
-  clear(): void { this.traces.clear(); this.emitted.clear(); }
+  clear(): void { this.traces.clear(); this.emitted.clear(); this.emittedTerminalStates.clear(); }
 }
 export const perfTraceManager = new PerfTraceManager();
