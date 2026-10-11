@@ -9,7 +9,7 @@
   import EveDropdown, { type EveDropdownOption } from '../components/EveDropdown.svelte';
   import HotkeyCaptureModal from '../components/HotkeyCaptureModal.svelte';
   import SettingsBottomSheet from '../components/SettingsBottomSheet.svelte';
-import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.svelte';
+  import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.svelte';
   import ServerView from './ServerView.svelte';
   import { hasPendingCompatibilityChanges, presetMatchesReadyEngine, presetPatch, speechModelPresetsFromCatalog, stagedPresetFromPending, type SpeechModelPreset } from '../speech-model-presets';
   import { serverStatusState } from '../server-status';
@@ -101,13 +101,13 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
   let appVersion = $state('unknown');
   let hotwordsFileMessage = $state('');
   let gpuPackState = $state<GpuPackState | null>(null);
-  let gpuPackInstalling = $state(false);
+  let gpuPackOperating = $state(false);
   let gpuPackActionError = $state('');
 
   let hotwordEntries = $derived(parseHotwordsCsl(settings.hotwordsCsl));
   let hotwordCount = $derived(hotwordEntries.length);
   let hasHotwordOverflowWarning = $derived(hotwordCount > HOTWORDS_WARNING_THRESHOLD);
-  let activeSheet = $state<'model' | 'vocabulary' | null>(null);
+  let activeSheet = $state<'model' | 'vocabulary' | 'removeGpuPack' | null>(null);
   let vocabularyDraft = $state('');
   let vocabularyEnabledDraft = $state(false);
   let vocabularyEntries = $derived(parseHotwordsCsl(vocabularyDraft));
@@ -257,11 +257,19 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
                 ? 'Verifying files…'
                 : gpuPackState.status === 'ready'
                   ? sharedServerState?.runtime?.pack_id === gpuPackState.packId
-                    ? 'Installed · active'
+                    ? sharedServerState.runtime?.effective_device === 'cuda'
+                      ? 'Installed · GPU active'
+                      : sharedServerState.runtime?.effective_device === 'cpu'
+                        ? 'Installed · CPU fallback'
+                        : 'Installed · device not reported'
                     : 'Installed · restart Eve to use'
-                  : gpuPackState.retryable
-                    ? 'Setup failed · retry available'
-                    : 'GPU setup failed'
+                  : gpuPackState.code === 'busy'
+                    ? 'In use · cannot modify'
+                    : gpuPackState.code === 'insufficient_space'
+                      ? 'Insufficient space'
+                      : gpuPackState.retryable
+                        ? 'Setup failed · retry available'
+                        : 'GPU setup failed'
   );
   let serverDiagnosticsSummary = $derived(
     sharedServerState?.status === 'running'
@@ -408,8 +416,8 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
   }
 
   async function installGpuPack(): Promise<void> {
-    if (gpuPackInstalling) return;
-    gpuPackInstalling = true;
+    if (gpuPackOperating) return;
+    gpuPackOperating = true;
     gpuPackActionError = '';
     try {
       gpuPackState = await window.murmurMain.installGpuPack();
@@ -417,7 +425,42 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
       gpuPackState = { status: 'failed', code: 'storage_failed', retryable: true };
       gpuPackActionError = 'GPU support could not be installed. Try again.';
     } finally {
-      gpuPackInstalling = false;
+      gpuPackOperating = false;
+    }
+  }
+
+  async function repairGpuPack(): Promise<void> {
+    if (gpuPackOperating) return;
+    gpuPackOperating = true;
+    gpuPackActionError = '';
+    try {
+      gpuPackState = await window.murmurMain.repairGpuPack();
+    } catch {
+      gpuPackActionError = 'GPU support could not be repaired. Try again.';
+      try { gpuPackState = await window.murmurMain.getGpuPackState(); } catch {}
+    } finally {
+      gpuPackOperating = false;
+    }
+  }
+
+  function promptRemoveGpuPack(): void {
+    if (gpuPackOperating) return;
+    gpuPackActionError = '';
+    activeSheet = 'removeGpuPack';
+  }
+
+  async function confirmRemoveGpuPack(): Promise<void> {
+    if (gpuPackOperating) return;
+    gpuPackOperating = true;
+    gpuPackActionError = '';
+    try {
+      closeSettingsSheet();
+      gpuPackState = await window.murmurMain.removeGpuPack();
+    } catch {
+      gpuPackActionError = 'GPU support could not be removed. Try again.';
+      try { gpuPackState = await window.murmurMain.getGpuPackState(); } catch {}
+    } finally {
+      gpuPackOperating = false;
     }
   }
 
@@ -1012,17 +1055,70 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
                 <span>Optional GPU support</span>
                 {#if gpuPackState?.status === 'downloading'}
                   <span>{getGpuPackProgress(gpuPackState)}%</span>
-                {:else if gpuPackState?.status === 'missing' || (gpuPackState?.status === 'failed' && gpuPackState.retryable)}
+                {:else if gpuPackState?.status === 'missing'}
                   <button
                     type="button"
                     data-gpu-pack-action
                     class="settings-link settings-gpu-action"
                     onclick={installGpuPack}
-                    disabled={gpuPackInstalling}
-                    aria-busy={gpuPackInstalling}
+                    disabled={gpuPackOperating}
+                    aria-busy={gpuPackOperating}
                   >
-                    {gpuPackInstalling ? 'starting…' : gpuPackState.status === 'missing' ? 'download GPU support' : 'try again'}
+                    {gpuPackOperating ? 'starting…' : 'download GPU support'}
                   </button>
+                {:else if gpuPackState?.status === 'ready'}
+                  <div class="settings-gpu-actions">
+                    <button
+                      type="button"
+                      data-gpu-pack-repair
+                      class="settings-link settings-gpu-action"
+                      onclick={repairGpuPack}
+                      disabled={gpuPackOperating}
+                      aria-busy={gpuPackOperating}
+                    >
+                      {gpuPackOperating ? 'working…' : 'repair'}
+                    </button>
+                    <button
+                      type="button"
+                      data-gpu-pack-remove
+                      class="settings-link settings-gpu-action"
+                      onclick={promptRemoveGpuPack}
+                      disabled={gpuPackOperating}
+                      aria-busy={gpuPackOperating}
+                    >
+                      remove
+                    </button>
+                  </div>
+                {:else if gpuPackState?.status === 'failed'}
+                  <div class="settings-gpu-actions">
+                    {#if gpuPackState.code === 'pack_invalid' || gpuPackState.code === 'integrity_failed'}
+                      <button type="button" data-gpu-pack-repair class="settings-link settings-gpu-action"
+                        onclick={repairGpuPack} disabled={gpuPackOperating} aria-busy={gpuPackOperating}>
+                        {gpuPackOperating ? 'working…' : 'repair'}
+                      </button>
+                    {:else if gpuPackState.retryable}
+                    <button
+                      type="button"
+                      data-gpu-pack-action
+                      class="settings-link settings-gpu-action"
+                      onclick={installGpuPack}
+                      disabled={gpuPackOperating}
+                      aria-busy={gpuPackOperating}
+                    >
+                      {gpuPackOperating ? 'starting…' : 'try again'}
+                    </button>
+                    {/if}
+                      <button
+                        type="button"
+                        data-gpu-pack-remove
+                        class="settings-link settings-gpu-action"
+                        onclick={promptRemoveGpuPack}
+                        disabled={gpuPackOperating}
+                        aria-busy={gpuPackOperating}
+                      >
+                        remove
+                      </button>
+                  </div>
                 {/if}
               </div>
               <p data-gpu-pack-status>
@@ -1037,7 +1133,19 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
                 {:else if gpuPackState.status === 'validating'}
                   Verifying downloaded GPU files…
                 {:else if gpuPackState.status === 'ready'}
-                  {sharedServerState?.runtime?.pack_id === gpuPackState.packId ? 'Installed · active' : 'Installed · restart Eve to use GPU support.'}
+                  {sharedServerState?.runtime?.pack_id === gpuPackState.packId
+                    ? sharedServerState.runtime?.effective_device === 'cuda'
+                      ? 'Installed · GPU active.'
+                      : sharedServerState.runtime?.effective_device === 'cpu'
+                        ? 'Installed · CPU fallback is active. Your device preference is unchanged.'
+                        : 'Installed · the speech server has not reported its active device.'
+                    : 'Installed · restart the speech server to use GPU support.'}
+                {:else if gpuPackState.code === 'busy'}
+                  Another operation or running speech server is using GPU support. Stop the server through its owner, then retry.
+                {:else if gpuPackState.code === 'insufficient_space'}
+                  Not enough disk space to install GPU support. Free space on the application data drive, then retry.
+                {:else if gpuPackState.code === 'space_unknown'}
+                  Could not verify available disk space. Check that application storage is available, then retry.
                 {:else if gpuPackState.code === 'integrity_failed' || gpuPackState.code === 'pack_invalid'}
                   GPU files did not pass integrity checks.
                 {:else if gpuPackState.code === 'download_failed'}
@@ -1151,6 +1259,41 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
       <span class="settings-footer-spacer"></span>
       <button type="button" class="settings-link settings-secondary-link" onclick={closeSettingsSheet}>cancel</button>
       <button type="button" class="settings-primary-action" onclick={saveVocabulary}>done</button>
+    </div>
+  {/if}
+</SettingsBottomSheet>
+
+<SettingsBottomSheet
+  open={activeSheet === 'removeGpuPack'}
+  title="Remove GPU support?"
+  description="Remove downloaded GPU support files. Eve will use CPU for speech recognition until GPU support is downloaded again."
+  onClose={closeSettingsSheet}
+>
+  {#if activeSheet === 'removeGpuPack'}
+    <p class="settings-note">
+      This removes local CUDA components. Your settings and downloaded models are not changed.
+    </p>
+    <div class="settings-action-row settings-gpu-remove-actions">
+      <span class="settings-footer-spacer"></span>
+      <button
+        type="button"
+        class="settings-link settings-secondary-link"
+        onclick={closeSettingsSheet}
+        disabled={gpuPackOperating}
+        data-sheet-initial-focus
+      >
+        cancel
+      </button>
+      <button
+        type="button"
+        data-gpu-pack-confirm-remove
+        class="settings-primary-action"
+        onclick={confirmRemoveGpuPack}
+        disabled={gpuPackOperating}
+        aria-busy={gpuPackOperating}
+      >
+        {gpuPackOperating ? 'removing…' : 'remove'}
+      </button>
     </div>
   {/if}
 </SettingsBottomSheet>
@@ -1440,6 +1583,18 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
     color: var(--fg2, #9b9b9b);
   }
 
+  .settings-gpu-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    margin-left: auto;
+  }
+
+  .settings-gpu-remove-actions {
+    margin-top: 16px;
+  }
+
   .settings-gpu-action {
     flex: none;
     margin-left: auto;
@@ -1459,7 +1614,10 @@ import SpeechModelSelectionSheet from '../components/SpeechModelSelectionSheet.s
     background: var(--line2, rgba(255, 255, 255, 0.14));
   }
 
-  .settings-gpu-support progress::-webkit-progress-bar,
+  .settings-gpu-support progress::-webkit-progress-bar {
+    background: var(--line2, rgba(255, 255, 255, 0.14));
+  }
+
   .settings-gpu-support progress::-webkit-progress-value {
     background: var(--fg2, #9b9b9b);
   }

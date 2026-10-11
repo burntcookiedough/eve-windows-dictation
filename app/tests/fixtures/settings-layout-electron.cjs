@@ -22,6 +22,8 @@ async function measure(window, zoom) {
     const owner = document.querySelector('[data-layout-scroll-owner]');
     const main = document.querySelector('[data-layout-main]');
     const status = document.querySelector('[data-status-region="model-progress"]');
+    const progressCard = status?.querySelector('.model-progress-inline');
+    const progress = progressCard?.querySelector('progress');
     const row = document.querySelector('[data-settings-row]');
     const control = row?.querySelector('[data-settings-control]');
     const toggleRows = [...document.querySelectorAll('[data-settings-row]')]
@@ -41,6 +43,14 @@ async function measure(window, zoom) {
       owner: owner ? { overflowY: getComputedStyle(owner).overflowY, clientHeight: owner.clientHeight, scrollHeight: owner.scrollHeight, scrollWidth: owner.scrollWidth, clientWidth: owner.clientWidth, rect: rect(owner) } : null,
       main: rect(main),
       status: status ? { position: getComputedStyle(status).position, rect: rect(status) } : null,
+      progress: progressCard && progress ? {
+        background: getComputedStyle(progressCard).backgroundColor,
+        borderWidth: getComputedStyle(progressCard).borderTopWidth,
+        height: getComputedStyle(progress).height,
+        value: progress.value,
+        label: progress.getAttribute('aria-label'),
+        color: getComputedStyle(progressCard.querySelector('p')).color,
+      } : null,
       row: { rect: rect(row), control: rect(control) },
       toggles: toggleRows.map(({ row: toggleRow, toggle }) => ({ row: rect(toggleRow), toggle: rect(toggle) })),
       document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },

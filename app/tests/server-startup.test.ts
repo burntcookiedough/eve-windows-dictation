@@ -54,7 +54,7 @@ describe('packaged server startup timing', () => {
       new URL('../src/main/services/server-manager.ts', import.meta.url),
       'utf8',
     );
-    const pidWait = source.indexOf('const pidData = await waitForPidFile');
+    const pidWait = source.indexOf('const pidData = await waitPidFileFn');
     const ownership = source.indexOf(
       'await this.isOwnedServerProcess(pidData.pid, pidData.startedAt)',
       pidWait,

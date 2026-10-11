@@ -16,6 +16,7 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [Lean runtime architecture](architecture/eve-lean-runtime-architecture.md): CPU base distribution and modular GPU acceleration model.
 - [Lean runtime release plan](architecture/eve-lean-runtime-release-plan.md): Packaging controls, size accounting, and verification gates.
 - [GPU pack provenance](architecture/eve-gpu-pack-provenance.md): Provenance and SHA-256 verification of optional NVIDIA runtime DLLs.
+- [GPU pack lifecycle](architecture/eve-gpu-pack-lifecycle.md): Resume, ownership, disk-space, Repair/Remove, and retention policy.
 - [CPU first-run decision](architecture/eve-cpu-first-run-decision.md): Architectural decision for CPU-first dictation on Windows.
 - [CPU dictation benchmark](architecture/eve-cpu-dictation-benchmark.md): Historical measurements supporting the first-run decision.
 - [Milestone B4 validation baseline](architecture/eve-b4-validation-baseline.md): Alpha validation status ($n = 0$ physical candidate evidence) and historical replay comparison.
@@ -26,6 +27,7 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [Agent workflow](development/agent-workflow.md): Branching, testing, and verification procedures for contributors and agents.
 - [Alpha quality gates](development/alpha-quality-gates.md): Mandatory evidence, provisional limits, and existing release verification procedures.
 - [Microphone validation protocol](development/microphone-validation-protocol.md): Consented physical microphone testing procedure, prompt cards, and offline scoring harness.
+- [GPU lifecycle validation](development/gpu-pack-lifecycle-validation.md): Repeatable Windows source checks and exact-candidate acceptance exercises.
 - [v0.8.2-alpha.8 release notes](releases/eve-v0.8.2-alpha.8-release-notes.md): Current published alpha release notes.
 
 ## History and archive
