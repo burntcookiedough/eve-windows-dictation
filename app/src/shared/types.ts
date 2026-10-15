@@ -16,16 +16,30 @@ export interface ServerRuntimeFingerprint {
   effective_device: string | null;
 }
 
+export type GpuPackFailureCode =
+  | 'download_failed'
+  | 'integrity_failed'
+  | 'pack_invalid'
+  | 'storage_failed'
+  | 'insufficient_space'
+  | 'space_unknown'
+  | 'busy';
+
+export type GpuPackUnavailableCode =
+  | 'descriptor_missing'
+  | 'invalid_descriptor'
+  | 'incompatible_build';
+
 /** GPU pack state safe to serialize over IPC. Never includes a URL or path. */
 export type GpuPackState =
-  | { status: 'unavailable'; code: 'descriptor_missing' | 'invalid_descriptor' | 'incompatible_build' }
+  | { status: 'unavailable'; code: GpuPackUnavailableCode }
   | { status: 'missing'; packId: string; downloadBytes: number }
   | { status: 'downloading'; packId: string; receivedBytes: number; totalBytes: number }
   | { status: 'validating'; packId: string }
   | { status: 'ready'; packId: string; restartRequired: true }
   | {
       status: 'failed';
-      code: 'download_failed' | 'integrity_failed' | 'pack_invalid' | 'storage_failed';
+      code: GpuPackFailureCode;
       retryable: boolean;
     };
 

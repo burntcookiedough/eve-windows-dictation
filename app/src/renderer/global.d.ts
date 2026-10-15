@@ -65,6 +65,8 @@ declare global {
       getServerLogs: () => Promise<ServerLogEntry[]>;
       getGpuPackState: () => Promise<GpuPackState>;
       installGpuPack: () => Promise<GpuPackState>;
+      repairGpuPack: () => Promise<GpuPackState>;
+      removeGpuPack: () => Promise<GpuPackState>;
       onGpuPackStateChange: (callback: (state: GpuPackState) => void) => () => void;
       onServerStateChange: (callback: (state: ServerStatePayload) => void) => () => void;
       onServerLog: (callback: (entry: ServerLogEntry) => void) => () => void;
