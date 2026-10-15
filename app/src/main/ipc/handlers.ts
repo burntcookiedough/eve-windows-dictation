@@ -335,6 +335,14 @@ export function setupIpcHandlers(
     return gpuPackManagerRef?.install() ?? GPU_PACK_UNAVAILABLE_STATE;
   });
 
+  ipcMain.handle(IPC_CHANNELS.GPU_PACK_REPAIR, async () => {
+    return gpuPackManagerRef?.repair() ?? GPU_PACK_UNAVAILABLE_STATE;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GPU_PACK_REMOVE, async () => {
+    return gpuPackManagerRef?.remove() ?? GPU_PACK_UNAVAILABLE_STATE;
+  });
+
   // Server settings (REST API proxy)
   ipcMain.handle(IPC_CHANNELS.GET_SERVER_SETTINGS, async () => {
     return getServerSettings(getServerApiUrl());
