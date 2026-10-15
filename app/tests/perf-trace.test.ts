@@ -71,6 +71,15 @@ describe('passive correlated diagnostics', () => {
     expect(trace.clientClockDomain).toBe('electron_main_performance_now'); expect(trace.main.finalReceivedAt).toBeNull();
     expect(trace.renderer!.finalDomCommittedAt! - trace.renderer!.finalReceivedAt!).toBe(8);
   });
+  it('preserves cancellation when a pending connection subsequently closes', () => {
+    manager.startTrace('cancel-before-close');
+    manager.completeTrace('cancel-before-close', 'cancelled');
+    const exportsBeforeClose = loggedTraces.length;
+    manager.completeTrace('cancel-before-close', 'closed');
+    expect(manager.getRecentTraces()[0].status).toBe('cancelled');
+    expect(loggedTraces.length).toBe(exportsBeforeClose);
+    expect(loggedTraces.at(-1)!.status).toBe('cancelled');
+  });
   it('exports completed output after renderer updates exhaust the snapshot budget', () => {
     manager.startTrace('busy');
     const overlay = new OverlayPerfObserver('busy', 10);

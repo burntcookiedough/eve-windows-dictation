@@ -108,7 +108,7 @@ class PerfTraceManager {
     if (!isPerfTraceEnabled() || !id) return;
     const trace = this.traces.get(id);
     if (!trace) return;
-    if (trace.status === 'complete' && status === 'closed') return;
+    if ((trace.status === 'complete' || trace.status === 'cancelled') && status === 'closed') return;
     trace.status = status;
     this.emit(id, status !== 'open');
   }
