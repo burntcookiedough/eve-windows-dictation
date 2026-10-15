@@ -1,3 +1,4 @@
+import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
 import { clipboard } from 'electron';
 import { execFile } from 'child_process';
 import { writeFileSync, existsSync } from 'fs';
@@ -190,7 +191,7 @@ function ensureSendInputScript(): string {
   return sendInputScriptPath;
 }
 
-export async function copyToClipboard(text: string): Promise<void> {
+export async function copyToClipboard(text: string, perfTraceId?: string): Promise<void> {
   log.debug('Writing text', { length: text.length });
   latestPasteGeneration += 1;
   return enqueuePasteCriticalSection(async () => {
@@ -198,7 +199,12 @@ export async function copyToClipboard(text: string): Promise<void> {
       discardPasteSequence(activePasteSequence);
     }
     try {
+      const writeStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
+      if (writeStart !== null) {
+        const completedAt = performance.now();
+        perfTraceManager.output(perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
+      }
     } catch {
       log.error('Failed to write text to clipboard');
       throw new Error('Could not write to clipboard.');
@@ -321,6 +327,7 @@ export async function simulatePaste(
 }
 
 export interface PasteTextOptions {
+  perfTraceId?: string;
   restoreClipboard: boolean;
   restoreDelayMs: number;
   method: 'sendinput' | 'vbscript';
@@ -457,7 +464,12 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       sequence = operation.sequence;
       baselineText = operation.baselineText;
 
+      const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
+      if (writeStart !== null) {
+        const completedAt = performance.now();
+        perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
+      }
       const writtenSnapshot = await readClipboardSnapshot();
       if (writtenSnapshot.text !== text) {
         if (sequence && activePasteSequence === sequence) {

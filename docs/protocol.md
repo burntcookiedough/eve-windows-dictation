@@ -394,3 +394,15 @@ A session ends when any of the following occur:
 4. **Fatal error** — Server sends `error`, closes connection immediately. No `final` or `closing` frame is sent.
 
 5. **Non-fatal warning** — Server may send `warning` at any time during an active session. Session continues.
+
+## Optional test timing diagnostics
+
+With explicit `MURMUR_PERF_TRACE=1` opt-in, clients may supply start `trace_id`
+(1-64 ASCII letters, digits, underscores, periods or hyphens). The server echoes
+that token as final `perf.session_id`; without a token it generates a random ID.
+This optional final object contains only fixed numeric/null timing fields in the
+`python_perf_counter` domain and partial-task state. Ordinary frames omit these
+fields, partial frames are unchanged, and existing clients may ignore them.
+See [B4 timing definitions](architecture/eve-b4-timing-definitions.md) for exact
+boundaries, clock separation, unavailable stages, and bounded opt-in logging.
+No text/audio is included in timing diagnostics and no recording is started.

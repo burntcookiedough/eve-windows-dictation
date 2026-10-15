@@ -10,9 +10,10 @@ export interface AudioCaptureOptions {
   normalizationSmooth?: number;
   responsiveRatio?: number;
   deviceId?: string; // 'default' or undefined uses system default
+  onCaptureReady?: (timestamp: number) => void;
 }
 
-const DEFAULTS: Required<AudioCaptureOptions> = {
+const DEFAULTS: Required<Omit<AudioCaptureOptions, 'onCaptureReady'>> = {
   historyLength: WAVEFORM_BARS,
   historyUpdateMs: 40,
   normalizationSmooth: 0.97,
@@ -34,7 +35,7 @@ export class AudioCapture {
   private onAudioData: ((buffer: ArrayBuffer) => void) | null = null;
   private onLevels: ((levels: number[]) => void) | null = null;
 
-  private options: Required<AudioCaptureOptions> = DEFAULTS;
+  private options: Required<Omit<AudioCaptureOptions, 'onCaptureReady'>> = DEFAULTS;
 
   private levelHistory: number[] = [];
   private currentLevel = 0;
@@ -142,6 +143,8 @@ registerProcessor('audio-processor', AudioProcessor);
       this.sourceNode.connect(this.workletNode);
 
       this.isCapturing = true;
+      // Diagnostic callbacks must never affect capture or its cancellation contract.
+      try { options?.onCaptureReady?.(performance.now()); } catch { /* diagnostic only */ }
       this.startVisualizationLoop();
     } catch (error) {
       if (generation !== this.startGeneration) return;
