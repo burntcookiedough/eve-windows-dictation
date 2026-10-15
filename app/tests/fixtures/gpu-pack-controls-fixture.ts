@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, mock, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import { IPC_CHANNELS } from '../../src/shared/constants.js';
 import type { GpuPackState } from '../../src/shared/types.js';
 import type {
@@ -373,6 +375,56 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
       expect(manager.getState().error).toBe('Failed to bind runtime lease to server process');
       expect(leaseReleased).toBeFalse();
     });
+
+    test('only the bundled standalone interpreter is identified as a direct runtime', () => {
+      const serverDir = path.join(process.resourcesPath, 'server');
+      const runtimePython = path.join(serverDir, '.runtime', 'python.exe');
+      const legacyPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe');
+      const sitePackages = path.join(serverDir, '.venv', 'Lib', 'site-packages');
+      const exists = spyOn(fs, 'existsSync');
+      try {
+        const manager = new ServerManager();
+        exists.mockImplementation(value => [runtimePython, sitePackages].includes(String(value)));
+        expect((manager as any).getServerCommand(null)).toMatchObject({ command: runtimePython, directRuntimeProcess: true });
+        exists.mockImplementation(value => String(value) === legacyPython);
+        expect((manager as any).getServerCommand(null)).toMatchObject({ command: legacyPython, directRuntimeProcess: false });
+      } finally { exists.mockRestore(); }
+    });
+
+    for (const directRuntimeProcess of [true, false]) {
+      for (const outcome of ['exit', 'timeout', 'still-alive', 'bind-failure'] as const) {
+        test(`${directRuntimeProcess ? 'direct runtime' : 'unknown launcher'} ${outcome} before PID discovery preserves appropriate lease protection`, async () => {
+          const child = new MockChildProcess(8103);
+          let alive = true;
+          let released = 0;
+          const boundRoles: string[] = [];
+          const lease: RuntimeLease = {
+            runtime: { directory: 'E:/fixture', packId: 'fixture' } as ValidatedGpuRuntime,
+            bindServerPid: async (_pid, role) => { boundRoles.push(role ?? 'server'); if (outcome === 'bind-failure') throw new Error('Synthetic bind failure'); },
+            release: async () => { released++; },
+          };
+          const manager = new ServerManager({ acquireRuntime: async () => lease, getValidatedRuntime: async () => lease.runtime } as GpuPackManager, {
+            isPackaged: true,
+            isProcessAlive: (pid) => pid === 8103 && alive,
+            readPidFile: () => null,
+            getServerCommand: () => ({ command: 'python.exe', args: ['main.py'], cwd: 'E:/fixture', env: {}, directRuntimeProcess }),
+            spawn: (() => child as any) as any,
+            waitForProcessExit: async () => { if (outcome === 'still-alive') return false; alive = false; return true; },
+            waitForPidFile: async () => {
+              if (outcome === 'exit') { alive = false; child.emit('exit', 1, null); }
+              return null;
+            },
+          });
+          await manager.start();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          expect(manager.getState().status).toBe('error');
+          expect(boundRoles).toEqual([directRuntimeProcess ? 'server' : 'wrapper']);
+          const shouldRelease = directRuntimeProcess && outcome !== 'still-alive';
+          expect(released).toBe(shouldRelease ? 1 : 0);
+          expect((manager as any).activeRuntimeLease).toBe(shouldRelease ? null : lease);
+        });
+      }
+    }
 
     test('ServerManager living process error retains childProcess reference and does not release lease', async () => {
       const mockChild = new MockChildProcess(104);

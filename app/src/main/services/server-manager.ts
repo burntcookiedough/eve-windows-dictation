@@ -55,6 +55,7 @@ export interface ServerManagerDeps {
     args: string[];
     cwd: string;
     env: NodeJS.ProcessEnv;
+    directRuntimeProcess?: boolean;
   } | null;
   waitForPidFile?: (
     readFn: () => ServerPidFile | null,
@@ -623,6 +624,7 @@ export class ServerManager {
     args: string[];
     cwd: string;
     env: NodeJS.ProcessEnv;
+    directRuntimeProcess?: boolean;
   } | null {
     if (this.deps?.getServerCommand) return this.deps.getServerCommand(gpuRuntime);
     // In production, the server is bundled with the app
@@ -667,6 +669,7 @@ export class ServerManager {
 
       return {
         command: pythonExe,
+        directRuntimeProcess: pythonExe === runtimePython,
         args: [mainPy],
         cwd: serverDir,
         env: {
@@ -889,6 +892,9 @@ export class ServerManager {
     let childPid: number | undefined;
     let boundServerPid: number | undefined;
     let verifiedServerKnown = false;
+    // The bundled standalone interpreter runs main.py in this child. Legacy
+    // venv launchers may leave an undiscovered interpreter alive after exit.
+    const directRuntimeProcess = serverCmd.directRuntimeProcess === true;
     const processGeneration = ++this.processGeneration;
     try {
       const spawnStartedAt = Date.now();
@@ -947,7 +953,7 @@ export class ServerManager {
 
       const child = this.childProcess;
       childPid = child.pid;
-      this.activeRuntimeConsumers = { pids: childPid ? [childPid] : [], identified: false };
+      this.activeRuntimeConsumers = { pids: childPid ? [childPid] : [], identified: directRuntimeProcess && childPid !== undefined };
 
       let leaseReleased = false;
       let leaseOpQueue: Promise<void> = Promise.resolve();
@@ -970,8 +976,8 @@ export class ServerManager {
           if (leaseReleased || !processLease) return;
           // A launcher can exit before its daemon writes the PID file.
           // Until discovery completes, its exit cannot prove all consumers died.
-          if (childPid && !verifiedServerKnown) return;
-          if (!force) {
+          if (childPid && !verifiedServerKnown && !directRuntimeProcess) return;
+          if (!force || directRuntimeProcess) {
             const isChildAlive = childPid ? this.isProcessAlive(childPid) : false;
             const serverPid = boundServerPid;
             const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
@@ -1086,7 +1092,7 @@ export class ServerManager {
 
       if (childPid && processLease) {
         try {
-          await safeBindServerPid(childPid, 'wrapper');
+          await safeBindServerPid(childPid, directRuntimeProcess ? 'server' : 'wrapper');
         } catch (bindErr) {
           log.error('Failed to bind child process PID to runtime lease; stopping child', { error: bindErr });
           try { child.kill('SIGTERM'); } catch {}
@@ -1200,7 +1206,7 @@ export class ServerManager {
       const isChildAlive = childPid ? this.isProcessAlive(childPid) : false;
       const serverPid = boundServerPid;
       const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
-      if (!isChildAlive && !isServerAlive && (verifiedServerKnown || !childPid) && this.activeRuntimeLease) {
+      if (!isChildAlive && !isServerAlive && (verifiedServerKnown || directRuntimeProcess || !childPid) && this.activeRuntimeLease === processLease && processLease) {
         try {
           await this.activeRuntimeLease.release();
         } catch {}
