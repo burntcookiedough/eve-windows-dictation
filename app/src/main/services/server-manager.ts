@@ -895,6 +895,7 @@ export class ServerManager {
     // The bundled standalone interpreter runs main.py in this child. Legacy
     // venv launchers may leave an undiscovered interpreter alive after exit.
     const directRuntimeProcess = serverCmd.directRuntimeProcess === true;
+    let releaseStartupLease: (() => Promise<void>) | undefined;
     const processGeneration = ++this.processGeneration;
     try {
       const spawnStartedAt = Date.now();
@@ -1004,6 +1005,8 @@ export class ServerManager {
         leaseOpQueue = op.catch(() => {});
         return op;
       };
+
+      releaseStartupLease = () => releaseProcessLease();
 
       // Handle process exit - registered before any await so child death is never missed
       child.on('exit', (code, signal) => {
@@ -1207,10 +1210,13 @@ export class ServerManager {
       const serverPid = boundServerPid;
       const isServerAlive = serverPid ? this.isProcessAlive(serverPid) : false;
       if (!isChildAlive && !isServerAlive && (verifiedServerKnown || directRuntimeProcess || !childPid) && this.activeRuntimeLease === processLease && processLease) {
-        try {
-          await this.activeRuntimeLease.release();
-        } catch {}
-        this.activeRuntimeLease = null;
+        if (releaseStartupLease) {
+          await releaseStartupLease();
+        } else {
+          // spawn() failed before process callbacks and their release queue exist.
+          try { await processLease.release(); } catch {}
+          if (this.activeRuntimeLease === processLease) this.activeRuntimeLease = null;
+        }
       }
     }
   }
