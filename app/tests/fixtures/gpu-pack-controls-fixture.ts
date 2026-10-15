@@ -422,6 +422,11 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
           const shouldRelease = directRuntimeProcess && outcome !== 'still-alive';
           expect(released).toBe(shouldRelease ? 1 : 0);
           expect((manager as any).activeRuntimeLease).toBe(shouldRelease ? null : lease);
+          if (shouldRelease) {
+            child.emit('exit', 1, null);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(released).toBe(1);
+          }
         });
       }
     }
