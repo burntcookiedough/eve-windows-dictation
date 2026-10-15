@@ -1,3 +1,4 @@
+import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
 import { randomUUID } from 'crypto';
 import type {
   DictationSessionMode,
@@ -130,7 +131,8 @@ export async function dispatchToOutputs(
   entry: TranscriptionEntry,
   settings: Settings,
   historyService: HistoryService | null,
-  pasteTargetWindowHandle?: number | null
+  pasteTargetWindowHandle?: number | null,
+  perfTraceId?: string
 ): Promise<DispatchResult> {
   // Auto-paste temporarily uses the clipboard and can restore the previous value.
   if (settings.autoPaste && entry.text) {
@@ -140,12 +142,13 @@ export async function dispatchToOutputs(
         restoreDelayMs: settings.clipboardRestoreDelayMs,
         method: settings.pasteMethod,
         targetWindowHandle: pasteTargetWindowHandle,
+        ...(perfTraceId ? { perfTraceId } : {}),
       });
     } catch {
       log.error('Auto-paste failed');
       if (settings.autoCopy) {
         try {
-          await copyToClipboard(entry.text);
+          await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
         } catch {
           log.error('Automatic clipboard fallback failed');
         }
@@ -153,7 +156,7 @@ export async function dispatchToOutputs(
     }
   } else if (settings.autoCopy && entry.text) {
     try {
-      await copyToClipboard(entry.text);
+      await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
     } catch {
       log.error('Automatic clipboard copy failed');
     }
@@ -162,7 +165,12 @@ export async function dispatchToOutputs(
   // Save to history
   if (historyService) {
     try {
+      const histStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       historyService.save(entry);
+      if (histStart !== null) {
+        const completedAt = performance.now();
+        perfTraceManager.output(perfTraceId, 'history', completedAt - histStart, completedAt);
+      }
     } catch (err) {
       log.error('Failed to save to history', { error: err as Error });
     }
@@ -185,7 +193,8 @@ export async function processFinalTranscription(
   settings: Settings,
   historyService: HistoryService | null,
   sessionMode: DictationSessionMode = 'quick',
-  pasteTargetWindowHandle?: number | null
+  pasteTargetWindowHandle?: number | null,
+  perfTraceId?: string
 ): Promise<DispatchResult> {
   const rawEntry = buildEntry(frame, sessionMode);
   const processedEntry = applyPostProcessing(rawEntry, settings);
@@ -196,6 +205,7 @@ export async function processFinalTranscription(
     },
     settings,
     historyService,
-    pasteTargetWindowHandle
+    pasteTargetWindowHandle,
+    perfTraceId
   );
 }
