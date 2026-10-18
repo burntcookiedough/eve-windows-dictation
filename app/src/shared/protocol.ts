@@ -7,6 +7,7 @@ export interface ControlFrameStart {
   silence_timeout: number;
   partial_emission_interval?: number;
   hotwords?: string;
+  trace_id?: string;
 }
 
 export interface ControlFrameStop {
@@ -68,6 +69,21 @@ export interface TextFramePartial {
   audio_duration: number;
 }
 
+export interface ServerPerfTiming {
+  session_id: string;
+  clock_domain?: string;
+  last_audio_offset_ms?: number | null;
+  stop_to_lock_wait_ms?: number | null;
+  lock_wait_ms?: number | null;
+  outstanding_partial_wait_ms?: number | null;
+  partial_task_active_at_stop?: boolean | null;
+  executor_queue_wait_ms?: number | null;
+  final_inference_start_offset_ms?: number | null;
+  final_inference_end_offset_ms?: number | null;
+  model_inference_ms?: number | null;
+  ws_send_duration_ms?: number | null;
+}
+
 export interface TextFrameFinal {
   frame: 'text';
   type: 'final';
@@ -75,6 +91,7 @@ export interface TextFrameFinal {
   confidence: number;
   transcription_time: number;
   audio_duration: number;
+  perf?: ServerPerfTiming | null;
 }
 
 export type TextFrame = TextFramePartial | TextFrameFinal;

@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   // Renderer → Main (audio data)
   AUDIO_DATA: 'audio:data',
   AUDIO_CAPTURE_ERROR: 'audio:capture-error',
+  PERF_OVERLAY_EVENT: 'perf:overlay-event',
 
   // Renderer → Main (commands)
   COMMAND_COPY_TO_CLIPBOARD: 'command:copy-to-clipboard',

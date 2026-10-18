@@ -1,3 +1,4 @@
+import { isPerfTraceEnabled, perfTraceManager } from './services/perf-trace.js';
 import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron';
 import path from 'node:path';
 import { createOverlayWindow, showOverlay, hideOverlay, positionOverlayOnActiveDisplay } from './windows/overlay.js';
@@ -49,6 +50,7 @@ let startLongAfterStop = false;
 let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false, mode: 'quick' };
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
+let recordingPerfTraceId: string | undefined;
 let latestStatus: RecordingStatusPayload | null = null;
 let recordingTerminalOverride: 'error' | null = null;
 let overlaySessionGeneration = 0;
@@ -208,6 +210,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   }
 
   const sessionGeneration = beginOverlaySession();
+  const serviceTraceId = perfTraceManager.startTrace()?.correlationId;
+  recordingPerfTraceId = serviceTraceId;
 
   isRecording = true;
   recordingTerminalOverride = null;
@@ -242,7 +246,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     silenceTimeout,
     overlayWindow,
     hotwords,
-    sessionMode
+    sessionMode,
+    serviceTraceId
   );
   transcriptionService = service;
   const serviceSessionMode = sessionMode;
@@ -270,12 +275,15 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   });
 
   // Set up transcription callbacks
-  service.onFinal(async (frame: TextFrameFinal) => {
+  service.onFinal(async (frame: TextFrameFinal, receivedAt?: number) => {
     if (transcriptionService !== service) {
       return;
     }
+    if (receivedAt !== undefined) perfTraceManager.mark(serviceTraceId, 'finalReceivedAt', receivedAt);
+    perfTraceManager.server(serviceTraceId, frame.perf);
 
     if (source !== 'normal') {
+      perfTraceManager.completeTrace(serviceTraceId);
       return;
     }
 
@@ -289,7 +297,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
         getSettings(),
         historyService,
         serviceSessionMode,
-        pasteTargetWindowHandle
+        pasteTargetWindowHandle,
+        serviceTraceId
       );
 
       // Keep Home and History current when dictation happens while Eve is in the tray.
@@ -297,10 +306,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
         mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
       }
     }
+    perfTraceManager.completeTrace(serviceTraceId);
   });
 
   service.onClose(() => {
     if (transcriptionService !== service) return;
+    perfTraceManager.completeTrace(serviceTraceId, 'closed');
+    recordingPerfTraceId = undefined;
     const shouldStartLongAfterStop = startLongAfterStop;
     const closedSessionMode = recordingSessionMode;
     const terminalState = recordingTerminalOverride ?? currentRecordingState.state;
@@ -338,11 +350,17 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     }
     // Tell overlay to start audio capture with selected device
     const deviceId = getSetting('selectedDeviceId');
-    overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
+    perfTraceManager.mark(serviceTraceId, 'captureCommandAt');
+    if (serviceTraceId) {
+      overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId, serviceTraceId);
+    } else {
+      overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
+    }
   } catch (error) {
     if (transcriptionService !== service) {
       return;
     }
+    perfTraceManager.completeTrace(serviceTraceId, 'cancelled');
     if (error instanceof TranscriptionConnectionCancelledError) {
       return;
     }
@@ -355,6 +373,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
 async function stopRecording() {
   if (!isRecording) return;
+  if (isPerfTraceEnabled()) {
+    perfTraceManager.mark(recordingPerfTraceId, 'stopRequestedAt');
+  }
   isRecording = false;
   isStopping = true;
 
@@ -362,6 +383,9 @@ async function stopRecording() {
   overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING);
 
   // Send stop to server
+  if (isPerfTraceEnabled()) {
+    perfTraceManager.mark(recordingPerfTraceId, 'stopDispatchedAt');
+  }
   transcriptionService?.stop();
   updateRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
 }
@@ -393,6 +417,11 @@ function toggleLongRecording(): void {
 
 // Handle audio data from overlay renderer
 function setupAudioHandler() {
+  ipcMain.on(IPC_CHANNELS.PERF_OVERLAY_EVENT, (event, payload: unknown) => {
+    if (overlayWindow && event.sender === overlayWindow.webContents) {
+      perfTraceManager.renderer(payload);
+    }
+  });
   let lastLevelAt = 0;
   ipcMain.on('audio:data', (event, audioData: ArrayBuffer) => {
     if (
@@ -404,6 +433,9 @@ function setupAudioHandler() {
       return;
     }
     if (transcriptionService && isRecording) {
+      if (isPerfTraceEnabled()) {
+        perfTraceManager.mark(recordingPerfTraceId, 'lastAudioDispatchedAt');
+      }
       transcriptionService.sendAudioBuffer(audioData);
       const now = Date.now();
       if (now - lastLevelAt >= 33) {
