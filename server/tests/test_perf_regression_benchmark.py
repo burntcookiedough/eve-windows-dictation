@@ -92,6 +92,25 @@ def test_comparison_does_not_accept_missing_evidence_or_mixed_settings():
         compare_records([before, before], [after, after], thresholds)
 
 
+@pytest.mark.parametrize('text,empty', [(None, False), ('', True), (' \t\n', True), ('safe speech', False)])
+def test_only_observed_empty_finals_count_as_empty_results(tmp_path, text, empty):
+    """A failed request has no observed output; whitespace finals are empty speech results."""
+    reference = tmp_path / 'reference.txt'
+    reference.write_text('safe speech', encoding='utf-8')
+    clip = {'reference': reference, 'duration': 1.0,
+            'speaker_stratum': 'synthetic_peer', 'content_domain': 'general_english'}
+    observation = {'text': text, 'outcome': 'unexpected_failure' if text is None else 'success',
+                   'first_partial_ms': None, 'last_audio_ms': None,
+                   'stop_to_final_text_ms': None, 'server_perf': None}
+    record = make_record(BASE_FIXTURE_RECORD, clip, observation, run_id='synthetic-test',
+                         trial_id='empty-boundary', repetition=1, repetitions=2, warmup=False, raw=True)
+    assert record['evaluation']['output_empty'] is empty
+    from scripts.validation_harness import stratify_and_summarize
+    summary = stratify_and_summarize([record])[0]
+    assert summary.empty_on_expected_speech_count == int(empty)
+    assert summary.unexpected_failures == int(text is None)
+
+
 def test_manifest_fingerprints_exact_corpus_and_respects_external_paths(tmp_path):
     """Changed replay audio or references change the grouping identity before measurement."""
     audio = tmp_path / 'script.wav'
