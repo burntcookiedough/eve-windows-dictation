@@ -183,7 +183,7 @@ def make_record(template, clip, observation, *, run_id, trial_id, repetition, re
     record['resources'] = {key: None for key in record['resources']}
     record['rates'] = {key: None for key in record['rates']}
     evaluation = record['evaluation']
-    evaluation.update(output_empty=not observation['text'], expected_speech=True,
+    evaluation.update(output_empty=observation['text'] is not None and not observation['text'].strip(), expected_speech=True,
         outcome=observation['outcome'], scoring_normalization='raw' if raw else 'standard',
         human_assessment=None, critical_entity_errors=None)
     for key in ('reference_word_count', 'word_errors', 'wer', 'wer_fraction',
