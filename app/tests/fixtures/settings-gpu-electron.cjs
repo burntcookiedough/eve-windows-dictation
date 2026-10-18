@@ -65,6 +65,16 @@ async function main() {
     await evaluate(`document.querySelector('[data-gpu-pack-confirm-remove]').click(); document.querySelector('[data-gpu-pack-confirm-remove]')?.click()`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-action]')`);
     const removed = { ...await evaluate(`({calls: [...gpuFixture.calls], status: document.querySelector('[data-gpu-pack-status]').textContent, download: !!document.querySelector('[data-gpu-pack-action]')})`), normalMotionFocus };
+    const missing = await evaluate(`({remove: !!document.querySelector('[data-gpu-pack-remove]'), calls: [...gpuFixture.calls]})`);
+    if (!missing.remove) throw new Error('Missing GPU state must allow confirmed removal of retained partials');
+    await evaluate(`document.querySelector('[data-gpu-pack-remove]').focus(); document.querySelector('[data-gpu-pack-remove]').click()`);
+    await waitFor(`!!document.querySelector('[data-gpu-pack-confirm-remove]')`);
+    const missingConfirmation = await evaluate(`({calls: [...gpuFixture.calls], focus: document.activeElement.textContent.trim()})`);
+    if (JSON.stringify(missingConfirmation.calls) !== JSON.stringify(missing.calls) || missingConfirmation.focus !== 'cancel') {
+      throw new Error('Missing-state Remove must retain safe confirmation without invoking removal');
+    }
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await waitFor(`!document.querySelector('.sheet-layer.open [role="dialog"]') && document.activeElement?.hasAttribute?.('data-gpu-pack-remove')`);
     await evaluate(`gpuFixture.publish({status:'failed',code:'download_failed',retryable:true})`);
     await waitFor(`!!document.querySelector('[data-gpu-pack-remove]')`);
     const interrupted = await evaluate(`!!document.querySelector('[data-gpu-pack-remove]')`);

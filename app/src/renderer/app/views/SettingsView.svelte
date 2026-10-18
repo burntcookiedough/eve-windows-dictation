@@ -1056,6 +1056,7 @@
                 {#if gpuPackState?.status === 'downloading'}
                   <span>{getGpuPackProgress(gpuPackState)}%</span>
                 {:else if gpuPackState?.status === 'missing'}
+                  <div class="settings-gpu-actions">
                   <button
                     type="button"
                     data-gpu-pack-action
@@ -1066,6 +1067,17 @@
                   >
                     {gpuPackOperating ? 'starting…' : 'download GPU support'}
                   </button>
+                    <button
+                      type="button"
+                      data-gpu-pack-remove
+                      class="settings-link settings-gpu-action"
+                      onclick={promptRemoveGpuPack}
+                      disabled={gpuPackOperating}
+                      aria-busy={gpuPackOperating}
+                    >
+                      remove
+                    </button>
+                  </div>
                 {:else if gpuPackState?.status === 'ready'}
                   <div class="settings-gpu-actions">
                     <button
