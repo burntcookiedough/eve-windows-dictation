@@ -12,6 +12,7 @@ import hashlib
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 import struct
 import sys
@@ -21,6 +22,7 @@ import uuid
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts.accuracy_scoring import AccuracyAccumulator
 from scripts.validation_harness import (
     BASE_FIXTURE_RECORD, compute_cer, compute_wer, ensure_safe_external_path,
     get_stratum_key, load_records_file, stratify_and_summarize, validate_record_dict,
@@ -156,6 +158,25 @@ async def replay_trial(url, clip, *, timeout=300, connect=None):
     return state
 
 
+def paths_collide(p1: Path, p2: Path) -> bool:
+    """Return True if two paths resolve to the same filesystem location or alias."""
+    try:
+        r1 = p1.resolve()
+        r2 = p2.resolve()
+    except Exception:
+        r1 = p1.absolute()
+        r2 = p2.absolute()
+    if r1 == r2:
+        return True
+    try:
+        return r1.samefile(r2)
+    except OSError:
+        pass
+    if os.name == 'nt':
+        return os.path.normcase(str(r1)) == os.path.normcase(str(r2))
+    return False
+
+
 def make_record(template, clip, observation, *, run_id, trial_id, repetition, repetitions, warmup, raw):
     """Translate observed replay durations into the shared schema without inventing stages."""
     record = copy.deepcopy(template)
@@ -203,24 +224,81 @@ def make_record(template, clip, observation, *, run_id, trial_id, repetition, re
 async def run_replay(args):
     """Run only the explicitly supplied external test corpus and write safe trial records."""
     template, clips = load_manifest(args.manifest)
+    manifest_path = ensure_safe_external_path(Path(args.manifest))
     output = ensure_safe_external_path(Path(args.output))
+    accuracy_output = ensure_safe_external_path(Path(args.accuracy_output)) if getattr(args, 'accuracy_output', None) else None
+
+    # Fail BEFORE network/output mutation for existing report or collision with primary log/manifest/reference/audio.
+    protected_paths = [("manifest", manifest_path)]
+    for idx, clip in enumerate(clips):
+        protected_paths.append((f"clip {idx} audio", clip['audio']))
+        protected_paths.append((f"clip {idx} reference", clip['reference']))
+
+    for name, p in protected_paths:
+        if paths_collide(output, p):
+            raise ValueError(f"Primary output path collides with {name}: {output}")
+
+    if output.exists():
+        raise FileExistsError(f"Primary output path already exists: {output}")
+
+    if accuracy_output is not None:
+        if paths_collide(accuracy_output, output):
+            raise ValueError(f"Accuracy output path collides with primary output: {accuracy_output}")
+        for name, p in protected_paths:
+            if paths_collide(accuracy_output, p):
+                raise ValueError(f"Accuracy output path collides with {name}: {accuracy_output}")
+        if accuracy_output.exists():
+            raise FileExistsError(f"Accuracy output path already exists: {accuracy_output}")
+
     validate_url(args.url)
     run_id = str(uuid.uuid4())
-    with output.open('x', encoding='utf-8') as sink:
-        for clip_index, clip in enumerate(clips):
-            for repetition in range(args.repetitions + 1):
-                observation = {'first_partial_ms': None, 'stop_to_final_text_ms': None,
-                    'last_audio_ms': None, 'server_perf': None, 'text': None, 'outcome': 'unexpected_failure'}
-                try:
-                    observation = await replay_trial(args.url, clip, timeout=args.timeout)
-                except Exception:
-                    # Failed trials stay in the denominator; never emit remote error text.
-                    pass
-                record = make_record(template, clip, observation, run_id=run_id,
-                    trial_id=f'clip-{clip_index}-repeat-{repetition}', repetition=repetition,
-                    repetitions=args.repetitions + 1, warmup=repetition == 0, raw=args.raw)
-                sink.write(json.dumps(record) + '\n')
-                sink.flush()
+    accumulator = AccuracyAccumulator(template) if accuracy_output is not None else None
+
+    # Reserve/open new sidecar exclusively before first replay; never overwrite existing evidence.
+    sidecar_sink = None
+    if accuracy_output is not None:
+        sidecar_sink = accuracy_output.open('x', encoding='utf-8')
+        sidecar_sink.write('{"report_status":"incomplete"}')
+        sidecar_sink.flush()
+
+    try:
+        with output.open('x', encoding='utf-8') as sink:
+            for clip_index, clip in enumerate(clips):
+                for repetition in range(args.repetitions + 1):
+                    observation = {'first_partial_ms': None, 'stop_to_final_text_ms': None,
+                        'last_audio_ms': None, 'server_perf': None, 'text': None, 'outcome': 'unexpected_failure'}
+                    try:
+                        observation = await replay_trial(args.url, clip, timeout=args.timeout)
+                    except Exception:
+                        # Failed trials stay in the denominator; never emit remote error text.
+                        pass
+                    is_warmup = repetition == 0
+                    record = make_record(template, clip, observation, run_id=run_id,
+                        trial_id=f'clip-{clip_index}-repeat-{repetition}', repetition=repetition,
+                        repetitions=args.repetitions + 1, warmup=is_warmup, raw=args.raw)
+                    sink.write(json.dumps(record) + '\n')
+                    sink.flush()
+                    if accumulator is not None:
+                        accumulator.record_trial(record, clip=clip, observation=observation)
+    except BaseException:
+        # Keep reserved evidence explicitly incomplete and close it on cancellation.
+        if sidecar_sink is not None:
+            sidecar_sink.close()
+        raise
+
+    # Primary trial records must survive sidecar error.
+    if accumulator is not None and sidecar_sink is not None:
+        try:
+            report_dict = accumulator.to_dict(run_id=run_id)
+            serialized = json.dumps(report_dict, indent=2)
+            sidecar_sink.seek(0)
+            sidecar_sink.write(serialized)
+            sidecar_sink.truncate()
+            sidecar_sink.flush()
+        finally:
+            sidecar_sink.close()
+            sidecar_sink = None
+
     print('Replay records saved externally; no speech text emitted. Physical and insertion evidence: unavailable.')
 
 
@@ -285,6 +363,7 @@ def main(argv=None):
     replay.add_argument('--repetitions', type=int, default=2)
     replay.add_argument('--timeout', type=float, default=300)
     replay.add_argument('--raw', action='store_true')
+    replay.add_argument('--accuracy-output', default=None, help='Optional path for safe aggregate accuracy report')
     compare = sub.add_parser('compare')
     compare.add_argument('--before', required=True)
     compare.add_argument('--after', required=True)
