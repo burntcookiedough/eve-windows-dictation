@@ -82,6 +82,8 @@ def test_rejects_invalid_manifest(payload, change):
 
 @pytest.mark.parametrize('listing,valid', [
     ('Path = helper.exe\nSize = 5\nMethod = BCJ LZMA2:20', True),
+    ('Path = helper.exe\nSize = 5\nMethod = BCJ LZMA2:3m', True),
+    ('Path = helper.exe\nSize = 5\nMethod = LZMA2:1536k', True),
     ('Path = stored.bin\nSize = 5\nMethod = Copy', True),
     ('Path = empty.txt\nSize = 0\nMethod = ', True),
     ('Path = file\nSize = 5\nMethod = ARM64 LZMA2:20', False),
@@ -138,3 +140,23 @@ def test_manifest_generation_rejects_directory_junction(tmp_path):
     )
     assert result.returncode != 0
     assert 'reparse points are unsupported' in result.stderr
+
+
+def test_skip_launch_still_verifies_requested_bytes(payload):
+    source, manifest = payload
+    (source / 'Eve.exe').write_bytes(b'synthetic exe, never launched')
+    smoke = (ROOT / 'scripts/installer-smoke.ps1').read_text(encoding='utf-8')
+    # Execute the real post-install block only; never invoke installers or cleanup.
+    block = smoke[smoke.index('$exePath = Join-Path $InstallDir'):smoke.index('$launchStartedAt =')]
+    assert 'if ($SkipLaunch)' in block
+    command = (
+        '$InstallDir=$env:SOURCE; $ManifestPath=$env:MANIFEST; $SkipLaunch=$true; '
+        'function Write-Step { param($Message) Write-Host $Message }; ' + block
+    )
+    valid = run_ps(command, SOURCE=source, MANIFEST=manifest)
+    assert valid.returncode == 0, valid.stderr
+    assert 'Skipping launch' in valid.stdout
+    (source / 'nested/helper.exe').unlink()
+    missing = run_ps(command, SOURCE=source, MANIFEST=manifest)
+    assert missing.returncode != 0
+    assert 'Missing installed payload' in missing.stderr

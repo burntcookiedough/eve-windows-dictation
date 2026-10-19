@@ -107,7 +107,7 @@ function Assert-SevenZipListing {
         $fileCount++
         $method = $fields['Method'].Trim()
         if (-not $method -and $fields['Size'] -eq '0') { continue }
-        if ($method -cnotmatch '^(Copy|(BCJ )?LZMA2(?::\d+)?)$') { throw "Incompatible 7z compression method: $method" }
+        if ($method -cnotmatch '^(Copy|(BCJ )?LZMA2(?::\d+[km]?)?)$') { throw "Incompatible 7z compression method: $method" }
     }
     if ($fileCount -eq 0) { throw 'Archive contains no payload files.' }
     Write-Host "[verify] Verified compression methods for $fileCount payload files."

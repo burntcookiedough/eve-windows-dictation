@@ -121,8 +121,9 @@ and lifecycle evidence, which still require separate authorization.
 
 ## Checks
 
+Run from the repository root:
+
 ```powershell
-Set-Location ..
 python scripts/version.py check
 git diff --check
 ```
