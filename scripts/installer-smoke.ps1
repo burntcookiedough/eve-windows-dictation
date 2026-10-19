@@ -7,6 +7,7 @@ param(
     [int]$DownloadTimeoutSec = 1200,
     [string]$PidFilePath = "$env:APPDATA\Eve\server.pid",
     [string]$ExpectedVersion = "",
+    [string]$ManifestPath = "",
     [switch]$SkipUninstall,
     [switch]$SkipLaunch,
     [switch]$RequireCuda,
@@ -16,6 +17,7 @@ param(
 )
 
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "installer-manifest.ps1")
 $ErrorActionPreference = "Stop"
 
 function Write-Step {
@@ -204,6 +206,13 @@ if ($SkipLaunch) {
 $exePath = Join-Path $InstallDir "Eve.exe"
 if (-not (Test-Path $exePath)) {
     throw "Installed app not found at $exePath"
+}
+
+if ($ManifestPath) {
+    Write-Step "Verifying installed files against payload manifest at $ManifestPath"
+    Assert-InstalledPayload -InstallDir $InstallDir -ManifestPath $ManifestPath | Out-Null
+} else {
+    Write-Step "No payload manifest provided (-ManifestPath); installed payload byte/hash verification unverified."
 }
 
 $launchStartedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()

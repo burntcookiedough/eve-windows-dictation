@@ -5,10 +5,13 @@ param(
     [string]$InstallDir = "E:\EveRelease\release-prep\smoke-install\Eve",
     [string]$BaseBranch = "trunk",
     [int]$HealthPort = 8765,
-    [int]$HealthTimeoutSec = 180
+    [int]$HealthTimeoutSec = 180,
+    [string]$ManifestPath = "",
+    [string]$SevenZipPath = ""
 )
 
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "installer-manifest.ps1")
 $ErrorActionPreference = "Stop"
 $InstallerDir = (Resolve-Path -LiteralPath $InstallerDir -ErrorAction Stop).ProviderPath
 $InstallDir = (Resolve-Path -LiteralPath $InstallDir -ErrorAction Stop).ProviderPath
@@ -183,6 +186,8 @@ Assert-Path $setupExe "Installer"
 Assert-Path $payload7z "NSIS web payload"
 Assert-Path $latestYml "latest.yml"
 Assert-Contains -Value (Get-Content -LiteralPath $latestYml -Raw) -Expected $ExpectedVersion -Description "latest.yml"
+Write-Step "Checking NSIS web payload archive compression methods"
+Assert-SevenZipArchiveMethods -ArchivePath $payload7z -SevenZipPath $SevenZipPath -AppDir (Join-Path $repoRoot "app") | Out-Null
 
 Write-Step "Checking installed payload contents"
 $appExe = Join-Path $InstallDir "Eve.exe"
@@ -191,6 +196,12 @@ $pythonExe = Join-Path $serverRoot ".runtime\python.exe"
 $sitePackages = Join-Path $serverRoot ".venv\Lib\site-packages"
 Assert-Path $appExe "Installed Eve.exe"
 Assert-Path $pythonExe "Bundled Python"
+if ($ManifestPath) {
+    Write-Step "Verifying installed files against payload manifest at $ManifestPath"
+    Assert-InstalledPayload -InstallDir $InstallDir -ManifestPath $ManifestPath | Out-Null
+} else {
+    Write-Step "No payload manifest provided (-ManifestPath); installed payload byte/hash verification unverified."
+}
 Assert-Path (Join-Path $sitePackages "faster_whisper") "faster-whisper package"
 Assert-NoPackage -SitePackages $sitePackages -Description "Unsupported model-runtime packages"
 $cudnnDispatcher = Join-Path $sitePackages "ctranslate2\cudnn64_9.dll"
