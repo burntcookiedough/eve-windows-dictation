@@ -103,6 +103,7 @@ to work around an unsupported compression filter.
 For an authorized candidate, retain a byte manifest before removing `win-unpacked`:
 
 ```powershell
+Set-Location .. # From app back to the repository root.
 . ./scripts/installer-manifest.ps1
 New-InstalledPayloadManifest -SourceDir ./app/release/win-unpacked -OutputFile ./candidate-payload-manifest.json
 ```
