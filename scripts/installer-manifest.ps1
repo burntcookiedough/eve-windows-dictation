@@ -61,10 +61,6 @@ function Resolve-SevenZip {
     if ($ExplicitPath) {
         return (Resolve-Path -LiteralPath $ExplicitPath -ErrorAction Stop).ProviderPath
     }
-    foreach ($name in @('7z.exe', '7za.exe')) {
-        $tool = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($tool) { return $tool.Source }
-    }
     if ($AppDir -and (Get-Command node -ErrorAction SilentlyContinue)) {
         # Use the same pinned, checksum-verified tool resolver as the builder.
         $module = Join-Path $AppDir 'node_modules/app-builder-lib/out/toolsets/7zip.js'
@@ -72,6 +68,10 @@ function Resolve-SevenZip {
         if ($LASTEXITCODE -eq 0 -and $resolved -and (Test-Path -LiteralPath ([string]$resolved) -PathType Leaf)) {
             return [string]$resolved
         }
+    }
+    foreach ($name in @('7z.exe', '7za.exe')) {
+        $tool = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($tool) { return $tool.Source }
     }
     throw '7-Zip unavailable; specify -SevenZipPath. Archive verification failed closed.'
 }

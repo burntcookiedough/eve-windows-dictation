@@ -102,3 +102,21 @@ def test_archive_native_failure_is_rejected(tmp_path):
     result = run_ps('Assert-SevenZipArchiveMethods -ArchivePath $env:ARCHIVE -SevenZipPath (Get-Command pwsh).Source', ARCHIVE=archive)
     assert result.returncode != 0
     assert 'listing failed' in result.stderr
+
+
+def test_pinned_resolver_precedes_path_and_path_remains_fallback(tmp_path):
+    app = tmp_path / 'app'
+    module = app / 'node_modules/app-builder-lib/out/toolsets/7zip.js'
+    module.parent.mkdir(parents=True)
+    module.write_text('exports.getPath7za = async () => process.execPath;', encoding='utf-8')
+    path_tool = tmp_path / '7z.exe'
+    path_tool.write_bytes(b'lookup-only fixture, never executed')
+    command = 'Resolve-SevenZip -AppDir $env:APP'
+    values = {'APP': app, 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH']}
+    pinned = run_ps(command, **values)
+    assert pinned.returncode == 0, pinned.stderr
+    assert 'node.exe' in pinned.stdout.lower()
+    module.write_text('exports.getPath7za = async () => null;', encoding='utf-8')
+    fallback = run_ps(command, **values)
+    assert fallback.returncode == 0, fallback.stderr
+    assert str(path_tool) in fallback.stdout
