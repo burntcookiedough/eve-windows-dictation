@@ -108,6 +108,7 @@ def test_archive_native_failure_is_rejected(tmp_path):
     assert 'listing failed' in result.stderr
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows executable discovery')
 def test_pinned_resolver_precedes_path_and_path_remains_fallback(tmp_path):
     app = tmp_path / 'app'
     module = app / 'node_modules/app-builder-lib/out/toolsets/7zip.js'
@@ -126,6 +127,7 @@ def test_pinned_resolver_precedes_path_and_path_remains_fallback(tmp_path):
     assert str(path_tool) in fallback.stdout
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows directory junction')
 def test_manifest_generation_rejects_directory_junction(tmp_path):
     source = tmp_path / 'source'
     source.mkdir()
