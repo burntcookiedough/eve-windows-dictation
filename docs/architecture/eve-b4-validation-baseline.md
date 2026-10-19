@@ -11,7 +11,7 @@ No B4 artifact has been packaged or authorized here. B4 is **not complete**.
 | Physical unavailable/disconnect/recovery | 0; pending |
 | B4 exact-candidate replay performance | 0; pending |
 | CPU before/after comparison | 0; pending; no optimization justified yet |
-| Offline schema/scoring tests | Synthetic software evidence only |
+| Offline schema/scoring tests | Synthetic software evidence only; see [accuracy evidence and comparable scoring](eve-b4-accuracy-evidence.md) |
 
 The operator reports laptop mic/headset and Indian English/additional speaker
 availability. Headset type, additional accent, hardware configuration, and trial
@@ -55,7 +55,8 @@ packaged profiles still select `small`; saved choices remain untouched.
 3. Perform consented tests for available mics/speakers/conditions/modes; keep audio,
    text, profiles, and private trial files outside the repository.
 4. Score and summarize per-stratum n/p50/p95, empty/failure rates, actual insertion,
-   CPU/RAM, and unavailable equipment/stages.
+   CPU/RAM, and unavailable equipment/stages using the
+   [comparable accuracy scoring policy and sidecar](eve-b4-accuracy-evidence.md).
 5. Set thresholds before optimization, compare source-matched before/after artifacts
    under identical conditions, and reject quality/recovery/partial/auto-stop/resource
    regressions. No safe speedup is currently established.
