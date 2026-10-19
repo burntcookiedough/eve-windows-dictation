@@ -4,8 +4,11 @@ Set-StrictMode -Version Latest
 function New-InstalledPayloadManifest {
     param([Parameter(Mandatory)][string]$SourceDir, [Parameter(Mandatory)][string]$OutputFile)
     $root = (Resolve-Path -LiteralPath $SourceDir -ErrorAction Stop).ProviderPath.TrimEnd('\', '/')
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName | ForEach-Object {
-        if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Payload reparse points are unsupported.' }
+    $items = @((Get-Item -LiteralPath $root -Force -ErrorAction Stop)) + @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction Stop)
+    if (@($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+        throw 'Payload reparse points are unsupported.'
+    }
+    $files = @($items | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName | ForEach-Object {
         [pscustomobject]@{
             path = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
             length = $_.Length
@@ -96,14 +99,15 @@ function Assert-SevenZipListing {
             if ($line -match '^([^=]+?) = ?(.*)$') { $fields[$Matches[1]] = $Matches[2] }
         }
         if (-not $fields.ContainsKey('Path')) { throw 'Malformed 7-Zip payload listing.' }
-        if ($fields.ContainsKey('Folder') -and $fields['Folder'] -eq '+') { continue }
+        if (($fields.ContainsKey('Folder') -and $fields['Folder'] -eq '+') -or
+            ($fields.ContainsKey('Attributes') -and $fields['Attributes'] -match '^D')) { continue }
         if (-not $fields.ContainsKey('Size') -or $fields['Size'] -notmatch '^\d+$' -or -not $fields.ContainsKey('Method')) {
             throw 'Missing payload size or method.'
         }
         $fileCount++
         $method = $fields['Method'].Trim()
         if (-not $method -and $fields['Size'] -eq '0') { continue }
-        if ($method -cnotmatch '^(BCJ )?LZMA2(?::\d+)?$') { throw "Incompatible 7z compression method: $method" }
+        if ($method -cnotmatch '^(Copy|(BCJ )?LZMA2(?::\d+)?)$') { throw "Incompatible 7z compression method: $method" }
     }
     if ($fileCount -eq 0) { throw 'Archive contains no payload files.' }
     Write-Host "[verify] Verified compression methods for $fileCount payload files."

@@ -82,6 +82,7 @@ def test_rejects_invalid_manifest(payload, change):
 
 @pytest.mark.parametrize('listing,valid', [
     ('Path = helper.exe\nSize = 5\nMethod = BCJ LZMA2:20', True),
+    ('Path = stored.bin\nSize = 5\nMethod = Copy', True),
     ('Path = empty.txt\nSize = 0\nMethod = ', True),
     ('Path = file\nSize = 5\nMethod = ARM64 LZMA2:20', False),
     ('Path = file\nSize = 5\nMethod = BCJ2 LZMA2:20', False),
@@ -89,6 +90,7 @@ def test_rejects_invalid_manifest(payload, change):
     ('Path = file\nSize = 5', False),
     ('', False),
     ('Path = directory\nFolder = +', False),
+    ('Path = directory\nAttributes = D\nSize = 0\nMethod = ', False),
 ])
 def test_archive_listing_fails_closed(listing, valid):
     result = run_ps('Assert-SevenZipListing -Listing $env:LISTING', LISTING=listing)
@@ -120,3 +122,19 @@ def test_pinned_resolver_precedes_path_and_path_remains_fallback(tmp_path):
     fallback = run_ps(command, **values)
     assert fallback.returncode == 0, fallback.stderr
     assert str(path_tool) in fallback.stdout
+
+
+def test_manifest_generation_rejects_directory_junction(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'visible.txt').write_bytes(b'visible')
+    other = tmp_path / 'other'
+    other.mkdir()
+    (other / 'omitted.txt').write_bytes(b'must not silently omit')
+    result = run_ps(
+        "New-Item -ItemType Junction -Path (Join-Path $env:SOURCE 'linked') -Target $env:OTHER | Out-Null; "
+        'New-InstalledPayloadManifest $env:SOURCE $env:MANIFEST',
+        SOURCE=source, OTHER=other, MANIFEST=tmp_path / 'manifest.json',
+    )
+    assert result.returncode != 0
+    assert 'reparse points are unsupported' in result.stderr
