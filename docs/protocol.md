@@ -119,7 +119,7 @@ Explicitly ends the session.
 
 **Server behavior:**
 1. Finalize any pending transcription
-2. Send exactly one `final` text frame (may be empty when no speech was recognized)
+2. On successful inference, send exactly one `final` text frame (may be empty when no speech was recognized); on failure, use the incomplete-recovery sequence below
 3. Send `closing` control frame with reason `"stop_received"`
 4. Close WebSocket connection
 
@@ -249,7 +249,7 @@ Non-terminal progress/status update. Clients that do not understand a status val
 
 ### closing (Server → Client)
 
-Server is about to close the connection. Sent after the terminal `final` text frame.
+Server is about to close the connection. Sent after the terminal `final` text frame on success, or after a finalization `error` on failure.
 
 ```json
 {
@@ -354,7 +354,41 @@ Committed transcription result. Will not change.
 
 1. A `final` frame is emitted on normal session termination (client `stop`, silence timeout).
 2. Once a `final` is sent, no further `partial` frames are sent for that session.
-3. The sequence is always: zero or more `partial` → one terminal `final` → `closing` → connection close.
+3. Successful finalization follows: zero or more `partial` → one terminal `final` → `closing` → connection close.
+
+#### Incomplete inference recovery
+
+When native inference fails, completed segments from that call and completed
+long-dictation chunks remain available as **incomplete** text. A failed primary
+chunk stops further chunk inference; it is not silently skipped. An optional
+low-confidence retry that runs out of GPU memory retains its completed first
+pass. Other retry failures retain that first pass and report incomplete output.
+Recognized CUDA OOM uses the internal `VramExhaustedError`; other native errors
+retain their original exception as the cause of `IncompleteTranscriptionError`.
+
+Failed finalization sends an optional replacement `partial` containing available
+text, then `error` (`code: "internal"`, explicitly describing incomplete text),
+then `closing` and connection close. It emits **no successful `final`**. Recovery
+does not substitute a prior chunk's result at a new audio offset. Successful
+silence emits an empty final rather than substituting an earlier partial.
+The frame shapes and existing error/closing codes are unchanged.
+
+Clients must retain failure provenance across `closing` and socket closure.
+Recovered text is for explicit review/recovery, not normal automatic paste or
+successful History insertion. **Implementation limit:** issue #103 batch 2 must
+update the desktop client's synthetic-final behavior to honor this contract;
+the backend batch alone does not establish end-to-end paste safety.
+
+Chunk deduplication requires matching segment text at overlapping absolute audio
+times. Equal words at different times remain intact. Segments crossing the
+overlap boundary, or transcripts without timing evidence, are retained in full;
+this conservative policy can leave ambiguous overlap repeated rather than
+delete potentially intentional speech. Decoder defaults are unchanged. Packaged
+accuracy and boundary behavior still require product validation.
+
+Cancellation of the async inference await does not stop native executor work.
+Processor teardown retains the generation lease through actual completion (or
+cancellation before execution) of every submitted job; it rejects later work.
 
 ---
 
@@ -391,7 +425,7 @@ A session ends when any of the following occur:
 
 3. **Client closes connection** — Server treats as implicit stop, cleans up resources.
 
-4. **Fatal error** — Server sends `error`, closes connection immediately. No `final` or `closing` frame is sent.
+4. **Fatal error** — Server sends `error` and closes without a successful `final`. A finalization failure uses the incomplete-recovery sequence above, including `closing`; earlier fatal protocol errors may close immediately.
 
 5. **Non-fatal warning** — Server may send `warning` at any time during an active session. Session continues.
 

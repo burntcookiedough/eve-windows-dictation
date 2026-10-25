@@ -13,10 +13,18 @@ def resolve_option(default: T, override: T | None) -> T:
 
 
 @dataclass(frozen=True, slots=True)
+class TranscribeSegment:
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
 class TranscribeResult:
     text: str
     confidence: float  # 0.0–1.0
     last_speech_end: float | None  # Seconds from audio start; None if no speech
+    segments: tuple[TranscribeSegment, ...] = ()  # Optional, relative to this call's audio
 
 
 @dataclass(frozen=True, slots=True)

@@ -25,7 +25,8 @@ from transcription.model_download import (
     track_huggingface_download_progress,
     update_model_download_state,
 )
-from transcription.types import TranscribeOptions, TranscribeResult, resolve_option
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, resolve_option
+from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -436,28 +437,35 @@ class WhisperSession:
         vad_filter = resolve_option(self._options.vad_filter, options.vad_filter)
         temperature = resolve_option(self._options.temperature, options.temperature)
         beam_size = resolve_option(self._options.beam_size, options.beam_size)
-        segments, _info = self._model.transcribe(
-            audio,
-            language=self._options.language,
-            hotwords=hotwords,
-            beam_size=beam_size,
-            temperature=temperature,
-            condition_on_previous_text=condition_on_previous_text,
-            without_timestamps=without_timestamps,
-            vad_filter=vad_filter,
-            vad_parameters=self._options.vad_parameters,
-        )
-
         text_parts: list[str] = []
+        timed_segments: list[TranscribeSegment] = []
         total_prob = 0.0
         segment_count = 0
         last_speech_end: float | None = None
 
-        for segment in segments:
-            text_parts.append(segment.text.strip())
-            total_prob += segment.avg_logprob
-            segment_count += 1
-            last_speech_end = segment.end
+        failure: Exception | None = None
+        try:
+            segments, _info = self._model.transcribe(
+                audio,
+                language=self._options.language,
+                hotwords=hotwords,
+                beam_size=beam_size,
+                temperature=temperature,
+                condition_on_previous_text=condition_on_previous_text,
+                without_timestamps=without_timestamps,
+                vad_filter=vad_filter,
+                vad_parameters=self._options.vad_parameters,
+            )
+            # Native inference runs during iteration, not just transcribe().
+            for segment in segments:
+                text_parts.append(segment.text.strip())
+                total_prob += segment.avg_logprob
+                segment_count += 1
+                last_speech_end = segment.end
+                if options.mode == "long_chunk" and hasattr(segment, "start"):
+                    timed_segments.append(TranscribeSegment(segment.text.strip(), segment.start, segment.end))
+        except Exception as exc:
+            failure = exc
         self._report_latency(time.perf_counter() - start)
 
         text = " ".join(text_parts).strip()
@@ -468,7 +476,16 @@ class WhisperSession:
 
         self._last_result = TranscribeResult(
             text=text, confidence=avg_confidence, last_speech_end=last_speech_end,
+            segments=tuple(timed_segments),
         )
+        if failure is not None:
+            message = str(failure).lower()
+            if "cuda" in message and ("out of memory" in message or "cuda_error_out_of_memory" in message):
+                raise VramExhaustedError(last_result=self._last_result) from failure
+            raise IncompleteTranscriptionError(
+                "Native transcription failed; available text is incomplete.",
+                last_result=self._last_result,
+            ) from failure
         return self._last_result
 
     def finalize(self) -> TranscribeResult:

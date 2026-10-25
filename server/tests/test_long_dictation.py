@@ -11,8 +11,8 @@ import pytest
 from audio.buffer import AudioBuffer
 import transcription.processor as processor_module
 from transcription.errors import VramExhaustedError
-from transcription.long_dictation import plan_chunks, stitch_text
-from transcription.types import TranscribeOptions, TranscribeResult
+from transcription.long_dictation import AudioChunk, plan_chunks, stitch_text, text_for_chunk
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment
 
 
 def _settings(**overrides: object) -> SimpleNamespace:
@@ -152,7 +152,7 @@ def test_plan_chunks_uses_overlap_after_first_chunk() -> None:
     assert chunks[-1].end_s == pytest.approx(62.8)
 
 
-def test_stitch_text_removes_word_overlap() -> None:
+def test_stitch_text_preserves_repetition_without_timing_evidence() -> None:
     result = stitch_text(
         [
             "This is the first part of a sentence",
@@ -160,9 +160,32 @@ def test_stitch_text_removes_word_overlap() -> None:
             "continues cleanly into the end.",
         ]
     )
+    assert result == (
+        "This is the first part of a sentence part of a sentence that continues cleanly "
+        "continues cleanly into the end."
+    )
+    assert stitch_text(["and that was that.", "That was incredible."]) == (
+        "and that was that. That was incredible."
+    )
 
-    assert result == "This is the first part of a sentence that continues cleanly into the end."
 
+def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
+    previous_chunk = AudioChunk(1, 2, 0, 400000, 0, 400000)
+    current_chunk = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
+    old = TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9),))
+    current = TranscribeResult("That. That was incredible.", 0.9, 2.0, (
+        TranscribeSegment("That.", 0.05, 0.65),  # Same speech at absolute 24.30..24.90.
+        TranscribeSegment("That was incredible.", 0.8, 2.0),  # New speech after 25.0.
+    ))
+    assert text_for_chunk(current, current_chunk, (previous_chunk, old)) == "That was incredible."
+    # Equal text at a different time is intentional repetition, not overlap.
+    earlier = TranscribeResult("That.", 0.9, 20.0, (TranscribeSegment("That.", 19.0, 20.0),))
+    assert text_for_chunk(current, current_chunk, (previous_chunk, earlier)) == current.text
+    # Audio previously processed without recognizing this segment isn't proof.
+    assert text_for_chunk(current, current_chunk, (previous_chunk, TranscribeResult("", 0.0, None))) == current.text
+    # Ambiguous crossing segments are kept in full; word equality cannot delete them.
+    crossing = TranscribeResult("That was that.", 0.9, 1.1, (TranscribeSegment("That was that.", 0.1, 1.1),))
+    assert text_for_chunk(crossing, current_chunk, (previous_chunk, old)) == crossing.text
 
 @pytest.mark.asyncio
 async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,8 +292,33 @@ async def test_final_uses_chunked_long_path_and_reports_progress(
     buf.close()
 
 
+async def test_processor_deduplicates_timed_audio_overlap_and_keeps_new_repetition(monkeypatch):
+    class Session:
+        calls = 0
+
+        def transcribe(self, audio, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9),))
+            return TranscribeResult("That. That was incredible.", 0.9, 2.0, (
+                TranscribeSegment("That.", 0.05, 0.65),
+                TranscribeSegment("That was incredible.", 0.8, 2.0),
+            ))
+
+    monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: _RecordingRuntime(Session()))
+    buf = _make_audio_buffer(np.zeros(31 * 16000, dtype=np.float32))
+    processor = processor_module.TranscriptionProcessor(SimpleNamespace(session_id="timed", audio_buffer=buf, hotwords=None))
+    try:
+        result = await processor.transcribe_final()
+        assert result.text == "That. That was incredible."
+    finally:
+        processor.close()
+        buf.close()
+
+
 @pytest.mark.asyncio
-async def test_long_final_skips_oom_chunk_and_keeps_latest_speech_endpoint(
+async def test_long_final_retains_completed_work_and_marks_oom_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _OverlappingOomSession()
@@ -282,10 +330,12 @@ async def test_long_final_skips_oom_chunk_and_keeps_latest_speech_endpoint(
     monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
-    result = await processor_module.TranscriptionProcessor(context).transcribe_final()
+    with pytest.raises(VramExhaustedError) as failure:
+        await processor_module.TranscriptionProcessor(context).transcribe_final()
 
-    assert result.text == "chunk 1 chunk 3"
-    assert result.last_speech_end == pytest.approx(49.35)
+    assert failure.value.last_result.text == "chunk 1 first chunk repeated"
+    assert failure.value.last_result.last_speech_end == pytest.approx(48.25)
+    assert len(session.calls) == 2  # Bounded recovery stops at the failed chunk.
     buf.close()
 
 
@@ -313,7 +363,7 @@ async def test_low_confidence_long_chunk_retries_with_safer_options(
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_final()
 
-    assert result.text == "better words"
+    assert result.text == "better words better words"
     assert len(session.calls) == 3
     assert session.calls[1][1] is not None
     assert session.calls[1][1].beam_size == 3

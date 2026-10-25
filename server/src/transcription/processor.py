@@ -4,18 +4,18 @@ import asyncio
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Final, TYPE_CHECKING
+from typing import Awaitable, Callable, Final, TYPE_CHECKING, TypeVar
 
 from perf_trace import ServerPerfTiming, is_perf_trace_enabled, sanitize_correlation_id
 from audio.buffer import AudioBuffer
 from config import get_settings
 from protocol.constants import AUDIO_SAMPLE_RATE
 from transcription.contracts import ModelSession, SessionId
-from transcription.errors import VramExhaustedError
+from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 from transcription.factory import get_model_runtime
-from transcription.long_dictation import plan_chunks, stitch_text
+from transcription.long_dictation import plan_chunks, stitch_text, text_for_chunk
 from transcription.types import TranscribeOptions, TranscribeResult
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Bounded configuration invariants for inference memory safety
 MAX_LONG_DICTATION_THRESHOLD_S: Final[float] = 120.0
+_Result = TypeVar("_Result")
 MAX_LONG_DICTATION_CHUNK_S: Final[float] = 60.0
 MIN_LONG_DICTATION_CHUNK_S: Final[float] = 1.0
 
@@ -90,6 +91,8 @@ class TranscriptionProcessor:
         self._session_id = context.session_id
         self._close_lock = threading.Lock()
         self._closed = False
+        self._pending_inference = 0
+        self._lease_release: asyncio.Future[None] | None = None
 
     @property
     def _allow_overlapping_inference(self) -> bool:
@@ -136,19 +139,7 @@ class TranscriptionProcessor:
         if len(audio) == 0:
             return None
 
-        if self._allow_overlapping_inference:
-            executor = await get_executor(self._transcription_max_workers)
-            result = await loop.run_in_executor(
-                executor,
-                lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-            )
-        else:
-            async with get_inference_lock():
-                executor = await get_executor(1)
-                result = await loop.run_in_executor(
-                    executor,
-                    lambda: self._session.transcribe(audio, hotwords=self._context.hotwords),
-                )
+        result = await self._run_transcribe(audio, loop=loop)
 
         transcription_time = time.perf_counter() - start_time
 
@@ -217,13 +208,13 @@ class TranscriptionProcessor:
                     loop=loop,
                     perf_collector=perf_collector,
                 )
-        except VramExhaustedError as error:
+        except VramExhaustedError:
             logger.warning(
                 "[%s] VRAM exhausted during final transcription; "
-                "returning last successful result",
+                "available result is incomplete",
                 self._session_id,
             )
-            result = error.last_result or self._session.finalize()
+            raise
 
         transcription_time = time.perf_counter() - start_time
 
@@ -332,6 +323,8 @@ class TranscriptionProcessor:
         )
 
         loop = asyncio.get_running_loop()
+        failure: IncompleteTranscriptionError | None = None
+        previous = None
         for chunk in chunks:
             if progress_callback is not None:
                 await progress_callback(chunk.index, chunk.total)
@@ -340,20 +333,23 @@ class TranscriptionProcessor:
             )
             try:
                 result = await self._run_transcribe(chunk_audio, loop=loop, options=options, perf_collector=perf_collector)
-            except VramExhaustedError:
-                logger.warning(
-                    "[%s] VRAM exhausted during long dictation chunk %d/%d; "
-                    "skipping failed chunk",
-                    self._session_id,
-                    chunk.index,
-                    chunk.total,
-                )
-                result = TranscribeResult(
+            except IncompleteTranscriptionError as error:
+                failure = error
+                # Only current-call work belongs to this chunk. Never reuse a
+                # previous chunk's session.finalize() result at a new offset.
+                result = error.last_result or TranscribeResult(
                     text="",
                     confidence=0.0,
                     last_speech_end=None,
                 )
-            if self._is_suspicious_long_chunk(result):
+            except Exception as error:
+                raise IncompleteTranscriptionError(
+                    "Long transcription failed; completed chunks are incomplete output.",
+                    last_result=TranscribeResult(
+                        stitch_text(texts), 0.0, last_speech_end,
+                    ),
+                ) from error
+            if failure is None and self._is_suspicious_long_chunk(result):
                 retry_options = TranscribeOptions(
                     condition_on_previous_text=False,
                     without_timestamps=False,
@@ -376,23 +372,39 @@ class TranscriptionProcessor:
                         chunk.index,
                         chunk.total,
                     )
+                except IncompleteTranscriptionError as error:
+                    # The first pass covered this chunk. Preserve it as well
+                    # as prior chunks when a non-OOM retry fails.
+                    failure = error
+                except Exception as error:
+                    failure = IncompleteTranscriptionError(
+                        "Long transcription retry failed; available text is incomplete.",
+                    )
+                    failure.__cause__ = error
                 else:
                     if retry_result.confidence >= result.confidence or not result.text.strip():
                         result = retry_result
-            texts.append(result.text)
+            texts.append(text_for_chunk(result, chunk, previous))
+            previous = (chunk, result)
             weight = max(0.001, chunk.logical_duration_s)
             weighted_confidence += result.confidence * weight
             total_weight += weight
             if result.last_speech_end is not None:
                 absolute_speech_end = chunk.start_s + result.last_speech_end
                 last_speech_end = max(last_speech_end or 0.0, absolute_speech_end)
+            if failure is not None:
+                break
 
         confidence = weighted_confidence / total_weight if total_weight > 0 else 0.0
-        return TranscribeResult(
+        combined = TranscribeResult(
             text=stitch_text(texts),
             confidence=min(1.0, max(0.0, confidence)),
             last_speech_end=last_speech_end,
         )
+        if failure is not None:
+            failure.last_result = combined
+            raise failure
+        return combined
 
     async def _run_transcribe(
         self,
@@ -415,13 +427,14 @@ class TranscriptionProcessor:
                     perf_collector.setdefault("inference_started_at", t_inf)
                     perf_collector["inference_ended_at"] = t_end
                     return res, q_wait, (t_end - t_inf) * 1000.0
-                res, q_wait, inf_ms = await loop.run_in_executor(executor, _worker_overlap)
+                res, q_wait, inf_ms = await self._submit_inference(executor, _worker_overlap, loop=loop)
                 perf_collector["executor_queue_wait_ms"] = perf_collector.get("executor_queue_wait_ms", 0.0) + q_wait
                 perf_collector["model_inference_ms"] = perf_collector.get("model_inference_ms", 0.0) + inf_ms
                 return res
-            return await loop.run_in_executor(
+            return await self._submit_inference(
                 executor,
                 lambda: self._call_session_transcribe(audio, options=options),
+                loop=loop,
             )
 
         t_lock_start = time.perf_counter() if perf_collector is not None else None
@@ -444,15 +457,57 @@ class TranscriptionProcessor:
                     perf_collector.setdefault("inference_started_at", t_inf)
                     perf_collector["inference_ended_at"] = t_end
                     return res, q_wait, (t_end - t_inf) * 1000.0
-                res, q_wait, inf_ms = await loop.run_in_executor(executor, _worker_exclusive)
+                res, q_wait, inf_ms = await self._submit_inference(executor, _worker_exclusive, loop=loop)
                 perf_collector["executor_queue_wait_ms"] = perf_collector.get("executor_queue_wait_ms", 0.0) + q_wait
                 perf_collector["model_inference_ms"] = perf_collector.get("model_inference_ms", 0.0) + inf_ms
                 return res
 
-            return await loop.run_in_executor(
+            return await self._submit_inference(
                 executor,
                 lambda: self._call_session_transcribe(audio, options=options),
+                loop=loop,
             )
+
+    async def _submit_inference(
+        self,
+        executor: ThreadPoolExecutor,
+        work: Callable[[], _Result],
+        *,
+        loop: asyncio.AbstractEventLoop,
+    ) -> _Result:
+        # Reserve before submit: queued jobs own the lease too. Cancellation of
+        # an asyncio await does not mean that a running native job has stopped.
+        with self._close_lock:
+            if self._closed:
+                raise RuntimeError("Transcription processor is closed")
+            self._pending_inference += 1
+        try:
+            future = executor.submit(work)
+        except BaseException:
+            self._inference_finished()
+            raise
+        future.add_done_callback(self._inference_finished)
+        return await asyncio.wrap_future(future, loop=loop)
+
+    def _inference_finished(self, _future: Future | None = None) -> None:
+        with self._close_lock:
+            self._pending_inference -= 1
+            release = self._closed and self._pending_inference == 0
+        if release:
+            # A queued job can be cancelled on the event-loop thread. Closing
+            # a retired generation can unload native memory; keep that off-loop.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._lease.close()
+            else:
+                self._lease_release = loop.run_in_executor(None, self._lease.close)
+                self._lease_release.add_done_callback(self._report_lease_release)
+
+    @staticmethod
+    def _report_lease_release(future: asyncio.Future[None]) -> None:
+        if not future.cancelled() and future.exception() is not None:
+            logger.error("Deferred model lease release failed", exc_info=future.exception())
 
     def _call_session_transcribe(
         self,
@@ -476,13 +531,15 @@ class TranscriptionProcessor:
         return result.confidence < 0.35
 
     def close(self) -> None:
-        """Release the generation lease exactly once."""
+        """Release the lease after all submitted native work has actually ended."""
 
         with self._close_lock:
             if self._closed:
                 return
             self._closed = True
-        self._lease.close()
+            release = self._pending_inference == 0
+        if release:
+            self._lease.close()
 
 
 def shutdown_executor() -> None:

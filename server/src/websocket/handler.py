@@ -16,7 +16,7 @@ from protocol.frames import ClosingReason, StartFrame, StatusKind, WarningCode
 from session.context import SessionContext
 from session.manager import SessionLimitError, get_session_manager
 from session.state import SessionState
-from transcription.errors import VramExhaustedError
+from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 from transcription.factory import (
     get_model_runtime,
     model_info_to_engine_payload,
@@ -546,7 +546,7 @@ async def _finalize_session(
     processor: TranscriptionProcessor,
     reason: ClosingReason,
 ) -> None:
-    """Finalize session: always send final text frame, then closing frame."""
+    """Commit successful text, or report incomplete recovery, then close."""
     async with context.finalization_lock:
         if context.state_machine.state == SessionState.CLOSED:
             return
@@ -557,7 +557,8 @@ async def _finalize_session(
         if context.state_machine.state != SessionState.FINALIZING:
             context.state_machine.transition_to(SessionState.FINALIZING)
 
-        # Get final transcription. If it fails, fall back to the last partial.
+        # A recovered partial must never masquerade as a successful final.
+        failed = False
         final_text = ""
         final_confidence = 0.0
         final_transcription_time = 0.0
@@ -582,14 +583,6 @@ async def _finalize_session(
             final_audio_duration = result.audio_duration
             final_perf = getattr(result, "perf", None) or final_perf
 
-            if result.is_empty and context.last_partial_text:
-                logger.warning(
-                    "[%s] Final transcription empty, using last partial as terminal text",
-                    context.session_id,
-                )
-                final_text = context.last_partial_text
-                final_confidence = 0.0
-
             if final_text:
                 logger.info(
                     "[%s] Final transcription (%d chars, %.1fs audio)",
@@ -603,13 +596,14 @@ async def _finalize_session(
                     context.session_id,
                 )
         except Exception as e:
+            failed = True
             logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
-            if context.last_partial_text:
+            recovered = e.last_result if isinstance(e, IncompleteTranscriptionError) else None
+            if recovered is not None:
+                final_text = recovered.text
+                final_confidence = recovered.confidence
+            else:
                 final_text = context.last_partial_text
-                logger.warning(
-                    "[%s] Falling back to last partial as terminal text after finalization error",
-                    context.session_id,
-                )
 
         # Clear backing audio immediately upon completing final transcription,
         # before waiting further on network socket transmission.
@@ -619,13 +613,26 @@ async def _finalize_session(
             logger.debug("[%s] Error closing audio buffer in finalize: %s", context.session_id, e)
 
         try:
-            await sender.send_final(
-                final_text,
-                final_confidence,
-                final_transcription_time,
-                final_audio_duration,
-                perf=final_perf,
-            )
+            if failed:
+                if final_text:
+                    try:
+                        await sender.send_partial(
+                            final_text, final_confidence, final_transcription_time, final_audio_duration,
+                        )
+                    except Exception:
+                        logger.debug("[%s] Failed to send recovered partial", context.session_id, exc_info=True)
+                await sender.send_error(
+                    ErrorCode.INTERNAL,
+                    "Final transcription failed; any recovered text is incomplete.",
+                )
+            else:
+                await sender.send_final(
+                    final_text,
+                    final_confidence,
+                    final_transcription_time,
+                    final_audio_duration,
+                    perf=final_perf,
+                )
         except Exception:
             logger.debug("[%s] Failed to send final frame", context.session_id, exc_info=True)
 
