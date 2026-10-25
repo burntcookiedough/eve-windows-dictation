@@ -44,6 +44,23 @@ def test_manifest_verifies_all_files(payload):
     assert verify(source, manifest).returncode == 0
 
 
+def test_relative_manifest_output_uses_powershell_location(payload, tmp_path):
+    source, _ = payload
+    working = tmp_path / 'powershell-location'
+    process_directory = tmp_path / 'process-directory'
+    working.mkdir()
+    process_directory.mkdir()
+    result = run_ps(
+        'Set-Location -LiteralPath $env:WORKING; '
+        '[Environment]::CurrentDirectory=$env:PROCESS_DIRECTORY; '
+        "New-InstalledPayloadManifest $env:SOURCE 'relative.json'",
+        SOURCE=source, WORKING=working, PROCESS_DIRECTORY=process_directory,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (working / 'relative.json').is_file()
+    assert not (process_directory / 'relative.json').exists()
+
+
 @pytest.mark.parametrize('change,expected', [('missing', 'Missing'), ('length', 'length mismatch'), ('hash', 'SHA256 mismatch')])
 def test_detects_lost_or_changed_bytes(payload, change, expected):
     source, manifest = payload

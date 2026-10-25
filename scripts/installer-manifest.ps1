@@ -18,7 +18,8 @@ function New-InstalledPayloadManifest {
     if ($files.Count -eq 0) { throw 'Cannot generate an empty payload manifest.' }
     $manifest = [ordered]@{ schemaVersion = 1; fileCount = $files.Count; files = $files }
     $json = $manifest | ConvertTo-Json -Depth 5
-    [IO.File]::WriteAllText([IO.Path]::GetFullPath($OutputFile), $json, [Text.UTF8Encoding]::new($false))
+    $outputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputFile)
+    [IO.File]::WriteAllText($outputPath, $json, [Text.UTF8Encoding]::new($false))
 }
 
 function Assert-InstalledPayload {
