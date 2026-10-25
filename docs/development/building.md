@@ -96,10 +96,34 @@ release assets.
 The package script uses `--publish never`; package, tag, upload, draft, and public
 release actions each require their applicable authorization and release plan.
 
-## Checks
+The Windows `beforePack` hook selects BCJ compression so the NSIS extractor can
+decode every intended file, including ARM64 Python helpers. Do not remove files
+to work around an unsupported compression filter.
+
+For an authorized candidate, retain a byte manifest before removing `win-unpacked`:
 
 ```powershell
-Set-Location ..
+Set-Location .. # From app back to the repository root.
+. ./scripts/installer-manifest.ps1
+New-InstalledPayloadManifest -SourceDir ./app/release/win-unpacked -OutputFile ./candidate-payload-manifest.json
+```
+
+Keep this QA manifest outside the payload and the frozen release asset set. Pass
+its path as `-ManifestPath` to `installer-smoke.ps1` and `release-verify.ps1` to
+compare every expected installed file's length and SHA256. Without it, those
+standalone scripts explicitly report byte verification as unverified. The hosted
+lifecycle gate requires the manifest and checks the candidate after upgrade;
+historical baseline files are not compared to the candidate manifest.
+`release-verify.ps1` also rejects unsupported archive methods and fails if 7-Zip
+cannot list the payload. It resolves the pinned builder tool or accepts an
+explicit `-SevenZipPath`. Source tests do not replace exact-source installation
+and lifecycle evidence, which still require separate authorization.
+
+## Checks
+
+Run from the repository root:
+
+```powershell
 python scripts/version.py check
 git diff --check
 ```

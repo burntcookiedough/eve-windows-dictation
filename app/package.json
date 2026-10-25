@@ -129,6 +129,7 @@
         "owner": "burntcookiedough",
         "repo": "eve-windows-dictation"
       }
-    ]
+    ],
+    "beforePack": "./scripts/before-pack.cjs"
   }
 }
