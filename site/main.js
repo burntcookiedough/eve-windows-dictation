@@ -11,6 +11,7 @@ fetch(`https://api.github.com/repos/${repo}/releases?per_page=1`)
 
 const reveals = document.querySelectorAll('.reveal');
 if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.documentElement.classList.add('js');
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
