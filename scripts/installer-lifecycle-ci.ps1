@@ -2,6 +2,7 @@
 param()
 
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'installer-manifest.ps1')
 $ErrorActionPreference = 'Stop'
 
 $script:ProductGuid = '0204d005-75b3-5b31-b1f6-ef2831e2b204'
@@ -393,6 +394,10 @@ function Assert-Installed {
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) { throw "Installed Eve.exe is missing for $Version." }
     Assert-RegistryState -ExpectedVersion $Version
     Assert-ShortcutAndIcon -InstallDir $script:CurrentInstallDir
+    if ($Version -eq $script:CandidateVersion) {
+        $candidateManifest = Join-Path $script:CandidateArtifactDir 'candidate-payload-manifest.json'
+        Assert-InstalledPayload -InstallDir $script:CurrentInstallDir -ManifestPath $candidateManifest
+    }
 }
 
 function Assert-SyntheticSentinels {
@@ -555,6 +560,11 @@ function Move-And-CleanBuildOutput {
     if ($latest -notmatch [regex]::Escape($script:CandidateVersion) -or $latest -notmatch 'murmur-0\.8\.2-alpha\.8-x64\.nsis\.7z') {
         throw 'Candidate latest.yml does not identify the alpha.8 setup and payload.'
     }
+    $winUnpacked = Join-Path $PSScriptRoot '..\app\release\win-unpacked'
+    $winUnpacked = [System.IO.Path]::GetFullPath($winUnpacked)
+    $candidateManifest = Join-Path $CandidateDir 'candidate-payload-manifest.json'
+    New-InstalledPayloadManifest -SourceDir $winUnpacked -OutputFile $candidateManifest
+    Assert-SevenZipArchiveMethods -ArchivePath (Join-Path $CandidateDir "murmur-$script:CandidateVersion-x64.nsis.7z") -AppDir (Join-Path $script:RepoRoot 'app')
     foreach ($relative in @('app\release', 'app\node_modules', 'server\.venv', 'server\.runtime')) {
         $path = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..') $relative))
         if (-not (Assert-PathWithin -Path $path -Root $script:RepoRoot)) { throw "Refusing build cleanup outside checkout: $path" }
