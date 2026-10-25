@@ -97,7 +97,7 @@ talk, shows the words as they arrive, and disappears when the text is pasted.
 
 1. Download `Eve.Web.Setup.<version>.exe` from
    [GitHub Releases](https://github.com/burntcookiedough/eve-windows-dictation/releases).
-2. Run it. This is a small web installer that downloads the app during setup, so you need
+2. Run it. This is a small `nsis-web` installer that downloads the app during setup, so you need
    an internet connection. It is **unsigned**, so Windows SmartScreen may ask you to confirm.
 3. Open Eve and hold <kbd>Ctrl</kbd>+<kbd>Win</kbd>. The speech model downloads from Hugging Face the first time you use it.
 
