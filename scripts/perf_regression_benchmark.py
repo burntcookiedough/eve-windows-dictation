@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import time
 from urllib.parse import urlsplit
 import uuid
@@ -288,16 +289,25 @@ async def run_replay(args):
 
     # Primary trial records must survive sidecar error.
     if accumulator is not None and sidecar_sink is not None:
+        temporary_path = None
         try:
             report_dict = accumulator.to_dict(run_id=run_id)
             serialized = json.dumps(report_dict, indent=2)
-            sidecar_sink.seek(0)
-            sidecar_sink.write(serialized)
-            sidecar_sink.truncate()
-            sidecar_sink.flush()
-        finally:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                    dir=accuracy_output.parent, prefix=f'.{accuracy_output.name}.',
+                    suffix='.tmp', delete=False) as candidate:
+                temporary_path = Path(candidate.name)
+                candidate.write(serialized)
+                candidate.flush()
+                os.fsync(candidate.fileno())
             sidecar_sink.close()
             sidecar_sink = None
+            os.replace(temporary_path, accuracy_output)
+        finally:
+            if sidecar_sink is not None:
+                sidecar_sink.close()
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     print('Replay records saved externally; no speech text emitted. Physical and insertion evidence: unavailable.')
 

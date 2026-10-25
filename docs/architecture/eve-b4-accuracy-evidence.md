@@ -112,6 +112,12 @@ to ingest human review counts. Consequently:
 
 All commands must be executed from Windows PowerShell within the repository.
 
+The optional sidecar starts as an explicitly incomplete report. The complete
+aggregate is written to an exclusive temporary file in the same directory,
+flushed and synchronized, then atomically replaces that placeholder. Report I/O
+failure or interruption leaves the placeholder incomplete and preserves primary
+trial records; temporary-file cleanup runs on normal exception paths.
+
 ### Replay with safe aggregate sidecar
 
 ```powershell

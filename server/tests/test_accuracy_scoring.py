@@ -17,12 +17,15 @@ Verifies:
 9. Integration tests at mock replay_trial seam:
    - Existing accuracy_output fails before network/output mutation; bytes unchanged; replay not called.
    - Path collision with output (including case alias), manifest, reference, audio rejected.
-   - Partial execution does not emit falsely complete report; sidecar unlinked on failure.
+   - Partial execution preserves an explicitly incomplete sidecar.
+   - Atomic publication preserves that placeholder on report I/O failure.
    - Primary trial records survive sidecar error.
    - Default record write unchanged.
 """
 import asyncio
 import copy
+from contextlib import ExitStack
+import io
 import json
 import os
 from pathlib import Path
@@ -510,7 +513,7 @@ async def test_accuracy_output_path_collision_rejected_before_network(tmp_path):
 
 @pytest.mark.asyncio
 async def test_partial_execution_does_not_emit_falsely_complete_report(tmp_path):
-    """If replay fails partially, the reserved sidecar is unlinked and no falsely complete report is emitted."""
+    """If replay fails partially, the reserved sidecar remains explicitly incomplete."""
     manifest_path, _, _ = _make_test_manifest(tmp_path)
     primary_output = tmp_path / "partial_output.ndjson"
     sidecar_path = tmp_path / "sidecar.json"
@@ -608,3 +611,74 @@ async def test_default_record_write_unchanged(tmp_path):
     for line in lines:
         rec = json.loads(line)
         assert validate_record_dict(rec) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 'write', 'flush', 'sync', 'replace', 'interrupt'])
+async def test_sidecar_publication_preserves_incomplete_on_io_failure(tmp_path, failure):
+    manifest_path, _, _ = _make_test_manifest(tmp_path)
+    primary = tmp_path / 'trials.ndjson'
+    sidecar = tmp_path / 'accuracy.json'
+
+    class Args:
+        manifest = str(manifest_path)
+        output = str(primary)
+        accuracy_output = str(sidecar)
+        url = 'ws://127.0.0.1:51717/transcribe'
+        repetitions = 1
+        timeout = 10.0
+        raw = False
+
+    async def replay(*args, **kwargs):
+        return {'first_partial_ms': 1.0, 'stop_to_final_text_ms': 2.0, 'last_audio_ms': 1.0,
+                'server_perf': None, 'text': 'The quick brown fox', 'outcome': 'success'}
+
+    original_open = io.open
+
+    class FaultyReportFile:
+        def __init__(self, sink):
+            self.sink = sink
+            self.aggregate_written = False
+
+        def __getattr__(self, name):
+            return getattr(self.sink, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.sink.__exit__(*args)
+
+        def write(self, data):
+            aggregate = isinstance(data, str) and '"report_type"' in data
+            if aggregate and failure == 'write':
+                self.sink.write(data[:8])
+                self.sink.flush()
+                raise OSError('synthetic partial report write')
+            result = self.sink.write(data)
+            self.aggregate_written |= aggregate
+            return result
+
+        def flush(self):
+            self.sink.flush()
+            if self.aggregate_written and failure == 'flush':
+                raise OSError('synthetic report flush')
+
+    with ExitStack() as stack:
+        stack.enter_context(patch('scripts.perf_regression_benchmark.replay_trial', side_effect=replay))
+        stack.enter_context(patch('io.open', side_effect=lambda *a, **kw: FaultyReportFile(original_open(*a, **kw))))
+        if failure in {'sync', 'replace', 'interrupt'}:
+            operation = 'replace' if failure == 'replace' else 'fsync'
+            error = KeyboardInterrupt if failure == 'interrupt' else OSError
+            stack.enter_context(patch(f'scripts.perf_regression_benchmark.os.{operation}',
+                                      side_effect=error(f'synthetic report {failure}')))
+        if failure is None:
+            await run_replay(Args())
+        else:
+            with pytest.raises(KeyboardInterrupt if failure == 'interrupt' else OSError, match='synthetic'):
+                await run_replay(Args())
+
+    assert json.loads(sidecar.read_text())['report_status'] == ('complete' if failure is None else 'incomplete')
+    records = [json.loads(line) for line in primary.read_text().splitlines()]
+    assert len(records) == 2 and all(validate_record_dict(record) == [] for record in records)
+    assert not list(tmp_path.glob('.accuracy.json.*.tmp'))
