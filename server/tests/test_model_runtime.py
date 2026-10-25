@@ -15,6 +15,9 @@ from typing import Callable
 import numpy as np
 import pytest
 
+from session.context import SessionContext
+import transcription.processor as processor_module
+
 from transcription.model_runtime import ModelRuntime
 from transcription.contracts import (
     Failed,
@@ -47,6 +50,47 @@ def _config(model: str) -> WhisperConfig:
         vad_speech_pad_ms=200,
         vad_threshold=0.5,
     )
+
+
+async def test_cancelled_processor_inference_pins_retired_generation(monkeypatch):
+    adapter = _Adapter()
+    runtime = ModelRuntime(adapter=adapter, initial=_config("one"))
+    await runtime.start()
+    old = adapter.prepared[0]
+    entered, release, unloaded = threading.Event(), threading.Event(), threading.Event()
+    old.shutdown_started = unloaded
+
+    def transcribe(audio, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        assert old.shutdown_calls == 0
+        return TranscribeResult("completed words", 0.9, 0.1)
+
+    monkeypatch.setattr(old.session, "transcribe", transcribe)
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: type("Settings", (), {})())
+    context = SessionContext()
+    processor = processor_module.TranscriptionProcessor(context)
+    task = asyncio.create_task(processor._run_transcribe(np.zeros(1), loop=asyncio.get_running_loop()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        processor.close()
+        await runtime.prepare_and_activate(_config("two"), persist=lambda: None, publish=lambda: None)
+        assert old.shutdown_calls == 0
+        assert not old.session.closed
+        release.set()
+        assert await asyncio.to_thread(unloaded.wait, 2)
+        assert old.shutdown_calls == 1
+        assert old.session.closed
+    finally:
+        release.set()
+        await asyncio.to_thread(processor_module.shutdown_executor)
+        processor.close()
+        context.audio_buffer.close()
+        await runtime.shutdown()
 
 
 def _info(model: str) -> ModelInfo:

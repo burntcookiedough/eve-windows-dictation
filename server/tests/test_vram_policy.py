@@ -45,7 +45,7 @@ class _FakeRuntime:
 
 
 @pytest.mark.asyncio
-async def test_transcribe_final_returns_last_result_after_vram_oom(
+async def test_transcribe_final_preserves_incomplete_result_after_vram_oom(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_session = _FakeSession()
@@ -62,8 +62,12 @@ async def test_transcribe_final_returns_last_result_after_vram_oom(
     )
     processor = processor_module.TranscriptionProcessor(context)
 
-    result = await processor.transcribe_final()
-
-    assert result.text == "last good"
-    assert result.confidence == pytest.approx(0.93)
-    assert result.last_speech_end == pytest.approx(2.8)
+    try:
+        with pytest.raises(VramExhaustedError) as failure:
+            await processor.transcribe_final()
+        result = failure.value.last_result
+        assert result.text == "last good"
+        assert result.confidence == pytest.approx(0.93)
+        assert result.last_speech_end == pytest.approx(2.8)
+    finally:
+        processor.close()

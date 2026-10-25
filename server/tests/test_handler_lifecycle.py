@@ -416,7 +416,7 @@ async def test_handler_storage_append_error_cleans_storage_and_leases(
 async def test_handler_final_inference_error_cleans_storage_and_leases(
     lifecycle_env, trace_enabled, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Inference failure still delivers one final and cleans storage, with diagnostics on/off."""
+    """Inference failure delivers an error and cleans storage, with diagnostics on/off."""
     if trace_enabled:
         monkeypatch.setenv("MURMUR_PERF_TRACE", "1")
     else:
@@ -458,8 +458,9 @@ async def test_handler_final_inference_error_cleans_storage_and_leases(
 
     frames = [json.loads(message) for message in ws.sent_messages if isinstance(message, str)]
     finals = [frame for frame in frames if frame.get("type") == "final"]
-    assert len(finals) == 1
-    assert ("perf" in finals[0]) == trace_enabled
+    assert finals == []
+    assert [frame["type"] for frame in frames][-2:] == ["error", "closing"]
+    assert frames[-2]["code"] == "internal"
 
     # Backing file unlinked despite final inference error
     assert not os.path.exists(path)

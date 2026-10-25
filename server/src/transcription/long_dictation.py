@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from audio.buffer import AudioBuffer
 from protocol.constants import AUDIO_SAMPLE_RATE
+from transcription.types import TranscribeResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,17 +92,40 @@ def plan_chunks(
 
 
 def stitch_text(chunks: list[str]) -> str:
-    """Join chunk transcripts and remove exact word overlap at boundaries."""
-    stitched = ""
-    for chunk_text in chunks:
-        text = _normalize_space(chunk_text)
-        if not text:
-            continue
-        if not stitched:
-            stitched = text
-            continue
-        stitched = _append_deduped(stitched, text)
-    return _normalize_space(stitched)
+    """Join retained text; equal words alone do not prove duplicate speech."""
+    return _normalize_space(" ".join(chunks))
+
+
+def text_for_chunk(
+    result: TranscribeResult,
+    chunk: AudioChunk,
+    previous: tuple[AudioChunk, TranscribeResult] | None = None,
+) -> str:
+    """Remove only matching segments at demonstrated overlapping audio times.
+
+    A segment crossing the overlap boundary is ambiguous: retain it rather
+    than deleting potentially intentional words. No decoder defaults change.
+    """
+    overlap_end = (chunk.logical_start_sample - chunk.start_sample) / AUDIO_SAMPLE_RATE
+    if overlap_end <= 0 or not result.segments or previous is None:
+        return result.text
+    previous_chunk, previous_result = previous
+
+    def already_transcribed(segment) -> bool:
+        if not (0 <= segment.start <= segment.end <= overlap_end):
+            return False
+        start, end = chunk.start_s + segment.start, chunk.start_s + segment.end
+        return any(
+            _normalize_space(segment.text).casefold() == _normalize_space(old.text).casefold()
+            and start < previous_chunk.start_s + old.end
+            and end > previous_chunk.start_s + old.start
+            for old in previous_result.segments
+        )
+
+    return stitch_text([
+        segment.text for segment in result.segments
+        if not already_transcribed(segment)
+    ])
 
 
 def _find_quiet_boundary(
@@ -141,33 +165,6 @@ def _find_quiet_boundary(
             best_score = score
             best_pos = pos
     return best_pos
-
-
-def _append_deduped(previous: str, current: str) -> str:
-    prev_words = previous.split()
-    current_words = current.split()
-    overlap = _word_overlap(prev_words, current_words)
-    suffix = " ".join(current_words[overlap:])
-    if not suffix:
-        return previous
-    if previous.endswith(("-", "/", "'")):
-        return previous + suffix
-    return f"{previous} {suffix}"
-
-
-def _word_overlap(previous_words: list[str], current_words: list[str]) -> int:
-    max_overlap = min(24, len(previous_words), len(current_words))
-    normalized_previous = [_normalize_word(word) for word in previous_words]
-    normalized_current = [_normalize_word(word) for word in current_words]
-
-    for size in range(max_overlap, 0, -1):
-        if normalized_previous[-size:] == normalized_current[:size]:
-            return size
-    return 0
-
-
-def _normalize_word(word: str) -> str:
-    return re.sub(r"(^[^\w]+|[^\w]+$)", "", word.casefold())
 
 
 def _normalize_space(text: str) -> str:

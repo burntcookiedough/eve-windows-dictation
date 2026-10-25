@@ -8,7 +8,15 @@ if TYPE_CHECKING:
     from transcription.types import TranscribeResult
 
 
-class RecoverableTranscriptionError(RuntimeError):
+class IncompleteTranscriptionError(RuntimeError):
+    """Inference failed; available text is recoverable work, not a final result."""
+
+    def __init__(self, message: str, *, last_result: "TranscribeResult | None" = None) -> None:
+        super().__init__(message)
+        self.last_result = last_result
+
+
+class RecoverableTranscriptionError(IncompleteTranscriptionError):
     """A non-fatal transcription failure that should not end the session."""
 
     def __init__(
@@ -18,10 +26,9 @@ class RecoverableTranscriptionError(RuntimeError):
         message: str,
         last_result: "TranscribeResult | None" = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, last_result=last_result)
         self.code = code
         self.message = message
-        self.last_result = last_result
 
 
 class VramExhaustedError(RecoverableTranscriptionError):
