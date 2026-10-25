@@ -1,11 +1,23 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, promises as fs } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
 const fixtureTempRoot = resolve(tmpdir());
-const vitePort = 51900 + (process.pid % 100);
+// Let Windows choose outside reserved ranges, as the other rendered fixtures do.
+const portProbe = createServer();
+await new Promise((resolveListen, rejectListen) => {
+  portProbe.once('error', rejectListen);
+  portProbe.listen(0, '127.0.0.1', resolveListen);
+});
+const address = portProbe.address();
+await new Promise((resolveClose, rejectClose) => {
+  portProbe.close((error) => error ? rejectClose(error) : resolveClose());
+});
+if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port');
+const vitePort = address.port;
 const viteProcess = Bun.spawn([
   'node',
   resolve(appRoot, 'node_modules/vite/bin/vite.js'),
