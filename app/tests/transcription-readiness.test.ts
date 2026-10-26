@@ -146,7 +146,7 @@ describe('TranscriptionService protocol readiness', () => {
     }
   });
 
-  test('distinguishes a user stop before readiness from a connection failure', async () => {
+  test.each([false, true])('distinguishes a user stop before readiness from a connection failure (closing frame: %s)', async (sendClosing) => {
     const server = new WebSocketServer({ port: 0 });
     await once(server, 'listening');
     const address = server.address();
@@ -164,6 +164,7 @@ describe('TranscriptionService protocol readiness', () => {
           startReceived.resolve();
         } else if (frame.type === 'stop') {
           stopReceived.resolve();
+          if (sendClosing) socket.send(JSON.stringify({ frame: 'control', type: 'closing', reason: 'stop_received' }));
           socket.close();
         }
       });
@@ -178,6 +179,10 @@ describe('TranscriptionService protocol readiness', () => {
       10,
       overlay
     );
+    const closed = deferred<void>();
+    const recordingStates: string[] = [];
+    service.onClose(() => closed.resolve());
+    service.onRecordingState(payload => recordingStates.push(payload.state));
 
     try {
       const connectPromise = service.connect();
@@ -188,6 +193,9 @@ describe('TranscriptionService protocol readiness', () => {
         TranscriptionConnectionCancelledError
       );
       await stopReceived.promise;
+      await closed.promise;
+      expect(recordingStates).not.toContain('error');
+      expect(recordingStates).not.toContain('success');
     } finally {
       for (const client of server.clients) {
         client.terminate();

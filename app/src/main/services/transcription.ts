@@ -293,7 +293,9 @@ export class TranscriptionService {
         case 'closing':
           // Server is ending the session - stop accepting audio
           log.info('Server closing session', { reason: frame.reason });
-          if (!this.didReceiveFinal) this.fail('Session ended without a final result; available text is incomplete.');
+          if (!this.didReceiveFinal && !(this.stopRequested && !this.didReceiveReady)) {
+            this.fail('Session ended without a final result; available text is incomplete.');
+          }
           this.isReady = false;
           this.serverClosing = true; // Don't send stop frame back
           // Trigger close callback to clean up
