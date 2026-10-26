@@ -156,6 +156,7 @@ export interface AudioCaptureErrorPayload {
   code: string;
   message: string;
   deviceId?: string;
+  sessionId?: number;
 }
 
 export interface RecordingStatusPayload {

@@ -109,9 +109,28 @@ class _LifecycleProcessor:
         self.in_final_event = asyncio.Event()
         self.final_gate = asyncio.Event()
         self.raise_in_final = False
+        self.in_partial_event = asyncio.Event()
+        self.partial_gate = asyncio.Event()
+        self.raise_vram_in_partial = False
+        self.partial_result_text: str | None = None
 
     async def transcribe_partial(self) -> TranscriptionResult | None:
         self.transcribe_partial_calls += 1
+        self.in_partial_event.set()
+        if hasattr(self, "_wait_partial_gate") and self._wait_partial_gate:
+            await self.partial_gate.wait()
+        if getattr(self, "raise_vram_in_partial", False):
+            from transcription.errors import VramExhaustedError
+            raise VramExhaustedError()
+        if self.partial_result_text is not None:
+            return TranscriptionResult(
+                text=self.partial_result_text,
+                confidence=0.8,
+                is_empty=False,
+                transcription_time=0.01,
+                audio_duration=1.0,
+                last_speech_end=1.0,
+            )
         return None
 
     async def transcribe_final(self, progress_callback=None) -> TranscriptionResult:
@@ -686,3 +705,159 @@ def test_session_manager_remove_session_defensively_closes_audio_buffer() -> Non
     assert context.audio_buffer._file is None
     assert context.audio_buffer._closed is True
     assert not os.path.exists(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raise_vram", [False, True])
+async def test_handler_blocked_partial_emits_no_frames_after_terminal(
+    lifecycle_env, monkeypatch: pytest.MonkeyPatch, raise_vram
+) -> None:
+    """B3 regression: Blocked partial awaiting inference emits nothing after terminal final or during finalization."""
+    created_processors: list[_LifecycleProcessor] = []
+
+    def make_processor(ctx):
+        proc = _LifecycleProcessor(ctx)
+        proc._wait_partial_gate = True
+        proc.partial_result_text = "stale post-terminal partial"
+        proc.raise_vram_in_partial = raise_vram
+        created_processors.append(proc)
+        return proc
+
+    monkeypatch.setattr(handler_module, "TranscriptionProcessor", make_processor)
+
+    original_send_final = handler_module.FrameSender.send_final
+
+    async def hooked_send_final(self, *args, **kwargs):
+        res = await original_send_final(self, *args, **kwargs)
+        # B3 reproduction: terminal final has been sent, now release blocked partial
+        if created_processors:
+            created_processors[0].partial_gate.set()
+        await asyncio.sleep(0.01)
+        return res
+
+    monkeypatch.setattr(handler_module.FrameSender, "send_final", hooked_send_final)
+
+    ws = _LifecycleWebSocket([
+        _make_control_frame("start", silence_timeout=30.0),
+        _make_audio_frame(0, np.ones(500, dtype=np.int16)),
+    ])
+
+    task = asyncio.create_task(handler_module.websocket_handler(ws))
+
+    # Wait until processor is created and partial loop has started transcribe_partial
+    await _wait_until(lambda: bool(created_processors))
+    processor = created_processors[0]
+    await processor.in_partial_event.wait()
+
+    # Partial inference is now blocked on partial_gate.
+    # Client sends stop frame to trigger finalization.
+    ws.queue_message(_make_control_frame("stop"))
+
+    await task
+
+    # Parse sent messages in emission order
+    frames = [json.loads(m) for m in ws.sent_messages if isinstance(m, str)]
+    frame_types = [f.get("type") for f in frames]
+
+    assert "final" in frame_types
+    final_index = frame_types.index("final")
+
+    # Invariant: No partial, warning, or status frame may appear after terminal final or during finalization
+    frames_after_final = frames[final_index + 1:]
+    disallowed_after_final = [
+        f for f in frames_after_final
+        if f.get("type") in ("partial", "warning", "status")
+    ]
+    assert disallowed_after_final == [], f"Unexpected frames emitted after final: {disallowed_after_final}"
+    assert any(f.get("type") == "closing" for f in frames_after_final)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_kind", ["audio", "control"])
+async def test_handler_invalid_audio_parse_error_fatal_closes_and_cleans_resources(
+    lifecycle_env, monkeypatch: pytest.MonkeyPatch, invalid_kind
+) -> None:
+    """B4 regression: ParseError in _handle_audio_frame sends fatal error, closes socket, accepts no later frames, emits no false final, and cleans all resources."""
+    created_processors: list[_LifecycleProcessor] = []
+
+    def make_processor(ctx):
+        proc = _LifecycleProcessor(ctx)
+        proc._wait_partial_gate = True
+        proc.partial_result_text = "stale partial after fatal error"
+        created_processors.append(proc)
+        return proc
+
+    monkeypatch.setattr(handler_module, "TranscriptionProcessor", make_processor)
+    original_send_error = handler_module.FrameSender.send_error
+
+    async def release_partial_during_error(sender, code, message):
+        await original_send_error(sender, code, message)
+        created_processors[0].partial_gate.set()
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(handler_module.FrameSender, "send_error", release_partial_during_error)
+
+    valid_samples = np.ones(500, dtype=np.int16)
+    invalid_bytes = b"bad-magic-too-short"
+    extra_samples = np.ones(500, dtype=np.int16)
+
+    ws = _LifecycleWebSocket([
+        _make_control_frame("start", silence_timeout=30.0),
+        _make_audio_frame(0, valid_samples),
+    ])
+
+    task = asyncio.create_task(handler_module.websocket_handler(ws))
+
+    await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
+    buf = lifecycle_env.tracked_buffers[0]
+    await buf.first_append_event.wait()
+
+    path = buf.observed_backing_path
+    assert path is not None
+    assert os.path.exists(path)
+    assert len(created_processors) == 1
+    processor = created_processors[0]
+    await processor.in_partial_event.wait()
+
+    # Queue invalid audio frame, followed by subsequent valid audio and stop
+    later_sequences = []
+    original_append = buf.append
+
+    def track_later_audio(sequence, samples):
+        later_sequences.append(sequence)
+        original_append(sequence, samples)
+
+    monkeypatch.setattr(buf, "append", track_later_audio)
+    ws.queue_message({"type": "websocket.receive", "bytes": invalid_bytes} if invalid_kind == "audio"
+                     else {"type": "websocket.receive", "text": "{invalid-json"})
+    ws.queue_message(_make_audio_frame(2, extra_samples))
+    ws.queue_message(_make_control_frame("stop"))
+
+    # Handler must exit promptly due to fatal error
+    await asyncio.wait_for(task, timeout=2.0)
+
+    # Fatal error sent to client
+    frames = [json.loads(m) for m in ws.sent_messages if isinstance(m, str)]
+    error_frames = [f for f in frames if f.get("type") == "error"]
+    assert len(error_frames) == 1
+    assert error_frames[0].get("code") == f"invalid_{'audio' if invalid_kind == 'audio' else 'ctrl'}"
+    error_index = frames.index(error_frames[0])
+    assert frames[error_index + 1:] == []
+    assert later_sequences == []
+
+    # WebSocket was closed
+    assert ws.closed is True
+
+    # No false final emitted
+    final_frames = [f for f in frames if f.get("type") == "final"]
+    assert final_frames == [], f"Unexpected final frames after fatal error: {final_frames}"
+
+    # Processor lease was released
+    assert processor.closed is True
+
+    # Session removed from manager
+    assert lifecycle_env.manager.active_count == 0
+
+    # Backing storage cleanly unlinked
+    assert not os.path.exists(path)
+    assert processor.context.state_machine.state == SessionState.CLOSED

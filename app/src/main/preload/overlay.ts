@@ -54,21 +54,25 @@ const murmurAPI = {
   },
 
   // Recording commands (Main → Renderer, tells overlay to start/stop audio capture)
-  onStartRecording: (callback: (deviceId?: string, perfTraceId?: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, deviceId?: string, perfTraceId?: string) => callback(deviceId, perfTraceId);
+  onStartRecording: (callback: (deviceId?: string, perfTraceId?: string, sessionId?: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, deviceId?: string, perfTraceId?: string, sessionId?: number) => callback(deviceId, perfTraceId, sessionId);
     ipcRenderer.on(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMMAND_START_RECORDING, handler);
   },
 
-  onStopRecording: (callback: () => void) => {
-    const handler = () => callback();
+  onStopRecording: (callback: (sessionId?: number, drain?: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId?: number, drain?: boolean) => callback(sessionId, drain);
     ipcRenderer.on(IPC_CHANNELS.COMMAND_STOP_RECORDING, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMMAND_STOP_RECORDING, handler);
   },
 
   // Audio data (Renderer → Main)
-  sendAudioData: (buffer: ArrayBuffer) => {
-    ipcRenderer.send(IPC_CHANNELS.AUDIO_DATA, buffer);
+  sendAudioData: (buffer: ArrayBuffer, sessionId?: number) => {
+    ipcRenderer.send(IPC_CHANNELS.AUDIO_DATA, buffer, sessionId);
+  },
+
+  reportCaptureStopped: (sessionId: number, drained: boolean) => {
+    ipcRenderer.send(IPC_CHANNELS.AUDIO_CAPTURE_STOPPED, sessionId, drained);
   },
 
   reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => {

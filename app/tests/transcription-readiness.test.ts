@@ -16,6 +16,73 @@ function deferred<T>() {
 }
 
 describe('TranscriptionService protocol readiness', () => {
+  test('unexpected closure before readiness remains an error, not user cancellation', async () => {
+    const server = new WebSocketServer({ port: 0 });
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No test address');
+    server.on('connection', socket => socket.close());
+    const service = new TranscriptionService(`ws://127.0.0.1:${address.port}`, 10,
+      { isDestroyed: () => false, webContents: { send: () => {} } } as unknown as BrowserWindow);
+    const states: string[] = [];
+    service.onRecordingState(payload => states.push(payload.state));
+    try {
+      await expect(service.connect()).rejects.toThrow('closed');
+      expect(states.at(-1)).toBe('error');
+    } finally {
+      for (const client of server.clients) client.terminate();
+      server.close();
+    }
+  });
+
+  for (const ending of ['error', 'disconnect', 'closing', 'success'] as const) {
+    test(`partial then ${ending} preserves terminal provenance and commits once only on success`, async () => {
+      const server = new WebSocketServer({ port: 0 });
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No test address');
+      const accepted = deferred<WebSocket>();
+      server.on('connection', socket => {
+        accepted.resolve(socket);
+        socket.on('message', () => socket.send(JSON.stringify({ frame: 'control', type: 'ready' })));
+      });
+      const overlay = { isDestroyed: () => false, webContents: { send: () => {} } } as unknown as BrowserWindow;
+      const service = new TranscriptionService(`ws://127.0.0.1:${address.port}`, 10, overlay);
+      const finals: string[] = [];
+      const states: string[] = [];
+      const closed = deferred<void>();
+      let closes = 0;
+      service.onFinal(frame => finals.push(frame.text));
+      service.onRecordingState(payload => states.push(payload.state));
+      service.onClose(() => { closes++; closed.resolve(); });
+      try {
+        await service.connect();
+        const socket = await accepted.promise;
+        const socketClosed = once(socket, 'close');
+        const text = (type: string) => JSON.stringify({ frame: 'text', type, text: 'synthetic available words', confidence: 0.9, transcription_time: 0.1, audio_duration: 1 });
+        socket.send(text('partial'));
+        if (ending === 'success') {
+          socket.send(text('final'));
+          socket.send(text('final')); // Duplicate terminal frames cannot paste twice.
+          socket.send(text('partial')); // Nor regress success back to transcribing.
+        }
+        if (ending === 'error') {
+          socket.send(JSON.stringify({ frame: 'control', type: 'error', code: 'internal', message: 'Incomplete inference' }));
+        }
+        if (ending !== 'disconnect') socket.send(JSON.stringify({ frame: 'control', type: 'closing', reason: 'stop_received' }));
+        socket.close();
+        await closed.promise;
+        await socketClosed;
+        expect(finals).toEqual(ending === 'success' ? ['synthetic available words'] : []);
+        expect(states.at(-1)).toBe(ending === 'success' ? 'success' : 'error');
+        expect(closes).toBe(1);
+      } finally {
+        for (const client of server.clients) client.terminate();
+        server.close();
+      }
+    });
+  }
+
   test('does not connect or send audio until the server emits ready', async () => {
     const server = new WebSocketServer({ port: 0 });
     await once(server, 'listening');

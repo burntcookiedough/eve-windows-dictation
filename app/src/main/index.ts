@@ -32,6 +32,7 @@ import type {
   AudioCaptureErrorPayload,
 } from '../shared/types.js';
 import { createLogger } from './lib/logger.js';
+import { CaptureSession } from './services/capture-session.js';
 
 const log = createLogger('App');
 
@@ -39,6 +40,7 @@ let overlayWindow: BrowserWindow | null = null;
 let mainWindow: BrowserWindow | null = null;
 let secondInstanceShowRequested = false;
 let transcriptionService: TranscriptionService | null = null;
+let captureSession: CaptureSession | null = null;
 let historyService: HistoryService | null = null;
 let serverManager: ServerManager | null = null;
 let gpuPackManager: ReturnType<typeof createGpuPackManager> | null = null;
@@ -250,6 +252,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     serviceTraceId
   );
   transcriptionService = service;
+  let serviceCapture: CaptureSession | null = null;
   const serviceSessionMode = sessionMode;
   const servicePasteTargetWindowHandlePromise = currentPasteTargetWindowHandlePromise;
 
@@ -279,6 +282,15 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     if (transcriptionService !== service) {
       return;
     }
+    if (recordingTerminalOverride) return;
+    if (serviceCapture && !serviceCapture.canCommit) {
+      recordingTerminalOverride = 'error';
+      sendOverlayRecordingState({ state: 'error', isRecording: false, mode: serviceSessionMode });
+      service.abort('Server finalized before capture drained; available text is incomplete.');
+      return;
+    }
+    serviceCapture?.close();
+    overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, false);
     if (receivedAt !== undefined) perfTraceManager.mark(serviceTraceId, 'finalReceivedAt', receivedAt);
     perfTraceManager.server(serviceTraceId, frame.perf);
 
@@ -318,7 +330,9 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     const terminalState = recordingTerminalOverride ?? currentRecordingState.state;
 
     // A server-initiated close must stop the renderer's microphone capture too.
-    overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING);
+    serviceCapture?.close();
+    if (captureSession === serviceCapture) captureSession = null;
+    overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, false);
 
     // End Lab state immediately while allowing the overlay to dwell on its
     // success/error state before its renderer exit transition and native hide.
@@ -327,7 +341,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     isRecording = false;
     isStopping = false;
     transcriptionService = null;
-    latestTranscription = null;
+    if (terminalState !== 'error') latestTranscription = null;
     latestStatus = null;
     recordingSource = null;
     recordingSessionMode = 'quick';
@@ -351,11 +365,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     // Tell overlay to start audio capture with selected device
     const deviceId = getSetting('selectedDeviceId');
     perfTraceManager.mark(serviceTraceId, 'captureCommandAt');
-    if (serviceTraceId) {
-      overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId, serviceTraceId);
-    } else {
-      overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId);
-    }
+    serviceCapture = new CaptureSession(
+      sessionGeneration,
+      buffer => service.sendAudioBuffer(buffer),
+      () => overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, true),
+    );
+    captureSession = serviceCapture;
+    overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId, serviceTraceId, sessionGeneration);
   } catch (error) {
     if (transcriptionService !== service) {
       return;
@@ -378,16 +394,24 @@ async function stopRecording() {
   }
   isRecording = false;
   isStopping = true;
+  const service = transcriptionService;
+  const capture = captureSession;
 
   // Tell overlay to stop audio capture
-  overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING);
+  updateRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
+  const drained = capture ? await capture.stop() : true;
+  if (transcriptionService !== service) return;
+  if (!drained) {
+    recordingTerminalOverride = 'error';
+    service?.abort('Audio capture could not drain; available text is incomplete.');
+    return;
+  }
 
   // Send stop to server
   if (isPerfTraceEnabled()) {
     perfTraceManager.mark(recordingPerfTraceId, 'stopDispatchedAt');
   }
-  transcriptionService?.stop();
-  updateRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
+  service?.stop();
 }
 
 function queueLongRecordingAfterStop(): void {
@@ -423,7 +447,7 @@ function setupAudioHandler() {
     }
   });
   let lastLevelAt = 0;
-  ipcMain.on('audio:data', (event, audioData: ArrayBuffer) => {
+  ipcMain.on(IPC_CHANNELS.AUDIO_DATA, (event, audioData: ArrayBuffer, sessionId: number) => {
     if (
       !overlayWindow ||
       overlayWindow.isDestroyed() ||
@@ -432,17 +456,21 @@ function setupAudioHandler() {
     ) {
       return;
     }
-    if (transcriptionService && isRecording) {
+    if (captureSession?.forward(sessionId, audioData)) {
       if (isPerfTraceEnabled()) {
         perfTraceManager.mark(recordingPerfTraceId, 'lastAudioDispatchedAt');
       }
-      transcriptionService.sendAudioBuffer(audioData);
       const now = Date.now();
       if (now - lastLevelAt >= 33) {
         lastLevelAt = now;
         broadcastRecordingState(IPC_CHANNELS.STATE_AUDIO_LEVEL, getAudioFrameLevel(audioData));
       }
     }
+  });
+  ipcMain.on(IPC_CHANNELS.AUDIO_CAPTURE_STOPPED, (event, sessionId: unknown, drained: unknown) => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents) return;
+    if (typeof sessionId !== 'number' || !Number.isSafeInteger(sessionId) || typeof drained !== 'boolean') return;
+    captureSession?.acknowledge(sessionId, drained);
   });
 
   ipcMain.on(
@@ -457,6 +485,7 @@ function setupAudioHandler() {
         typeof payload !== 'object' ||
         typeof payload.code !== 'string' ||
         typeof payload.message !== 'string' ||
+        payload.sessionId !== captureSession?.id ||
         (payload.deviceId !== undefined && typeof payload.deviceId !== 'string')
       ) {
         return;
@@ -474,9 +503,8 @@ function setupAudioHandler() {
         code: `audio_capture_${payload.code}`,
         message: payload.message,
       });
-      void stopRecording().then(() => {
-        sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
-      });
+      transcriptionService?.abort(payload.message);
+      sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
     }
   );
 }

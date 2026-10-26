@@ -45,10 +45,11 @@ export class TranscriptionService {
   private onTranscriptionCallback: ((payload: TranscriptionPayload) => void) | null = null;
   private onWarningCallback: ((payload: RecordingWarningPayload) => void) | null = null;
   private onStatusCallback: ((payload: RecordingStatusPayload) => void) | null = null;
-  private lastTextFrame: TextFrame | null = null;
   private didReceiveFinal = false;
   private didReceiveReady = false;
   private stopRequested = false;
+  private failed = false;
+  private closed = false;
   private cancelPendingConnect: (() => void) | null = null;
 
   constructor(
@@ -70,10 +71,11 @@ export class TranscriptionService {
     return new Promise((resolve, reject) => {
       this.isReady = false;
       this.serverClosing = false;
-      this.lastTextFrame = null;
       this.didReceiveFinal = false;
       this.didReceiveReady = false;
       this.stopRequested = false;
+      this.failed = false;
+      this.closed = false;
       this.sendConnectionState('connecting');
       let connectSettled = false;
 
@@ -106,17 +108,19 @@ export class TranscriptionService {
       });
 
       this.ws.on('error', (error) => {
-        if (this.stopRequested) return;
+        if (this.stopRequested && !this.didReceiveReady) return;
         log.error('WebSocket error', { error });
-        this.sendConnectionState('error', error.message);
+        this.fail(error.message);
         settleConnect(error);
       });
 
       this.ws.on('close', () => {
-        this.maybeEmitSyntheticFinal('socket_closed');
+        if (!this.didReceiveFinal && !(this.stopRequested && !this.didReceiveReady)) {
+          this.fail('Connection closed before a final result; available text is incomplete.');
+        }
         this.sendConnectionState('disconnected');
         settleConnect(new Error('WebSocket closed before connection was ready'));
-        this.onCloseCallback?.();
+        this.finishClose();
       });
     });
   }
@@ -138,13 +142,14 @@ export class TranscriptionService {
 
   // Send pre-formatted audio buffer (already has header)
   sendAudioBuffer(buffer: ArrayBuffer): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isReady) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isReady || this.stopRequested || this.closed || this.failed || this.didReceiveFinal) {
       return;
     }
     this.ws.send(Buffer.from(buffer));
   }
 
   stop(): void {
+    if (this.stopRequested || this.closed || this.failed || this.didReceiveFinal) return;
     this.stopRequested = true;
     this.cancelPendingConnect?.();
 
@@ -171,6 +176,29 @@ export class TranscriptionService {
       type: 'stop',
     };
     this.ws.send(JSON.stringify(frame));
+  }
+
+  /** Abort incomplete capture without dispatching a successful stop/final path. */
+  abort(message: string): void {
+    this.fail(message);
+    this.cancelPendingConnect?.();
+    if (this.ws) this.ws.terminate();
+    else this.finishClose();
+  }
+
+  private fail(message: string): void {
+    if (this.failed || this.didReceiveFinal || this.closed) return;
+    this.failed = true;
+    this.isReady = false;
+    this.sendConnectionState('error', message);
+    this.sendRecordingState('error');
+  }
+
+  private finishClose(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.isReady = false;
+    this.onCloseCallback?.();
   }
 
   onFinal(callback: (frame: TextFrameFinal, receivedAt?: number) => void): void {
@@ -208,16 +236,18 @@ export class TranscriptionService {
   }
 
   private handleMessage(data: string): void {
+    if (this.closed || this.failed) return;
     const frame = parseServerFrame(data);
     if (!frame) {
       log.warn('Failed to parse server frame', { dataLength: data.length });
       return;
     }
+    if (this.didReceiveFinal && !(frame.frame === 'control' && frame.type === 'closing')) return;
 
     if (frame.frame === 'control') {
       switch (frame.type) {
         case 'ready':
-          if (this.stopRequested) break;
+          if (this.stopRequested || this.didReceiveReady) break;
           this.didReceiveReady = true;
           this.isReady = true;
           this.sendRecordingState('listening');
@@ -225,8 +255,8 @@ export class TranscriptionService {
 
         case 'error':
           log.error('Server error', { code: frame.code, message: frame.message });
-          this.sendConnectionState('error', frame.message);
-          this.sendRecordingState('error');
+          this.fail(frame.message);
+          this.ws?.terminate();
           break;
 
         case 'warning': {
@@ -263,11 +293,12 @@ export class TranscriptionService {
         case 'closing':
           // Server is ending the session - stop accepting audio
           log.info('Server closing session', { reason: frame.reason });
-          this.maybeEmitSyntheticFinal('server_closing');
+          if (!this.didReceiveFinal) this.fail('Session ended without a final result; available text is incomplete.');
           this.isReady = false;
           this.serverClosing = true; // Don't send stop frame back
           // Trigger close callback to clean up
-          this.onCloseCallback?.();
+          this.finishClose();
+          this.ws?.close();
           break;
       }
     } else if (frame.frame === 'text') {
@@ -276,8 +307,12 @@ export class TranscriptionService {
   }
 
   private handleTextFrame(frame: TextFrame): void {
+    if (!this.didReceiveReady) return;
+    if (frame.type === 'final') {
+      this.didReceiveFinal = true;
+      this.isReady = false;
+    }
     const receivedAt = this.perfTraceId ? performance.now() : undefined;
-    this.lastTextFrame = frame;
     const payload: TranscriptionPayload = {
       type: frame.type,
       text: frame.text,
@@ -292,37 +327,11 @@ export class TranscriptionService {
       perfTraceManager.mark(this.perfTraceId, 'firstPartialReceivedAt', receivedAt);
       this.sendRecordingState('transcribing');
     } else if (frame.type === 'final') {
-      this.didReceiveFinal = true;
       this.sendRecordingState('success');
       this.onFinalCallback?.(frame, receivedAt);
+      this.finishClose();
+      this.ws?.close();
     }
-  }
-
-  private maybeEmitSyntheticFinal(source: 'server_closing' | 'socket_closed'): void {
-    if (this.didReceiveFinal) {
-      return;
-    }
-    if (!this.didReceiveReady && this.lastTextFrame == null) {
-      return;
-    }
-
-    const fallback = this.lastTextFrame;
-    const syntheticFinal: TextFrameFinal = {
-      frame: 'text',
-      type: 'final',
-      text: fallback?.text ?? '',
-      confidence: fallback?.confidence ?? 0.0,
-      transcription_time: 0.0,
-      audio_duration: fallback?.audio_duration ?? 0.0,
-    };
-
-    log.warn('Synthesizing final frame from best available text', {
-      source,
-      hadTextFrame: fallback != null,
-      sourceFrameType: fallback?.type ?? 'none',
-      textLength: syntheticFinal.text.length,
-    });
-    this.handleTextFrame(syntheticFinal);
   }
 
   private sendConnectionState(status: ConnectionStatePayload['status'], error?: string): void {

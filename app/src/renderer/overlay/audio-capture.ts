@@ -31,6 +31,8 @@ export class AudioCapture {
   private isCapturing = false;
   private isStarting = false;
   private startGeneration = 0;
+  private drainPromise: Promise<boolean> | null = null;
+  private finishDrain: ((drained: boolean) => void) | null = null;
 
   private onAudioData: ((buffer: ArrayBuffer) => void) | null = null;
   private onLevels: ((levels: number[]) => void) | null = null;
@@ -95,7 +97,18 @@ export class AudioCapture {
       // reliably in both dev and packaged Electron builds.
       const workletCode = `
 class AudioProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.draining = false;
+    this.port.onmessage = (event) => {
+      if (event.data?.type === 'drain') {
+        this.draining = true;
+        this.port.postMessage({ type: 'drained' });
+      }
+    };
+  }
   process(inputs, outputs, parameters) {
+    if (this.draining) return false;
     const input = inputs[0];
     if (input && input[0] && input[0].length > 0) {
       this.port.postMessage({ audioData: input[0] });
@@ -133,6 +146,10 @@ registerProcessor('audio-processor', AudioProcessor);
           generation !== this.startGeneration ||
           this.workletNode !== workletNode
         ) return;
+        if (event.data?.type === 'drained') {
+          this.finishDrain?.(true);
+          return;
+        }
         const { audioData } = event.data;
         if (audioData) {
           this.sendAudioToServer(audioData);
@@ -158,7 +175,34 @@ registerProcessor('audio-processor', AudioProcessor);
     }
   }
 
+  /** Drain messages preceding the worklet marker before tearing down capture. */
+  drain(timeoutMs = 1000): Promise<boolean> {
+    if (this.drainPromise) return this.drainPromise;
+    if (!this.isCapturing || !this.workletNode) {
+      this.stop();
+      return Promise.resolve(true);
+    }
+    let resolve!: (drained: boolean) => void;
+    const promise = new Promise<boolean>(done => { resolve = done; });
+    this.drainPromise = promise;
+    const timer = setTimeout(() => this.finishDrain?.(false), timeoutMs);
+    this.finishDrain = drained => {
+      clearTimeout(timer);
+      this.finishDrain = null;
+      this.drainPromise = null;
+      this.stop();
+      resolve(drained);
+    };
+    try { this.workletNode.port.postMessage({ type: 'drain' }); }
+    catch { this.finishDrain?.(false); }
+    return promise;
+  }
+
   stop(): void {
+    if (this.finishDrain) {
+      this.finishDrain(false);
+      return;
+    }
     this.startGeneration += 1;
     this.isStarting = false;
     this.isCapturing = false;

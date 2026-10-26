@@ -27,20 +27,21 @@
 
   let cleanupFns: Array<() => void> = [];
   let perfObserver: OverlayPerfObserver | null = null;
+  let captureSessionId: number | undefined;
 
   function reportPerf(observer: OverlayPerfObserver | null) {
     if (!observer) return;
     try { window.murmur.reportPerfObservation?.(observer.snapshot()); } catch { /* diagnostic only */ }
   }
 
-  async function startAudioCapture(deviceId?: string) {
+  async function startAudioCapture(deviceId?: string, sessionId?: number) {
     const observer = perfObserver;
     try {
       await audioCapture.start(
         // On audio data - send to main process
         (buffer) => {
           observer?.mark('lastAudioAt');
-          window.murmur.sendAudioData(buffer);
+          window.murmur.sendAudioData(buffer, sessionId);
         },
         // On levels - update waveform
         (levels) => {
@@ -64,7 +65,9 @@
               ? `Could not start the microphone: ${error.message}`
               : 'Could not start the microphone. Check the selected input device and try again.';
 
-      window.murmur.reportAudioCaptureError({ code, message, deviceId });
+      if (captureSessionId === sessionId) {
+        window.murmur.reportAudioCaptureError({ code, message, deviceId, sessionId });
+      }
     }
   }
 
@@ -156,15 +159,34 @@
 
     // Subscribe to start/stop commands from main process
     cleanupFns.push(
-      window.murmur.onStartRecording((deviceId, traceId) => {
+      window.murmur.onStartRecording((deviceId, traceId, sessionId) => {
+        captureSessionId = sessionId;
         perfObserver = traceId && /^[a-zA-Z0-9_.-]{1,64}$/.test(traceId) ? new OverlayPerfObserver(traceId) : null;
-        startAudioCapture(deviceId);
+        startAudioCapture(deviceId, sessionId);
       })
     );
 
     cleanupFns.push(
-      window.murmur.onStopRecording(() => {
-        stopAudioCapture();
+      window.murmur.onStopRecording((sessionId, drain) => {
+        if (sessionId === undefined) {
+          captureSessionId = undefined;
+          stopAudioCapture();
+        } else if (sessionId === captureSessionId) {
+          if (!drain) {
+            captureSessionId = undefined;
+            stopAudioCapture();
+            return;
+          }
+          perfObserver?.mark('stopRequestedAt');
+          void audioCapture.drain().then(drained => {
+            if (captureSessionId === sessionId) {
+              captureSessionId = undefined;
+              reportPerf(perfObserver);
+              audioLevels = new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0);
+            }
+            window.murmur.reportCaptureStopped(sessionId, drained);
+          });
+        }
       })
     );
   });
