@@ -414,6 +414,21 @@ cancellation before execution) of every submitted job; it rejects later work.
 
 ---
 
+## Desktop clipboard restoration
+
+When clipboard restoration is enabled, the desktop client retains detached
+payloads for formats exposed by Electron's clipboard API, including rich text,
+images and raw file-list formats. Rich and multi-item baselines are restored in
+one atomic write. An unreadable baseline aborts the paste before replacing it;
+when restoration is disabled, old payloads are not read for preservation.
+
+Pending restoration is cancelled when the observed text, formats or payload
+hashes differ from the client's write. This is content comparison, not an OS
+clipboard sequence token: an identical external copy cannot be distinguished,
+and there is no compare-and-swap across the final read/write window. Native
+format round trips and actual editor insertion still require isolated Windows
+product validation. Clipboard contents are retained only in memory, not logs.
+
 ## Session Lifecycle
 
 ```

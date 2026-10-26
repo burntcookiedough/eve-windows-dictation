@@ -1,15 +1,81 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
+class MockClipboardItem {
+  readonly types: string[];
+  private _items: Record<string, string | Blob | { title: string; url: string } | Promise<Blob | string>>;
+
+  constructor(items: Record<string, string | Blob | { title: string; url: string } | Promise<Blob | string>>) {
+    this._items = { ...items };
+    this.types = Object.keys(items);
+  }
+
+  async getType(type: string): Promise<Blob | { title: string; url: string }> {
+    if (!(type in this._items)) {
+      throw new Error(`Failed to execute 'getType' on 'ClipboardItem': The type '${type}' was not found`);
+    }
+    const val = await this._items[type];
+    if (typeof val === 'string') {
+      return new Blob([val], { type });
+    }
+    return val as Blob | { title: string; url: string };
+  }
+}
+
 let clipboardText = '';
 let clipboardFormats: string[] = [];
 let clipboardWrites: string[] = [];
+let clipboardItems: MockClipboardItem[] = [];
+let clipboardItemWrites: MockClipboardItem[][] = [];
+
 const clipboardReadText = mock(async () => clipboardText);
-const clipboardRead = mock(async () => [{ types: [...clipboardFormats] }]);
+const clipboardRead = mock(async () => {
+  if (clipboardItems.length > 0) {
+    const currentTypes = [...new Set(clipboardItems.flatMap((item) => item.types))].sort();
+    const requestedTypes = [...clipboardFormats].sort();
+    if (JSON.stringify(currentTypes) === JSON.stringify(requestedTypes)) {
+      return clipboardItems;
+    }
+  }
+  const record: Record<string, string> = {};
+  for (const fmt of clipboardFormats) {
+    record[fmt] = fmt === 'text/plain' ? clipboardText : `content for ${fmt}`;
+  }
+  return [new MockClipboardItem(record)];
+});
+
 const clipboardWriteText = mock(async (text: string) => {
   clipboardText = text;
   clipboardFormats = ['text/plain'];
+  clipboardItems = [new MockClipboardItem({ 'text/plain': text })];
   clipboardWrites.push(text);
 });
+
+const clipboardWrite = mock(async (items: MockClipboardItem[]) => {
+  clipboardItems = [...items];
+  clipboardItemWrites.push([...items]);
+  clipboardFormats = [...new Set(items.flatMap((item) => item.types))].sort();
+  let foundText = false;
+  for (const item of items) {
+    if (item.types.includes('text/plain')) {
+      const blob = await item.getType('text/plain');
+      if (blob instanceof Blob) {
+        clipboardText = await blob.text();
+        foundText = true;
+        break;
+      }
+    }
+  }
+  if (!foundText) {
+    clipboardText = '';
+  }
+});
+
+const clipboardClear = mock(() => {
+  clipboardText = '';
+  clipboardFormats = [];
+  clipboardItems = [];
+});
+
 const execFile = mock((
   command: string,
   args: string[],
@@ -28,10 +94,13 @@ mock.module('electron', () => ({
   app: {
     getPath: () => process.env.TEMP ?? '.',
   },
+  ClipboardItem: MockClipboardItem,
   clipboard: {
     readText: clipboardReadText,
     read: clipboardRead,
     writeText: clipboardWriteText,
+    write: clipboardWrite,
+    clear: clipboardClear,
   },
 }));
 
@@ -39,6 +108,14 @@ mock.module('child_process', () => ({
   execFile,
   spawn,
 }));
+
+function setSyntheticClipboard(items: MockClipboardItem[], text?: string) {
+  clipboardItems = [...items];
+  clipboardFormats = [...new Set(items.flatMap((item) => item.types))].sort();
+  if (typeof text === 'string') {
+    clipboardText = text;
+  }
+}
 
 const {
   buildSendInputScriptContent,
@@ -54,16 +131,53 @@ describe('pasteText', () => {
     clipboardText = 'previous';
     clipboardFormats = ['text/plain'];
     clipboardWrites = [];
+    clipboardItemWrites = [];
+    clipboardItems = [new MockClipboardItem({ 'text/plain': 'previous' })];
     clipboardReadText.mockClear();
     clipboardReadText.mockImplementation(async () => clipboardText);
     clipboardRead.mockClear();
-    clipboardRead.mockImplementation(async () => [{ types: [...clipboardFormats] }]);
+    clipboardRead.mockImplementation(async () => {
+      if (clipboardItems.length > 0) {
+        const currentTypes = [...new Set(clipboardItems.flatMap((item) => item.types))].sort();
+        const requestedTypes = [...clipboardFormats].sort();
+        if (JSON.stringify(currentTypes) === JSON.stringify(requestedTypes)) {
+          return clipboardItems;
+        }
+      }
+      const record: Record<string, string> = {};
+      for (const fmt of clipboardFormats) {
+        record[fmt] = fmt === 'text/plain' ? clipboardText : `content for ${fmt}`;
+      }
+      return [new MockClipboardItem(record)];
+    });
     clipboardWriteText.mockClear();
     clipboardWriteText.mockImplementation(async (text: string) => {
       clipboardText = text;
       clipboardFormats = ['text/plain'];
+      clipboardItems = [new MockClipboardItem({ 'text/plain': text })];
       clipboardWrites.push(text);
     });
+    clipboardWrite.mockClear();
+    clipboardWrite.mockImplementation(async (items: MockClipboardItem[]) => {
+      clipboardItems = [...items];
+      clipboardItemWrites.push([...items]);
+      clipboardFormats = [...new Set(items.flatMap((item) => item.types))].sort();
+      let foundText = false;
+      for (const item of items) {
+        if (item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain');
+          if (blob instanceof Blob) {
+            clipboardText = await blob.text();
+            foundText = true;
+            break;
+          }
+        }
+      }
+      if (!foundText) {
+        clipboardText = '';
+      }
+    });
+    clipboardClear.mockClear();
     execFile.mockClear();
   });
 
@@ -379,6 +493,249 @@ describe('pasteText', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(clipboardText).toBe('final transcript');
+  });
+
+  test('restores rich clipboard content (text/html and text/plain) faithfully after paste', async () => {
+    const htmlPayload = '<b>rich baseline</b>';
+    const plainPayload = 'plain baseline';
+    const initialItem = new MockClipboardItem({
+      'text/plain': plainPayload,
+      'text/html': htmlPayload,
+    });
+    setSyntheticClipboard([initialItem], plainPayload);
+
+    await pasteText('transcription text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardItemWrites.length).toBeGreaterThanOrEqual(1);
+    const lastWritten = clipboardItemWrites[clipboardItemWrites.length - 1];
+    expect(lastWritten).toBeDefined();
+    expect(lastWritten[0].types).toContain('text/html');
+    expect(lastWritten[0].types).toContain('text/plain');
+    const restoredHtmlBlob = (await lastWritten[0].getType('text/html')) as Blob;
+    expect(await restoredHtmlBlob.text()).toBe(htmlPayload);
+    const restoredTextBlob = (await lastWritten[0].getType('text/plain')) as Blob;
+    expect(await restoredTextBlob.text()).toBe(plainPayload);
+  });
+
+  test('restores image/png binary payload faithfully after paste', async () => {
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+    const initialItem = new MockClipboardItem({
+      'image/png': new Blob([pngBytes], { type: 'image/png' }),
+    });
+    setSyntheticClipboard([initialItem], '');
+
+    await pasteText('transcription text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardItemWrites.length).toBeGreaterThanOrEqual(1);
+    const lastWritten = clipboardItemWrites[clipboardItemWrites.length - 1];
+    expect(lastWritten).toBeDefined();
+    expect(lastWritten[0].types).toEqual(['image/png']);
+    const restoredBlob = (await lastWritten[0].getType('image/png')) as Blob;
+    const restoredBytes = new Uint8Array(await restoredBlob.arrayBuffer());
+    expect(restoredBytes).toEqual(pngBytes);
+  });
+
+  test('restores custom raw OS file-list format faithfully after paste', async () => {
+    const fileListPayload = 'file:///C:/path/to/file1.txt\r\nfile:///C:/path/to/file2.txt';
+    const names = 'C:\\synthetic\\first.txt\0C:\\synthetic\\second.txt\0\0';
+    const fileListBytes = new Uint8Array(20 + names.length * 2);
+    const header = new DataView(fileListBytes.buffer);
+    header.setUint32(0, 20, true); // DROPFILES.pFiles
+    header.setUint32(16, 1, true); // DROPFILES.fWide
+    for (let index = 0; index < names.length; index += 1) {
+      header.setUint16(20 + index * 2, names.charCodeAt(index), true);
+    }
+    const osClipboardFormat = 'electron application/osclipboard;format="CF_HDROP"';
+    const initialItem = new MockClipboardItem({
+      'text/uri-list': fileListPayload,
+      [osClipboardFormat]: new Blob([fileListBytes], { type: osClipboardFormat }),
+    });
+    setSyntheticClipboard([initialItem], fileListPayload);
+
+    await pasteText('transcription text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardItemWrites.length).toBeGreaterThanOrEqual(1);
+    const lastWritten = clipboardItemWrites[clipboardItemWrites.length - 1];
+    expect(lastWritten).toBeDefined();
+    expect(lastWritten[0].types).toContain('text/uri-list');
+    expect(lastWritten[0].types).toContain(osClipboardFormat);
+    const restoredFiles = await lastWritten[0].getType(osClipboardFormat) as Blob;
+    expect(new Uint8Array(await restoredFiles.arrayBuffer())).toEqual(fileListBytes);
+    const restoredUris = await lastWritten[0].getType('text/uri-list') as Blob;
+    expect(await restoredUris.text()).toBe(fileListPayload);
+  });
+
+  test('restores bookmark (electron application/bookmark) faithfully after paste', async () => {
+    const bookmarkPayload = { title: 'Eve Voice', url: 'https://eve.local' };
+    const initialItem = new MockClipboardItem({
+      'electron application/bookmark': bookmarkPayload,
+    });
+    setSyntheticClipboard([initialItem], '');
+
+    await pasteText('transcription text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardItemWrites.length).toBeGreaterThanOrEqual(1);
+    const lastWritten = clipboardItemWrites[clipboardItemWrites.length - 1];
+    expect(lastWritten).toBeDefined();
+    expect(lastWritten[0].types).toEqual(['electron application/bookmark']);
+    const restoredBookmark = await lastWritten[0].getType('electron application/bookmark');
+    expect(restoredBookmark).toEqual(bookmarkPayload);
+  });
+
+  test('preserves a newer payload when owned format names and plain text are unchanged', async () => {
+    const pngA = new Uint8Array([137, 80, 78, 71, 1, 1, 1, 1]);
+    const pngB = new Uint8Array([137, 80, 78, 71, 2, 2, 2, 2]);
+
+    setSyntheticClipboard([
+      new MockClipboardItem({
+        'text/plain': 'shared text',
+        'image/png': new Blob([pngA], { type: 'image/png' }),
+      }),
+    ], 'shared text');
+
+    // Model an additional native format exposed alongside our plain-text write.
+    // The user's subsequent update changes bytes without adding a format.
+    clipboardWriteText.mockImplementationOnce(async (text: string) => {
+      clipboardText = text;
+      clipboardItems = [new MockClipboardItem({
+        'text/plain': text,
+        'image/png': new Blob([pngA], { type: 'image/png' }),
+      })];
+      clipboardFormats = ['text/plain', 'image/png'];
+      clipboardWrites.push(text);
+    });
+
+    await pasteText('transcription text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+      targetWindowHandle: 12345,
+    });
+
+    // While waiting for restore, user copies new image B with identical format names and text
+    setSyntheticClipboard([
+      new MockClipboardItem({
+        'text/plain': 'transcription text',
+        'image/png': new Blob([pngB], { type: 'image/png' }),
+      }),
+    ], 'transcription text');
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // Must NOT restore over user's new image B
+    expect(clipboardItemWrites).toEqual([]);
+    const currentItem = clipboardItems[0];
+    const currentBlob = (await currentItem.getType('image/png')) as Blob;
+    const currentBytes = new Uint8Array(await currentBlob.arrayBuffer());
+    expect(currentBytes).toEqual(pngB);
+  });
+
+  test('does not inspect unreadable old payloads when clipboard restoration is disabled', async () => {
+    const readUnknownPayload = mock(async () => { throw new Error('Unreadable baseline'); });
+    clipboardItems = [{ types: ['custom/unreadable'], getType: readUnknownPayload } as unknown as MockClipboardItem];
+    clipboardFormats = ['custom/unreadable'];
+
+    await pasteText('explicitly replace clipboard', {
+      restoreClipboard: false, restoreDelayMs: 1, method: 'sendinput',
+    });
+
+    expect(readUnknownPayload).not.toHaveBeenCalled();
+    expect(clipboardText).toBe('explicitly replace clipboard');
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
+  test('restores an empty clipboard without inventing a text format', async () => {
+    clipboardRead.mockImplementationOnce(async () => []);
+    clipboardText = '';
+    clipboardFormats = [];
+    clipboardItems = [];
+    await pasteText('temporary text', {
+      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardClear).toHaveBeenCalledTimes(1);
+    expect(clipboardFormats).toEqual([]);
+  });
+
+  test('restores multiple items together in one native write', async () => {
+    setSyntheticClipboard([
+      new MockClipboardItem({ 'text/plain': 'first', 'text/html': '<b>first</b>' }),
+      new MockClipboardItem({ 'image/png': new Blob([new Uint8Array([1, 2, 3])]) }),
+    ], 'first');
+    await pasteText('temporary text', {
+      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardWrite).toHaveBeenCalledTimes(1);
+    expect(clipboardItemWrites[0].length).toBe(2);
+    const first = await clipboardItemWrites[0][0].getType('text/html') as Blob;
+    const second = await clipboardItemWrites[0][1].getType('image/png') as Blob;
+    expect(await first.text()).toBe('<b>first</b>');
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  test('does not fall back to destructive text restore if atomic rich restore fails', async () => {
+    setSyntheticClipboard([
+      new MockClipboardItem({ 'text/plain': 'baseline', 'text/html': '<b>baseline</b>' }),
+    ], 'baseline');
+    clipboardWrite.mockImplementationOnce(async () => { throw new Error('Synthetic atomic write failure'); });
+    await pasteText('temporary text', {
+      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(clipboardWrite).toHaveBeenCalledTimes(1);
+    expect(clipboardWrites).toEqual(['temporary text']);
+    expect(clipboardText).toBe('temporary text');
+    expect(clipboardClear).not.toHaveBeenCalled();
+  });
+
+  test('aborts paste and preserves unknown clipboard when async snapshot getType fails for an unreadable format', async () => {
+    const unreadableItem = {
+      types: ['custom/unreadable'],
+      getType: mock(async () => {
+        throw new Error('OS format cannot be read');
+      }),
+    };
+    clipboardItems = [unreadableItem as unknown as MockClipboardItem];
+    clipboardFormats = ['custom/unreadable'];
+
+    await expect(pasteText('new text', {
+      restoreClipboard: true,
+      restoreDelayMs: 1,
+      method: 'sendinput',
+    })).rejects.toThrow('OS format cannot be read');
+
+    expect(clipboardWrites).toEqual([]);
+    expect(clipboardItemWrites).toEqual([]);
+    expect(execFile).not.toHaveBeenCalled();
   });
 });
 
