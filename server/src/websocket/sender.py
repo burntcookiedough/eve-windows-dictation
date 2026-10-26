@@ -1,5 +1,6 @@
 """Helper for sending protocol frames over WebSocket."""
 
+import asyncio
 import logging
 import time
 from perf_trace import ServerPerfTiming, record_server_perf, is_perf_trace_enabled
@@ -22,6 +23,7 @@ from protocol.frames import (
 )
 
 logger = logging.getLogger(__name__)
+FRAME_SEND_TIMEOUT_SECONDS = 5.0
 
 
 class FrameSender:
@@ -37,11 +39,17 @@ class FrameSender:
         self._ws = websocket
         self._session_id = session_id
 
+    async def _send_json(self, payload: dict[str, Any]) -> None:
+        """Bound transport backpressure so session teardown can make progress."""
+        await asyncio.wait_for(
+            self._ws.send_json(payload), timeout=FRAME_SEND_TIMEOUT_SECONDS,
+        )
+
     async def send_ready(self, engine_info: dict[str, Any] | None = None) -> None:
         """Send a ready control frame."""
         frame = ReadyFrame(engine=engine_info)
         data = frame.model_dump(exclude_none=True)
-        await self._ws.send_json(data)
+        await self._send_json(data)
         logger.info("[%s] Sent ready frame", self._session_id)
 
     async def send_error(self, code: ErrorCode, message: str) -> None:
@@ -52,7 +60,7 @@ class FrameSender:
             message: Human-readable error message.
         """
         frame = ErrorFrame(code=code, message=message)
-        await self._ws.send_json(frame.model_dump())
+        await self._send_json(frame.model_dump())
         logger.warning(
             "[%s] Sent error frame: %s - %s", self._session_id, code, message
         )
@@ -60,7 +68,7 @@ class FrameSender:
     async def send_warning(self, code: WarningCode, message: str) -> None:
         """Send a non-fatal warning control frame."""
         frame = WarningFrame(code=code, message=message)
-        await self._ws.send_json(frame.model_dump())
+        await self._send_json(frame.model_dump())
         logger.warning(
             "[%s] Sent warning frame: %s - %s", self._session_id, code, message
         )
@@ -82,7 +90,7 @@ class FrameSender:
             chunk_total=chunk_total,
             audio_duration=audio_duration,
         )
-        await self._ws.send_json(frame.model_dump(exclude_none=True))
+        await self._send_json(frame.model_dump(exclude_none=True))
         logger.debug("[%s] Sent status frame: %s", self._session_id, status.value)
 
     async def send_closing(self, reason: ClosingReason) -> None:
@@ -92,7 +100,7 @@ class FrameSender:
             reason: Reason for closing.
         """
         frame = ClosingFrame(reason=reason)
-        await self._ws.send_json(frame.model_dump())
+        await self._send_json(frame.model_dump())
         logger.info("[%s] Sent closing frame: %s", self._session_id, reason.value)
 
     async def send_partial(
@@ -116,7 +124,7 @@ class FrameSender:
             transcription_time=transcription_time,
             audio_duration=audio_duration,
         )
-        await self._ws.send_json(frame.model_dump())
+        await self._send_json(frame.model_dump())
         logger.debug(
             "[%s] Sent partial (%d chars, conf=%.2f, time=%.3fs)",
             self._session_id,
@@ -155,7 +163,7 @@ class FrameSender:
             payload.pop("perf", None)
 
         t_send_start = time.perf_counter() if perf is not None else None
-        await self._ws.send_json(payload)
+        await self._send_json(payload)
         if perf is not None and t_send_start is not None:
             send_duration_ms = (time.perf_counter() - t_send_start) * 1000.0
             perf.ws_send_duration_ms = round(send_duration_ms, 3)

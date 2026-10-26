@@ -375,9 +375,31 @@ The frame shapes and existing error/closing codes are unchanged.
 
 Clients must retain failure provenance across `closing` and socket closure.
 Recovered text is for explicit review/recovery, not normal automatic paste or
-successful History insertion. **Implementation limit:** issue #103 batch 2 must
-update the desktop client's synthetic-final behavior to honor this contract;
-the backend batch alone does not establish end-to-end paste safety.
+successful History insertion. The desktop client commits only an explicit
+successful `final`, once per session. An error, unexpected disconnect, or
+`closing` without a final stays failed; none synthesizes a successful final.
+Late text/status/warning frames cannot change an already-terminal outcome.
+Recovered partial text remains available in memory for review until the next
+recording; it is not automatically pasted or stored as successful History.
+Packaged insertion and physical microphone behavior still need product testing.
+
+Before a user-requested stop reaches the server, the desktop drains capture:
+the worklet stops producing PCM and sends an ordered marker after queued audio.
+The renderer forwards that audio before acknowledging the same capture session
+to main. Main accepts audio only for the active session, including its drain,
+then sends WebSocket `stop`. A missing marker (1 second) or acknowledgement
+(2 seconds) aborts with an explicit incomplete/error outcome. Stale session
+audio, stop commands and acknowledgements cannot affect the next recording.
+These session identifiers are internal IPC metadata; the WebSocket audio and
+control frame formats are unchanged. Server-initiated terminal frames force
+capture teardown rather than requesting another successful stop.
+
+Server frame writes and socket-close attempts have a five-second deadline so
+transport backpressure cannot indefinitely pin finalization or teardown. Fatal
+audio/control errors release buffered audio before awaiting network output;
+shared teardown also closes it defensively. A timed-out close attempt releases
+the session's resources without claiming that the peer received a terminal
+frame or that the underlying network transport has closed successfully.
 
 Chunk deduplication requires matching segment text at overlapping absolute audio
 times. Equal words at different times remain intact. Segments crossing the

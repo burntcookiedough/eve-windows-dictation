@@ -23,10 +23,18 @@ from transcription.factory import (
     runtime_accepts_sessions,
 )
 from transcription.processor import TranscriptionProcessor
-from websocket.sender import FrameSender
+from websocket.sender import FRAME_SEND_TIMEOUT_SECONDS, FrameSender
 
 logger = logging.getLogger(__name__)
 FIRST_AUDIO_TIMEOUT_SECONDS = 30.0
+
+
+async def _close_websocket(websocket: WebSocket) -> None:
+    """Bound the close attempt; cleanup cannot depend on a responsive peer."""
+    try:
+        await asyncio.wait_for(websocket.close(), timeout=FRAME_SEND_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("Timed out closing transcription WebSocket")
 
 
 async def websocket_handler(websocket: WebSocket) -> None:
@@ -44,7 +52,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         await websocket.accept()
         sender = FrameSender(websocket, "no-session")
         await sender.send_error(ErrorCode.RATE_LIMIT, "Maximum sessions reached")
-        await websocket.close()
+        await _close_websocket(websocket)
         return
 
     sender = FrameSender(websocket, context.session_id)
@@ -59,7 +67,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         except Exception as e:
             logger.exception("[%s] Model runtime unavailable: %s", context.session_id, e)
             await sender.send_error(ErrorCode.INTERNAL, "Model runtime unavailable")
-            await websocket.close()
+            await _close_websocket(websocket)
             return
 
         # Replacement preparation keeps the current generation available to
@@ -70,7 +78,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
                 ErrorCode.INTERNAL,
                 "Transcription model is still loading. Try again shortly.",
             )
-            await websocket.close()
+            await _close_websocket(websocket)
             return
 
         # Wait for start frame with timeout
@@ -132,7 +140,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         except Exception:
             logger.debug("[%s] Failed to close audio buffer during teardown", context.session_id, exc_info=True)
         try:
-            await websocket.close()
+            await _close_websocket(websocket)
         except Exception:
             pass
 
@@ -155,13 +163,13 @@ async def _wait_for_start(
         )
     except asyncio.TimeoutError:
         await sender.send_error(ErrorCode.START_TIMEOUT, "No start frame received")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Check message type
     if "bytes" in message:
         await sender.send_error(ErrorCode.NO_START, "Audio received before start")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     if "text" not in message:
@@ -173,20 +181,20 @@ async def _wait_for_start(
         data = json.loads(message["text"])
     except json.JSONDecodeError:
         await sender.send_error(ErrorCode.INVALID_CTRL, "Invalid JSON")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Validate as start frame
     if data.get("frame") != "control" or data.get("type") != "start":
         await sender.send_error(ErrorCode.INVALID_START, "Expected start frame")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     try:
         start_frame = StartFrame.model_validate(data)
     except ValidationError:
         await sender.send_error(ErrorCode.INVALID_START, "Invalid start frame")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Update context with start frame config
@@ -245,7 +253,12 @@ async def _message_loop(
 
         # Handle binary audio frames
         if "bytes" in message:
-            await _handle_audio_frame(message["bytes"], sender, context)
+            should_close = await _handle_audio_frame(
+                message["bytes"], sender, context
+            )
+            if should_close:
+                await _close_websocket(websocket)
+                return
             continue
 
         # Handle text control frames
@@ -266,47 +279,57 @@ async def _handle_audio_frame(
     data: bytes,
     sender: FrameSender,
     context: SessionContext,
-) -> None:
-    """Handle a binary audio frame."""
-    if not context.state_machine.is_accepting_audio():
-        # Only log once per invalid state to avoid spam
-        if not getattr(context, "_logged_invalid_audio", False):
-            logger.warning(
-                "[%s] Audio received in invalid state %s (suppressing further)",
-                context.session_id,
-                context.state_machine.state.value,
+) -> bool:
+    """Handle a binary audio frame.
+
+    Returns:
+        True if the session should close due to a fatal error, False otherwise.
+    """
+    async with context.finalization_lock:
+        if not context.state_machine.is_accepting_audio():
+            # Only log once per invalid state to avoid spam
+            if not getattr(context, "_logged_invalid_audio", False):
+                logger.warning(
+                    "[%s] Audio received in invalid state %s (suppressing further)",
+                    context.session_id,
+                    context.state_machine.state.value,
+                )
+                context._logged_invalid_audio = True  # type: ignore[attr-defined]
+            return False
+
+        try:
+            frame = parse_audio_frame(data)
+        except ParseError as e:
+            logger.warning("[%s] Invalid audio frame: %s", context.session_id, e)
+            context.state_machine.transition_to(SessionState.CLOSED)
+            context.audio_buffer.close()
+            await sender.send_error(ErrorCode.INVALID_AUDIO, str(e))
+            return True
+
+        # Add to buffer
+        if is_perf_trace_enabled():
+            context.last_audio_received_at = time.perf_counter()
+        context.audio_buffer.append(frame.sequence, frame.samples)
+        audio_duration = context.audio_buffer.duration_seconds
+
+        if (
+            not context.long_dictation_announced
+            and audio_duration >= get_settings().long_dictation_threshold_s
+        ):
+            context.long_dictation_announced = True
+            await sender.send_status(
+                StatusKind.LONG_DICTATION_STARTED,
+                message="Long dictation mode",
+                audio_duration=audio_duration,
             )
-            context._logged_invalid_audio = True  # type: ignore[attr-defined]
-        return
 
-    try:
-        frame = parse_audio_frame(data)
-    except ParseError as e:
-        await sender.send_error(ErrorCode.INVALID_AUDIO, str(e))
-        return
+        # Transition to streaming if first audio and record audio start time
+        if context.state_machine.state == SessionState.STARTED:
+            context.audio_start_time = time.monotonic()
+            context.state_machine.transition_to(SessionState.STREAMING)
+            logger.info("[%s] Audio streaming started", context.session_id)
 
-    # Add to buffer
-    if is_perf_trace_enabled():
-        context.last_audio_received_at = time.perf_counter()
-    context.audio_buffer.append(frame.sequence, frame.samples)
-    audio_duration = context.audio_buffer.duration_seconds
-
-    if (
-        not context.long_dictation_announced
-        and audio_duration >= get_settings().long_dictation_threshold_s
-    ):
-        context.long_dictation_announced = True
-        await sender.send_status(
-            StatusKind.LONG_DICTATION_STARTED,
-            message="Long dictation mode",
-            audio_duration=audio_duration,
-        )
-
-    # Transition to streaming if first audio and record audio start time
-    if context.state_machine.state == SessionState.STARTED:
-        context.audio_start_time = time.monotonic()
-        context.state_machine.transition_to(SessionState.STREAMING)
-        logger.info("[%s] Audio streaming started", context.session_id)
+        return False
 
 
 async def _handle_control_frame(
@@ -324,8 +347,12 @@ async def _handle_control_frame(
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        await sender.send_error(ErrorCode.INVALID_CTRL, "Invalid JSON")
-        await websocket.close()
+        async with context.finalization_lock:
+            if context.state_machine.state != SessionState.CLOSED:
+                context.state_machine.transition_to(SessionState.CLOSED)
+                context.audio_buffer.close()
+                await sender.send_error(ErrorCode.INVALID_CTRL, "Invalid JSON")
+        await _close_websocket(websocket)
         return True
 
     frame_type = data.get("frame")
@@ -343,7 +370,7 @@ async def _handle_control_frame(
             context.partial_task_active_at_stop = context.partial_in_flight
         logger.info("[%s] Received stop frame from client", context.session_id)
         await _finalize_session(sender, context, processor, ClosingReason.STOP_RECEIVED)
-        await websocket.close()
+        await _close_websocket(websocket)
         return True
 
     # Ignore duplicate start
@@ -383,43 +410,61 @@ async def _partial_emission_loop(
                 result = await processor.transcribe_partial()
             finally:
                 context.partial_in_flight = False
-            if result is not None:
-                # Update last speech time if speech was detected
-                if (
-                    result.last_speech_end is not None
-                    and context.audio_start_time is not None
-                ):
-                    context.last_speech_time = (
-                        context.audio_start_time + result.last_speech_end
-                    )
 
-                if not result.is_empty:
-                    await sender.send_partial(
-                        result.text,
-                        result.confidence,
-                        result.transcription_time,
+            async with context.finalization_lock:
+                if (
+                    not context.state_machine.is_accepting_audio()
+                ):
+                    logger.debug(
+                        "[%s] Suppressing partial emission after finalization began (state=%s)",
+                        context.session_id,
+                        context.state_machine.state.value,
+                    )
+                    return
+
+                if result is not None:
+                    # Update last speech time if speech was detected
+                    if (
+                        result.last_speech_end is not None
+                        and context.audio_start_time is not None
+                    ):
+                        context.last_speech_time = (
+                            context.audio_start_time + result.last_speech_end
+                        )
+
+                    if not result.is_empty:
+                        await sender.send_partial(
+                            result.text,
+                            result.confidence,
+                            result.transcription_time,
+                            result.audio_duration,
+                        )
+                        context.has_speech = True
+
+                    # Log cycle timing at debug level
+                    cycle_time = time.monotonic() - cycle_start
+                    logger.debug(
+                        "[%s] Partial emission: transcribe=%.0fms, cycle=%.0fms, audio=%.1fs",
+                        context.session_id,
+                        result.transcription_time * 1000,
+                        cycle_time * 1000,
                         result.audio_duration,
                     )
-                    context.has_speech = True
-
-                # Log cycle timing at debug level
-                cycle_time = time.monotonic() - cycle_start
-                logger.debug(
-                    "[%s] Partial emission: transcribe=%.0fms, cycle=%.0fms, audio=%.1fs",
-                    context.session_id,
-                    result.transcription_time * 1000,
-                    cycle_time * 1000,
-                    result.audio_duration,
-                )
         except VramExhaustedError as e:
             logger.warning(
                 "[%s] VRAM exhausted during partial transcription: %s",
                 context.session_id,
                 e.message,
             )
-            if not warning_sent:
-                warning_sent = True
-                await sender.send_warning(WarningCode.VRAM_EXHAUSTED, e.message)
+            async with context.finalization_lock:
+                if (
+                    context.state_machine.is_accepting_audio()
+                ):
+                    if not warning_sent:
+                        warning_sent = True
+                        await sender.send_warning(WarningCode.VRAM_EXHAUSTED, e.message)
+                else:
+                    return
         except Exception as e:
             logger.exception(
                 "[%s] Error in partial emission: %s", context.session_id, e
@@ -471,7 +516,7 @@ async def _silence_monitor_loop(
                     )
                 finally:
                     try:
-                        await websocket.close()
+                        await _close_websocket(websocket)
                     except Exception:
                         logger.debug(
                             "[%s] WebSocket already closed after silence timeout",
@@ -497,7 +542,7 @@ async def _silence_monitor_loop(
                     )
                 finally:
                     try:
-                        await websocket.close()
+                        await _close_websocket(websocket)
                     except Exception:
                         logger.debug(
                             "[%s] WebSocket already closed after first-audio timeout",
@@ -531,7 +576,7 @@ async def _silence_monitor_loop(
                 )
             finally:
                 try:
-                    await websocket.close()
+                    await _close_websocket(websocket)
                 except Exception:
                     logger.debug(
                         "[%s] WebSocket already closed after silence timeout",
