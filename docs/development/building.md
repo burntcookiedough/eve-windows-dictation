@@ -129,6 +129,10 @@ while their process objects have open handles ([Microsoft process lifetime
 contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information)).
 An inaccessible or changed identity fails cleanup instead of authorizing an
 unsafe stop or reporting success. A PID-file claim alone never authorizes cleanup.
+Preflight also refuses unverifiable process paths; use an isolated QA host with
+visibility into its target processes. Clean exits after capture retain their
+bound creation identity, and an immediate launcher exit uses the original
+creation handle and requested image instead of requiring a live module query.
 Windows console hosts are waited on after their owned clients stop; the smoke
 script never forcibly terminates those OS executables.
 The synthetic process tests execute only extracted functions and the actual

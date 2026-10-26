@@ -59,6 +59,7 @@ function Resolve-InstallerPath {
 function Get-SmokeTargetPaths {
     param([string[]]$Directories)
     foreach ($directory in $Directories) {
+        $directory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($directory)
         foreach ($relative in @('Eve.exe', 'Murmur.exe', 'resources\server\.runtime\python.exe', 'resources\server\.venv\Scripts\python.exe')) {
             [IO.Path]::GetFullPath((Join-Path $directory $relative))
         }
@@ -78,15 +79,38 @@ function Assert-SmokeTargetsIdle {
 }
 
 function Get-SmokeProcessIdentity {
-    param([System.Diagnostics.Process]$Process)
+    param([System.Diagnostics.Process]$Process, [string]$ExpectedPath = '', $Snapshot = $null)
     # Pin the OS process object before reading identity or following child IDs.
     # Retain this handle through descendant cleanup, including after root exit.
     $null = $Process.SafeHandle
+    $started = $Process.StartTime.ToUniversalTime()
+    $fallbackPath = ''
+    if ($ExpectedPath) { $fallbackPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExpectedPath) }
+    if ($Snapshot) {
+        # CIM timestamps have microsecond precision. Bind its earlier path/parent
+        # record to this pinned OS object before using it after a clean exit.
+        $recordTicks = ([datetime]$Snapshot.CreationDate).ToUniversalTime().Ticks
+        if (($started.Ticks - ($started.Ticks % 10)) -ne ($recordTicks - ($recordTicks % 10))) {
+            throw 'Smoke child creation identity changed; refusing snapshot fallback.'
+        }
+        $fallbackPath = [string]$Snapshot.ExecutablePath
+    }
+    $path = $null
+    try { $path = $Process.Path }
+    catch { if (-not $Process.HasExited) { throw } }
+    if (-not $path) {
+        if (-not $Process.HasExited -or -not $fallbackPath) { throw 'Smoke executable identity could not be captured.' }
+        $path = $fallbackPath
+    }
+    $path = [IO.Path]::GetFullPath($path)
+    if ($fallbackPath -and -not $path.Equals([IO.Path]::GetFullPath($fallbackPath), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Smoke executable identity changed; refusing to stop it.'
+    }
     return [pscustomobject]@{
         Process = $Process
         Id = $Process.Id
-        Path = [IO.Path]::GetFullPath($Process.Path)
-        Started = $Process.StartTime.ToUniversalTime()
+        Path = $path
+        Started = $started
     }
 }
 
@@ -113,9 +137,12 @@ function Stop-SmokeOwnedTree {
         $child = $null
         try {
             $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction Stop
-            $childIdentity = Get-SmokeProcessIdentity -Process $child
+            $childIdentity = Get-SmokeProcessIdentity -Process $child -Snapshot $record
             $live = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($childIdentity.Id)" -ErrorAction Stop
-            if (-not $live) { throw 'Smoke child exited before its ancestry could be verified.' }
+            if (-not $live) {
+                if (-not $child.HasExited) { throw 'Live smoke child ancestry could not be verified.' }
+                $live = $record # Creation identity was bound to the pinned handle.
+            }
             if ($live.ParentProcessId -ne $Identity.Id -or $childIdentity.Started -lt $Identity.Started) {
                 throw 'Smoke child identity changed; refusing to stop it or claim complete cleanup.'
             }
@@ -305,7 +332,9 @@ $allowedSmokePaths = @(Get-SmokeTargetPaths -Directories @($InstallDir))
 
 try {
     $process = Start-Process -FilePath $exePath -ArgumentList $launchArguments -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden
-    $ownedLauncher = Get-SmokeProcessIdentity -Process $process
+    # Start-Process with WindowStyle captures its creation handle before resuming
+    # on Windows. Retain the requested image when a rapid exit hides MainModule.
+    $ownedLauncher = Get-SmokeProcessIdentity -Process $process -ExpectedPath $exePath
     Write-Step "Waiting for server PID file at $PidFilePath"
     $pidData = Wait-For-PidFile -Path $PidFilePath -TimeoutSec $HealthTimeoutSec -StartedAfter $launchStartedAt
     $healthUrl = "http://127.0.0.1:$($pidData.port)/health"

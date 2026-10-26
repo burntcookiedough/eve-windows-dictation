@@ -9,6 +9,24 @@ foreach ($function in $ast.FindAll({ param($n) $n -is [System.Management.Automat
     Invoke-Expression $function.Extent.Text
 }
 
+if ($Mode -eq 'provider-paths') {
+    $self = Get-Process -Id $PID
+    try {
+        $image = $self.Path
+        $staleDirectory = Join-Path $Root 'different native directory'
+        New-Item -ItemType Directory -Path $staleDirectory | Out-Null
+        [Environment]::CurrentDirectory = $staleDirectory
+        Set-Location -LiteralPath (Split-Path -Parent $image)
+        $identity = Get-SmokeProcessIdentity -Process $self -ExpectedPath ('.\' + [IO.Path]::GetFileName($image))
+        if ($identity.Path -ine $image) { throw 'Relative launch identity resolved outside the PowerShell location' }
+        Set-Location -LiteralPath $Root
+        $paths = @(Get-SmokeTargetPaths -Directories @('installed'))
+        if ((Join-Path $Root 'installed/Eve.exe') -notin $paths) { throw 'Target paths ignored PowerShell location' }
+        Write-Output 'PROVIDER_PROOF=relative target/image paths follow PowerShell location'
+    } finally { $self.Dispose() }
+    exit 0
+}
+
 if ($Mode -eq 'preflight') {
     $script:Stops = 0
     $script:CandidatePath = Join-Path $Root 'unrelated/Eve.exe'
@@ -43,10 +61,15 @@ function Wait-ProbeRecord([string]$Directory) {
 }
 $launcherFile = Join-Path $Root 'launcher.ps1'
 @'
-param([string]$PythonExe, [string]$BackendScript, [string]$ChildRoot, [switch]$Nested)
+param([string]$PythonExe, [string]$BackendScript, [string]$ChildRoot, [switch]$Nested, [switch]$ExitEarly)
 $childArguments = @('-u', "`"$BackendScript`"", "`"$ChildRoot`"")
 if ($Nested) { $childArguments += 'relay' }
 $child = Start-Process -FilePath $PythonExe -ArgumentList $childArguments -PassThru -WindowStyle Hidden
+if ($ExitEarly) {
+    New-Item -ItemType Directory -Path $ChildRoot -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $ChildRoot 'launcher-done.txt') -Value 'exiting'
+    exit 0
+}
 Start-Sleep -Seconds 20
 Set-Content -LiteralPath (Join-Path $ChildRoot 'launcher-expired.txt') -Value 'fixture TTL expired'
 '@ | Set-Content -LiteralPath $launcherFile
@@ -59,17 +82,28 @@ try {
     $shellExe = (Get-Process -Id $PID).Path
     $launcherArguments = @('-NoProfile', '-File', "`"$launcherFile`"", '-PythonExe', "`"$PythonExe`"", '-BackendScript', "`"$BackendScript`"", '-ChildRoot', "`"$ownRoot`"")
     if ($Mode -eq 'nested') { $launcherArguments += '-Nested' }
+    if ($Mode -eq 'fast-launcher') { $launcherArguments += '-ExitEarly' }
     $process = Start-Process -FilePath $shellExe -ArgumentList $launcherArguments -PassThru -WindowStyle Hidden
-    $sourceHandle = $process.SafeHandle
-    $launcherObserver = Get-Process -Id $process.Id
-    $null = $launcherObserver.SafeHandle
-    if (Get-Command Get-SmokeProcessIdentity -ErrorAction SilentlyContinue) {
-        $ownedLauncher = Get-SmokeProcessIdentity -Process $process
+    if ($Mode -eq 'fast-launcher') {
+        $record = Wait-ProbeRecord $ownRoot
+        $backend = Get-Process -Id $record.pid
+        $null = $backend.SafeHandle
+        # Do not acquire a second observer handle or inspect the launcher module.
+        # Delay capture until the launcher has exited, as an immediate crash can.
+        Start-Sleep -Milliseconds 150
     }
+    $sourceHandle = $process.SafeHandle
+    if ($Mode -ne 'fast-launcher') {
+        $launcherObserver = Get-Process -Id $process.Id
+        $null = $launcherObserver.SafeHandle
+    }
+    if (Get-Command Get-SmokeProcessIdentity -ErrorAction SilentlyContinue) {
+        $ownedLauncher = Get-SmokeProcessIdentity -Process $process -ExpectedPath $shellExe
+    }
+    if ($Mode -eq 'fast-launcher' -and -not $process.HasExited) { throw 'Fixture did not exit before identity capture' }
     $record = Wait-ProbeRecord $ownRoot
     if ($record.parent -ne $process.Id) { throw 'Fixture child was not spawned by the owned launcher' }
-    $backend = Get-Process -Id $record.pid
-    $null = $backend.SafeHandle
+    if (-not $backend) { $backend = Get-Process -Id $record.pid; $null = $backend.SafeHandle }
     if ($Mode -eq 'nested') {
         $leafRecord = Wait-ProbeRecord (Join-Path $ownRoot 'leaf')
         if ($leafRecord.parent -ne $backend.Id) { throw 'Fixture relay did not own its child' }
@@ -86,13 +120,26 @@ try {
     if (-not $locked) { throw 'Fixture file was not held before cleanup' }
     $allowedSmokePaths = @($shellExe, $PythonExe)
     if ($Mode -eq 'wrong-path') { $allowedSmokePaths = @($shellExe) }
-    if ($Mode -eq 'wrong-parent') {
+    if ($Mode -in @('wrong-parent', 'wrong-birth', 'exit-during-inspection')) {
         $script:BackendId = $backend.Id
         $script:ForeignId = $foreign.Id
+        $script:BackendProcess = $backend
         function Get-CimInstance {
             [CmdletBinding()]param([string]$ClassName, [string]$Filter)
             $rows = @(CimCmdlets\Get-CimInstance -ClassName $ClassName -Filter $Filter -ErrorAction Stop)
+            if ($Mode -eq 'wrong-birth' -and $Filter -like 'ParentProcessId = *') {
+                return @($rows | ForEach-Object {
+                    if ($_.ProcessId -eq $script:BackendId) {
+                        [pscustomobject]@{ ProcessId=$_.ProcessId; ParentProcessId=$_.ParentProcessId; ExecutablePath=$_.ExecutablePath; CreationDate=$_.CreationDate.AddSeconds(-1) }
+                    } else { $_ }
+                })
+            }
             if ($Filter -eq "ProcessId = $script:BackendId") {
+                if ($Mode -eq 'exit-during-inspection') {
+                    $script:BackendProcess.Kill()
+                    $null = $script:BackendProcess.WaitForExit(5000)
+                    return $null
+                }
                 return [pscustomobject]@{ ParentProcessId = $script:ForeignId }
             }
             return $rows
@@ -115,7 +162,7 @@ try {
         finally { Invoke-Expression ($cleanup.Statements.Extent.Text -join "`n") }
     } catch { $cleanupError = $_ }
     if (-not $sourceHandle.IsClosed) { throw 'Smoke cleanup did not release its launcher handle' }
-    if ($Mode -in @('wrong-path', 'wrong-parent')) {
+    if ($Mode -in @('wrong-path', 'wrong-parent', 'wrong-birth')) {
         if (-not $cleanupError -or $cleanupError.Exception.Message -notmatch 'cleanup could not be verified') { throw 'Cleanup did not report ownership refusal' }
         if ($backend.HasExited -or $foreign.HasExited) { throw 'Cleanup stopped a process after failed identity validation' }
         Write-Output "REFUSAL_PROOF=$Mode; no unsafe stop; incomplete cleanup reported"
@@ -125,7 +172,7 @@ try {
     if ((Test-Path -LiteralPath (Join-Path $ownRoot 'expired.txt')) -or
         (Test-Path -LiteralPath (Join-Path $ownRoot 'launcher-expired.txt'))) { throw 'Fixture expired naturally; not cleanup proof' }
     if ($Mode -eq 'failure' -and -not $primaryFailure) { throw 'Fixture missed failure path' }
-    if (-not $launcherObserver.WaitForExit(5000)) { throw 'Owned launcher survived cleanup' }
+    if ($launcherObserver -and -not $launcherObserver.WaitForExit(5000)) { throw 'Owned launcher survived cleanup' }
     if (-not $backend.WaitForExit(1000)) { throw 'Owned backend survived actual smoke cleanup' }
     if ($leaf) {
         if (Test-Path -LiteralPath (Join-Path $ownRoot 'leaf/expired.txt')) { throw 'Grandchild expired naturally; not cleanup proof' }
@@ -149,4 +196,5 @@ try {
             finally { $fixture.Dispose() }
         }
     }
+    if ($process -and $Mode -eq 'fast-launcher') { $process.Dispose() }
 }

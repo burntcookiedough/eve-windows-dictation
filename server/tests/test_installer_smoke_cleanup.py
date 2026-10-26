@@ -11,7 +11,11 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows process/CIM semantics')
 
 
-@pytest.mark.parametrize('mode', ['success', 'failure', 'forced', 'missing-pid', 'nested', 'wrong-path', 'wrong-parent', 'preflight'])
+@pytest.mark.parametrize('mode', [
+    'success', 'failure', 'forced', 'missing-pid', 'nested',
+    'wrong-path', 'wrong-parent', 'wrong-birth', 'preflight', 'provider-paths',
+    'fast-launcher', 'exit-during-inspection',
+])
 def test_smoke_cleanup_owns_only_its_processes(tmp_path, mode):
     isolated = tmp_path / 'fixture with spaces'
     isolated.mkdir()
@@ -24,5 +28,7 @@ def test_smoke_cleanup_owns_only_its_processes(tmp_path, mode):
         capture_output=True, text=True, timeout=35,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    marker = 'PREFLIGHT_PROOF=' if mode == 'preflight' else 'REFUSAL_PROOF=' if mode.startswith('wrong-') else 'CLEANUP_PROOF='
+    marker = ('PROVIDER_PROOF=' if mode == 'provider-paths' else
+              'PREFLIGHT_PROOF=' if mode == 'preflight' else
+              'REFUSAL_PROOF=' if mode.startswith('wrong-') else 'CLEANUP_PROOF=')
     assert marker in result.stdout
