@@ -555,10 +555,9 @@ async def _silence_monitor_loop(
         if context.last_speech_time is not None:
             # Speech has been detected - check time since last speech
             silence_duration = now - context.last_speech_time
-        elif context.started_at is not None:
-            # No speech detected yet - use session start as fallback
-            # This handles the case where user never speaks
-            silence_duration = now - context.started_at
+        elif context.audio_start_time is not None:
+            # Microphone initialization must not consume pre-speech silence.
+            silence_duration = now - context.audio_start_time
         else:
             continue
 
@@ -568,7 +567,7 @@ async def _silence_monitor_loop(
                 "[%s] Speech silence timeout (%.1fs since %s)",
                 context.session_id,
                 context.silence_timeout,
-                "last speech" if context.last_speech_time else "session start",
+                "last speech" if context.last_speech_time is not None else "audio start",
             )
             try:
                 await _finalize_session(
