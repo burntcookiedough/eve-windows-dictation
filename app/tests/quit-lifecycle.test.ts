@@ -54,7 +54,7 @@ test('quit timeout keeps deletion owner open; retry ignores the expired acknowle
   await settle();
   expect(p.counts().attempts).toBe(1);
   expect(p.timers.size).toBe(1);
-  expect([...p.timers.values()][0]!.delay).toBeGreaterThan(5300);
+  expect([...p.timers.values()][0]!.delay).toBe(10_000);
   p.expire();
   await settle();
   expect(p.pending()).toBeFalse();

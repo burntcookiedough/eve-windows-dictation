@@ -196,25 +196,27 @@ export class HistoryService {
       )
     `);
 
-    this.db.transaction(() => {
-      stmt.run({
-        id: entry.id,
-        timestamp: entry.timestamp,
-        text: entry.text,
-        confidence: entry.confidence,
-        audioDuration: entry.audioDuration,
-        transcriptionTime: entry.transcriptionTime,
-        wordCount,
-        sessionMode: entry.sessionMode ?? null,
-        engine: entry.engine ?? null,
-        model: entry.model ?? null,
-        device: entry.device ?? null,
-        computeType: entry.computeType ?? null,
-        cudaActive: entry.cudaActive === undefined ? null : Number(entry.cudaActive),
-        editedAt: entry.editedAt ?? null,
-        originalText: entry.originalText ?? null,
-      });
+    stmt.run({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      text: entry.text,
+      confidence: entry.confidence,
+      audioDuration: entry.audioDuration,
+      transcriptionTime: entry.transcriptionTime,
+      wordCount,
+      sessionMode: entry.sessionMode ?? null,
+      engine: entry.engine ?? null,
+      model: entry.model ?? null,
+      device: entry.device ?? null,
+      computeType: entry.computeType ?? null,
+      cudaActive: entry.cudaActive === undefined ? null : Number(entry.cudaActive),
+      editedAt: entry.editedAt ?? null,
+      originalText: entry.originalText ?? null,
+    });
 
+    // Keep the dictation durable if derived writes fail; startup catch-up retries
+    // rows without a ledger entry. Aggregates and the ledger must commit together.
+    this.db.transaction(() => {
       this.addEntryToInsights({ ...entry, wordCount });
     })();
   }

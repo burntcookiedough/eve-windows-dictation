@@ -121,9 +121,11 @@ and lifecycle evidence, which still require separate authorization.
 
 ## Checks
 
-History saves commit the transcription, Insights aggregates, and processed-entry
-ledger in one SQLite transaction. The native `test:history` check injects failures
-at each Insights write stage and verifies rollback, restart, and retry.
+History saves persist the transcription before committing Insights aggregates and
+the processed-entry ledger in one SQLite transaction. If Insights fails, the
+dictation remains in History and startup catch-up retries its derived writes.
+The native `test:history` check injects failures at each Insights write stage and
+verifies retained text, aggregate rollback, restart, and idempotent catch-up.
 
 On quit, Eve gives the renderer ten seconds to acknowledge deferred History
 deletes. Rejection or timeout keeps the app and deletion owner open, brings the

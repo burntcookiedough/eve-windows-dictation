@@ -113,7 +113,7 @@ try {
   ]);
   service.close();
 
-  // A failed Insights write must roll back History and every aggregate together.
+  // Keep the dictation when Insights fails; roll back all derived writes together.
   // Keep a processed row so startup migration cannot conceal a partial write.
   for (const table of ['insights_daily_rollups', 'insights_word_counts', 'insights_processed_entries']) {
     const atomicPath = join(workDir, `atomic-${table}.db`);
@@ -123,23 +123,38 @@ try {
       atomicService.initialize();
       atomicService.save(transcription('prior', now, 'Prior project notes', 10, 1000));
       const before = atomicService.getInsights('all', now);
+      const rollupsBefore = inspection.prepare('SELECT * FROM insights_daily_rollups ORDER BY day').all();
+      const wordsBefore = inspection.prepare('SELECT * FROM insights_word_counts ORDER BY day, word').all();
       inspection.exec(`CREATE TRIGGER fail_insights BEFORE INSERT ON ${table}
         BEGIN SELECT RAISE(ABORT, 'synthetic Insights failure'); END`);
       assert.throws(
         () => atomicService.save(transcription('interrupted', now, 'Interrupted project notes', 20, 2000)),
         /synthetic Insights failure/,
       );
-      assert.deepEqual(atomicService.getEntryIds(), ['prior']);
-      assert.deepEqual(atomicService.getInsights('all', now), before);
+      assert.equal(atomicService.getById('interrupted')?.text, 'Interrupted project notes');
+      assert.equal(atomicService.getEntryIds().length, 2);
+      // A read may also attempt catch-up while the injected fault remains active.
+      assert.throws(() => atomicService.getInsights('all', now), /synthetic Insights failure/);
+      assert.deepEqual(inspection.prepare('SELECT * FROM insights_daily_rollups ORDER BY day').all(), rollupsBefore);
+      assert.deepEqual(inspection.prepare('SELECT * FROM insights_word_counts ORDER BY day, word').all(), wordsBefore);
       assert.equal(inspection.prepare('SELECT COUNT(*) AS count FROM insights_processed_entries').get().count, 1);
       inspection.exec('DROP TRIGGER fail_insights');
       atomicService.close();
       atomicService = new HistoryService(atomicPath);
       atomicService.initialize();
-      assert.deepEqual(atomicService.getInsights('all', now), before);
-      // Retry the same id after rollback, then rebuild/delete through public APIs.
-      atomicService.save(transcription('interrupted', now, 'Interrupted project notes', 20, 2000));
-      assert.equal(atomicService.getInsights('all', now).summary.totalDictations, 2);
+      const recovered = atomicService.getInsights('all', now);
+      assert.equal(recovered.summary.totalDictations, 2);
+      assert.equal(recovered.summary.totalWords, 6);
+      assert.equal(recovered.commonWords.find(word => word.text === 'project')?.count, 2);
+      assert.equal(recovered.indexing.processedEntries, 2);
+      atomicService.close();
+      atomicService = new HistoryService(atomicPath);
+      atomicService.initialize();
+      assert.deepEqual(atomicService.getInsights('all', now), recovered);
+      // Catch-up retried only the derived writes; normal saves still work.
+      atomicService.save(transcription('later', now, 'Later project notes', 20, 2000));
+      assert.equal(atomicService.getInsights('all', now).summary.totalDictations, 3);
+      atomicService.delete('later');
       atomicService.rebuildInsights();
       assert.equal(atomicService.getInsights('all', now).summary.totalDictations, 2);
       atomicService.delete('interrupted');
