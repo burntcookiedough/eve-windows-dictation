@@ -810,15 +810,18 @@ async def test_handler_blocked_partial_emits_no_frames_after_terminal(
     task = asyncio.create_task(handler_module.websocket_handler(ws))
 
     # Wait until processor is created and partial loop has started transcribe_partial
-    await _wait_until(lambda: bool(created_processors))
-    processor = created_processors[0]
-    await processor.in_partial_event.wait()
+    try:
+        await _wait_until(lambda: bool(created_processors))
+        processor = created_processors[0]
+        await asyncio.wait_for(processor.in_partial_event.wait(), timeout=2.0)
 
-    # Partial inference is now blocked on partial_gate.
-    # Client sends stop frame to trigger finalization.
-    ws.queue_message(_make_control_frame("stop"))
-
-    await task
+        # Partial inference is now blocked on partial_gate.
+        # Client sends stop frame to trigger finalization.
+        ws.queue_message(_make_control_frame("stop"))
+        await asyncio.wait_for(task, timeout=2.0)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     # Parse sent messages in emission order
     frames = [json.loads(m) for m in ws.sent_messages if isinstance(m, str)]
