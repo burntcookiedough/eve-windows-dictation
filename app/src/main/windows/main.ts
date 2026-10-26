@@ -12,6 +12,7 @@ const devServerOrigin = `http://localhost:${process.env.MURMUR_DEV_PORT ?? '5173
 let isQuitting = false;
 let quitFlushPending = false;
 let mainWindowForQuit: BrowserWindow | null = null;
+const QUIT_FLUSH_TIMEOUT_MS = 10_000;
 
 // Wait for deferred History deletes before the app closes its database services.
 app.on('before-quit', (event) => {
@@ -26,8 +27,16 @@ app.on('before-quit', (event) => {
   if (quitFlushPending) return;
   quitFlushPending = true;
 
-  void window.webContents
-    .executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')
+  let flushTimeout: ReturnType<typeof setTimeout>;
+  // A stalled renderer must not trap quit. Keep its deletion owner alive on
+  // failure and let the user retry; a late acknowledgement cannot authorize exit.
+  void Promise.race([
+    Promise.resolve().then(() => window.webContents.executeJavaScript('window.__flushDeferredHistoryDeletesOnQuit?.()')),
+    new Promise<void>((_, reject) => {
+      flushTimeout = setTimeout(() => reject(new Error('History shutdown acknowledgement timed out')), QUIT_FLUSH_TIMEOUT_MS);
+    }),
+  ])
+    .finally(() => clearTimeout(flushTimeout))
     .then(() => {
       isQuitting = true;
       app.quit();

@@ -214,7 +214,11 @@ export class HistoryService {
       originalText: entry.originalText ?? null,
     });
 
-    this.addEntryToInsights({ ...entry, wordCount });
+    // Keep the dictation durable if derived writes fail; startup catch-up retries
+    // rows without a ledger entry. Aggregates and the ledger must commit together.
+    this.db.transaction(() => {
+      this.addEntryToInsights({ ...entry, wordCount });
+    })();
   }
 
   getEntries(offset: number, limit: number, filters?: HistoryFilters): HistoryResponse {
