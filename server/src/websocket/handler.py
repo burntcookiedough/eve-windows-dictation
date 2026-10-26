@@ -465,10 +465,8 @@ async def _partial_emission_loop(
                         await sender.send_warning(WarningCode.VRAM_EXHAUSTED, e.message)
                 else:
                     return
-        except Exception as e:
-            logger.exception(
-                "[%s] Error in partial emission: %s", context.session_id, e
-            )
+        except Exception:
+            logger.error("[%s] Error in partial emission", context.session_id)
 
         # Adaptive sleep: yield even when transcription took longer than the interval.
         elapsed = time.monotonic() - cycle_start
@@ -641,7 +639,7 @@ async def _finalize_session(
                 )
         except Exception as e:
             failed = True
-            logger.exception("[%s] Error in final transcription: %s", context.session_id, e)
+            logger.error("[%s] Error in final transcription", context.session_id)
             recovered = e.last_result if isinstance(e, IncompleteTranscriptionError) else None
             if recovered is not None:
                 final_text = recovered.text

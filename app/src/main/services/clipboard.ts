@@ -1,10 +1,10 @@
-import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
-import { clipboard } from 'electron';
+import { createHash } from 'node:crypto';
+import { app, clipboard, ClipboardItem } from 'electron';
 import { execFile } from 'child_process';
 import { writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { app } from 'electron';
 import { createLogger } from '../lib/logger.js';
+import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
 
 const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
@@ -19,15 +19,16 @@ let sendInputScriptPath: string | null = null;
 let latestPasteGeneration = 0;
 let pasteCriticalSection: Promise<void> = Promise.resolve();
 
-interface PasteSequence {
-  baselineText: string;
-  ownedSignature: string;
-  restoreTimer: ReturnType<typeof setTimeout> | null;
-}
-
 interface ClipboardSnapshot {
   text: string;
+  items: Electron.ClipboardItem[];
   signature: string;
+}
+
+interface PasteSequence {
+  baselineSnapshot: ClipboardSnapshot;
+  ownedSignature: string;
+  restoreTimer: ReturnType<typeof setTimeout> | null;
 }
 
 let activePasteSequence: PasteSequence | null = null;
@@ -222,12 +223,43 @@ export async function readFromClipboard(): Promise<string> {
 }
 
 async function readClipboardSnapshot(): Promise<ClipboardSnapshot> {
-  const [text, items] = await Promise.all([clipboard.readText(), clipboard.read()]);
-  const formats = [...new Set(items.flatMap((item) => item.types))].sort();
-  return {
-    text,
-    signature: JSON.stringify({ text, formats }),
-  };
+  const [text, rawItems] = await Promise.all([clipboard.readText(), clipboard.read()]);
+  const items: Electron.ClipboardItem[] = [];
+  const signatures: Array<Array<[string, string]>> = [];
+  for (const rawItem of rawItems) {
+    const payloads: Record<string, Blob | Electron.ClipboardBookmark> = {};
+    const hashes: Array<[string, string]> = [];
+    for (const type of [...rawItem.types].sort()) {
+      if (type === 'electron application/bookmark') {
+        const bookmark = await rawItem.getType('electron application/bookmark');
+        payloads[type] = { title: bookmark.title, url: bookmark.url };
+        hashes.push([type, createHash('sha256').update(JSON.stringify(payloads[type])).digest('hex')]);
+      } else {
+        const payload = await rawItem.getType(type);
+        if (!(payload instanceof Blob)) throw new Error('Unreadable clipboard format');
+        const bytes = new Uint8Array(await payload.arrayBuffer());
+        // Detach from native clipboard ownership before replacing any content.
+        payloads[type] = new Blob([bytes], { type });
+        hashes.push([type, createHash('sha256').update(bytes).digest('hex')]);
+      }
+    }
+    items.push(new ClipboardItem(payloads));
+    signatures.push(hashes);
+  }
+  return { text, items, signature: JSON.stringify({ text, items: signatures }) };
+}
+
+async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<void> {
+  if (snapshot.items.length === 0) {
+    clipboard.clear();
+  } else if (snapshot.items.length === 1 && snapshot.items[0].types.length === 1
+    && snapshot.items[0].types[0] === 'text/plain') {
+    const text = await snapshot.items[0].getType('text/plain');
+    await clipboard.writeText(await text.text());
+  } else {
+    // Electron commits all items and formats in one atomic clipboard write.
+    await clipboard.write(snapshot.items);
+  }
 }
 
 export function getForegroundWindowHandle(): Promise<number | null> {
@@ -348,7 +380,7 @@ function discardPasteSequence(sequence: PasteSequence): void {
   }
 }
 
-async function beginPasteOperation(): Promise<{ sequence: PasteSequence | null; baselineText: string }> {
+async function beginPasteOperation(): Promise<{ sequence: PasteSequence | null; baselineSnapshot: ClipboardSnapshot }> {
   const snapshot = await readClipboardSnapshot();
   const currentSequence = activePasteSequence;
 
@@ -358,23 +390,23 @@ async function beginPasteOperation(): Promise<{ sequence: PasteSequence | null; 
         clearTimeout(currentSequence.restoreTimer);
         currentSequence.restoreTimer = null;
       }
-      return { sequence: currentSequence, baselineText: currentSequence.baselineText };
+      return { sequence: currentSequence, baselineSnapshot: currentSequence.baselineSnapshot };
     }
     discardPasteSequence(currentSequence);
   }
 
   return {
     sequence: null,
-    baselineText: snapshot.text,
+    baselineSnapshot: snapshot,
   };
 }
 
 function activatePasteSequence(
-  baselineText: string,
+  baselineSnapshot: ClipboardSnapshot,
   ownedSignature: string
 ): PasteSequence {
   const sequence: PasteSequence = {
-    baselineText,
+    baselineSnapshot,
     ownedSignature,
     restoreTimer: null,
   };
@@ -429,7 +461,7 @@ function schedulePasteRestore(
           return;
         }
 
-        await clipboard.writeText(sequence.baselineText);
+        await restoreClipboardSnapshot(sequence.baselineSnapshot);
       } catch {
         log.error('Failed to restore clipboard');
       }
@@ -453,16 +485,20 @@ function enqueuePasteCriticalSection(operation: () => Promise<void>): Promise<vo
 export async function pasteText(text: string, options: PasteTextOptions): Promise<void> {
   const pasteGeneration = ++latestPasteGeneration;
   let sequence: PasteSequence | null = null;
-  let baselineText = '';
+  let baselineSnapshot: ClipboardSnapshot | null = null;
 
   return enqueuePasteCriticalSection(async () => {
     let clipboardOwnershipSignature: string | null = null;
     try {
       if (pasteGeneration !== latestPasteGeneration) return;
-      const operation = await beginPasteOperation();
-      if (pasteGeneration !== latestPasteGeneration) return;
-      sequence = operation.sequence;
-      baselineText = operation.baselineText;
+      if (options.restoreClipboard) {
+        const operation = await beginPasteOperation();
+        if (pasteGeneration !== latestPasteGeneration) return;
+        sequence = operation.sequence;
+        baselineSnapshot = operation.baselineSnapshot;
+      } else if (activePasteSequence) {
+        discardPasteSequence(activePasteSequence);
+      }
 
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
@@ -479,8 +515,8 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       }
 
       clipboardOwnershipSignature = writtenSnapshot.signature;
-      if (!sequence) {
-        sequence = activatePasteSequence(baselineText, clipboardOwnershipSignature);
+      if (!sequence && baselineSnapshot) {
+        sequence = activatePasteSequence(baselineSnapshot, clipboardOwnershipSignature);
       } else if (sequence && activePasteSequence === sequence) {
         sequence.ownedSignature = clipboardOwnershipSignature;
       }
@@ -499,6 +535,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       if (pasteGeneration !== latestPasteGeneration) return;
       await simulatePaste(options.method, options.targetWindowHandle);
     } finally {
+      if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
+        sequence = activePasteSequence;
+      }
       if (sequence && activePasteSequence === sequence) {
         if (
           options.restoreClipboard &&

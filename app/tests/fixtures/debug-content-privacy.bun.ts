@@ -7,6 +7,9 @@ import type { LogEntry } from '../../src/main/lib/logger.js';
 const clipboardWrites: string[] = [];
 
 mock.module('electron', () => ({
+  ClipboardItem: class {
+    constructor() { throw new Error('Clipboard payload access is not expected in the log privacy fixture'); }
+  },
   BrowserWindow: class {},
   app: { getPath: () => process.env.TEMP ?? '.' },
   clipboard: {
