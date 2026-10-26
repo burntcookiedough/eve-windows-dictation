@@ -429,6 +429,10 @@ and there is no compare-and-swap across the final read/write window. Native
 format round trips and actual editor insertion still require isolated Windows
 product validation. Clipboard contents are retained only in memory, not logs.
 
+Partial and final transcription failures log their stage and session identifier,
+without raw exception messages or traceback chains that may contain dictated
+text. Recovered text remains available through the incomplete-result protocol.
+
 ## Session Lifecycle
 
 ```

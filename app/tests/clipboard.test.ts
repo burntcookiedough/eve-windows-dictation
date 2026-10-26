@@ -277,6 +277,35 @@ describe('pasteText', () => {
     expect(clipboardText).toBe('second text');
   });
 
+  test.each([false, true])('retains the original restore after a failed successor snapshot (old timer fired: %s)', async (oldTimerFired) => {
+    setSyntheticClipboard([
+      new MockClipboardItem({ 'text/plain': 'baseline', 'text/html': '<b>baseline</b>' }),
+    ], 'baseline');
+    await pasteText('first text', {
+      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+    });
+
+    let rejectRead: ((error: Error) => void) | undefined;
+    clipboardRead.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject; }));
+    const failure = pasteText('second text', {
+      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+    }).then(() => null, (error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, oldTimerFired ? 800 : 0));
+    expect(rejectRead).toBeDefined();
+    rejectRead?.(new Error('Synthetic successor snapshot failure'));
+    const error = await failure;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Synthetic successor snapshot failure');
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    expect(clipboardWrites).toEqual(['first text']);
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(clipboardText).toBe('baseline');
+    expect(clipboardWrite).toHaveBeenCalledTimes(1);
+    const html = await clipboardItems[0].getType('text/html') as Blob;
+    expect(await html.text()).toBe('<b>baseline</b>');
+  });
+
   test('does not restore over a manual clipboard change observed by an async read', async () => {
     await pasteText('new text', {
       restoreClipboard: true,

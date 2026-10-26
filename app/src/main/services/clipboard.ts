@@ -535,6 +535,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       if (pasteGeneration !== latestPasteGeneration) return;
       await simulatePaste(options.method, options.targetWindowHandle);
     } finally {
+      if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
+        sequence = activePasteSequence;
+      }
       if (sequence && activePasteSequence === sequence) {
         if (
           options.restoreClipboard &&
