@@ -21,6 +21,9 @@ afterAll(() => { process.kill = originalKill; });
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const electronMock = {
+  ClipboardItem: class {
+    constructor() { throw new Error('Clipboard payload access is not expected in the GPU controls fixture'); }
+  },
   app: {
     getPath: () => tmpdir(),
     getVersion: () => '1.0.0-test',
