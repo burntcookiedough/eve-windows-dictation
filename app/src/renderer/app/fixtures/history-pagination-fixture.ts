@@ -24,6 +24,7 @@ Object.assign(window, {
   murmurMain: {
     getHistoryEntries: async (offset: number, limit: number, filters?: HistoryFilters) => {
       requests.push({ offset, text: filters?.text });
+      if (new URL(location.href).searchParams.has('delayed')) await new Promise(resolve => setTimeout(resolve, 50));
       const matching = entries.filter(entry => !filters?.text || entry.text.includes(filters.text));
       return { entries: matching.slice(offset, offset + limit), hasMore: offset + limit < matching.length };
     },

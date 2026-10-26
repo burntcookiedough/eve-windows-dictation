@@ -131,7 +131,8 @@ window forward, and allows another quit attempt. A late acknowledgement from an
 expired attempt cannot close the app. This deadline does not cancel an in-flight
 delete or silently discard it. The shutdown tests retain the native delayed
 acknowledgement check; the pagination fixture exercises empty-filter recovery
-using native intersection events in rendered Electron.
+using native intersection events in rendered Electron, including an always-visible
+list end and delayed responses that finish after the first intersection event.
 
 Run from the repository root:
 

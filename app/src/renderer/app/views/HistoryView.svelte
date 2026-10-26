@@ -64,6 +64,7 @@
   let historyRoot: HTMLElement | undefined = $state(undefined);
   let searchInput: HTMLInputElement | undefined = $state(undefined);
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+  let recheckPagination: (() => void) | undefined;
 
   let pendingIds = $derived(new Set(pendingHistoryDeletes.items.map((item) => item.id)));
   let pendingDeletes = $derived(pendingHistoryDeletes.items);
@@ -161,6 +162,10 @@
     } finally {
       loading = false;
       if (resetQueued) { resetQueued = false; void loadEntries(true); }
+      else {
+        await tick();
+        if (!loadError) recheckPagination?.();
+      }
     }
   }
 
@@ -383,8 +388,15 @@
     const observer = new IntersectionObserver((entries) => {
       if (entries[0]?.isIntersecting && hasMore && !loading) void loadEntries();
     }, { root: node.closest('[data-scroll-owner="history"]'), rootMargin: '200px' });
+    // Re-observing requests a fresh native intersection result even when the
+    // end stayed visible, or its first event arrived during an in-flight load.
+    const recheck = () => { observer.unobserve(node); observer.observe(node); };
+    recheckPagination = recheck;
     observer.observe(node);
-    return { destroy: () => observer.disconnect() };
+    return { destroy: () => {
+      observer.disconnect();
+      if (recheckPagination === recheck) recheckPagination = undefined;
+    } };
   }
 
   function localDateKey(timestamp: number): string {

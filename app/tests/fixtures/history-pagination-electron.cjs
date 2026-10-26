@@ -16,7 +16,8 @@ async function main() {
       if (await run(expression)) return;
       await new Promise(resolve => setTimeout(resolve, 25));
     }
-    throw new Error(`Pagination fixture timed out: ${label}`);
+    const state = await run('({ height: innerHeight, entries: document.querySelectorAll("[data-history-entry]").length, requests: window.paginationProbe?.requests })');
+    throw new Error(`Pagination fixture timed out: ${label}: ${JSON.stringify(state)}`);
   }
   try {
     await window.loadURL(process.argv[2]);
@@ -33,9 +34,16 @@ async function main() {
     }
     const requests = await run('window.paginationProbe.requests');
     assert.equal(requests.filter(request => request.offset === 30).length, 3);
+    // A tall viewport keeps the sentinel intersecting across multiple pages.
+    window.setContentSize(960, 12000);
+    for (const suffix of ['?delayed=1', '']) {
+      await window.loadURL(process.argv[2] + suffix);
+      await until('document.querySelectorAll("[data-history-entry]").length === 65', `visible end fills remaining pages ${suffix}`);
+      assert.deepEqual((await run('window.paginationProbe.requests')).map(request => request.offset), [0, 30, 60]);
+    }
     await run('window.paginationProbe.unmount()');
     assert.deepEqual(await run('window.paginationProbe.targets()'), []);
-    process.stdout.write('PAGINATION_PROOF=3 filter/reset/scroll cycles; native intersection; no stale targets; unmount clean\n');
+    process.stdout.write('PAGINATION_PROOF=3 filter/reset/scroll cycles; visible-end refill; native intersection; no stale targets; unmount clean\n');
   } finally { window.destroy(); }
 }
 main().then(() => app.exit(0), error => { console.error(error); app.exit(1); });
