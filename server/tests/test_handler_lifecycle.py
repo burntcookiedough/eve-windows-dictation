@@ -467,7 +467,7 @@ async def test_stalled_transport_cannot_pin_finalization_or_spooled_audio(lifecy
     try:
         await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
         buffer = lifecycle_env.tracked_buffers[0]
-        await buffer.first_append_event.wait()
+        await asyncio.wait_for(buffer.first_append_event.wait(), timeout=2.0)
         path = buffer.observed_backing_path
         assert path and os.path.exists(path)
         if stall == "partial":
