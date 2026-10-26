@@ -121,6 +121,18 @@ and lifecycle evidence, which still require separate authorization.
 
 ## Checks
 
+History saves commit the transcription, Insights aggregates, and processed-entry
+ledger in one SQLite transaction. The native `test:history` check injects failures
+at each Insights write stage and verifies rollback, restart, and retry.
+
+On quit, Eve gives the renderer ten seconds to acknowledge deferred History
+deletes. Rejection or timeout keeps the app and deletion owner open, brings the
+window forward, and allows another quit attempt. A late acknowledgement from an
+expired attempt cannot close the app. This deadline does not cancel an in-flight
+delete or silently discard it. The shutdown tests retain the native delayed
+acknowledgement check; the pagination fixture exercises empty-filter recovery
+using native intersection events in rendered Electron.
+
 Run from the repository root:
 
 ```powershell

@@ -196,25 +196,27 @@ export class HistoryService {
       )
     `);
 
-    stmt.run({
-      id: entry.id,
-      timestamp: entry.timestamp,
-      text: entry.text,
-      confidence: entry.confidence,
-      audioDuration: entry.audioDuration,
-      transcriptionTime: entry.transcriptionTime,
-      wordCount,
-      sessionMode: entry.sessionMode ?? null,
-      engine: entry.engine ?? null,
-      model: entry.model ?? null,
-      device: entry.device ?? null,
-      computeType: entry.computeType ?? null,
-      cudaActive: entry.cudaActive === undefined ? null : Number(entry.cudaActive),
-      editedAt: entry.editedAt ?? null,
-      originalText: entry.originalText ?? null,
-    });
+    this.db.transaction(() => {
+      stmt.run({
+        id: entry.id,
+        timestamp: entry.timestamp,
+        text: entry.text,
+        confidence: entry.confidence,
+        audioDuration: entry.audioDuration,
+        transcriptionTime: entry.transcriptionTime,
+        wordCount,
+        sessionMode: entry.sessionMode ?? null,
+        engine: entry.engine ?? null,
+        model: entry.model ?? null,
+        device: entry.device ?? null,
+        computeType: entry.computeType ?? null,
+        cudaActive: entry.cudaActive === undefined ? null : Number(entry.cudaActive),
+        editedAt: entry.editedAt ?? null,
+        originalText: entry.originalText ?? null,
+      });
 
-    this.addEntryToInsights({ ...entry, wordCount });
+      this.addEntryToInsights({ ...entry, wordCount });
+    })();
   }
 
   getEntries(offset: number, limit: number, filters?: HistoryFilters): HistoryResponse {

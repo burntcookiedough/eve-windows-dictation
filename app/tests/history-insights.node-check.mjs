@@ -113,6 +113,43 @@ try {
   ]);
   service.close();
 
+  // A failed Insights write must roll back History and every aggregate together.
+  // Keep a processed row so startup migration cannot conceal a partial write.
+  for (const table of ['insights_daily_rollups', 'insights_word_counts', 'insights_processed_entries']) {
+    const atomicPath = join(workDir, `atomic-${table}.db`);
+    let atomicService = new HistoryService(atomicPath);
+    const inspection = new Database(atomicPath);
+    try {
+      atomicService.initialize();
+      atomicService.save(transcription('prior', now, 'Prior project notes', 10, 1000));
+      const before = atomicService.getInsights('all', now);
+      inspection.exec(`CREATE TRIGGER fail_insights BEFORE INSERT ON ${table}
+        BEGIN SELECT RAISE(ABORT, 'synthetic Insights failure'); END`);
+      assert.throws(
+        () => atomicService.save(transcription('interrupted', now, 'Interrupted project notes', 20, 2000)),
+        /synthetic Insights failure/,
+      );
+      assert.deepEqual(atomicService.getEntryIds(), ['prior']);
+      assert.deepEqual(atomicService.getInsights('all', now), before);
+      assert.equal(inspection.prepare('SELECT COUNT(*) AS count FROM insights_processed_entries').get().count, 1);
+      inspection.exec('DROP TRIGGER fail_insights');
+      atomicService.close();
+      atomicService = new HistoryService(atomicPath);
+      atomicService.initialize();
+      assert.deepEqual(atomicService.getInsights('all', now), before);
+      // Retry the same id after rollback, then rebuild/delete through public APIs.
+      atomicService.save(transcription('interrupted', now, 'Interrupted project notes', 20, 2000));
+      assert.equal(atomicService.getInsights('all', now).summary.totalDictations, 2);
+      atomicService.rebuildInsights();
+      assert.equal(atomicService.getInsights('all', now).summary.totalDictations, 2);
+      atomicService.delete('interrupted');
+      assert.deepEqual(atomicService.getInsights('all', now).summary, before.summary);
+    } finally {
+      atomicService.close();
+      inspection.close();
+    }
+  }
+
   const deterministicDbPath = join(workDir, 'deterministic-insights.db');
   const deterministicService = new HistoryService(deterministicDbPath);
   try {

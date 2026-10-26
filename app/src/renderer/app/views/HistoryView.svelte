@@ -61,7 +61,6 @@
   let selectionFeedback = $state('');
   let selectionGeneration = 0;
   let expandedId: string | null = $state(null);
-  let sentinel: HTMLElement | undefined = $state(undefined);
   let historyRoot: HTMLElement | undefined = $state(undefined);
   let searchInput: HTMLInputElement | undefined = $state(undefined);
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -372,26 +371,21 @@
     });
     window.addEventListener('history-delete-committed', onDeleteCommitted);
 
-    let observer: IntersectionObserver | null = null;
-    const setupObserver = () => {
-      if (!sentinel) return;
-      const scrollRoot = document.querySelector<HTMLElement>('[data-scroll-owner="history"]');
-      observer = new IntersectionObserver((entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loading) void loadEntries();
-      }, { root: scrollRoot, rootMargin: '200px' });
-      observer.observe(sentinel);
-    };
-    const observerTimer = setTimeout(setupObserver, 0);
-
     return () => {
-      observer?.disconnect();
-      clearTimeout(observerTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('history-delete-committed', onDeleteCommitted);
       unsubscribeNewHistoryEntry();
       if (searchTimeout) clearTimeout(searchTimeout);
     };
   });
+
+  function observePagination(node: HTMLElement) {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && hasMore && !loading) void loadEntries();
+    }, { root: node.closest('[data-scroll-owner="history"]'), rootMargin: '200px' });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
 
   function localDateKey(timestamp: number): string {
     const date = new Date(timestamp);
@@ -603,7 +597,7 @@
             {/each}
           </section>
         {/each}
-        <div bind:this={sentinel} class="list-end" aria-live="polite">
+        <div use:observePagination class="list-end" aria-live="polite">
           {#if loading}<span>Loading…</span>{:else if !hasMore && visibleHistory.length > 0}<span>No more entries</span>{/if}
         </div>
       </div>
