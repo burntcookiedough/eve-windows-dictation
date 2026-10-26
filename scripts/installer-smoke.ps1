@@ -56,8 +56,83 @@ function Resolve-InstallerPath {
     return $null
 }
 
-function Stop-ProductProcesses {
-    Get-Process -Name "Eve","Murmur" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+function Get-SmokeTargetPaths {
+    param([string[]]$Directories)
+    foreach ($directory in $Directories) {
+        foreach ($relative in @('Eve.exe', 'Murmur.exe', 'resources\server\.runtime\python.exe', 'resources\server\.venv\Scripts\python.exe')) {
+            [IO.Path]::GetFullPath((Join-Path $directory $relative))
+        }
+    }
+}
+
+function Assert-SmokeTargetsIdle {
+    param([string[]]$Directories)
+    $paths = @(Get-SmokeTargetPaths -Directories $Directories)
+    $candidates = Get-CimInstance -Query "SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE Name='Eve.exe' OR Name='Murmur.exe' OR Name='python.exe'" -ErrorAction Stop
+    foreach ($candidate in $candidates) {
+        if (-not $candidate.ExecutablePath) { throw 'Cannot verify target install trees are idle: a process path is inaccessible.' }
+        if ([IO.Path]::GetFullPath($candidate.ExecutablePath) -in $paths) {
+            throw 'A target app or backend is running. Close it explicitly before this smoke run; no existing session was stopped.'
+        }
+    }
+}
+
+function Get-SmokeProcessIdentity {
+    param([System.Diagnostics.Process]$Process)
+    # Pin the OS process object before reading identity or following child IDs.
+    # Retain this handle through descendant cleanup, including after root exit.
+    $null = $Process.SafeHandle
+    return [pscustomobject]@{
+        Process = $Process
+        Id = $Process.Id
+        Path = [IO.Path]::GetFullPath($Process.Path)
+        Started = $Process.StartTime.ToUniversalTime()
+    }
+}
+
+function Stop-SmokeOwnedTree {
+    param($Identity, [string[]]$AllowedPaths, [int]$Depth = 0)
+    if ($Depth -gt 16) { throw 'Smoke process ancestry exceeded its cleanup bound.' }
+    $consoleHostPath = Join-Path ([Environment]::SystemDirectory) 'conhost.exe'
+    $consoleHost = $Identity.Path -ieq $consoleHostPath
+    if (-not $consoleHost -and $Identity.Path -notin $AllowedPaths) { throw 'Smoke child is outside the exact test install paths; refusing to stop it.' }
+    $owned = $Identity.Process
+    if (-not $owned.HasExited) {
+        # Console hosts belong to Windows: wait for their clients to release them,
+        # never terminate an executable outside the exact test install paths.
+        if (-not $consoleHost) { $owned.Kill() }
+        if (-not $owned.WaitForExit(5000)) { throw 'Test-owned smoke process did not exit.' }
+    }
+    # Stop a parent before enumerating: it cannot spawn more children now. Windows
+    # retains each live child's original parent ID; the pinned parent handle keeps
+    # that ID from being recycled while we validate and drain its descendants.
+    $failures = [Collections.Generic.List[Exception]]::new()
+    $ownedChildren = [Collections.Generic.List[object]]::new()
+    $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Identity.Id)" -ErrorAction Stop
+    foreach ($record in $children) {
+        $child = $null
+        try {
+            $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction Stop
+            $childIdentity = Get-SmokeProcessIdentity -Process $child
+            $live = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($childIdentity.Id)" -ErrorAction Stop
+            if (-not $live) { throw 'Smoke child exited before its ancestry could be verified.' }
+            if ($live.ParentProcessId -ne $Identity.Id -or $childIdentity.Started -lt $Identity.Started) {
+                throw 'Smoke child identity changed; refusing to stop it or claim complete cleanup.'
+            }
+            $ownedChildren.Add($childIdentity)
+            $child = $null # Ownership of this pinned handle transfers to the list.
+        } catch { $failures.Add($_.Exception) }
+        finally { if ($child) { $child.Dispose() } }
+    }
+    try {
+        # Pin sibling identities before stopping any: a console can exit as soon
+        # as its last Python client does. Release consoles after those clients.
+        foreach ($childIdentity in ($ownedChildren | Sort-Object { $_.Path -ieq $consoleHostPath })) {
+            try { Stop-SmokeOwnedTree -Identity $childIdentity -AllowedPaths $AllowedPaths -Depth ($Depth + 1) }
+            catch { $failures.Add($_.Exception) }
+        }
+    } finally { foreach ($childIdentity in $ownedChildren) { $childIdentity.Process.Dispose() } }
+    if ($failures.Count) { throw [AggregateException]::new('Smoke descendant cleanup could not be verified.', $failures) }
 }
 
 function Resolve-UninstallerPaths {
@@ -159,11 +234,13 @@ if (-not $resolvedInstaller) {
 
 Write-Step "Using installer: $resolvedInstaller"
 
-if (-not $SkipUninstall) {
-    Write-Step "Stopping any running Eve or legacy Murmur processes"
-    Stop-ProductProcesses
+$legacyInstallDir = "$env:LOCALAPPDATA\Programs\murmur"
+$targetDirectories = @($InstallDir)
+if (-not $SkipUninstall) { $targetDirectories += $legacyInstallDir }
+Write-Step "Checking that the target install trees are idle"
+Assert-SmokeTargetsIdle -Directories $targetDirectories
 
-    $legacyInstallDir = "$env:LOCALAPPDATA\Programs\murmur"
+if (-not $SkipUninstall) {
     $uninstallers = @(Resolve-UninstallerPaths -Directories @($InstallDir, $legacyInstallDir))
     foreach ($uninstaller in $uninstallers) {
         Write-Step "Uninstalling existing Eve or legacy Murmur installation at $uninstaller"
@@ -222,9 +299,13 @@ $launchArguments = @(
     "--eve-qa-isolation",
     "--eve-qa-user-data-root=`"$qaUserDataRoot`""
 )
-$process = Start-Process -FilePath $exePath -ArgumentList $launchArguments -WorkingDirectory $InstallDir -PassThru
+$process = $null
+$ownedLauncher = $null
+$allowedSmokePaths = @(Get-SmokeTargetPaths -Directories @($InstallDir))
 
 try {
+    $process = Start-Process -FilePath $exePath -ArgumentList $launchArguments -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden
+    $ownedLauncher = Get-SmokeProcessIdentity -Process $process
     Write-Step "Waiting for server PID file at $PidFilePath"
     $pidData = Wait-For-PidFile -Path $PidFilePath -TimeoutSec $HealthTimeoutSec -StartedAfter $launchStartedAt
     $healthUrl = "http://127.0.0.1:$($pidData.port)/health"
@@ -276,11 +357,15 @@ try {
     if ($RequireModelDownload -and $state.detail -ne "downloaded") {
         throw "Expected a fresh download, but detail=$($state.detail)"
     }
+} catch {
+    Write-Warning "Smoke checks failed: $($_.Exception.Message)"
+    throw
 } finally {
-    Write-Step "Stopping Eve"
-    if ($process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    }
+    Write-Step "Stopping this smoke run's owned app and backend"
+    try {
+        if ($ownedLauncher) { Stop-SmokeOwnedTree -Identity $ownedLauncher -AllowedPaths $allowedSmokePaths }
+        elseif ($process) { throw 'Launcher identity was not captured; descendant cleanup is unverified.' }
+    } finally { if ($process) { $process.Dispose() } }
 }
 
 Write-Step "Smoke test complete"
