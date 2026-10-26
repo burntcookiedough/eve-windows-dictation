@@ -139,4 +139,19 @@ describe('processFinalTranscription', () => {
       targetWindowHandle: 12345,
     });
   });
+
+  test('retains dictated text in History when baseline protection aborts paste without auto-copy', async () => {
+    const saved: TranscriptionEntry[] = [];
+    pasteText.mockImplementationOnce(async () => { throw new Error('Unreadable clipboard baseline'); });
+    const result = await processFinalTranscription(
+      frame,
+      { ...settings, autoPaste: true, autoCopy: false, restoreClipboardAfterPaste: true },
+      { save: (entry: TranscriptionEntry) => saved.push(entry) },
+      'quick',
+    );
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].text).toBe('Hello from eve.');
+    expect(result.entryWithGroup.text).toBe(saved[0].text);
+  });
 });

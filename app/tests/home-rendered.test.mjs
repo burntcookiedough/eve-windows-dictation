@@ -1,11 +1,20 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { resolve } from 'node:path';
 
 const appRoot = resolve(import.meta.dir, '..');
 const screenshotDir = resolve(tmpdir(), 'eve-home-screenshots');
-const vitePort = 53000 + (process.pid % 100);
+const probe = createServer();
+await new Promise((resolveReady, reject) => {
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', resolveReady);
+});
+const address = probe.address();
+await new Promise((resolveClosed, reject) => probe.close(error => error ? reject(error) : resolveClosed()));
+if (!address || typeof address === 'string') throw new Error('Expected an ephemeral port');
+const vitePort = address.port;
 const fixtureUrl = `http://127.0.0.1:${vitePort}/app/fixtures/home-fixture.html`;
 const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1'], {
   cwd: appRoot,
@@ -13,26 +22,47 @@ const vite = Bun.spawn(['node', resolve(appRoot, 'node_modules/vite/bin/vite.js'
   stdout: 'ignore', stderr: 'pipe', windowsHide: true,
 });
 
-for (let attempt = 0; attempt < 60; attempt += 1) {
-  try { if ((await fetch(fixtureUrl)).ok) break; } catch {}
-  await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+let viteStopped = false;
+async function stopVite() {
+  if (viteStopped) return;
+  viteStopped = true;
+  vite.kill();
+  await vite.exited;
 }
+afterAll(stopVite);
 
-const child = Bun.spawn([
-  resolve(appRoot, 'node_modules/electron/dist/electron.exe'),
-  resolve(appRoot, 'tests/fixtures/home-electron.cjs'),
-  fixtureUrl,
-], {
-  cwd: appRoot,
-  env: { ...process.env, EVE_HOME_SCREENSHOT_DIR: screenshotDir },
-  stdout: 'pipe', stderr: 'pipe', windowsHide: true,
-});
-const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-if (code !== 0) throw new Error(`Home fixture exited ${code}: ${stderr || stdout}`);
-const result = JSON.parse(stdout);
-await fs.rm(result.userDataPath, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+let result;
+try {
+  let ready = false;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try { if ((await fetch(fixtureUrl)).ok) { ready = true; break; } } catch {}
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  if (!ready) {
+    await stopVite();
+    throw new Error(`Home fixture server did not start: ${await new Response(vite.stderr).text()}`);
+  }
 
-afterAll(async () => { vite.kill(); await vite.exited; });
+  const child = Bun.spawn([
+    resolve(appRoot, 'node_modules/electron/dist/electron.exe'),
+    resolve(appRoot, 'tests/fixtures/home-electron.cjs'),
+    fixtureUrl,
+  ], {
+    cwd: appRoot,
+    env: { ...process.env, EVE_HOME_SCREENSHOT_DIR: screenshotDir },
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  if (code !== 0) {
+    await fs.rm(resolve(tmpdir(), `eve-home-${child.pid}`), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    throw new Error(`Home fixture exited ${code}: ${stderr || stdout}`);
+  }
+  result = JSON.parse(stdout);
+  await fs.rm(result.userDataPath, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+} catch (error) {
+  await stopVite();
+  throw error;
+}
 
 describe('rendered Home experience', () => {
   test('refreshes unfinished indexing then stops polling and displays the complete-history streak', () => {
