@@ -394,6 +394,13 @@ These session identifiers are internal IPC metadata; the WebSocket audio and
 control frame formats are unchanged. Server-initiated terminal frames force
 capture teardown rather than requesting another successful stop.
 
+Server frame writes and socket-close attempts have a five-second deadline so
+transport backpressure cannot indefinitely pin finalization or teardown. Fatal
+audio/control errors release buffered audio before awaiting network output;
+shared teardown also closes it defensively. A timed-out close attempt releases
+the session's resources without claiming that the peer received a terminal
+frame or that the underlying network transport has closed successfully.
+
 Chunk deduplication requires matching segment text at overlapping absolute audio
 times. Equal words at different times remain intact. Segments crossing the
 overlap boundary, or transcripts without timing evidence, are retained in full;

@@ -14,6 +14,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 import websocket.handler as handler_module
+import websocket.sender as sender_module
 from audio.buffer import AudioBuffer
 from config import Settings
 from protocol.frames import ClosingReason
@@ -428,6 +429,70 @@ async def test_handler_storage_append_error_cleans_storage_and_leases(
     assert processor.context.state_machine.state == SessionState.CLOSED
     assert processor.context.audio_buffer.sample_count == 0
     assert processor.context.audio_buffer._file is None
+
+
+@pytest.mark.parametrize("stall", ["partial", "error", "close"])
+async def test_stalled_transport_cannot_pin_finalization_or_spooled_audio(lifecycle_env, monkeypatch, stall):
+    entered = asyncio.Event()
+    processors = []
+    monkeypatch.setattr(sender_module, "FRAME_SEND_TIMEOUT_SECONDS", 0.02, raising=False)
+    monkeypatch.setattr(handler_module, "FRAME_SEND_TIMEOUT_SECONDS", 0.02, raising=False)
+
+    def make_processor(ctx):
+        processor = _LifecycleProcessor(ctx)
+        processor.partial_result_text = "available synthetic words"
+        processors.append(processor)
+        return processor
+
+    monkeypatch.setattr(handler_module, "TranscriptionProcessor", make_processor)
+
+    class StalledSocket(_LifecycleWebSocket):
+        async def send_json(self, data):
+            if data.get("type") == stall:
+                entered.set()
+                await asyncio.Event().wait()
+            await super().send_json(data)
+
+        async def close(self, code=1000):
+            if stall == "close":
+                entered.set()
+                await asyncio.Event().wait()
+            await super().close(code)
+
+    socket = StalledSocket([
+        _make_control_frame("start", silence_timeout=30.0),
+        _make_audio_frame(0, np.ones(500, dtype=np.int16)),
+    ])
+    task = asyncio.create_task(handler_module.websocket_handler(socket))
+    try:
+        await _wait_until(lambda: bool(lifecycle_env.tracked_buffers))
+        buffer = lifecycle_env.tracked_buffers[0]
+        await buffer.first_append_event.wait()
+        path = buffer.observed_backing_path
+        assert path and os.path.exists(path)
+        if stall == "partial":
+            await asyncio.wait_for(entered.wait(), 1)
+            socket.queue_message(_make_control_frame("stop"))
+        else:
+            socket.queue_message({"type": "websocket.receive", "bytes": b"bad"})
+            await asyncio.wait_for(entered.wait(), 1)
+            # Fatal capture data must be released before blocked network I/O.
+            assert not os.path.exists(path)
+        await asyncio.wait_for(asyncio.shield(task), 1)
+        assert not os.path.exists(path)
+        assert processors[0].closed
+        assert lifecycle_env.manager.active_count == 0
+        if stall == "partial":
+            assert processors[0].transcribe_final_calls == 1
+            frames = [json.loads(message) for message in socket.sent_messages]
+            assert sum(frame.get("type") == "final" for frame in frames) == 1
+            assert not any(frame.get("type") == "partial" for frame in frames)
+    finally:
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, 0.1)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
 
 
 @pytest.mark.asyncio

@@ -23,10 +23,18 @@ from transcription.factory import (
     runtime_accepts_sessions,
 )
 from transcription.processor import TranscriptionProcessor
-from websocket.sender import FrameSender
+from websocket.sender import FRAME_SEND_TIMEOUT_SECONDS, FrameSender
 
 logger = logging.getLogger(__name__)
 FIRST_AUDIO_TIMEOUT_SECONDS = 30.0
+
+
+async def _close_websocket(websocket: WebSocket) -> None:
+    """Bound the close attempt; cleanup cannot depend on a responsive peer."""
+    try:
+        await asyncio.wait_for(websocket.close(), timeout=FRAME_SEND_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("Timed out closing transcription WebSocket")
 
 
 async def websocket_handler(websocket: WebSocket) -> None:
@@ -44,7 +52,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         await websocket.accept()
         sender = FrameSender(websocket, "no-session")
         await sender.send_error(ErrorCode.RATE_LIMIT, "Maximum sessions reached")
-        await websocket.close()
+        await _close_websocket(websocket)
         return
 
     sender = FrameSender(websocket, context.session_id)
@@ -59,7 +67,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         except Exception as e:
             logger.exception("[%s] Model runtime unavailable: %s", context.session_id, e)
             await sender.send_error(ErrorCode.INTERNAL, "Model runtime unavailable")
-            await websocket.close()
+            await _close_websocket(websocket)
             return
 
         # Replacement preparation keeps the current generation available to
@@ -70,7 +78,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
                 ErrorCode.INTERNAL,
                 "Transcription model is still loading. Try again shortly.",
             )
-            await websocket.close()
+            await _close_websocket(websocket)
             return
 
         # Wait for start frame with timeout
@@ -132,7 +140,7 @@ async def websocket_handler(websocket: WebSocket) -> None:
         except Exception:
             logger.debug("[%s] Failed to close audio buffer during teardown", context.session_id, exc_info=True)
         try:
-            await websocket.close()
+            await _close_websocket(websocket)
         except Exception:
             pass
 
@@ -155,13 +163,13 @@ async def _wait_for_start(
         )
     except asyncio.TimeoutError:
         await sender.send_error(ErrorCode.START_TIMEOUT, "No start frame received")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Check message type
     if "bytes" in message:
         await sender.send_error(ErrorCode.NO_START, "Audio received before start")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     if "text" not in message:
@@ -173,20 +181,20 @@ async def _wait_for_start(
         data = json.loads(message["text"])
     except json.JSONDecodeError:
         await sender.send_error(ErrorCode.INVALID_CTRL, "Invalid JSON")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Validate as start frame
     if data.get("frame") != "control" or data.get("type") != "start":
         await sender.send_error(ErrorCode.INVALID_START, "Expected start frame")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     try:
         start_frame = StartFrame.model_validate(data)
     except ValidationError:
         await sender.send_error(ErrorCode.INVALID_START, "Invalid start frame")
-        await websocket.close()
+        await _close_websocket(websocket)
         return False
 
     # Update context with start frame config
@@ -249,7 +257,7 @@ async def _message_loop(
                 message["bytes"], sender, context
             )
             if should_close:
-                await websocket.close()
+                await _close_websocket(websocket)
                 return
             continue
 
@@ -294,6 +302,7 @@ async def _handle_audio_frame(
         except ParseError as e:
             logger.warning("[%s] Invalid audio frame: %s", context.session_id, e)
             context.state_machine.transition_to(SessionState.CLOSED)
+            context.audio_buffer.close()
             await sender.send_error(ErrorCode.INVALID_AUDIO, str(e))
             return True
 
@@ -341,8 +350,9 @@ async def _handle_control_frame(
         async with context.finalization_lock:
             if context.state_machine.state != SessionState.CLOSED:
                 context.state_machine.transition_to(SessionState.CLOSED)
+                context.audio_buffer.close()
                 await sender.send_error(ErrorCode.INVALID_CTRL, "Invalid JSON")
-        await websocket.close()
+        await _close_websocket(websocket)
         return True
 
     frame_type = data.get("frame")
@@ -360,7 +370,7 @@ async def _handle_control_frame(
             context.partial_task_active_at_stop = context.partial_in_flight
         logger.info("[%s] Received stop frame from client", context.session_id)
         await _finalize_session(sender, context, processor, ClosingReason.STOP_RECEIVED)
-        await websocket.close()
+        await _close_websocket(websocket)
         return True
 
     # Ignore duplicate start
@@ -506,7 +516,7 @@ async def _silence_monitor_loop(
                     )
                 finally:
                     try:
-                        await websocket.close()
+                        await _close_websocket(websocket)
                     except Exception:
                         logger.debug(
                             "[%s] WebSocket already closed after silence timeout",
@@ -532,7 +542,7 @@ async def _silence_monitor_loop(
                     )
                 finally:
                     try:
-                        await websocket.close()
+                        await _close_websocket(websocket)
                     except Exception:
                         logger.debug(
                             "[%s] WebSocket already closed after first-audio timeout",
@@ -566,7 +576,7 @@ async def _silence_monitor_loop(
                 )
             finally:
                 try:
-                    await websocket.close()
+                    await _close_websocket(websocket)
                 except Exception:
                     logger.debug(
                         "[%s] WebSocket already closed after silence timeout",
