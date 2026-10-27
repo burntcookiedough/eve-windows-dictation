@@ -145,6 +145,18 @@ try {
             return $rows
         }
     }
+    if ($Mode -eq 'exit-on-parent-stop') {
+        $script:BackendProcess = $backend
+        $script:LauncherProcess = $process
+        function Get-Process {
+            [CmdletBinding()]param([int]$Id)
+            if ($Id -eq $script:BackendProcess.Id -and $script:LauncherProcess.HasExited) {
+                if (-not $script:BackendProcess.HasExited) { $script:BackendProcess.Kill(); $null = $script:BackendProcess.WaitForExit(5000) }
+                throw 'Child exited between the post-stop snapshot and handle capture'
+            }
+            Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction Stop
+        }
+    }
     # A fresh, same-executable foreign PID must not become cleanup authority.
     $pidData = @{ pid = $foreign.Id; port = $foreignRecord.port; startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     if ($Mode -eq 'missing-pid') { $pidData = $null }

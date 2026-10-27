@@ -123,8 +123,10 @@ and lifecycle evidence, which still require separate authorization.
 that session explicitly. It never stops existing Eve/Python processes by name.
 Forced cleanup retains handles to this run's launcher and validated descendants,
 checks exact installed executable paths and parent/creation identity, and waits
-for each owned process to exit. Parents stop before descendant enumeration so
-they cannot spawn more children during that scan. Windows retains process IDs
+for each owned process to exit. Existing child handles are pinned before stopping
+a parent; a second scan
+captures children born during the first scan after further spawning has stopped.
+Windows retains process IDs
 while their process objects have open handles ([Microsoft process lifetime
 contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information)).
 An inaccessible or changed identity fails cleanup instead of authorizing an

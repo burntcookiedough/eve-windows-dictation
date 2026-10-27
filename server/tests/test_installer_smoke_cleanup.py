@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows process/CIM sem
 @pytest.mark.parametrize('mode', [
     'success', 'failure', 'forced', 'missing-pid', 'nested',
     'wrong-path', 'wrong-parent', 'wrong-birth', 'preflight', 'provider-paths',
-    'fast-launcher', 'exit-during-inspection',
+    'fast-launcher', 'exit-during-inspection', 'exit-on-parent-stop',
 ])
 def test_smoke_cleanup_owns_only_its_processes(tmp_path, mode):
     isolated = tmp_path / 'fixture with spaces'

@@ -121,39 +121,39 @@ function Stop-SmokeOwnedTree {
     $consoleHost = $Identity.Path -ieq $consoleHostPath
     if (-not $consoleHost -and $Identity.Path -notin $AllowedPaths) { throw 'Smoke child is outside the exact test install paths; refusing to stop it.' }
     $owned = $Identity.Process
-    if (-not $owned.HasExited) {
-        # Console hosts belong to Windows: wait for their clients to release them,
-        # never terminate an executable outside the exact test install paths.
-        if (-not $consoleHost) { $owned.Kill() }
-        if (-not $owned.WaitForExit(5000)) { throw 'Test-owned smoke process did not exit.' }
-    }
-    # Stop a parent before enumerating: it cannot spawn more children now. Windows
-    # retains each live child's original parent ID; the pinned parent handle keeps
-    # that ID from being recycled while we validate and drain its descendants.
     $failures = [Collections.Generic.List[Exception]]::new()
     $ownedChildren = [Collections.Generic.List[object]]::new()
-    $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Identity.Id)" -ErrorAction Stop
-    foreach ($record in $children) {
-        $child = $null
-        try {
-            $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction Stop
-            $childIdentity = Get-SmokeProcessIdentity -Process $child -Snapshot $record
-            $live = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($childIdentity.Id)" -ErrorAction Stop
-            if (-not $live) {
-                if (-not $child.HasExited) { throw 'Live smoke child ancestry could not be verified.' }
-                $live = $record # Creation identity was bound to the pinned handle.
-            }
-            if ($live.ParentProcessId -ne $Identity.Id -or $childIdentity.Started -lt $Identity.Started) {
-                throw 'Smoke child identity changed; refusing to stop it or claim complete cleanup.'
-            }
-            $ownedChildren.Add($childIdentity)
-            $child = $null # Ownership of this pinned handle transfers to the list.
-        } catch { $failures.Add($_.Exception) }
-        finally { if ($child) { $child.Dispose() } }
-    }
     try {
-        # Pin sibling identities before stopping any: a console can exit as soon
-        # as its last Python client does. Release consoles after those clients.
+        # Pin current children before stopping their parent can make them exit.
+        # Scan again after the stop to capture children born during the first scan.
+        foreach ($pass in 0..1) {
+            $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Identity.Id)" -ErrorAction Stop
+            foreach ($record in $children) {
+                if ($ownedChildren | Where-Object { $_.Id -eq [int]$record.ProcessId }) { continue }
+                $child = $null
+                try {
+                    $child = Get-Process -Id ([int]$record.ProcessId) -ErrorAction Stop
+                    $childIdentity = Get-SmokeProcessIdentity -Process $child -Snapshot $record
+                    $live = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($childIdentity.Id)" -ErrorAction Stop
+                    if (-not $live) {
+                        if (-not $child.HasExited) { throw 'Live smoke child ancestry could not be verified.' }
+                        $live = $record # Creation identity was bound to the pinned handle.
+                    }
+                    if ($live.ParentProcessId -ne $Identity.Id -or $childIdentity.Started -lt $Identity.Started) {
+                        throw 'Smoke child identity changed; refusing to stop it or claim complete cleanup.'
+                    }
+                    $ownedChildren.Add($childIdentity)
+                    $child = $null # Transfer this pinned handle to the cleanup list.
+                } catch { $failures.Add($_.Exception) }
+                finally { if ($child) { $child.Dispose() } }
+            }
+            if ($pass -eq 0 -and -not $owned.HasExited) {
+                # Console hosts are wait-only; never kill an OS executable.
+                if (-not $consoleHost) { $owned.Kill() }
+                if (-not $owned.WaitForExit(5000)) { throw 'Test-owned smoke process did not exit.' }
+            }
+        }
+        # Pinned handles prevent ID reuse while clients and consoles drain.
         foreach ($childIdentity in ($ownedChildren | Sort-Object { $_.Path -ieq $consoleHostPath })) {
             try { Stop-SmokeOwnedTree -Identity $childIdentity -AllowedPaths $AllowedPaths -Depth ($Depth + 1) }
             catch { $failures.Add($_.Exception) }
