@@ -121,6 +121,7 @@
   let engineStatus = $state<EngineStatus | null>(null);
   let serverConnected = $state(false);
   let serverSettingsLoading = $state(false);
+  let serverSettingsRead: Promise<boolean> | null = null;
   let lastServerSettingsAttemptKey = $state<string | null>(null);
   let engineApplying = $state(false);
   let enginePreparationRequested = $state(false);
@@ -487,27 +488,42 @@
     }
   }
 
-  async function loadServerSettings(isCurrent: () => boolean = () => true): Promise<boolean> {
-    if (serverSettingsLoading) return false;
-    serverSettingsLoading = true;
-    try {
-      const serverData = await window.murmurMain.getServerSettings();
-      if (!isCurrent()) return false;
-      serverSettings = serverData.settings;
-      modelCatalog = serverData.model_catalog ?? [];
-      engineStatus = serverData.engine_status;
-      serverConnected = true;
-      return true;
-    } catch {
-      if (!isCurrent()) return false;
-      serverSettings = null;
-      modelCatalog = [];
-      engineStatus = null;
-      serverConnected = false;
-      return false;
-    } finally {
-      serverSettingsLoading = false;
+  function loadServerSettings(): Promise<boolean> {
+    const patch = enginePreparationPatch;
+    const isCurrent = () => enginePreparationPatch === patch;
+    const pendingRead = serverSettingsRead;
+    if (pendingRead) {
+      // A busy read is not a failed read. Wait for its completion event, then
+      // obtain a fresh snapshot if this transaction has not been invalidated.
+      return pendingRead.then(() => isCurrent() ? loadServerSettings() : false);
     }
+    serverSettingsLoading = true;
+    const read = (async (): Promise<boolean> => {
+      try {
+        const serverData = await window.murmurMain.getServerSettings();
+        if (!isCurrent()) return false;
+        serverSettings = serverData.settings;
+        modelCatalog = serverData.model_catalog ?? [];
+        engineStatus = serverData.engine_status;
+        serverConnected = true;
+        return true;
+      } catch {
+        if (!isCurrent()) return false;
+        serverSettings = null;
+        modelCatalog = [];
+        engineStatus = null;
+        serverConnected = false;
+        return false;
+      } finally {
+        serverSettingsLoading = false;
+      }
+    })();
+    serverSettingsRead = read;
+    const releaseRead = () => {
+      if (serverSettingsRead === read) serverSettingsRead = null;
+    };
+    void read.then(releaseRead, releaseRead);
+    return read;
   }
 
   async function loadAudioDevices() {
@@ -798,7 +814,7 @@
     const patch = enginePreparationPatch;
     const isCurrent = () => enginePreparationPatch === patch;
     try {
-      const loaded = await loadServerSettings(isCurrent);
+      const loaded = await loadServerSettings();
       if (!isCurrent()) return;
       if (!loaded) {
         finishEnginePreparation('Could not confirm speech settings. Retry or revert your changes.');
@@ -835,7 +851,7 @@
       finishEnginePreparation(sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.');
       return;
     }
-    if (shouldRefreshCommittedSettings(
+    if (!serverSettingsLoading && shouldRefreshCommittedSettings(
       pendingEngine,
       enginePreparationRequested,
       enginePreparationObserved,

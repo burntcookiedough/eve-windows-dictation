@@ -9,6 +9,7 @@ import ts from 'typescript';
 // Run the production functions and their actual Svelte effect, with synthetic
 // IPC and state boundaries. This does not mount SettingsView or open a mic.
 interface ProbeState {
+  serverSettings: Record<string, { value: unknown }> | null;
   pendingEngine: Record<string, unknown>;
   enginePreparationActive: boolean;
   enginePreparationRequested: boolean;
@@ -17,6 +18,7 @@ interface ProbeState {
   refreshingCommittedSettings: boolean;
 }
 interface Probe {
+  read(): Promise<boolean>;
   apply(): Promise<void>;
   revert(): void;
   confirm(): Promise<void>;
@@ -48,22 +50,24 @@ beforeAll(async () => {
       const dispose = $effect.root(() => {
         let pendingEngine = $state(initial.pending ?? {whisper_model:'submitted'});
         let enginePreparationPatch = $state({whisper_model:'submitted'});
-        let enginePreparationRequested = $state(true), enginePreparationActive = $state(true);
+        let enginePreparationRequested = $state(initial.requested ?? true), enginePreparationActive = $state(initial.active ?? true);
         let enginePreparationObserved = $state(initial.observed ?? true);
         let engineApplying = $state(false), refreshingCommittedSettings = $state(false);
         let engineApplyError = $state(''), serverSettings = $state(null), modelCatalog = $state([]);
         let serverSettingsLoading = $state(false), serverConnected = $state(true);
+        let serverSettingsRead = null;
         let engineStatus = $state({current:'whisper',status:'ready'});
         const sharedEngineStatus = $derived(engineStatus);
         const preparationFailed = $derived(enginePreparationPhase(sharedEngineStatus) === 'failed');
         ${functions.map(node => node.getText(source)).join('\n')}
         ${effect.getText(source)}
         controls = {
+          read: loadServerSettings,
           apply: applyEngineSettings, revert: revertEngineSettings,
           confirm: confirmEnginePreparationStatus,
           status: value => {engineStatus = value;},
           stage: patch => {pendingEngine = {...pendingEngine,...patch};},
-          snapshot: () => JSON.parse(JSON.stringify({pendingEngine,enginePreparationPatch,
+          snapshot: () => JSON.parse(JSON.stringify({pendingEngine,enginePreparationPatch,serverSettings,
             enginePreparationRequested,enginePreparationActive,enginePreparationObserved,
             engineApplyError,engineStatus,refreshingCommittedSettings})),
         };
@@ -196,5 +200,95 @@ test('a loading confirmation waits for a new ready transition before reading aga
     expect(reads).toBe(2);
     expect(probe.snapshot().pendingEngine).toEqual({});
     expect(probe.snapshot().engineApplyError).toBe('');
+  } finally { probe.dispose(); }
+});
+
+test('busy confirmation waits for the existing read before one fresh confirmation', async () => {
+  let reads = 0;
+  let resolveFirst!: (value: object) => void;
+  const probe = createProbe({ getServerSettings: async () => {
+    if (++reads === 1) return new Promise(resolve => { resolveFirst = resolve; });
+    return response();
+  } }, { observed: false });
+  try {
+    const first = probe.read();
+    const confirmation = probe.confirm();
+    await settle();
+    await settle();
+    expect(reads).toBe(1);
+    expect(probe.snapshot().enginePreparationActive).toBeTrue();
+    expect(probe.snapshot().engineApplyError).toBe('');
+    resolveFirst(response());
+    await first;
+    await confirmation;
+    await settle();
+    expect(reads).toBe(2);
+    expect(probe.snapshot().pendingEngine).toEqual({});
+    expect(probe.snapshot().engineApplyError).toBe('');
+  } finally { probe.dispose(); }
+});
+
+test('terminal failure invalidates the ordinary read that deferred confirmation', async () => {
+  let reads = 0;
+  let resolveFirst!: (value: object) => void;
+  const probe = createProbe({ getServerSettings: () => {
+    reads++;
+    return new Promise(resolve => { resolveFirst = resolve; });
+  } }, { observed: true });
+  try {
+    const first = probe.read();
+    const confirmation = probe.confirm();
+    probe.status({ current: 'whisper', status: 'error', message: 'Synthetic failure while busy' });
+    await settle();
+    resolveFirst(response());
+    await first;
+    await confirmation;
+    await settle();
+    expect(reads).toBe(1);
+    expect(probe.snapshot().engineStatus.status).toBe('error');
+    expect(probe.snapshot().engineApplyError).toBe('Synthetic failure while busy');
+    expect(probe.snapshot().pendingEngine).toEqual({ whisper_model: 'submitted' });
+  } finally { probe.dispose(); }
+});
+
+test('a failed busy read is followed by one fresh confirmation with its own failure result', async () => {
+  let reads = 0;
+  let rejectFirst!: (error: Error) => void;
+  const probe = createProbe({ getServerSettings: () => {
+    if (++reads > 1) return Promise.reject(new Error('Synthetic confirmation failure'));
+    return new Promise((_resolve, reject) => { rejectFirst = reject; });
+  } }, { observed: false });
+  try {
+    const first = probe.read();
+    const confirmation = probe.confirm();
+    expect(probe.snapshot().engineApplyError).toBe('');
+    rejectFirst(new Error('Synthetic ordinary read failure'));
+    await first;
+    await confirmation;
+    await settle();
+    expect(reads).toBe(2);
+    expect(probe.snapshot().enginePreparationActive).toBeFalse();
+    expect(probe.snapshot().enginePreparationRequested).toBeFalse();
+    expect(probe.snapshot().engineApplyError).not.toBe('');
+    expect(probe.snapshot().pendingEngine).toEqual({ whisper_model: 'submitted' });
+  } finally { probe.dispose(); }
+});
+
+test('Revert during an ordinary read refreshes current settings after that read settles', async () => {
+  let reads = 0;
+  let resolveFirst!: (value: object) => void;
+  const probe = createProbe({ getServerSettings: async () => {
+    if (++reads === 1) return new Promise(resolve => { resolveFirst = resolve; });
+    return response('current-after-revert');
+  } }, { active: false, requested: false, observed: false });
+  try {
+    const first = probe.read();
+    probe.revert();
+    resolveFirst(response('stale-before-revert'));
+    await first;
+    await settle();
+    expect(reads).toBe(2);
+    expect(probe.snapshot().pendingEngine).toEqual({});
+    expect(probe.snapshot().serverSettings?.whisper_model?.value).toBe('current-after-revert');
   } finally { probe.dispose(); }
 });

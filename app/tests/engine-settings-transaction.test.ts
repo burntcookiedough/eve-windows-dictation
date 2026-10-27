@@ -73,7 +73,7 @@ describe('Engine settings transaction UI', () => {
     expect(settingsView).toContain('enginePreparationRequested = true');
     expect(settingsView).toContain('await confirmEnginePreparationStatus()');
     expect(settingsView).toContain('void confirmEnginePreparationStatus()');
-    expect(settingsView).toContain('await loadServerSettings(isCurrent)');
+    expect(settingsView).toContain('await loadServerSettings()');
     expect(settingsView).toContain('function revertEngineSettings()');
     expect(settingsView).toContain('pendingEngine = {};');
     expect(settingsView).toContain('disabled={engineApplying || engineRevertDisabled}');
