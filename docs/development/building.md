@@ -140,6 +140,10 @@ compare every expected installed file's length and SHA256. Without it, those
 standalone scripts explicitly report byte verification as unverified. The hosted
 lifecycle gate requires the manifest and checks the candidate after upgrade;
 historical baseline files are not compared to the candidate manifest.
+After rollback and baseline removal, the hosted gate separately installs the
+candidate into a fresh runner-owned installation and QA profile, verifies its
+bytes and explicit tiny/CPU test runtime, and uninstalls it. The earlier profile
+and shared QA cache remain intact; this is not default-model or physical-mic proof.
 `release-verify.ps1` also rejects unsupported archive methods and fails if 7-Zip
 cannot list the payload. It resolves the pinned builder tool or accepts an
 explicit `-SevenZipPath`. Source tests do not replace exact-source installation
