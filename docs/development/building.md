@@ -24,6 +24,32 @@ uv run pytest
 uv run --no-sync python (Resolve-Path src/main.py).Path
 ```
 
+### Local data and reset scope
+
+Quit Eve and stop any separately started speech server through its owner before
+resetting data. Back up the intended profile and decide which data may be lost.
+Reinstalling the app and resetting its settings are separate operations.
+
+The existing `bun run clear-data` helper, run from `app/`, targets the default
+Windows profile `%APPDATA%\Eve`. It deletes `settings.json`, `history.db`,
+`history.db-wal`, and `history.db-shm`: this discards transcription History and
+its derived Insights as well as app preferences. It does not reset
+`server-settings.json`, `internal.json`, browser/session storage, model caches,
+or optional GPU packs. QA command-line profile flags do not redirect this helper;
+do not use it to reset an isolated QA profile.
+
+The managed server's preferences live in `<userData>/server-settings.json`,
+passed by Electron through the frozen `MURMUR_SETTINGS_FILE` override. A standalone
+server uses that override when set, otherwise `<repo>/server/settings.json`.
+To reset only persisted server preferences, stop that instance and back up that
+specific file before intentionally replacing its JSON object with `{}`. Explicit
+environment and `.env` values still take precedence. This does not reset app
+preferences or History and does not authorize deleting other profiles or caches.
+
+Do not delete `server.pid` as a settings reset: removing a PID record does not
+stop its process and can hide a running owner from later discovery. Let the
+owning app or server perform its normal shutdown cleanup.
+
 ### Standalone PID ownership
 
 Without a nonempty `MURMUR_PID_FILE`, the Python server uses these standalone
