@@ -9,7 +9,7 @@ $sequence = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Managemen
 if ($sequence.Count -ne 1) { throw 'Expected exactly one top-level lifecycle sequence.' }
 $allowed = @('Write-Step','Invoke-Installer','Assert-Installed','Launch-And-Verify','Set-Content',
     'Assert-SyntheticSentinels','Invoke-InstalledCpuInference','Uninstall-Current','Stop-TestProcesses',
-    'Join-Path','New-Item','Out-Null','Test-Path','Split-Path')
+    'Join-Path','New-Item','Out-Null','Test-Path','Split-Path','Get-Content')
 foreach ($command in $sequence[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
     if ($command.GetCommandName() -notin $allowed) { throw 'Unexpected command in extracted lifecycle sequence.' }
 }
@@ -34,7 +34,8 @@ $script:cleanLaunch = $false
 $script:cleanInference = $false
 $script:cleanRemoval = $false
 $script:stopped = $false
-function Write-Step { param($Message) }
+$script:passPrinted = $false
+function Write-Step { param($Message) if ($Message -like 'PASS:*') { $script:passPrinted = $true } }
 function Stop-TestProcesses { $script:stopped = $true }
 function Invoke-Installer {
     param($Installer, $InstallDir)
@@ -65,6 +66,12 @@ function Uninstall-Current {
     Remove-Item -LiteralPath (Join-Path $script:CurrentInstallDir 'Eve.exe')
     $script:installed = ''
     if ($script:clean) { $script:cleanRemoval = $true }
+    if ($script:clean -and $Mode -eq 'earlier-profile-removed') {
+        Remove-Item -LiteralPath $originalSentinel
+    }
+    if ($script:clean -and $Mode -eq 'earlier-profile-changed') {
+        Set-Content -LiteralPath $originalSentinel -Value 'changed synthetic evidence'
+    }
     if ($Version -eq 'baseline' -and $Mode -in @('existing-profile', 'existing-install')) {
         $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
         $existing = Join-Path $Root $name
@@ -75,7 +82,7 @@ function Uninstall-Current {
 $failure = $null
 try { Invoke-Expression $sequence[0].Extent.Text } catch { $failure = $_.Exception.Message }
 if (-not $script:stopped) { throw 'Lifecycle finally did not stop owned test processes.' }
-if ((Get-Content -LiteralPath $originalSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') { throw 'Original profile evidence changed.' }
+if ($Mode -notin @('earlier-profile-removed', 'earlier-profile-changed') -and (Get-Content -LiteralPath $originalSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') { throw 'Original profile evidence changed.' }
 if ($Mode -eq 'success') {
     if ($failure) { throw $failure }
     if (-not ($script:cleanLaunch -and $script:cleanInference -and $script:cleanRemoval)) { throw 'Candidate clean install, launch, inference and removal were not all exercised.' }
@@ -83,7 +90,9 @@ if ($Mode -eq 'success') {
     Assert-SyntheticSentinels
 } else {
     if (-not $failure) { throw 'Expected the isolated lifecycle phase to fail closed.' }
-    if ($script:cleanRemoval) { throw 'Failed clean phase was reported as complete.' }
+    if ($script:passPrinted) { throw 'Failed lifecycle phase reported PASS.' }
+    if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed')) { throw 'Failed clean phase was reported as complete.' }
+    if ($Mode -in @('earlier-profile-removed', 'earlier-profile-changed') -and $failure -notmatch 'Earlier profile sentinel') { throw $failure }
     if ($Mode -eq 'launch-failure' -and $failure -notmatch 'Synthetic fresh candidate launch failed') { throw $failure }
     if ($Mode -in @('existing-profile', 'existing-install')) {
         $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }

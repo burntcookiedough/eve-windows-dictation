@@ -647,6 +647,7 @@ try {
     Uninstall-Current -Version $script:BaselineVersion
 
     Write-Step 'Installing alpha.8 into a fresh installation and synthetic profile.'
+    $earlierProfileSentinel = $profileSentinel
     $cleanProfileRoot = Join-Path $script:RunRoot 'clean-profile'
     $cleanInstallRoot = Join-Path $script:RunRoot 'clean-install'
     New-Item -ItemType Directory -Path $cleanProfileRoot, $cleanInstallRoot | Out-Null
@@ -660,6 +661,10 @@ try {
     Assert-SyntheticSentinels
     Invoke-InstalledCpuInference
     Uninstall-Current -Version $script:CandidateVersion
+    if (-not (Test-Path -LiteralPath $earlierProfileSentinel -PathType Leaf) -or
+        (Get-Content -LiteralPath $earlierProfileSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') {
+        throw 'Earlier profile sentinel was removed or changed during the clean candidate lifecycle.'
+    }
 
     Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to alpha.8 upgrade, and alpha.5 rollback completed.'
     Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'
