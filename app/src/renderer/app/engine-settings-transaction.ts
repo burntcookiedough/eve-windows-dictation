@@ -6,8 +6,9 @@ export function enginePreparationPhase(
   status: EngineStatus | null,
 ): EnginePreparationPhase {
   if (!status) return 'unknown';
-  if (status.status === 'error' || status.pending?.status === 'error' || status.message) return 'failed';
+  if (status.status === 'error' || status.pending?.status === 'error') return 'failed';
   if (status.status === 'loading' || status.pending) return 'preparing';
+  if (status.message) return 'failed';
   if (status.status === 'ready') return 'ready';
   return 'unknown';
 }

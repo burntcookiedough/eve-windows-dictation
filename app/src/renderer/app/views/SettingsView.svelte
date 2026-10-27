@@ -121,6 +121,7 @@
   let engineStatus = $state<EngineStatus | null>(null);
   let serverConnected = $state(false);
   let serverSettingsLoading = $state(false);
+  let serverSettingsRead: Promise<boolean> | null = null;
   let lastServerSettingsAttemptKey = $state<string | null>(null);
   let engineApplying = $state(false);
   let enginePreparationRequested = $state(false);
@@ -170,7 +171,7 @@
     enginePreparationPhase(sharedEngineStatus) === 'failed' ||
     (!enginePreparationActive && stagedPreset !== null && sharedServerState?.modelDownload?.model === stagedPreset.model && sharedServerState.modelDownload.status === 'error')
   );
-  let engineRevertDisabled = $derived(shouldDisableEngineRevert(enginePreparationActive));
+  let engineRevertDisabled = $derived(shouldDisableEngineRevert(enginePreparationActive || refreshingCommittedSettings));
   let engineFailureMessage = $derived(
     engineApplyError ||
     (sharedEngineStatus?.status === 'error' ? sharedEngineStatus.message ?? 'Speech engine setup failed.' : '') ||
@@ -487,25 +488,42 @@
     }
   }
 
-  async function loadServerSettings(): Promise<boolean> {
-    if (serverSettingsLoading) return false;
-    serverSettingsLoading = true;
-    try {
-      const serverData = await window.murmurMain.getServerSettings();
-      serverSettings = serverData.settings;
-      modelCatalog = serverData.model_catalog ?? [];
-      engineStatus = serverData.engine_status;
-      serverConnected = true;
-      return true;
-    } catch {
-      serverSettings = null;
-      modelCatalog = [];
-      engineStatus = null;
-      serverConnected = false;
-      return false;
-    } finally {
-      serverSettingsLoading = false;
+  function loadServerSettings(): Promise<boolean> {
+    const patch = enginePreparationPatch;
+    const isCurrent = () => enginePreparationPatch === patch;
+    const pendingRead = serverSettingsRead;
+    if (pendingRead) {
+      // A busy read is not a failed read. Wait for its completion event, then
+      // obtain a fresh snapshot if this transaction has not been invalidated.
+      return pendingRead.then(() => isCurrent() ? loadServerSettings() : false);
     }
+    serverSettingsLoading = true;
+    const read = (async (): Promise<boolean> => {
+      try {
+        const serverData = await window.murmurMain.getServerSettings();
+        if (!isCurrent()) return false;
+        serverSettings = serverData.settings;
+        modelCatalog = serverData.model_catalog ?? [];
+        engineStatus = serverData.engine_status;
+        serverConnected = true;
+        return true;
+      } catch {
+        if (!isCurrent()) return false;
+        serverSettings = null;
+        modelCatalog = [];
+        engineStatus = null;
+        serverConnected = false;
+        return false;
+      } finally {
+        serverSettingsLoading = false;
+      }
+    })();
+    serverSettingsRead = read;
+    const releaseRead = () => {
+      if (serverSettingsRead === read) serverSettingsRead = null;
+    };
+    void read.then(releaseRead, releaseRead);
+    return read;
   }
 
   async function loadAudioDevices() {
@@ -733,7 +751,7 @@
   }
 
   function revertEngineSettings(): void {
-    if (enginePreparationActive) return;
+    if (engineApplying || enginePreparationActive || refreshingCommittedSettings) return;
     pendingEngine = {};
     enginePreparationRequested = false;
     enginePreparationActive = false;
@@ -744,7 +762,7 @@
   }
 
   async function applyEngineSettings(requestedPatch: Record<string, unknown> = pendingEngine) {
-    if (engineApplying || enginePreparationActive || Object.keys(requestedPatch).length === 0) return;
+    if (engineApplying || enginePreparationActive || refreshingCommittedSettings || Object.keys(requestedPatch).length === 0) return;
     enginePreparationRequested = false;
     enginePreparationObserved = false;
     enginePreparationPatch = {};
@@ -779,27 +797,47 @@
     }
   }
 
-  async function confirmEnginePreparationStatus(): Promise<void> {
-    if (!(await loadServerSettings())) return;
+  function finishEnginePreparation(message = ''): void {
+    enginePreparationRequested = false;
+    enginePreparationActive = false;
+    enginePreparationObserved = false;
+    enginePreparationPatch = {};
+    engineApplyError = message;
+  }
 
-    const phase = enginePreparationPhase(engineStatus);
-    if (phase === 'preparing') {
-      enginePreparationObserved = true;
-      return;
-    }
-    if (phase === 'failed') {
-      enginePreparationActive = false;
-      engineApplyError = engineStatus?.pending?.message ?? engineStatus?.message ?? 'Engine reload failed.';
-      return;
-    }
-    if (phase === 'ready') {
-      if (!engineSettingsPatchMatches(enginePreparationPatch, serverSettings)) return;
-      pendingEngine = clearAppliedEngineSettings(pendingEngine, enginePreparationPatch);
-      enginePreparationRequested = false;
-      enginePreparationActive = false;
-      enginePreparationObserved = false;
-      enginePreparationPatch = {};
-      engineApplyError = '';
+  async function confirmEnginePreparationStatus(): Promise<void> {
+    if (refreshingCommittedSettings) return;
+    refreshingCommittedSettings = true;
+    // Consume the reactive trigger before the read. A new loading transition can
+    // re-arm it, but a ready mismatch or failed read cannot retrigger it forever.
+    enginePreparationRequested = false;
+    const patch = enginePreparationPatch;
+    const isCurrent = () => enginePreparationPatch === patch;
+    try {
+      const loaded = await loadServerSettings();
+      if (!isCurrent()) return;
+      if (!loaded) {
+        finishEnginePreparation('Could not confirm speech settings. Retry or revert your changes.');
+        return;
+      }
+      const phase = enginePreparationPhase(engineStatus);
+      if (phase === 'preparing') {
+        enginePreparationRequested = true;
+        enginePreparationObserved = true;
+        return;
+      }
+      if (phase === 'failed') {
+        finishEnginePreparation(engineStatus?.pending?.message ?? engineStatus?.message ?? 'Engine reload failed.');
+        return;
+      }
+      if (phase !== 'ready' || !engineSettingsPatchMatches(patch, serverSettings)) {
+        finishEnginePreparation('Speech settings changed before confirmation. Retry or revert your changes.');
+        return;
+      }
+      pendingEngine = clearAppliedEngineSettings(pendingEngine, patch);
+      finishEnginePreparation();
+    } finally {
+      refreshingCommittedSettings = false;
     }
   }
 
@@ -810,38 +848,20 @@
     if (Object.keys(pendingEngine).length === 0) return;
     if (preparationFailed) {
       if (enginePreparationActive && !enginePreparationObserved) return;
-      enginePreparationActive = false;
-      engineApplyError = sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.';
+      finishEnginePreparation(sharedEngineStatus?.pending?.message ?? sharedEngineStatus?.message ?? 'Engine reload failed.');
       return;
     }
-    if (shouldRefreshCommittedSettings(
+    if (!serverSettingsLoading && shouldRefreshCommittedSettings(
       pendingEngine,
       enginePreparationRequested,
       enginePreparationObserved,
       preparationFailed,
       sharedEngineStatus,
     )) {
-      void refreshCommittedSettings();
+      void confirmEnginePreparationStatus();
     }
   });
 
-  async function refreshCommittedSettings(): Promise<void> {
-    if (refreshingCommittedSettings) return;
-    refreshingCommittedSettings = true;
-    try {
-      if (await loadServerSettings()) {
-        if (!engineSettingsPatchMatches(enginePreparationPatch, serverSettings)) return;
-        pendingEngine = clearAppliedEngineSettings(pendingEngine, enginePreparationPatch);
-        enginePreparationRequested = false;
-        enginePreparationActive = false;
-        enginePreparationObserved = false;
-        enginePreparationPatch = {};
-        engineApplyError = '';
-      }
-    } finally {
-      refreshingCommittedSettings = false;
-    }
-  }
 </script>
 
 <PrimaryPage page="settings" scrollOwner="settings-page" contentClass="pb-6">
@@ -1006,7 +1026,7 @@
                   <p>Compatibility changes require an engine reload.</p>
                   {#if !stagedPreset}
                     <div class="settings-action-row">
-                      <button type="button" class="settings-link" onclick={() => applyEngineSettings()} disabled={engineApplying || enginePreparationActive}>
+                      <button type="button" class="settings-link" onclick={() => applyEngineSettings()} disabled={engineApplying || enginePreparationActive || refreshingCommittedSettings}>
                         {engineApplying || enginePreparationActive ? 'preparing…' : preparationFailed ? 'retry changes' : 'apply changes'}
                       </button>
                       <button type="button" class="settings-link settings-secondary-link" onclick={revertEngineSettings} disabled={engineApplying || engineRevertDisabled}>revert</button>
@@ -1225,7 +1245,7 @@
   modelDownload={sharedServerState?.modelDownload}
   {preparationFailed}
   preparationActive={enginePreparationActive}
-  applying={engineApplying}
+  applying={engineApplying || refreshingCommittedSettings}
   canRevert={stagedPreset !== null}
   revertDisabled={engineApplying || engineRevertDisabled}
   errorMessage={engineApplyError}
