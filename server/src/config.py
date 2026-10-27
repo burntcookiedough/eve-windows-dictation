@@ -529,7 +529,8 @@ def get_settings() -> Settings:
         _settings = Settings()
     except ValidationError as e:
         logger.warning("Invalid settings.json values; falling back to defaults: %s", e)
-        _settings = _default_settings()
+        # Keep raw defaults source-free, but project recovery for runtime consumers.
+        _settings = _default_settings().resolve_runtime_compatibility()
     return _settings
 
 

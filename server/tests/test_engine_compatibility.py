@@ -360,3 +360,37 @@ def test_hidden_legacy_int16_is_rejected_for_new_updates(
 
     with pytest.raises(ValidationError):
         config.update_settings({"whisper_compute_type": "int16"})
+
+
+@pytest.mark.parametrize(
+    ("cuda_types", "expected_device", "expected_compute"),
+    [(None, "cpu", "auto"), (frozenset({"float16", "float32"}), "cuda", "auto")],
+)
+def test_invalid_settings_recovery_projects_defaults_without_rereading_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    cuda_types: frozenset[str] | None,
+    expected_device: str,
+    expected_compute: str,
+) -> None:
+    """Corrupt input cannot bypass the runtime's ordinary device projection."""
+    source_reads: list[bool] = []
+
+    def invalid_source() -> dict[str, object]:
+        source_reads.append(True)
+        return {"whisper_beam_size": 0, "whisper_model": "synthetic-discarded-model"}
+
+    monkeypatch.setattr(
+        config.Settings, "settings_customise_sources",
+        classmethod(lambda cls, *args, **kwargs: (invalid_source,)),
+    )
+    monkeypatch.setattr(config, "get_runtime_capabilities", lambda: _capabilities(cuda=cuda_types))
+    recovered = config.get_settings()
+    runtime_config = whisper_config_from_settings(recovered)
+    assert (runtime_config.device, runtime_config.compute_type) == (expected_device, expected_compute)
+    assert recovered.effective_whisper_config is not None
+    assert recovered.whisper_model == "large-v3-turbo"
+    assert recovered.whisper_beam_size == 1
+    assert recovered.model_dump()["whisper_device"] == "auto"
+    assert recovered.model_dump()["whisper_compute_type"] == "auto"
+    assert config.get_settings() is recovered
+    assert len(source_reads) == 1
