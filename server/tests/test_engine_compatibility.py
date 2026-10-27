@@ -361,16 +361,21 @@ def test_hidden_legacy_int16_is_rejected_for_new_updates(
     with pytest.raises(ValidationError):
         config.update_settings({"whisper_compute_type": "int16"})
 
+
 @pytest.mark.parametrize(
     ("cuda_types", "expected_device", "expected_compute"),
     [(None, "cpu", "auto"), (frozenset({"float16", "float32"}), "cuda", "auto")],
 )
 def test_invalid_settings_recovery_projects_defaults_without_rereading_sources(
-    monkeypatch: pytest.MonkeyPatch, cuda_types, expected_device: str, expected_compute: str,
+    monkeypatch: pytest.MonkeyPatch,
+    cuda_types: frozenset[str] | None,
+    expected_device: str,
+    expected_compute: str,
 ) -> None:
     """Corrupt input cannot bypass the runtime's ordinary device projection."""
-    source_reads = []
-    def invalid_source():
+    source_reads: list[bool] = []
+
+    def invalid_source() -> dict[str, object]:
         source_reads.append(True)
         return {"whisper_beam_size": 0, "whisper_model": "synthetic-discarded-model"}
 

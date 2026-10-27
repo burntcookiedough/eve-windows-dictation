@@ -133,7 +133,10 @@ def test_invalid_persisted_value_falls_back_to_builtin_defaults(
 
     settings = config.get_settings()
 
-    assert settings.whisper_device == "auto"
+    assert settings.requested_whisper_device == "auto"
+    assert settings.model_dump()["whisper_device"] == "auto"
+    assert settings.effective_whisper_config is not None
+    assert settings.whisper_device == settings.effective_whisper_config.effective_device
 
 
 def test_invalid_json_falls_back_to_builtin_defaults(
