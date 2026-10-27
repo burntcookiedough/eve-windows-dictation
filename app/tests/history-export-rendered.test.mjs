@@ -36,6 +36,28 @@ async function stopVite() {
 
 afterAll(stopVite);
 
+async function readFixtureOutput(stream, onChunk) {
+  const decoder = new TextDecoder();
+  let text = '';
+  for await (const chunk of stream) {
+    const part = decoder.decode(chunk, { stream: true });
+    text += part;
+    onChunk(part);
+  }
+  const final = decoder.decode();
+  onChunk(final);
+  return text + final;
+}
+
+function redactFixturePaths(text) {
+  for (const root of [tmpdir(), appRoot]) {
+    for (const spelling of [root, root.replaceAll('\\', '/'), JSON.stringify(root).slice(1, -1)]) {
+      text = text.replaceAll(spelling, '<fixture-root>');
+    }
+  }
+  return text;
+}
+
 let result;
 try {
   let fixtureReady = false;
@@ -66,9 +88,11 @@ try {
     windowsHide: true,
   });
   let watchdog;
+  let stdoutTail = '';
+  let stderrTail = '';
   const completed = Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
+    readFixtureOutput(child.stdout, part => { stdoutTail = redactFixturePaths(stdoutTail + part).slice(-8192); }),
+    readFixtureOutput(child.stderr, part => { stderrTail = redactFixturePaths(stderrTail + part).slice(-8192); }),
     child.exited,
   ]).then(([stdout, stderr, code]) => ({ kind: 'completed', stdout, stderr, code }));
   const timedOut = new Promise((resolveTimeout) => {
@@ -80,7 +104,7 @@ try {
     child.kill();
     await Promise.race([child.exited, new Promise((resolveWait) => setTimeout(resolveWait, 5000))]);
     await fs.rm(resolve(tmpdir(), `eve-history-export-${child.pid}`), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
-    throw new Error(`History export fixture exceeded its ${fixtureTimeoutMs}ms watchdog and was terminated`);
+    throw new Error(`History export fixture exceeded its ${fixtureTimeoutMs}ms watchdog and was terminated\nstdout tail:\n${redactFixturePaths(stdoutTail)}\nstderr tail:\n${redactFixturePaths(stderrTail)}`);
   }
   const { stdout, stderr, code } = outcome;
   if (code !== 0) {

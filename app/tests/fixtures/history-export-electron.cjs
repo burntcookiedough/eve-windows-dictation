@@ -9,6 +9,11 @@ const screenshotDir = path.resolve(process.env.EVE_HISTORY_EXPORT_SCREENSHOT_DIR
 const userData = path.resolve(os.tmpdir(), `eve-history-export-${process.pid}`);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let fixtureStep = 'startup';
+function setFixtureStep(step) {
+  fixtureStep = step;
+  process.stderr.write(`[History export fixture] ${step}\n`);
+}
+setFixtureStep('startup');
 
 async function readEntryIds(window) {
   return window.webContents.executeJavaScript(`Array.from(document.querySelectorAll('[data-history-entry]'), (entry) => entry.getAttribute('data-history-entry'))`);
@@ -104,11 +109,13 @@ async function main() {
   let historyControls = null;
   let bulkDeleteRequest = null;
   try {
+    setFixtureStep('load renderer');
     await window.loadURL(fixtureUrl);
+    setFixtureStep('enable focus emulation');
     window.webContents.debugger.attach('1.3');
     await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
     await wait(500);
-    fixtureStep = 'inactive and active slash shortcuts';
+    setFixtureStep('inactive and active slash shortcuts');
     const shortcuts = await window.webContents.executeJavaScript(`(() => {
       const layer = document.querySelector('#history-page-layer');
       const input = document.querySelector('input[type="search"]');
@@ -202,7 +209,7 @@ async function main() {
     await clickSelector(window, '[data-history-selection-toggle]');
     await clickSelector(window, '[data-history-select-entry="fixture-1"]');
     const requestsBeforeBackgroundCommit = await window.webContents.executeJavaScript('window.historyFixtureCalls.historyRequests.length');
-    fixtureStep = 'deferred delete while History layer is inactive';
+    setFixtureStep('deferred delete while History layer is inactive');
     await window.webContents.executeJavaScript(`(() => {
       const layer = document.querySelector('#history-page-layer');
       layer.classList.remove('app-page-layer--active');
@@ -241,7 +248,7 @@ async function main() {
 
     historyControls.queueFlush = {};
     for (const lifecycleEvent of ['visibilitychange', 'pagehide']) {
-      fixtureStep = `${lifecycleEvent} delete failure restores History`;
+      setFixtureStep(`${lifecycleEvent} delete failure restores History`);
       const requestsBeforeFlush = await window.webContents.executeJavaScript('window.historyFixtureCalls.singleDeleteRequests.length');
       await window.webContents.executeJavaScript(`(() => {
         window.historyFixtureCalls.failNextSingleDelete = true;
@@ -368,6 +375,7 @@ async function main() {
     await waitForEntryIds(window, [], 'committed bulk delete');
     historyControls.bulkDeleteRequest = bulkDeleteRequest;
 
+    setFixtureStep('capture export screenshots');
     fs.mkdirSync(screenshotDir, { recursive: true });
     for (const [name, setup] of [
       ['history-export-all.png', async () => {}],
