@@ -72,8 +72,8 @@ describe('Engine settings transaction UI', () => {
 
     expect(settingsView).toContain('enginePreparationRequested = true');
     expect(settingsView).toContain('await confirmEnginePreparationStatus()');
-    expect(settingsView).toContain('void refreshCommittedSettings()');
-    expect(settingsView).toContain('if (await loadServerSettings())');
+    expect(settingsView).toContain('void confirmEnginePreparationStatus()');
+    expect(settingsView).toContain('await loadServerSettings(isCurrent)');
     expect(settingsView).toContain('function revertEngineSettings()');
     expect(settingsView).toContain('pendingEngine = {};');
     expect(settingsView).toContain('disabled={engineApplying || engineRevertDisabled}');
@@ -81,4 +81,10 @@ describe('Engine settings transaction UI', () => {
     expect(settingsView).toContain('if (recovery.message) engineApplyError = recovery.message;');
     expect(settingsView).toContain('data-settings-readiness role="alert"');
   });
+});
+
+test('loading messages are informational while explicit failures retain precedence', () => {
+  expect(enginePreparationPhase({ current: 'whisper', status: 'loading', message: 'Faster-Whisper runtime is stopping.' })).toBe('preparing');
+  expect(enginePreparationPhase({ current: 'whisper', status: 'loading', pending: { engine: 'whisper', status: 'error', message: 'Failed.' } })).toBe('failed');
+  expect(enginePreparationPhase({ current: 'whisper', status: 'ready', pending: { engine: 'whisper', status: 'loading', message: 'Loading selected model.' } })).toBe('preparing');
 });
