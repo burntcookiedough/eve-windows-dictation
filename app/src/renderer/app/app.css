@@ -438,6 +438,7 @@ select:focus-visible,
 }
 
 .app-launch-intro {
+  --launch-ink: #7dbf96;
   position: absolute;
   z-index: 25;
   inset: 0;
@@ -447,6 +448,10 @@ select:focus-visible,
   justify-content: center;
   background: var(--bg);
   transition: background-color .8s;
+}
+
+.eve-shell--light .app-launch-intro {
+  --launch-ink: #285438;
 }
 
 .app-launch-intro--fly {
@@ -461,7 +466,7 @@ select:focus-visible,
 .app-launch-intro__cactus {
   width: 92px;
   height: auto;
-  color: var(--fg);
+  color: var(--launch-ink);
 }
 
 .app-launch-intro__cactus.cactus--draw path {
@@ -491,10 +496,12 @@ select:focus-visible,
 .app-launch-intro__wordmark {
   display: flex;
   margin-top: 34px;
-  padding-left: .34em;
-  font-size: 20px;
-  font-weight: 300;
-  letter-spacing: .34em;
+  padding-left: .16em;
+  color: var(--launch-ink);
+  font-family: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: .16em;
   transition: opacity .3s;
 }
 
