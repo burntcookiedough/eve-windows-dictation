@@ -157,6 +157,18 @@ try {
             Microsoft.PowerShell.Management\Get-Process -Id $Id -ErrorAction Stop
         }
     }
+    if ($Mode -eq 'second-scan-failure') {
+        $script:LauncherId = $process.Id
+        $script:RootScans = 0
+        function Get-CimInstance {
+            [CmdletBinding()]param([string]$ClassName, [string]$Filter)
+            if ($Filter -eq "ParentProcessId = $script:LauncherId") {
+                $script:RootScans++
+                if ($script:RootScans -eq 2) { throw 'synthetic second scan failure' }
+            }
+            CimCmdlets\Get-CimInstance -ClassName $ClassName -Filter $Filter -ErrorAction Stop
+        }
+    }
     # A fresh, same-executable foreign PID must not become cleanup authority.
     $pidData = @{ pid = $foreign.Id; port = $foreignRecord.port; startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     if ($Mode -eq 'missing-pid') { $pidData = $null }
@@ -179,6 +191,10 @@ try {
         if ($backend.HasExited -or $foreign.HasExited) { throw 'Cleanup stopped a process after failed identity validation' }
         Write-Output "REFUSAL_PROOF=$Mode; no unsafe stop; incomplete cleanup reported"
         return
+    }
+    if ($Mode -eq 'second-scan-failure') {
+        if (-not $cleanupError -or $cleanupError.Exception.Message -notmatch 'synthetic second scan failure') { throw 'Cleanup did not report the failed scan' }
+        $cleanupError = $null # Expected failure; still require real child/port/file cleanup below.
     }
     if ($cleanupError) { throw $cleanupError }
     if ((Test-Path -LiteralPath (Join-Path $ownRoot 'expired.txt')) -or

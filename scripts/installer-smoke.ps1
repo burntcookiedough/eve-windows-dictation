@@ -127,7 +127,13 @@ function Stop-SmokeOwnedTree {
         # Pin current children before stopping their parent can make them exit.
         # Scan again after the stop to capture children born during the first scan.
         foreach ($pass in 0..1) {
-            $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Identity.Id)" -ErrorAction Stop
+            try {
+                $children = Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Identity.Id)" -ErrorAction Stop
+            } catch {
+                if ($pass -eq 0) { throw }
+                $failures.Add($_.Exception)
+                break # Drain already-pinned children, then report incomplete discovery.
+            }
             foreach ($record in $children) {
                 if ($ownedChildren | Where-Object { $_.Id -eq [int]$record.ProcessId }) { continue }
                 $child = $null
