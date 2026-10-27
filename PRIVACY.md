@@ -15,9 +15,11 @@ Packaged Eve keeps speech processing on its bundled local service. The optional 
 
 ## Local data
 
-The current v0.6.3 binary uses Electron's Murmur user-data directory, including `%APPDATA%\murmur` on a standard Windows installation. It stores settings and a SQLite transcription History there. Model files use the relevant Hugging Face cache location.
+Current Eve builds use a separate Electron profile, normally `%APPDATA%\Eve` on Windows. It contains app settings, persisted server settings (`server-settings.json`), and the SQLite transcription History/Insights database (`history.db`). Model files use the relevant Hugging Face cache location. Optional GPU support files normally live under `%LOCALAPPDATA%\Eve\gpu-packs`, separately from the profile's speech data.
 
-Repository and product naming work does not authorize moving or deleting these locations. The future Eve application will use a separate fresh profile and will not import Murmur History, settings, hotwords, browser storage, credentials, or external-server configuration. The legacy Murmur directory will remain untouched. Shared third-party model caches are a separate runtime-asset boundary and may be reused without reading Murmur userData.
+The historical Murmur v0.6.3 release uses its own profile, normally `%APPDATA%\murmur`. Eve does not import that profile's History, settings, hotwords, browser storage, credentials, or external-server configuration. Naming changes do not authorize moving or deleting legacy data. Shared third-party model caches may be reused without reading Murmur userData.
+
+Developer data-reset tools have narrower scopes than the whole profile. See [local data and reset scope](docs/development/building.md#local-data-and-reset-scope) before resetting settings or History. The [historical Murmur setup guide](docs/windows-local-cuda-dictation.md) retains its original paths as release evidence.
 
 ## Diagnostics and contributions
 
