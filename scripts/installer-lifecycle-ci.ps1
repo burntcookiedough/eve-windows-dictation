@@ -645,7 +645,28 @@ try {
 
     Write-Step 'Uninstalling the rolled-back baseline.'
     Uninstall-Current -Version $script:BaselineVersion
-    Write-Step 'PASS: clean CPU install, alpha.5 to alpha.8 upgrade, alpha.5 rollback, and uninstall completed.'
+
+    Write-Step 'Installing alpha.8 into a fresh installation and synthetic profile.'
+    $earlierProfileSentinel = $profileSentinel
+    $cleanProfileRoot = Join-Path $script:RunRoot 'clean-profile'
+    $cleanInstallRoot = Join-Path $script:RunRoot 'clean-install'
+    New-Item -ItemType Directory -Path $cleanProfileRoot, $cleanInstallRoot | Out-Null
+    $script:ProfileRoot = $cleanProfileRoot
+    $script:CurrentInstallDir = Join-Path $cleanInstallRoot 'Programs\Eve'
+    $profileSentinel = Join-Path (Join-Path $script:ProfileRoot 'Eve') 'installer-lifecycle-sentinel.txt'
+    Invoke-Installer -Installer $candidateInstaller -InstallDir $script:CurrentInstallDir
+    Assert-Installed -Version $script:CandidateVersion
+    Launch-And-Verify -Version $script:CandidateVersion | Out-Null
+    Set-Content -LiteralPath $profileSentinel -Value 'eve-alpha7-profile-sentinel' -NoNewline
+    Assert-SyntheticSentinels
+    Invoke-InstalledCpuInference
+    Uninstall-Current -Version $script:CandidateVersion
+    if (-not (Test-Path -LiteralPath $earlierProfileSentinel -PathType Leaf) -or
+        (Get-Content -LiteralPath $earlierProfileSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') {
+        throw 'Earlier profile sentinel was removed or changed during the clean candidate lifecycle.'
+    }
+
+    Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to alpha.8 upgrade, and alpha.5 rollback completed.'
     Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'
 } finally {
     Stop-TestProcesses

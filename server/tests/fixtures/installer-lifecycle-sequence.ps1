@@ -1,0 +1,108 @@
+param([string]$LifecycleScript, [string]$Root, [string]$Mode)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($LifecycleScript, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Lifecycle script did not parse.' }
+$sequence = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.TryStatementAst] })
+if ($sequence.Count -ne 1) { throw 'Expected exactly one top-level lifecycle sequence.' }
+$allowed = @('Write-Step','Invoke-Installer','Assert-Installed','Launch-And-Verify','Set-Content',
+    'Assert-SyntheticSentinels','Invoke-InstalledCpuInference','Uninstall-Current','Stop-TestProcesses',
+    'Join-Path','New-Item','Out-Null','Test-Path','Split-Path','Get-Content')
+foreach ($command in $sequence[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    if ($command.GetCommandName() -notin $allowed) { throw 'Unexpected command in extracted lifecycle sequence.' }
+}
+$sentinels = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-SyntheticSentinels' }, $false)
+if ($sentinels.Count -ne 1) { throw 'Expected the real sentinel verifier.' }
+Invoke-Expression $sentinels[0].Extent.Text
+$script:RunRoot = $Root
+$script:ProfileRoot = Join-Path $Root 'profile'
+$script:CacheRoot = Join-Path $Root 'cache'
+$script:InstallDir = Join-Path $Root 'install'
+$script:CurrentInstallDir = $script:InstallDir
+$script:BaselineVersion = 'baseline'
+$script:CandidateVersion = 'candidate'
+$baselineInstaller = 'baseline'
+$candidateInstaller = 'candidate'
+New-Item -ItemType Directory -Path $script:ProfileRoot, $script:CacheRoot | Out-Null
+$profileSentinel = Join-Path $script:ProfileRoot 'Eve/installer-lifecycle-sentinel.txt'
+$originalSentinel = $profileSentinel
+Set-Content (Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt') 'eve-alpha7-cache-sentinel' -NoNewline
+$script:installed = ''
+$script:cleanLaunch = $false
+$script:cleanInference = $false
+$script:cleanRemoval = $false
+$script:stopped = $false
+$script:passPrinted = $false
+function Write-Step { param($Message) if ($Message -like 'PASS:*') { $script:passPrinted = $true } }
+function Stop-TestProcesses { $script:stopped = $true }
+function Invoke-Installer {
+    param($Installer, $InstallDir)
+    $script:clean = $Installer -eq 'candidate' -and $script:installed -eq ''
+    if ($script:clean -and (Test-Path (Join-Path $script:ProfileRoot 'Eve'))) { throw 'Clean candidate reused an existing profile.' }
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    Set-Content (Join-Path $InstallDir 'Eve.exe') $Installer
+    $script:installed = $Installer
+}
+function Assert-Installed {
+    param($Version)
+    if ($script:installed -ne $Version -or (Get-Content (Join-Path $script:CurrentInstallDir 'Eve.exe') -Raw).Trim() -ne $Version) { throw 'Synthetic installed version mismatch.' }
+}
+function Launch-And-Verify {
+    param($Version)
+    Assert-Installed $Version
+    if ($script:clean) {
+        if ($Mode -eq 'launch-failure') { throw 'Synthetic fresh candidate launch failed.' }
+        $script:cleanLaunch = $true
+    }
+    New-Item -ItemType Directory -Path (Join-Path $script:ProfileRoot 'Eve') -Force | Out-Null
+}
+function Invoke-InstalledCpuInference { if ($script:clean) { $script:cleanInference = $true } }
+function Uninstall-Current {
+    param($Version)
+    Assert-Installed $Version
+    Assert-SyntheticSentinels
+    Remove-Item -LiteralPath (Join-Path $script:CurrentInstallDir 'Eve.exe')
+    $script:installed = ''
+    if ($script:clean) { $script:cleanRemoval = $true }
+    if ($script:clean -and $Mode -eq 'earlier-profile-removed') {
+        Remove-Item -LiteralPath $originalSentinel
+    }
+    if ($script:clean -and $Mode -eq 'earlier-profile-changed') {
+        Set-Content -LiteralPath $originalSentinel -Value 'changed synthetic evidence'
+    }
+    if ($Version -eq 'baseline' -and $Mode -in @('existing-profile', 'existing-install')) {
+        $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
+        $existing = Join-Path $Root $name
+        New-Item -ItemType Directory -Path $existing | Out-Null
+        Set-Content (Join-Path $existing 'preserve.txt') 'existing synthetic evidence'
+    }
+}
+$failure = $null
+$failureRecord = $null
+try { Invoke-Expression $sequence[0].Extent.Text } catch { $failureRecord = $_; $failure = $_.Exception.Message }
+if (-not $script:stopped) { throw 'Lifecycle finally did not stop owned test processes.' }
+if ($Mode -notin @('earlier-profile-removed', 'earlier-profile-changed') -and (Get-Content -LiteralPath $originalSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') { throw 'Original profile evidence changed.' }
+if ($Mode -eq 'success') {
+    if ($failure) { throw $failure }
+    if (-not ($script:cleanLaunch -and $script:cleanInference -and $script:cleanRemoval)) { throw 'Candidate clean install, launch, inference and removal were not all exercised.' }
+    if ($script:ProfileRoot -eq (Join-Path $Root 'profile')) { throw 'Candidate did not receive a fresh profile.' }
+    Assert-SyntheticSentinels
+} else {
+    if (-not $failure) { throw 'Expected the isolated lifecycle phase to fail closed.' }
+    if ($script:passPrinted) { throw 'Failed lifecycle phase reported PASS.' }
+    if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed')) { throw 'Failed clean phase was reported as complete.' }
+    if ($Mode -in @('earlier-profile-removed', 'earlier-profile-changed') -and $failure -notmatch 'Earlier profile sentinel') { throw $failure }
+    if ($Mode -eq 'launch-failure' -and $failure -notmatch 'Synthetic fresh candidate launch failed') { throw $failure }
+    if ($Mode -in @('existing-profile', 'existing-install')) {
+        $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
+        $expectedConflict = [System.IO.Path]::GetFullPath((Join-Path $Root $name))
+        if ($failureRecord.FullyQualifiedErrorId -ne 'DirectoryExist,Microsoft.PowerShell.Commands.NewItemCommand' -or
+            -not $expectedConflict.Equals([System.IO.Path]::GetFullPath([string]$failureRecord.TargetObject), [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Expected collision rejection for the pre-existing lifecycle path.'
+        }
+        if ((Get-Content (Join-Path $expectedConflict 'preserve.txt') -Raw).Trim() -ne 'existing synthetic evidence') { throw 'Existing evidence was overwritten.' }
+    }
+}
+Write-Output "SEQUENCE_PROOF=$Mode"
