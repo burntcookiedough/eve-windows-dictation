@@ -80,7 +80,8 @@ function Uninstall-Current {
     }
 }
 $failure = $null
-try { Invoke-Expression $sequence[0].Extent.Text } catch { $failure = $_.Exception.Message }
+$failureRecord = $null
+try { Invoke-Expression $sequence[0].Extent.Text } catch { $failureRecord = $_; $failure = $_.Exception.Message }
 if (-not $script:stopped) { throw 'Lifecycle finally did not stop owned test processes.' }
 if ($Mode -notin @('earlier-profile-removed', 'earlier-profile-changed') -and (Get-Content -LiteralPath $originalSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') { throw 'Original profile evidence changed.' }
 if ($Mode -eq 'success') {
@@ -96,7 +97,12 @@ if ($Mode -eq 'success') {
     if ($Mode -eq 'launch-failure' -and $failure -notmatch 'Synthetic fresh candidate launch failed') { throw $failure }
     if ($Mode -in @('existing-profile', 'existing-install')) {
         $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
-        if ((Get-Content (Join-Path (Join-Path $Root $name) 'preserve.txt') -Raw).Trim() -ne 'existing synthetic evidence') { throw 'Existing evidence was overwritten.' }
+        $expectedConflict = [System.IO.Path]::GetFullPath((Join-Path $Root $name))
+        if ($failureRecord.FullyQualifiedErrorId -ne 'DirectoryExist,Microsoft.PowerShell.Commands.NewItemCommand' -or
+            -not $expectedConflict.Equals([System.IO.Path]::GetFullPath([string]$failureRecord.TargetObject), [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Expected collision rejection for the pre-existing lifecycle path.'
+        }
+        if ((Get-Content (Join-Path $expectedConflict 'preserve.txt') -Raw).Trim() -ne 'existing synthetic evidence') { throw 'Existing evidence was overwritten.' }
     }
 }
 Write-Output "SEQUENCE_PROOF=$Mode"
