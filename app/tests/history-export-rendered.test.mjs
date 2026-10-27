@@ -90,9 +90,11 @@ try {
   let watchdog;
   let stdoutTail = '';
   let stderrTail = '';
+  const stdoutRead = readFixtureOutput(child.stdout, part => { stdoutTail = redactFixturePaths(stdoutTail + part).slice(-8192); });
+  const stderrRead = readFixtureOutput(child.stderr, part => { stderrTail = redactFixturePaths(stderrTail + part).slice(-8192); });
   const completed = Promise.all([
-    readFixtureOutput(child.stdout, part => { stdoutTail = redactFixturePaths(stdoutTail + part).slice(-8192); }),
-    readFixtureOutput(child.stderr, part => { stderrTail = redactFixturePaths(stderrTail + part).slice(-8192); }),
+    stdoutRead,
+    stderrRead,
     child.exited,
   ]).then(([stdout, stderr, code]) => ({ kind: 'completed', stdout, stderr, code }));
   const timedOut = new Promise((resolveTimeout) => {
@@ -102,7 +104,7 @@ try {
   clearTimeout(watchdog);
   if (outcome.kind === 'timeout') {
     child.kill();
-    await Promise.race([child.exited, new Promise((resolveWait) => setTimeout(resolveWait, 5000))]);
+    await Promise.race([Promise.allSettled([stdoutRead, stderrRead, child.exited]), new Promise((resolveWait) => setTimeout(resolveWait, 5000))]);
     await fs.rm(resolve(tmpdir(), `eve-history-export-${child.pid}`), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     throw new Error(`History export fixture exceeded its ${fixtureTimeoutMs}ms watchdog and was terminated\nstdout tail:\n${redactFixturePaths(stdoutTail)}\nstderr tail:\n${redactFixturePaths(stderrTail)}`);
   }
