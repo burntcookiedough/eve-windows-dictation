@@ -119,6 +119,27 @@ cannot list the payload. It resolves the pinned builder tool or accepts an
 explicit `-SevenZipPath`. Source tests do not replace exact-source installation
 and lifecycle evidence, which still require separate authorization.
 
+`installer-smoke.ps1` refuses to run over an active target installation; close
+that session explicitly. It never stops existing Eve/Python processes by name.
+Forced cleanup retains handles to this run's launcher and validated descendants,
+checks exact installed executable paths and parent/creation identity, and waits
+for each owned process to exit. Existing child handles are pinned before stopping
+a parent; a second scan
+captures children born during the first scan after further spawning has stopped.
+Windows retains process IDs
+while their process objects have open handles ([Microsoft process lifetime
+contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-process_information)).
+An inaccessible or changed identity fails cleanup instead of authorizing an
+unsafe stop or reporting success. A PID-file claim alone never authorizes cleanup.
+Preflight also refuses unverifiable process paths; use an isolated QA host with
+visibility into its target processes. Clean exits after capture retain their
+bound creation identity, and an immediate launcher exit uses the original
+creation handle and requested image instead of requiring a live module query.
+Windows console hosts are waited on after their owned clients stop; the smoke
+script never forcibly terminates those OS executables.
+The synthetic process tests execute only extracted functions and the actual
+cleanup block; they do not run an installer or establish packaged lifecycle proof.
+
 ## Checks
 
 History saves persist the transcription before committing Insights aggregates and
