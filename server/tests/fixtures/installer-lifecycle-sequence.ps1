@@ -50,7 +50,10 @@ function Stop-TestProcesses {
     if ($Mode -eq 'cleanup-failure') { throw 'Synthetic owned cleanup failed.' }
 }
 $script:events = @()
-function Assert-CandidateBinding { $script:events += 'binding' }
+function Assert-CandidateBinding {
+    param($CandidateInstaller=$script:candidateInstaller, $CandidatePayload=$script:candidatePayload)
+    $script:events += "binding|$CandidateInstaller|$CandidatePayload"
+}
 function Assert-NoNvidiaDriver {}
 function Move-And-CleanBuildOutput {
     param($CandidateDir)
@@ -63,6 +66,7 @@ function Download-VerifiedBaseline {
 }
 function Invoke-Installer {
     param($Installer, $InstallDir)
+    if ($Installer -notin @($baselineInstaller, $candidateInstaller)) { throw 'Unknown synthetic installer argument.' }
     $kind = if ($Installer -eq $candidateInstaller) { 'candidate' } else { 'baseline' }
     $script:events += "install:$kind"
     $script:clean = $kind -eq 'candidate' -and $script:installed -eq ''
@@ -123,8 +127,9 @@ if ($Mode -eq 'success') {
     if ($phaseData.overallStatus -ne 'passed' -or $phaseData.phases.overall.status -ne 'passed') { throw 'Candidate overall status was not passed.' }
     $candidateInstalls = @(for ($i = 0; $i -lt $script:events.Count; $i++) { if ($script:events[$i] -eq 'install:candidate') { $i } })
     if ($candidateInstalls.Count -ne 2) { throw 'Expected two candidate installs in the lifecycle sequence.' }
+    $expectedBinding = "binding|$candidateInstaller|$candidatePayload"
     foreach ($i in $candidateInstalls) {
-        if ($i -eq 0 -or $script:events[$i - 1] -ne 'binding') { throw 'Candidate installer ran without an immediately preceding binding check.' }
+        if ($i -eq 0 -or $script:events[$i - 1] -ne $expectedBinding) { throw 'Candidate installer ran without an immediately preceding binding check for the candidate installer and payload.' }
     }
     Assert-SyntheticSentinels
 } else {
