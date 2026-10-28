@@ -873,6 +873,11 @@ html:not(.motion) .feat { flex: none; scroll-snap-align: start; }
   .footer-note { grid-column: 1 / -1; }
 }
 
+@media (max-width: 860px) and (max-height: 760px) {
+  .hero-pill { bottom: calc(4vh + 104px); }
+  .hero-cactus { bottom: 42vh; }
+}
+
 @media (max-width: 1100px) and (min-width: 861px) {
   .hero-meta { display: none; }
 }

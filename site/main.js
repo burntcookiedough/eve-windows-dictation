@@ -10,7 +10,8 @@ fetch(`https://api.github.com/repos/${repo}/releases?per_page=1`)
   .catch(() => {});
 
 const root = document.documentElement;
-const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reducedQuery = matchMedia('(prefers-reduced-motion: reduce)');
+let reduced = reducedQuery.matches;
 const narrow = matchMedia('(max-width: 860px)');
 let isStatic = reduced || narrow.matches;
 root.classList.toggle('motion', !isStatic);
@@ -89,12 +90,14 @@ const heroLoop = (() => {
 })();
 
 // Reduced motion: one still frame of the pill mid-transcript instead of the loop.
-if (reduced) {
+function holdHero() {
   heroPill.render(0, 0.7);
+  armL.style.transform = armR.style.transform = '';
   heroBubble.textContent = heroLines[0];
   heroBubble.classList.add('is-on');
   heroState.textContent = 'listening';
 }
+if (reduced) holdHero();
 
 /* ---------- story: ready → listening → transcript → pasted ---------- */
 
@@ -173,7 +176,8 @@ function renderAdds(q) {
   }
   const k = easeOut(q);
   counters.forEach((el) => {
-    el.textContent = Math.round(Number(el.dataset.count) * k).toLocaleString('en-US') + (el.dataset.suffix || '');
+    const text = Math.round(Number(el.dataset.count) * k).toLocaleString('en-US') + (el.dataset.suffix || '');
+    if (el.textContent !== text) el.textContent = text;
   });
 }
 
@@ -210,14 +214,16 @@ function renderScrub() {
 
 const themeMeta = $('meta[name="theme-color"]');
 const lit = new Set();
-const toneObserver = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (entry.isIntersecting) lit.add(entry.target); else lit.delete(entry.target);
-  }
-  if (lit.size) root.dataset.tone = 'light'; else delete root.dataset.tone;
-  themeMeta.content = lit.size ? '#f4f4f2' : '#0b0b0b';
-}, { rootMargin: '-49% 0px -50% 0px' });
-$$('[data-tone="light"]').forEach((el) => toneObserver.observe(el));
+if ('IntersectionObserver' in window) {
+  const toneObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) lit.add(entry.target); else lit.delete(entry.target);
+    }
+    if (lit.size) root.dataset.tone = 'light'; else delete root.dataset.tone;
+    themeMeta.content = lit.size ? '#f4f4f2' : '#0b0b0b';
+  }, { rootMargin: '-49% 0px -50% 0px' });
+  $$('[data-tone="light"]').forEach((el) => toneObserver.observe(el));
+}
 
 /* ---------- reveal ---------- */
 
@@ -261,7 +267,7 @@ function measure() {
   if (isStatic) {
     track.style.height = '';
     rail.style.transform = '';
-    wins.forEach((win) => { win.style.transform = ''; });
+    wins.forEach((win) => { win.style.transform = ''; win.style.removeProperty('--cap'); });
     fanBack.style.transform = '';
     [...Object.values(heroParts), ...depthEls].forEach((el) => { el.style.transform = ''; el.style.opacity = ''; el.style.translate = ''; });
   } else {
@@ -284,13 +290,8 @@ addEventListener('pointermove', (e) => {
   pointer.ty = (e.clientY / innerHeight) * 2 - 1;
 }, { passive: true });
 
-let staticAdds = reduced ? 1 : 0;
+let staticAdds = 0;
 let staticAddsStart = 0;
-if (!reduced) {
-  new IntersectionObserver((entries, obs) => {
-    if (entries[0].isIntersecting && isStatic) { staticAddsStart = performance.now(); obs.disconnect(); }
-  }, { threshold: 0.3 }).observe(heat);
-}
 
 function frame(now) {
   smoothY = reduced ? scrollY : lerp(smoothY, scrollY, 0.12);
@@ -304,8 +305,12 @@ function frame(now) {
     // Reduced motion holds one readable frame; narrow screens auto-play the story.
     if (reduced) renderStory(0.72, 0);
     else renderStory(((now / 11000) % 1) * 0.98, now);
+    if (!staticAddsStart && !reduced) {
+      const rect = heat.getBoundingClientRect();
+      if (rect.top < innerHeight * 0.85 && rect.bottom > 0) staticAddsStart = now;
+    }
     if (staticAddsStart) staticAdds = range(now - staticAddsStart, 0, 2400);
-    renderAdds(staticAdds);
+    renderAdds(reduced ? 1 : staticAdds);
   } else {
     const h = progress(hero, smoothY);
     const hp = easeInOut(h);
@@ -335,6 +340,14 @@ function frame(now) {
   renderScrub();
   requestAnimationFrame(frame);
 }
+
+let syncCrowd = () => {};
+reducedQuery.addEventListener?.('change', (e) => {
+  reduced = e.matches;
+  if (reduced) holdHero();
+  measure();
+  syncCrowd();
+});
 
 measure();
 addEventListener('resize', measure);
@@ -407,7 +420,7 @@ requestAnimationFrame(frame);
   }
 
   function tick(now) {
-    if (!visible) { running = false; return; }
+    if (!visible || reduced) { running = false; return; }
     const dt = Math.min(64, now - (last || now));
     last = now;
     let resort = false;
@@ -426,17 +439,28 @@ requestAnimationFrame(frame);
     peeps = Array.from({ length: COLS * ROWS }, (_, i) => ({ sx: (i % COLS) * sw, sy: Math.floor(i / COLS) * sh, sw, sh }));
     layout();
     draw();
-    new ResizeObserver(() => { layout(); draw(); }).observe(canvas);
-    new IntersectionObserver((entries) => {
-      visible = entries[0].isIntersecting;
-      if (visible && !running && !reduced) { running = true; last = 0; requestAnimationFrame(tick); }
-    }).observe(canvas);
+    if ('ResizeObserver' in window) new ResizeObserver(() => { layout(); draw(); }).observe(canvas);
+    else addEventListener('resize', () => { layout(); draw(); });
+    syncCrowd = () => {
+      if (!reduced && visible && !running) { running = true; last = 0; requestAnimationFrame(tick); }
+      if (reduced) draw();
+    };
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; syncCrowd(); }).observe(canvas);
+    } else {
+      visible = true;
+      syncCrowd();
+    }
   }
 
-  new IntersectionObserver((entries, obs) => {
-    if (!entries[0].isIntersecting) return;
-    obs.disconnect();
-    sheet.onload = start;
-    sheet.src = 'assets/peeps/open-peeps-sheet.png';
-  }, { rootMargin: '800px 0px' }).observe(canvas);
+  const load = () => { sheet.onload = start; sheet.src = 'assets/peeps/open-peeps-sheet.png'; };
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((entries, obs) => {
+      if (!entries[0].isIntersecting) return;
+      obs.disconnect();
+      load();
+    }, { rootMargin: '800px 0px' }).observe(canvas);
+  } else {
+    load();
+  }
 })();
