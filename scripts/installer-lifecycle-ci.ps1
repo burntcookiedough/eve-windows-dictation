@@ -632,35 +632,36 @@ Assert-RegistryState -ExpectedVersion ''
 if (Test-Path -LiteralPath $script:InstallDir) { throw 'Test install destination exists before the run.' }
 if (Test-Path -LiteralPath (Join-Path $script:ProfileRoot 'Eve')) { throw 'Synthetic app profile exists before the first install.' }
 
-Assert-NoNvidiaDriver
-Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir
-Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'started'
-Download-VerifiedBaseline -Destination $script:BaselineArtifactDir
-Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'passed'
-Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'started'
-
-$profileSentinel = Join-Path $script:ProfileRoot 'Eve\installer-lifecycle-sentinel.txt'
-$cacheSentinel = Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt'
-Set-Content -LiteralPath $cacheSentinel -Value 'eve-alpha7-cache-sentinel' -NoNewline
-$env:HF_HOME = $script:CacheRoot
-$env:HF_HUB_CACHE = Join-Path $script:CacheRoot 'hub'
-$env:MURMUR_ENGINE = 'whisper'
-$env:MURMUR_WHISPER_MODEL = 'tiny'
-$env:MURMUR_WHISPER_DEVICE = 'cpu'
-$env:MURMUR_WHISPER_COMPUTE_TYPE = 'int8'
-$env:CUDA_VISIBLE_DEVICES = '-1'
-$env:PYTHONNOUSERSITE = '1'
-
-$baselineInstaller = Join-Path $script:BaselineArtifactDir 'Eve.Web.Setup.0.8.2-alpha.5.exe'
-$candidateInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.8.exe'
-$baselinePayload = Join-Path $script:BaselineArtifactDir 'murmur-0.8.2-alpha.5-x64.nsis.7z'
-$candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.8-x64.nsis.7z'
-foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $candidatePayload)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Verified installer or web payload is missing: $path" }
-}
-Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'passed'
-
+$candidateStatusPath = Join-Path $script:RetainedArtifactDir 'qa/candidate-phase-status.json'
 try {
+    Assert-NoNvidiaDriver
+    Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir
+    Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'started'
+    Download-VerifiedBaseline -Destination $script:BaselineArtifactDir
+    Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'passed'
+    Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'started'
+
+    $profileSentinel = Join-Path $script:ProfileRoot 'Eve\installer-lifecycle-sentinel.txt'
+    $cacheSentinel = Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt'
+    Set-Content -LiteralPath $cacheSentinel -Value 'eve-alpha7-cache-sentinel' -NoNewline
+    $env:HF_HOME = $script:CacheRoot
+    $env:HF_HUB_CACHE = Join-Path $script:CacheRoot 'hub'
+    $env:MURMUR_ENGINE = 'whisper'
+    $env:MURMUR_WHISPER_MODEL = 'tiny'
+    $env:MURMUR_WHISPER_DEVICE = 'cpu'
+    $env:MURMUR_WHISPER_COMPUTE_TYPE = 'int8'
+    $env:CUDA_VISIBLE_DEVICES = '-1'
+    $env:PYTHONNOUSERSITE = '1'
+
+    $baselineInstaller = Join-Path $script:BaselineArtifactDir 'Eve.Web.Setup.0.8.2-alpha.5.exe'
+    $candidateInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.8.exe'
+    $baselinePayload = Join-Path $script:BaselineArtifactDir 'murmur-0.8.2-alpha.5-x64.nsis.7z'
+    $candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.8-x64.nsis.7z'
+    foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $candidatePayload)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Verified installer or web payload is missing: $path" }
+    }
+    Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'passed'
+
     Set-CandidatePhaseStatus -PhaseName 'baseline_install_launch' -Status 'started'
     Write-Step 'Installing published alpha.5 baseline into the temporary install directory.'
     Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir
@@ -726,14 +727,20 @@ try {
     Assert-CandidateBinding
     Set-CandidatePhaseStatus -PhaseName 'candidate_clean_removal' -Status 'passed'
 } catch {
-    Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'failed' -ErrorDetail $_.Exception.Message
+    if (Test-Path -LiteralPath $candidateStatusPath -PathType Leaf) {
+        Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'failed' -ErrorDetail $_.Exception.Message
+    }
     throw
 } finally {
     try {
         Stop-TestProcesses
-        Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'passed'
+        if (Test-Path -LiteralPath $candidateStatusPath -PathType Leaf) {
+            Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'passed'
+        }
     } catch {
-        Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'failed' -ErrorDetail $_.Exception.Message
+        if (Test-Path -LiteralPath $candidateStatusPath -PathType Leaf) {
+            Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'failed' -ErrorDetail $_.Exception.Message
+        }
         throw
     }
 }

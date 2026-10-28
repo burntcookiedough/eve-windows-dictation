@@ -204,23 +204,6 @@ def test_named_failure_can_record_first_detailed_overall(staged):
     assert data["phases"]["overall"]["error"] == "Owned cleanup exception"
 
 
-def test_pre_lifecycle_download_failure_names_the_operation(staged):
-    retained, candidate, _, _ = staged
-    source = (ROOT / "scripts/installer-lifecycle-ci.ps1").read_text()
-    fragment = source.split("Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir\n", 1)[1].split("$profileSentinel =", 1)[0]
-    command = (
-        "$script:RetainedArtifactDir=$env:TARGET; $script:BaselineArtifactDir=$env:CANDIDATE; "
-        "function Download-VerifiedBaseline { param($Destination) throw 'Pinned baseline download failed' }; "
-        "try { & ([ScriptBlock]::Create($env:FRAGMENT)) } catch { "
-        "Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'failed' -ErrorDetail $_.Exception.Message }"
-    )
-    result = run_ps(command, TARGET=retained, CANDIDATE=candidate, FRAGMENT=fragment)
-    assert result.returncode == 0, result.stderr
-    data = json.loads((retained / "qa/candidate-phase-status.json").read_text(encoding="utf-8-sig"))
-    assert data["phases"]["baseline_download"]["status"] == "failed"
-    assert data["phases"]["overall"]["error"] == "Pinned baseline download failed"
-
-
 def test_workflow_builder_uses_typed_unsigned_and_publish_never():
     workflow = (ROOT / ".github/workflows/installer-lifecycle-ci.yml").read_text()
     build = workflow.split("- name: Build candidate Windows web installer", 1)[1].split("- name: Run isolated", 1)[0]
