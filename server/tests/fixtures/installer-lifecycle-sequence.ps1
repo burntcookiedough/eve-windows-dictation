@@ -49,7 +49,8 @@ function Stop-TestProcesses {
     $script:stopped = $true
     if ($Mode -eq 'cleanup-failure') { throw 'Synthetic owned cleanup failed.' }
 }
-function Assert-CandidateBinding {}
+$script:events = @()
+function Assert-CandidateBinding { $script:events += 'binding' }
 function Assert-NoNvidiaDriver {}
 function Move-And-CleanBuildOutput {
     param($CandidateDir)
@@ -63,6 +64,7 @@ function Download-VerifiedBaseline {
 function Invoke-Installer {
     param($Installer, $InstallDir)
     $kind = if ($Installer -eq $candidateInstaller) { 'candidate' } else { 'baseline' }
+    $script:events += "install:$kind"
     $script:clean = $kind -eq 'candidate' -and $script:installed -eq ''
     if ($script:clean -and (Test-Path (Join-Path $script:ProfileRoot 'Eve'))) { throw 'Clean candidate reused an existing profile.' }
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -107,12 +109,23 @@ $failure = $null
 $failureRecord = $null
 try { Invoke-Expression $sequence[0].Extent.Text } catch { $failureRecord = $_; $failure = $_.Exception.Message }
 if (-not $script:stopped) { throw 'Lifecycle finally did not stop owned test processes.' }
+if ($Mode -eq 'success' -and -not $failure) {
+    $terminal = @($ast.EndBlock.Statements | Where-Object { $_.Extent.StartOffset -gt $sequence[0].Extent.EndOffset -and $_.Extent.Text -eq "Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'passed'" })
+    if ($terminal.Count -ne 1) { throw 'Expected exactly one terminal overall-pass write.' }
+    Invoke-Expression $terminal[0].Extent.Text
+}
 $phaseData = Get-Content $candidateStatusPath -Raw | ConvertFrom-Json -AsHashtable
 if ($Mode -notin @('earlier-profile-removed', 'earlier-profile-changed', 'baseline-download-failure') -and (Get-Content -LiteralPath $originalSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') { throw 'Original profile evidence changed.' }
 if ($Mode -eq 'success') {
     if ($failure) { throw $failure }
     if (-not ($script:cleanLaunch -and $script:cleanInference -and $script:cleanRemoval)) { throw 'Candidate clean install, launch, inference and removal were not all exercised.' }
     if ($script:ProfileRoot -eq (Join-Path $Root 'profile')) { throw 'Candidate did not receive a fresh profile.' }
+    if ($phaseData.overallStatus -ne 'passed' -or $phaseData.phases.overall.status -ne 'passed') { throw 'Candidate overall status was not passed.' }
+    $candidateInstalls = @(for ($i = 0; $i -lt $script:events.Count; $i++) { if ($script:events[$i] -eq 'install:candidate') { $i } })
+    if ($candidateInstalls.Count -ne 2) { throw 'Expected two candidate installs in the lifecycle sequence.' }
+    foreach ($i in $candidateInstalls) {
+        if ($i -eq 0 -or $script:events[$i - 1] -ne 'binding') { throw 'Candidate installer ran without an immediately preceding binding check.' }
+    }
     Assert-SyntheticSentinels
 } else {
     if (-not $failure) { throw 'Expected the isolated lifecycle phase to fail closed.' }
@@ -120,7 +133,7 @@ if ($Mode -eq 'success') {
     if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed', 'cleanup-failure')) { throw 'Failed clean phase was reported as complete.' }
     if ($Mode -in @('earlier-profile-removed', 'earlier-profile-changed') -and $failure -notmatch 'Earlier profile sentinel') { throw $failure }
     if ($Mode -eq 'launch-failure' -and $failure -notmatch 'Synthetic fresh candidate launch failed') { throw $failure }
-    if ($Mode -eq 'cleanup-failure' -and ($failure -notmatch 'Synthetic owned cleanup failed' -or $phaseData.phases.cleanup.status -ne 'failed')) { throw 'Cleanup failure was not recorded as failed.' }
+    if ($Mode -eq 'cleanup-failure' -and ($failure -notmatch 'Synthetic owned cleanup failed' -or $phaseData.phases.cleanup.status -ne 'failed' -or $phaseData.overallStatus -ne 'failed')) { throw 'Cleanup failure was not recorded as failed.' }
     if ($Mode -eq 'baseline-download-failure' -and ($failure -notmatch 'Synthetic pinned baseline download failed' -or $phaseData.phases.baseline_download.status -ne 'failed' -or $phaseData.phases.overall.error -notmatch 'Synthetic pinned baseline download failed')) { throw 'Original download failure was not recorded by the real lifecycle handler.' }
     if ($Mode -in @('existing-profile', 'existing-install')) {
         $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
