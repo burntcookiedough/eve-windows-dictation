@@ -128,8 +128,9 @@ if ($Mode -eq 'success') {
     if ($phaseData.phases.baseline_download.status -ne 'passed') { throw 'Baseline download phase was not recorded as passed.' }
     $candidateInstalls = @(for ($i = 0; $i -lt $script:events.Count; $i++) { if ($script:events[$i] -eq 'install:candidate') { $i } })
     if ($candidateInstalls.Count -ne 2) { throw 'Expected two candidate installs in the lifecycle sequence.' }
+    $expectedInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.8.exe'
     $expectedPayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.8-x64.nsis.7z'
-    $expectedBinding = "binding|$candidateInstaller|$expectedPayload"
+    $expectedBinding = "binding|$expectedInstaller|$expectedPayload"
     foreach ($i in $candidateInstalls) {
         if ($i -eq 0 -or $script:events[$i - 1] -ne $expectedBinding) { throw 'Candidate installer ran without an immediately preceding binding check for the candidate installer and payload.' }
     }
