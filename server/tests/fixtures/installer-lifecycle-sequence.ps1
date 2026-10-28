@@ -129,6 +129,7 @@ if ($Mode -eq 'success') {
     Assert-SyntheticSentinels
 } else {
     if (-not $failure) { throw 'Expected the isolated lifecycle phase to fail closed.' }
+    if ($phaseData.overallStatus -ne 'failed') { throw 'Failed lifecycle phase did not retain a failed overall status.' }
     if ($script:passPrinted) { throw 'Failed lifecycle phase reported PASS.' }
     if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed', 'cleanup-failure')) { throw 'Failed clean phase was reported as complete.' }
     if ($Mode -in @('earlier-profile-removed', 'earlier-profile-changed') -and $failure -notmatch 'Earlier profile sentinel') { throw $failure }
