@@ -12,6 +12,7 @@ pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows lifecycle harne
 @pytest.mark.parametrize('mode', [
     'success', 'existing-profile', 'existing-install', 'launch-failure',
     'earlier-profile-removed', 'earlier-profile-changed',
+    'cleanup-failure',
 ])
 def test_candidate_clean_install_is_isolated_and_fail_closed(tmp_path, mode):
     result = subprocess.run(

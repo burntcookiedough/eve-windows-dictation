@@ -149,6 +149,39 @@ cannot list the payload. It resolves the pinned builder tool or accepts an
 explicit `-SevenZipPath`. Source tests do not replace exact-source installation
 and lifecycle evidence, which still require separate authorization.
 
+### Hosted lifecycle candidate retention and upload controls
+
+Manual `workflow_dispatch` runs of the installer lifecycle gate require an exact
+`expected_commit` 40-character lowercase SHA matching both the workflow event and
+`git rev-parse HEAD` before runner dependencies or packaging proceed. Candidate
+artifact retention is an explicit manual boolean opt-in (`retain_candidate: true`,
+default `false`); automated pull request runs and default manual dispatches do not
+upload candidate assets. The isolated runner stages a verified set for lifecycle
+binding regardless of upload opt-in; it is otherwise discarded with the runner.
+
+When opted in, the workflow retains seven self-contained candidate assets
+(`Eve.Web.Setup.<version>.exe`, `murmur-<version>-x64.nsis.7z`, `latest.yml`,
+`THIRD_PARTY_NOTICES.txt`, `SHA256SUMS.txt`, `SHA512SUMS.txt`, and
+`eve-v<version>-artifact-manifest.json`) alongside separate QA evidence
+(`candidate-payload-manifest.json`, `candidate-provenance.json`, and
+`candidate-phase-status.json`) with a 7-day retention limit and an explicit unsigned
+QA label (`eve-v<version>-unsigned-candidate-qa-<run-id>`).
+
+Signed-in users with repository read access can download these Actions artifacts;
+on this public repository they must not be treated as private storage. Upload
+requires its own explicit run authorization. Upload is gated on successful staging
+and a final integrity check. Failed lifecycle runs may retain diagnostic artifacts,
+clearly marked failed; partial or unverified staging is never uploaded. Individual
+phase results and owned-process cleanup must succeed before reporting overall pass.
+Retained QA artifacts are generated solely for automated diagnostic proof. Building
+or verifying an unsigned candidate with `win.signExecutable = false` via the electron-builder
+API and validating via `release-artifacts.ps1 -AllowUnsigned` confirms packaging
+integrity only; an Authenticode status of `NotSigned` is not a release waiver and
+does not authorize signing, tagging, uploading release assets, or public release.
+Actual lifecycle phase outcomes are recorded directly in the phase evidence; synthetic
+sentinel validation does not establish functional History persistence or physical
+microphone acceptance.
+
 `installer-smoke.ps1` refuses to run over an active target installation; close
 that session explicitly. It never stops existing Eve/Python processes by name.
 Forced cleanup retains handles to this run's launcher and validated descendants,

@@ -1,8 +1,12 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$RetainedArtifactDir = '',
+    [string]$ExpectedCommit = ''
+)
 
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'installer-manifest.ps1')
+. (Join-Path $PSScriptRoot 'installer-candidate-artifacts.ps1')
 $ErrorActionPreference = 'Stop'
 
 $script:ProductGuid = '0204d005-75b3-5b31-b1f6-ef2831e2b204'
@@ -546,39 +550,68 @@ function Move-And-CleanBuildOutput {
     $source = Join-Path $PSScriptRoot '..\app\release\nsis-web'
     $source = [System.IO.Path]::GetFullPath($source)
     if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Candidate nsis-web output is missing: $source" }
+
+    $winUnpacked = Join-Path $PSScriptRoot '..\app\release\win-unpacked'
+    $winUnpacked = [System.IO.Path]::GetFullPath($winUnpacked)
+
+    $legalNotices = Join-Path $PSScriptRoot '..\app\resources\generated\legal\THIRD_PARTY_NOTICES.txt'
+    $legalNotices = [System.IO.Path]::GetFullPath($legalNotices)
+
+    New-CandidateArtifactSet `
+        -SourceBuildDir $source `
+        -WinUnpackedDir $winUnpacked `
+        -LegalNoticesFile $legalNotices `
+        -TargetDir $script:RetainedArtifactDir `
+        -CandidateVersion $script:CandidateVersion `
+        -ExpectedCommit $script:ExpectedCommit `
+        -RepoRoot $script:RepoRoot
+
     $names = @(
         "Eve.Web.Setup.$script:CandidateVersion.exe",
         "murmur-$script:CandidateVersion-x64.nsis.7z",
         'latest.yml'
     )
     foreach ($name in $names) {
-        $path = Join-Path $source $name
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Candidate installer output is missing: $name" }
-        Move-Item -LiteralPath $path -Destination $CandidateDir
+        $path = Join-Path $script:RetainedArtifactDir $name
+        Copy-Item -LiteralPath $path -Destination (Join-Path $CandidateDir $name) -Force
     }
-    $latest = Get-Content -LiteralPath (Join-Path $CandidateDir 'latest.yml') -Raw
-    if ($latest -notmatch [regex]::Escape($script:CandidateVersion) -or $latest -notmatch 'murmur-0\.8\.2-alpha\.8-x64\.nsis\.7z') {
-        throw 'Candidate latest.yml does not identify the alpha.8 setup and payload.'
-    }
-    $winUnpacked = Join-Path $PSScriptRoot '..\app\release\win-unpacked'
-    $winUnpacked = [System.IO.Path]::GetFullPath($winUnpacked)
-    $candidateManifest = Join-Path $CandidateDir 'candidate-payload-manifest.json'
-    New-InstalledPayloadManifest -SourceDir $winUnpacked -OutputFile $candidateManifest
-    Assert-SevenZipArchiveMethods -ArchivePath (Join-Path $CandidateDir "murmur-$script:CandidateVersion-x64.nsis.7z") -AppDir (Join-Path $script:RepoRoot 'app')
+    $qaManifestSource = Join-Path (Join-Path $script:RetainedArtifactDir 'qa') 'candidate-payload-manifest.json'
+    Copy-Item -LiteralPath $qaManifestSource -Destination (Join-Path $CandidateDir 'candidate-payload-manifest.json') -Force
+
+    Assert-CandidateBinding `
+        -CandidateInstaller (Join-Path $CandidateDir "Eve.Web.Setup.$script:CandidateVersion.exe") `
+        -CandidatePayload (Join-Path $CandidateDir "murmur-$script:CandidateVersion-x64.nsis.7z") `
+        -RetainedDir $script:RetainedArtifactDir `
+        -CandidateVersion $script:CandidateVersion
+
+    if ($env:GITHUB_OUTPUT) { 'candidate_verified=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT }
     foreach ($relative in @('app\release', 'app\node_modules', 'server\.venv', 'server\.runtime')) {
         $path = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..') $relative))
         if (-not (Assert-PathWithin -Path $path -Root $script:RepoRoot)) { throw "Refusing build cleanup outside checkout: $path" }
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
-    Write-Step 'Moved candidate installer artifacts to runner temp and removed only CI build caches.'
+    Write-Step 'Moved candidate installer artifacts to runner temp, staged verified retained release/QA assets, and removed CI build caches.'
 }
 
 Assert-CiHost
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if (-not $ExpectedCommit) {
+    $ExpectedCommit = if ($env:EXPECTED_COMMIT) { $env:EXPECTED_COMMIT } elseif ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch') { $env:GITHUB_SHA } else { throw 'Manual lifecycle requires ExpectedCommit.' }
+}
+$script:ExpectedCommit = $ExpectedCommit
+Assert-ExpectedCommit -Commit $script:ExpectedCommit -RepoRoot $script:RepoRoot
+
 $script:RunRoot = Join-Path $env:RUNNER_TEMP "eve-alpha7-installer-lifecycle-$env:GITHUB_RUN_ID"
 if (Test-Path -LiteralPath $script:RunRoot) { throw 'Unique runner temp lifecycle directory already exists; refusing to clear it.' }
 New-Item -ItemType Directory -Path $script:RunRoot | Out-Null
 if (-not (Assert-PathWithin -Path $script:RunRoot -Root $env:RUNNER_TEMP)) { throw 'Lifecycle scratch directory escaped runner temp.' }
+
+$script:RetainedArtifactDir = if ($RetainedArtifactDir) { [System.IO.Path]::GetFullPath($RetainedArtifactDir) } elseif ($env:RUNNER_TEMP -and $env:GITHUB_RUN_ID) { Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID" } else { Join-Path $script:RunRoot 'retained' }
+if (-not (Assert-PathWithin -Path $script:RetainedArtifactDir -Root $env:RUNNER_TEMP) -or
+    (Assert-PathWithin -Path $script:RetainedArtifactDir -Root $script:RepoRoot) -or
+    (Assert-PathWithin -Path $script:RepoRoot -Root $script:RetainedArtifactDir)) {
+    throw 'Retained artifacts must stay in runner temp outside the checkout and its cleanup paths.'
+}
 
 $script:CandidateArtifactDir = Join-Path $script:RunRoot 'candidate'
 $script:BaselineArtifactDir = Join-Path $script:RunRoot 'baseline'
@@ -620,32 +653,45 @@ foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $
 }
 
 try {
+    Set-CandidatePhaseStatus -PhaseName 'baseline_install_launch' -Status 'started'
     Write-Step 'Installing published alpha.5 baseline into the temporary install directory.'
     Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir
     Assert-Installed -Version $script:BaselineVersion
     Launch-And-Verify -Version $script:BaselineVersion | Out-Null
     Set-Content -LiteralPath $profileSentinel -Value 'eve-alpha7-profile-sentinel' -NoNewline
     Assert-SyntheticSentinels
+    Set-CandidatePhaseStatus -PhaseName 'baseline_install_launch' -Status 'passed'
 
+    Set-CandidatePhaseStatus -PhaseName 'candidate_upgrade' -Status 'started'
     Write-Step 'Upgrading alpha.5 in place to the locally built alpha.8 candidate.'
+    Assert-CandidateBinding
     Invoke-Installer -Installer $candidateInstaller -InstallDir $script:InstallDir
+    Assert-CandidateBinding
     Assert-Installed -Version $script:CandidateVersion
     Assert-SyntheticSentinels
     Launch-And-Verify -Version $script:CandidateVersion | Out-Null
     Assert-SyntheticSentinels
     Invoke-InstalledCpuInference
+    Set-CandidatePhaseStatus -PhaseName 'candidate_upgrade' -Status 'passed'
 
+    Set-CandidatePhaseStatus -PhaseName 'candidate_removal' -Status 'started'
     Write-Step 'Rolling back by uninstalling alpha.8 and reinstalling the published alpha.5 baseline.'
     Uninstall-Current -Version $script:CandidateVersion
+    Set-CandidatePhaseStatus -PhaseName 'candidate_removal' -Status 'passed'
+    Set-CandidatePhaseStatus -PhaseName 'baseline_rollback' -Status 'started'
     Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir
     Assert-Installed -Version $script:BaselineVersion
     Assert-SyntheticSentinels
     Launch-And-Verify -Version $script:BaselineVersion | Out-Null
     Assert-SyntheticSentinels
 
+    Set-CandidatePhaseStatus -PhaseName 'baseline_rollback' -Status 'passed'
+    Set-CandidatePhaseStatus -PhaseName 'baseline_removal' -Status 'started'
     Write-Step 'Uninstalling the rolled-back baseline.'
     Uninstall-Current -Version $script:BaselineVersion
+    Set-CandidatePhaseStatus -PhaseName 'baseline_removal' -Status 'passed'
 
+    Set-CandidatePhaseStatus -PhaseName 'candidate_clean_install' -Status 'started'
     Write-Step 'Installing alpha.8 into a fresh installation and synthetic profile.'
     $earlierProfileSentinel = $profileSentinel
     $cleanProfileRoot = Join-Path $script:RunRoot 'clean-profile'
@@ -654,20 +700,35 @@ try {
     $script:ProfileRoot = $cleanProfileRoot
     $script:CurrentInstallDir = Join-Path $cleanInstallRoot 'Programs\Eve'
     $profileSentinel = Join-Path (Join-Path $script:ProfileRoot 'Eve') 'installer-lifecycle-sentinel.txt'
+    Assert-CandidateBinding
     Invoke-Installer -Installer $candidateInstaller -InstallDir $script:CurrentInstallDir
+    Assert-CandidateBinding
     Assert-Installed -Version $script:CandidateVersion
     Launch-And-Verify -Version $script:CandidateVersion | Out-Null
     Set-Content -LiteralPath $profileSentinel -Value 'eve-alpha7-profile-sentinel' -NoNewline
     Assert-SyntheticSentinels
     Invoke-InstalledCpuInference
+    Set-CandidatePhaseStatus -PhaseName 'candidate_clean_install' -Status 'passed'
+    Set-CandidatePhaseStatus -PhaseName 'candidate_clean_removal' -Status 'started'
     Uninstall-Current -Version $script:CandidateVersion
     if (-not (Test-Path -LiteralPath $earlierProfileSentinel -PathType Leaf) -or
         (Get-Content -LiteralPath $earlierProfileSentinel -Raw) -ne 'eve-alpha7-profile-sentinel') {
         throw 'Earlier profile sentinel was removed or changed during the clean candidate lifecycle.'
     }
-
-    Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to alpha.8 upgrade, and alpha.5 rollback completed.'
-    Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'
+    Assert-CandidateBinding
+    Set-CandidatePhaseStatus -PhaseName 'candidate_clean_removal' -Status 'passed'
+} catch {
+    Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'failed' -ErrorDetail $_.Exception.Message
+    throw
 } finally {
-    Stop-TestProcesses
+    try {
+        Stop-TestProcesses
+        Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'passed'
+    } catch {
+        Set-CandidatePhaseStatus -PhaseName 'cleanup' -Status 'failed' -ErrorDetail $_.Exception.Message
+        throw
+    }
 }
+Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'passed'
+Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to alpha.8 upgrade, and alpha.5 rollback completed.'
+Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'

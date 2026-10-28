@@ -9,9 +9,10 @@ $sequence = @($ast.EndBlock.Statements | Where-Object { $_ -is [System.Managemen
 if ($sequence.Count -ne 1) { throw 'Expected exactly one top-level lifecycle sequence.' }
 $allowed = @('Write-Step','Invoke-Installer','Assert-Installed','Launch-And-Verify','Set-Content',
     'Assert-SyntheticSentinels','Invoke-InstalledCpuInference','Uninstall-Current','Stop-TestProcesses',
-    'Join-Path','New-Item','Out-Null','Test-Path','Split-Path','Get-Content')
+    'Join-Path','New-Item','Out-Null','Test-Path','Split-Path','Get-Content',
+    'Assert-CandidateBinding','Set-CandidatePhaseStatus')
 foreach ($command in $sequence[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
-    if ($command.GetCommandName() -notin $allowed) { throw 'Unexpected command in extracted lifecycle sequence.' }
+    if ($command.GetCommandName() -notin $allowed) { throw "Unexpected command in extracted lifecycle sequence: $($command.GetCommandName())" }
 }
 $sentinels = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-SyntheticSentinels' }, $false)
 if ($sentinels.Count -ne 1) { throw 'Expected the real sentinel verifier.' }
@@ -35,8 +36,17 @@ $script:cleanInference = $false
 $script:cleanRemoval = $false
 $script:stopped = $false
 $script:passPrinted = $false
+$script:phaseStatuses = @{}
 function Write-Step { param($Message) if ($Message -like 'PASS:*') { $script:passPrinted = $true } }
-function Stop-TestProcesses { $script:stopped = $true }
+function Stop-TestProcesses {
+    $script:stopped = $true
+    if ($Mode -eq 'cleanup-failure') { throw 'Synthetic owned cleanup failed.' }
+}
+function Assert-CandidateBinding {}
+function Set-CandidatePhaseStatus {
+    param($PhaseName, $Status, $ErrorDetail, $RetainedDir)
+    $script:phaseStatuses[$PhaseName] = $Status
+}
 function Invoke-Installer {
     param($Installer, $InstallDir)
     $script:clean = $Installer -eq 'candidate' -and $script:installed -eq ''
@@ -92,9 +102,10 @@ if ($Mode -eq 'success') {
 } else {
     if (-not $failure) { throw 'Expected the isolated lifecycle phase to fail closed.' }
     if ($script:passPrinted) { throw 'Failed lifecycle phase reported PASS.' }
-    if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed')) { throw 'Failed clean phase was reported as complete.' }
+    if ($script:cleanRemoval -and $Mode -notin @('earlier-profile-removed', 'earlier-profile-changed', 'cleanup-failure')) { throw 'Failed clean phase was reported as complete.' }
     if ($Mode -in @('earlier-profile-removed', 'earlier-profile-changed') -and $failure -notmatch 'Earlier profile sentinel') { throw $failure }
     if ($Mode -eq 'launch-failure' -and $failure -notmatch 'Synthetic fresh candidate launch failed') { throw $failure }
+    if ($Mode -eq 'cleanup-failure' -and ($failure -notmatch 'Synthetic owned cleanup failed' -or $script:phaseStatuses['cleanup'] -ne 'failed')) { throw 'Cleanup failure was not recorded as failed.' }
     if ($Mode -in @('existing-profile', 'existing-install')) {
         $name = if ($Mode -eq 'existing-profile') { 'clean-profile' } else { 'clean-install' }
         $expectedConflict = [System.IO.Path]::GetFullPath((Join-Path $Root $name))
