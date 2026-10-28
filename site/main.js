@@ -88,6 +88,14 @@ const heroLoop = (() => {
   };
 })();
 
+// Reduced motion: one still frame of the pill mid-transcript instead of the loop.
+if (reduced) {
+  heroPill.render(0, 0.7);
+  heroBubble.textContent = heroLines[0];
+  heroBubble.classList.add('is-on');
+  heroState.textContent = 'listening';
+}
+
 /* ---------- story: ready → listening → transcript → pasted ---------- */
 
 const storyPill = makePill($('[data-story-pill]'));
@@ -290,10 +298,12 @@ function frame(now) {
   pointer.x = lerp(pointer.x, pointer.tx, 0.06);
   pointer.y = lerp(pointer.y, pointer.ty, 0.06);
 
-  if (isStatic || near(hero, smoothY)) heroLoop(now);
+  if (!reduced && (isStatic || near(hero, smoothY))) heroLoop(now);
 
   if (isStatic) {
-    renderStory(((now / 11000) % 1) * 0.98, now);
+    // Reduced motion holds one readable frame; narrow screens auto-play the story.
+    if (reduced) renderStory(0.72, 0);
+    else renderStory(((now / 11000) % 1) * 0.98, now);
     if (staticAddsStart) staticAdds = range(now - staticAddsStart, 0, 2400);
     renderAdds(staticAdds);
   } else {
