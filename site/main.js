@@ -342,12 +342,16 @@ function frame(now) {
 }
 
 let syncCrowd = () => {};
-reducedQuery.addEventListener?.('change', (e) => {
+const onReducedChange = (e) => {
   reduced = e.matches;
   if (reduced) holdHero();
+  // The counters already showed their final values; don't drop them back to zero.
+  else if (!staticAddsStart) staticAddsStart = performance.now() - 2400;
   measure();
   syncCrowd();
-});
+};
+if (reducedQuery.addEventListener) reducedQuery.addEventListener('change', onReducedChange);
+else reducedQuery.addListener(onReducedChange);
 
 measure();
 addEventListener('resize', measure);
@@ -448,7 +452,7 @@ requestAnimationFrame(frame);
     if ('IntersectionObserver' in window) {
       new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; syncCrowd(); }).observe(canvas);
     } else {
-      visible = true;
+      // No visibility signal to pause on, so keep the still frame start() drew.
       syncCrowd();
     }
   }
