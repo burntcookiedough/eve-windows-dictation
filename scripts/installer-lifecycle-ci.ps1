@@ -566,6 +566,7 @@ function Move-And-CleanBuildOutput {
         -ExpectedCommit $script:ExpectedCommit `
         -RepoRoot $script:RepoRoot
 
+    Set-CandidatePhaseStatus -PhaseName 'candidate_staging' -Status 'started'
     $names = @(
         "Eve.Web.Setup.$script:CandidateVersion.exe",
         "murmur-$script:CandidateVersion-x64.nsis.7z",
@@ -584,12 +585,15 @@ function Move-And-CleanBuildOutput {
         -RetainedDir $script:RetainedArtifactDir `
         -CandidateVersion $script:CandidateVersion
 
+    Set-CandidatePhaseStatus -PhaseName 'candidate_staging' -Status 'passed'
     if ($env:GITHUB_OUTPUT) { 'candidate_verified=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT }
+    Set-CandidatePhaseStatus -PhaseName 'build_cache_cleanup' -Status 'started'
     foreach ($relative in @('app\release', 'app\node_modules', 'server\.venv', 'server\.runtime')) {
         $path = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..') $relative))
         if (-not (Assert-PathWithin -Path $path -Root $script:RepoRoot)) { throw "Refusing build cleanup outside checkout: $path" }
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
+    Set-CandidatePhaseStatus -PhaseName 'build_cache_cleanup' -Status 'passed'
     Write-Step 'Moved candidate installer artifacts to runner temp, staged verified retained release/QA assets, and removed CI build caches.'
 }
 
@@ -630,7 +634,10 @@ if (Test-Path -LiteralPath (Join-Path $script:ProfileRoot 'Eve')) { throw 'Synth
 
 Assert-NoNvidiaDriver
 Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir
+Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'started'
 Download-VerifiedBaseline -Destination $script:BaselineArtifactDir
+Set-CandidatePhaseStatus -PhaseName 'baseline_download' -Status 'passed'
+Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'started'
 
 $profileSentinel = Join-Path $script:ProfileRoot 'Eve\installer-lifecycle-sentinel.txt'
 $cacheSentinel = Join-Path $script:CacheRoot 'installer-lifecycle-sentinel.txt'
@@ -651,6 +658,7 @@ $candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.8
 foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $candidatePayload)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Verified installer or web payload is missing: $path" }
 }
+Set-CandidatePhaseStatus -PhaseName 'qa_profile_setup' -Status 'passed'
 
 try {
     Set-CandidatePhaseStatus -PhaseName 'baseline_install_launch' -Status 'started'

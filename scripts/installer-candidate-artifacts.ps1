@@ -60,7 +60,7 @@ function New-CandidateArtifactSet {
         runId=$env:GITHUB_RUN_ID;createdAtUtc=[DateTimeOffset]::UtcNow.ToString('o')
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $qa 'candidate-provenance.json') -Encoding utf8
     [ordered]@{
-        schema=1;commit=$ExpectedCommit;version=$CandidateVersion;overallStatus='staged';currentPhase='preparation'
+        schema=1;commit=$ExpectedCommit;version=$CandidateVersion;overallStatus='staged';currentPhase='candidate_artifacts_prepared'
         phases=@{candidate_artifacts_prepared=@{status='passed'}}
         disclaimers=@{functionalHistoryProof=$false;physicalMicAcceptance=$false;syntheticSentinelsOnly=$true}
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $qa 'candidate-phase-status.json') -Encoding utf8
@@ -99,6 +99,8 @@ function Set-CandidatePhaseStatus {
     $path = Join-Path $RetainedDir 'qa/candidate-phase-status.json'
     $data = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
     if ($PhaseName -eq 'overall' -and $Status -eq 'passed' -and $data.overallStatus -eq 'failed') { return }
+    $recordedOverall = $data.phases['overall']
+    if ($PhaseName -eq 'overall' -and $Status -eq 'failed' -and $recordedOverall -and $recordedOverall.status -eq 'failed' -and $recordedOverall['error']) { return }
     $phase = @{status=$Status;recordedAtUtc=[DateTimeOffset]::UtcNow.ToString('o')}
     if ($ErrorDetail) {
         foreach ($root in @($env:GITHUB_WORKSPACE,$env:RUNNER_TEMP)) { if ($root) { $ErrorDetail=$ErrorDetail -replace [regex]::Escape($root),'<qa-root>' } }

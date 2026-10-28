@@ -153,6 +153,7 @@ def test_phase_failure_stays_failed_and_redacts_paths(staged):
     data = json.loads((retained / "qa/candidate-phase-status.json").read_text(encoding="utf-8-sig"))
     assert data["overallStatus"] == "failed"
     assert data["phases"]["overall"]["status"] == "failed"
+    assert data["phases"]["overall"]["error"] == "<user-home>\\failure"
     assert data["phases"]["candidate_upgrade"]["status"] == "failed"
     assert data["phases"]["candidate_upgrade"]["error"] == "<user-home>\\failure"
     assert data["phases"]["cleanup"]["status"] == "passed"
@@ -164,11 +165,60 @@ def test_workflow_upload_allowlist_excludes_other_qa_files(staged):
     (retained / "qa/not-for-upload.txt").write_text("fictional canary")
     workflow = (ROOT / ".github/workflows/installer-lifecycle-ci.yml").read_text()
     upload = workflow.split("- name: Upload candidate QA artifacts", 1)[1]
-    patterns = re.findall(r"/eve-alpha8-candidate-artifacts-\$\{\{ github.run_id \}\}/([^\n]+)", upload)
+    block = upload.split("path: |\n", 1)[1].split("retention-days", 1)[0]
+    entries = [line.strip() for line in block.splitlines() if line.strip()]
+    prefix = "${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/"
+    assert len(entries) == 10
+    assert all(entry.startswith(prefix) for entry in entries)
+    patterns = [entry[len(prefix):] for entry in entries]
     selected = {path.relative_to(retained).as_posix() for pattern in patterns for path in retained.glob(pattern.strip())}
     generated = {path.relative_to(retained).as_posix() for path in retained.rglob("*") if path.is_file()}
     assert len(selected) == 10
     assert selected == generated - {"qa/not-for-upload.txt"}
+
+
+def test_binding_defaults_match_lifecycle_scope(staged):
+    retained, candidate, _, _ = staged
+    command = (
+        "$script:candidateInstaller=$env:INSTALLER; $script:candidatePayload=$env:PAYLOAD; "
+        "$script:RetainedArtifactDir=$env:RETAINED; $script:CandidateVersion='0.8.2-alpha.8'; "
+        "Assert-CandidateBinding"
+    )
+    values = dict(INSTALLER=candidate / "Eve.Web.Setup.0.8.2-alpha.8.exe",
+                  PAYLOAD=candidate / "murmur-0.8.2-alpha.8-x64.nsis.7z", RETAINED=retained)
+    result = run_ps(command, **values)
+    assert result.returncode == 0, result.stderr
+    (candidate / "candidate-payload-manifest.json").write_text("changed QA evidence")
+    assert run_ps(command, **values).returncode != 0
+
+
+def test_named_failure_can_record_first_detailed_overall(staged):
+    retained, _, _, _ = staged
+    result = run_ps(
+        "Set-CandidatePhaseStatus -RetainedDir $env:TARGET -PhaseName 'cleanup' -Status 'failed'; "
+        "Set-CandidatePhaseStatus -RetainedDir $env:TARGET -PhaseName 'overall' -Status 'failed' -ErrorDetail 'Owned cleanup exception'",
+        TARGET=retained,
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads((retained / "qa/candidate-phase-status.json").read_text(encoding="utf-8-sig"))
+    assert data["phases"]["overall"]["error"] == "Owned cleanup exception"
+
+
+def test_pre_lifecycle_download_failure_names_the_operation(staged):
+    retained, candidate, _, _ = staged
+    source = (ROOT / "scripts/installer-lifecycle-ci.ps1").read_text()
+    fragment = source.split("Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir\n", 1)[1].split("$profileSentinel =", 1)[0]
+    command = (
+        "$script:RetainedArtifactDir=$env:TARGET; $script:BaselineArtifactDir=$env:CANDIDATE; "
+        "function Download-VerifiedBaseline { param($Destination) throw 'Pinned baseline download failed' }; "
+        "try { & ([ScriptBlock]::Create($env:FRAGMENT)) } catch { "
+        "Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'failed' -ErrorDetail $_.Exception.Message }"
+    )
+    result = run_ps(command, TARGET=retained, CANDIDATE=candidate, FRAGMENT=fragment)
+    assert result.returncode == 0, result.stderr
+    data = json.loads((retained / "qa/candidate-phase-status.json").read_text(encoding="utf-8-sig"))
+    assert data["phases"]["baseline_download"]["status"] == "failed"
+    assert data["phases"]["overall"]["error"] == "Pinned baseline download failed"
 
 
 def test_workflow_builder_uses_typed_unsigned_and_publish_never():
