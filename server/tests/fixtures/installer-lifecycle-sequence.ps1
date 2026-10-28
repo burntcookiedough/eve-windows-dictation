@@ -125,9 +125,11 @@ if ($Mode -eq 'success') {
     if (-not ($script:cleanLaunch -and $script:cleanInference -and $script:cleanRemoval)) { throw 'Candidate clean install, launch, inference and removal were not all exercised.' }
     if ($script:ProfileRoot -eq (Join-Path $Root 'profile')) { throw 'Candidate did not receive a fresh profile.' }
     if ($phaseData.overallStatus -ne 'passed' -or $phaseData.phases.overall.status -ne 'passed') { throw 'Candidate overall status was not passed.' }
+    if ($phaseData.phases.baseline_download.status -ne 'passed') { throw 'Baseline download phase was not recorded as passed.' }
     $candidateInstalls = @(for ($i = 0; $i -lt $script:events.Count; $i++) { if ($script:events[$i] -eq 'install:candidate') { $i } })
     if ($candidateInstalls.Count -ne 2) { throw 'Expected two candidate installs in the lifecycle sequence.' }
-    $expectedBinding = "binding|$candidateInstaller|$candidatePayload"
+    $expectedPayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.8-x64.nsis.7z'
+    $expectedBinding = "binding|$candidateInstaller|$expectedPayload"
     foreach ($i in $candidateInstalls) {
         if ($i -eq 0 -or $script:events[$i - 1] -ne $expectedBinding) { throw 'Candidate installer ran without an immediately preceding binding check for the candidate installer and payload.' }
     }
