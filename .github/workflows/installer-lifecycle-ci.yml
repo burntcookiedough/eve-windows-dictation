@@ -9,11 +9,22 @@ on:
       - app/**
       - server/**
       - scripts/installer-lifecycle-ci.ps1
+      - scripts/installer-candidate-artifacts.ps1
       - scripts/prepare-python-runtime.ps1
       - scripts/generate-third-party-notices.ps1
       - scripts/version.py
       - README.md
   workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: 'Required 40-character lowercase commit SHA to build and test'
+        required: true
+        type: string
+      retain_candidate:
+        description: 'Retain candidate installer and QA artifacts for 7 days (unsigned QA build)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +48,8 @@ jobs:
 
       - name: Require the dedicated candidate or trunk workflow context
         shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:OS -ne 'Windows_NT') { throw 'This installer gate requires a disposable GitHub-hosted Windows runner.' }
@@ -45,7 +58,16 @@ jobs:
           } elseif ($env:GITHUB_REF -notin @('refs/heads/codex/eve-alpha7-candidate', 'refs/heads/trunk')) {
             throw "Unexpected ref for installer gate: $env:GITHUB_REF"
           }
-          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw 'Checkout does not match the workflow event commit.' }
+          $gitHead = (git rev-parse HEAD).Trim()
+          if ($gitHead -ne $env:GITHUB_SHA) { throw 'Checkout does not match the workflow event commit.' }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            if (-not $env:EXPECTED_COMMIT -or $env:EXPECTED_COMMIT -cnotmatch '^[0-9a-f]{40}$') {
+              throw 'workflow_dispatch requires expected_commit as a 40-character lowercase SHA.'
+            }
+            if ($env:EXPECTED_COMMIT -ne $env:GITHUB_SHA -or $env:EXPECTED_COMMIT -ne $gitHead) {
+              throw 'expected_commit does not match the workflow event SHA or git HEAD.'
+            }
+          }
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
@@ -78,10 +100,54 @@ jobs:
       - name: Build candidate Windows web installer
         shell: pwsh
         working-directory: app
-        run: bun run package:win
+        run: |
+          bun run notices:generate
+          if ($LASTEXITCODE -ne 0) { throw 'Notice generation failed.' }
+          bun run build
+          if ($LASTEXITCODE -ne 0) { throw 'App build failed.' }
+          node -e "require('electron-builder').build({ win: ['nsis-web'], publish: 'never', config: { win: { signExecutable: false } } }).catch(e => { console.error(e); process.exitCode=1; })"
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned QA packaging failed.' }
 
       - name: Run isolated alpha.5 to candidate lifecycle
+        id: lifecycle
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: ./scripts/installer-lifecycle-ci.ps1
+
+      - name: Verify staged QA upload after lifecycle outcome
+        id: qa-upload
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.retain_candidate == true && steps.lifecycle.outputs.candidate_verified == 'true'
+        shell: pwsh
+        env:
+          LIFECYCLE_OUTCOME: ${{ steps.lifecycle.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./scripts/installer-candidate-artifacts.ps1
+          $retained = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          $candidate = Join-Path $env:RUNNER_TEMP "eve-alpha7-installer-lifecycle-$env:GITHUB_RUN_ID/candidate"
+          if ($env:LIFECYCLE_OUTCOME -ne 'success') {
+            Set-CandidatePhaseStatus -RetainedDir $retained -PhaseName 'overall' -Status 'failed' -ErrorDetail 'Lifecycle step did not complete; inspect workflow logs.'
+          }
+          Assert-CandidateBinding -RetainedDir $retained -CandidateVersion '0.8.2-alpha.8' -CandidateInstaller (Join-Path $candidate 'Eve.Web.Setup.0.8.2-alpha.8.exe') -CandidatePayload (Join-Path $candidate 'murmur-0.8.2-alpha.8-x64.nsis.7z')
+          'verified=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+
+      - name: Upload candidate QA artifacts
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.retain_candidate == true && steps.qa-upload.outputs.verified == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eve-v0.8.2-alpha.8-unsigned-candidate-qa-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/Eve.Web.Setup.0.8.2-alpha.8.exe
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/murmur-0.8.2-alpha.8-x64.nsis.7z
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/latest.yml
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/THIRD_PARTY_NOTICES.txt
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/SHA256SUMS.txt
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/SHA512SUMS.txt
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/eve-v0.8.2-alpha.8-artifact-manifest.json
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-payload-manifest.json
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-provenance.json
+            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-phase-status.json
+          retention-days: 7
+          if-no-files-found: error
