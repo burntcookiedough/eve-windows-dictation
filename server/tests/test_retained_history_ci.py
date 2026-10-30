@@ -38,6 +38,38 @@ Wait-ForOwnedProcessExit -ProcInfo $info -TimeoutSeconds 2
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_owned_exit_timeout_stops_live_child():
+    """A live child must hit the bounded timeout and be cleaned up before failure."""
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+function Write-Step {{ param($Message) }}
+$script:child = Start-Process pwsh -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
+$null = $script:child.Handle
+$script:stopped = $false
+function Stop-OwnedHistoryProcess {{
+    $script:child.Kill()
+    $script:child.WaitForExit()
+    $script:stopped = $true
+}}
+try {{
+    if ($script:child.HasExited) {{ throw 'Child was not live before wait' }}
+    $info = [pscustomobject]@{{ Id=$script:child.Id; Process=$script:child }}
+    $failure = $null
+    try {{ Wait-ForOwnedProcessExit -ProcInfo $info -TimeoutSeconds 1 }}
+    catch {{ $failure = $_.Exception.Message }}
+    if ($failure -notlike '*did not exit gracefully*') {{ throw 'Expected graceful-exit timeout failure' }}
+    if (-not $script:stopped -or -not $script:child.HasExited) {{ throw 'Live child cleanup was not established' }}
+}} finally {{
+    if (-not $script:child.HasExited) {{ $script:child.Kill(); $script:child.WaitForExit() }}
+    $script:child.Dispose()
+}}
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
@@ -417,13 +449,13 @@ const initial=[{{id:'fixture-hist-003',timestamp:3,text:'gamma baseline'}},
  {{id:'fixture-hist-002-delete',timestamp:2,text:'beta temporary'}},
  {{id:'fixture-hist-001',timestamp:1,text:'alpha baseline'}}];
 const expected=initial.map(r=>({{id:r.id,timestamp:r.timestamp,textHash:sha256(r.text)}}));
-async function exercise(appearance) {{
+async function exercise(appearance, filterRows=true) {{
  let rows=[...initial], navigated=false, searched=false;
  const settings={{serverAutoStart:false,startMinimized:false,appearance}};
  const input={{value:'',dispatchEvent(event){{assert.equal(event.type,'input');assert.ok(event.bubbles);searched=true;}}}};
  const document={{querySelector(s){{if(s==='button[data-view="history"]')return {{click(){{navigated=true;}}}};
    if(s==='input[type="search"]')return navigated?input:null;return null;}},
-   querySelectorAll(s){{return rows.filter(r=>!searched||r.text.includes(input.value)).map(r=>({{
+   querySelectorAll(s){{return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
  const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.8',getSettings:()=>({{...settings}}),
   getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
@@ -437,7 +469,8 @@ async function exercise(appearance) {{
 }}
 await exercise('dark');
 await assert.rejects(exercise('light'),/Seeded appearance was not read/);
+await assert.rejects(exercise('dark',false),/Packaged app observation timed out/);
 """
     result = subprocess.run(['node', '--input-type=module', '-e', code],
-                            capture_output=True, text=True, timeout=20)
+                            capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr

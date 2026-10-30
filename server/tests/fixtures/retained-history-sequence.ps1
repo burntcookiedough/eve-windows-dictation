@@ -49,6 +49,7 @@ $script:RepoRoot = $Root
 $script:Installed = ''
 $script:Events = @()
 $script:InstallDirs = @()
+$script:InstallerPaths = @()
 $script:Stopped = $false
 $script:FunctionalHistoryComplete = $false
 
@@ -79,7 +80,16 @@ $expectationsPath = Join-Path $script:RunRoot 'expectations.json'
 [ordered]@{ records = @() } | ConvertTo-Json | Set-Content -LiteralPath $expectationsPath -Encoding utf8
 
 $baselineInstaller = Join-Path $script:BaselineArtifactDir "Eve.Web.Setup.$script:BaselineVersion.exe"
-$candidateInstaller = Join-Path $script:CandidateArtifactDir "Eve.Web.Setup.$script:CandidateVersion.exe"
+$candidateAssignments = @($invokeFn[0].Body.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $_.Left.VariablePath.UserPath -eq 'candidateInstaller'
+})
+if ($candidateAssignments.Count -ne 1) { throw 'Expected exactly one production candidateInstaller assignment.' }
+foreach ($command in $candidateAssignments[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    if ($command.GetCommandName() -ne 'Join-Path') { throw 'Unexpected command in candidate installer assignment.' }
+}
+Invoke-Expression $candidateAssignments[0].Extent.Text
 
 function Write-Step { param($Message) }
 function Assert-NoNvidiaDriver { }
@@ -123,6 +133,7 @@ function Initialize-SyntheticSentinels {
 function Invoke-Installer {
     param($Installer, $InstallDir)
     $script:InstallDirs += $InstallDir
+    $script:InstallerPaths += $Installer
     $script:Installed = if ($Installer -like '*alpha.8*') { $script:CandidateVersion } else { $script:BaselineVersion }
     $script:Events += "install:$script:Installed"
 }
@@ -193,6 +204,10 @@ if ($Mode -eq 'success') {
     if (-not $script:Stopped) { throw 'Cleanup was not called in finally block.' }
     if ($script:InstallDirs.Count -ne 3 -or @($script:InstallDirs | Where-Object { $_ -cne $script:InstallDir }).Count) {
         throw 'Every installation must target the owned install directory.'
+    }
+    $expectedCandidate = Join-Path $script:CandidateArtifactDir "Eve.Web.Setup.$script:CandidateVersion.exe"
+    if ($script:InstallerPaths[1] -cne $expectedCandidate) {
+        throw 'The candidate installation must use the staged candidate artifact.'
     }
     if ($null -eq $evidence) { throw 'Evidence file was not created.' }
     if ($evidence.overallStatus -ne 'passed') { throw "Expected overallStatus 'passed', got '$($evidence.overallStatus)'" }
