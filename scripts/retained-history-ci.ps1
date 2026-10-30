@@ -704,8 +704,10 @@ function Invoke-RetainedHistoryCi {
         Download-VerifiedBaseline -Destination $script:BaselineArtifactDir
         Set-FunctionalHistoryPhase -PhaseName 'baseline_download' -Status 'passed'
 
+        Set-FunctionalHistoryPhase -PhaseName 'qa_profile_setup' -Status 'started'
         Initialize-PreseededSettings -UserDataDir $userData
         Initialize-SyntheticSentinels -UserDataDir $userData -CacheRoot $script:CacheRoot
+        Set-FunctionalHistoryPhase -PhaseName 'qa_profile_setup' -Status 'passed'
 
         Set-FunctionalHistoryPhase -PhaseName 'baseline_install' -Status 'started'
         Invoke-Installer -Installer $baselineInstaller -InstallDir $script:InstallDir

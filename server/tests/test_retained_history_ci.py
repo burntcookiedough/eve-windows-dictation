@@ -14,12 +14,28 @@ ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows lifecycle harness')
 
 
+def ps_literal(value):
+    """Encode a path or string as one literal PowerShell argument."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def test_powershell_literal_preserves_apostrophes_and_metacharacters(tmp_path):
+    """Read a real fixture whose path would otherwise terminate a generated literal."""
+    path = tmp_path / "O'Brien $fixture.txt"
+    path.write_text('fictional fixture', encoding='utf-8')
+    command = f"Get-Content -LiteralPath {ps_literal(path.as_posix())} -Raw"
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == 'fictional fixture'
+
+
 @pytest.mark.parametrize('exit_code', [0, 17])
 def test_owned_exit_requires_success_from_retained_process(tmp_path, exit_code):
     """Exercise the real process handle after exit, including a recycled PID lookup."""
     command = f"""
 $ErrorActionPreference = 'Stop'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 function Stop-OwnedHistoryProcess {{ throw 'Unexpected forced cleanup' }}
 $process = Start-Process pwsh -ArgumentList @('-NoProfile', '-Command', 'exit {exit_code}') -PassThru -WindowStyle Hidden
@@ -42,7 +58,7 @@ def test_owned_exit_timeout_stops_live_child():
     """A live child must hit the bounded timeout and be cleaned up before failure."""
     command = f"""
 $ErrorActionPreference = 'Stop'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 $script:child = Start-Process pwsh -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -PassThru -WindowStyle Hidden
 $null = $script:child.Handle
@@ -71,6 +87,8 @@ try {{
 
 
 def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
+    tmp_path = tmp_path / "O'Brien probe"
+    tmp_path.mkdir()
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (scripts / 'retained-history-probe.mjs').write_text(
@@ -80,8 +98,8 @@ def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
     )
     command = f"""
 $ErrorActionPreference = 'Stop'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
-$script:RepoRoot = '{tmp_path.as_posix()}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$script:RepoRoot = {ps_literal(tmp_path.as_posix())}
 function Write-Step {{ param($Message) }}
 $result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture
 if ($result.status -ne 'passed') {{ throw 'Probe result lost' }}
@@ -103,13 +121,13 @@ def test_staging_stops_before_copy_when_release_verifier_exits_nonzero(tmp_path)
     digest = hashlib.sha256(b'fixture').hexdigest()
     command = f"""
 $ErrorActionPreference = 'Stop'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
-$script:RepoRoot = '{tmp_path.as_posix()}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$script:RepoRoot = {ps_literal(tmp_path.as_posix())}
 function Get-RetainedCandidatePins {{
     return @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
 }}
 function Copy-Item {{ throw 'COPY_REACHED' }}
-Assert-RetainedCandidateStaging -RetainedDir '{retained.as_posix()}' -CandidateArtifactDir '{candidate.as_posix()}'
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -CandidateArtifactDir {ps_literal(candidate.as_posix())}
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
                             capture_output=True, text=True, timeout=15)
@@ -127,7 +145,7 @@ def test_scripts_parse_and_ast_intact():
         cmd = [
             'pwsh', '-NoProfile', '-Command',
             f"$tokens = $null; $errors = $null; "
-            f"[System.Management.Automation.Language.Parser]::ParseFile('{script_path.as_posix()}', [ref]$tokens, [ref]$errors); "
+            f"[System.Management.Automation.Language.Parser]::ParseFile({ps_literal(script_path.as_posix())}, [ref]$tokens, [ref]$errors); "
             f"if ($errors.Count) {{ throw $errors[0].Message }}"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -138,8 +156,8 @@ def test_history_mode_binds_candidate_version_before_installer_paths():
     """A newer harness release must still consume the pinned alpha.8 candidate."""
     command = f"""
 $ErrorActionPreference = 'Stop'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
-$ast = [System.Management.Automation.Language.Parser]::ParseFile('{ROOT / 'scripts/retained-history-ci.ps1'}', [ref]$null, [ref]$null)
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$ast = [System.Management.Automation.Language.Parser]::ParseFile({ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}, [ref]$null, [ref]$null)
 $fn = $ast.Find({{ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-RetainedHistoryCi' }}, $true)
 $bindings = @($fn.Body.EndBlock.Statements | Where-Object {{
     $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
@@ -172,19 +190,19 @@ def test_host_guard_rejects_non_hosted_or_wrong_event(tmp_path, runner, event, m
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/installer-candidate-artifacts.ps1'}'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/installer-candidate-artifacts.ps1')}
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 
 $env:GITHUB_ACTIONS = 'true'
 $env:RUNNER_ENVIRONMENT = '{runner}'
 $env:OS = 'Windows_NT'
 $env:GITHUB_EVENT_NAME = '{event}'
 $env:GITHUB_REF = 'refs/heads/trunk'
-$env:RUNNER_TEMP = '{tmp_path.as_posix()}'
-$env:GITHUB_WORKSPACE = '{ROOT.as_posix()}'
+$env:RUNNER_TEMP = {ps_literal(tmp_path.as_posix())}
+$env:GITHUB_WORKSPACE = {ps_literal(ROOT.as_posix())}
 $env:GITHUB_SHA = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
 
-Assert-RetainedHistoryCiHost -ExpectedCommit $env:GITHUB_SHA -RepoRoot '{ROOT.as_posix()}'
+Assert-RetainedHistoryCiHost -ExpectedCommit $env:GITHUB_SHA -RepoRoot {ps_literal(ROOT.as_posix())}
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -198,19 +216,19 @@ def test_host_guard_rejects_non_trunk_ref(tmp_path):
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/installer-candidate-artifacts.ps1'}'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/installer-candidate-artifacts.ps1')}
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 
 $env:GITHUB_ACTIONS = 'true'
 $env:RUNNER_ENVIRONMENT = 'github-hosted'
 $env:OS = 'Windows_NT'
 $env:GITHUB_EVENT_NAME = 'workflow_dispatch'
 $env:GITHUB_REF = 'refs/heads/feature-branch' # WRONG: must be refs/heads/trunk
-$env:RUNNER_TEMP = '{tmp_path.as_posix()}'
-$env:GITHUB_WORKSPACE = '{ROOT.as_posix()}'
+$env:RUNNER_TEMP = {ps_literal(tmp_path.as_posix())}
+$env:GITHUB_WORKSPACE = {ps_literal(ROOT.as_posix())}
 $env:GITHUB_SHA = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
 
-Assert-RetainedHistoryCiHost -ExpectedCommit $env:GITHUB_SHA -RepoRoot '{ROOT.as_posix()}'
+Assert-RetainedHistoryCiHost -ExpectedCommit $env:GITHUB_SHA -RepoRoot {ps_literal(ROOT.as_posix())}
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -230,12 +248,12 @@ def test_retained_staging_rejects_missing_or_corrupt_files(tmp_path):
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/installer-manifest.ps1'}'
-. '{ROOT / 'scripts/installer-candidate-artifacts.ps1'}'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/installer-manifest.ps1')}
+. {ps_literal(ROOT / 'scripts/installer-candidate-artifacts.ps1')}
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir '{retained_dir.as_posix()}' -CandidateArtifactDir '{candidate_dir.as_posix()}'
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -266,12 +284,12 @@ def test_retained_staging_rejects_hash_mismatch(tmp_path):
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/installer-manifest.ps1'}'
-. '{ROOT / 'scripts/installer-candidate-artifacts.ps1'}'
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/installer-manifest.ps1')}
+. {ps_literal(ROOT / 'scripts/installer-candidate-artifacts.ps1')}
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir '{retained_dir.as_posix()}' -CandidateArtifactDir '{candidate_dir.as_posix()}'
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -310,10 +328,10 @@ def test_sqlite_seeder_validates_schema_and_inserts_fictional_records(tmp_path):
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-$manifest = Invoke-HistoryDatabaseSeed -DbPath '{db_path.as_posix()}'
+$manifest = Invoke-HistoryDatabaseSeed -DbPath {ps_literal(db_path.as_posix())}
 Write-Output "SEEDED_COUNT=$($manifest.seededRowCount)"
 """, encoding='utf-8')
 
@@ -346,10 +364,10 @@ def test_sqlite_seeder_rejects_missing_table_or_columns(tmp_path):
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Invoke-HistoryDatabaseSeed -DbPath '{db_path.as_posix()}'
+Invoke-HistoryDatabaseSeed -DbPath {ps_literal(db_path.as_posix())}
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -432,7 +450,7 @@ assert.throws(()=>assertHistoryResponse({{entries:[row],hasMore:true}},expected)
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-@pytest.mark.parametrize('mode', ['success', 'verification-failure', 'baseline-initialize', 'baseline-read',
+@pytest.mark.parametrize('mode', ['success', 'verification-failure', 'settings-failure', 'sentinels-failure', 'baseline-initialize', 'baseline-read',
     'candidate-upgrade-read-mutate', 'candidate-relaunch-verify', 'baseline-rollback-read', 'cleanup-failure'])
 def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
     res = subprocess.run(['pwsh', '-NoProfile', '-File',
@@ -479,6 +497,7 @@ if ({json.dumps(rejection)}) {{
 }} else {{
  const result=await observe();
  assert.equal(result.renderedCount,2);assert.equal(result.settingsMounted,false);assert.ok(navigated);
+ assert.deepEqual(result.records,expected);
 }}
 """
     res = subprocess.run(['node', '--input-type=module', '-e', code], capture_output=True, text=True, timeout=20)

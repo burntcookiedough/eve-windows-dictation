@@ -52,6 +52,7 @@ $script:InstallDirs = @()
 $script:InstallerPaths = @()
 $script:StagingCalls = @()
 $script:ObservationCalls = @()
+$script:InitializerCalls = @()
 $script:Stopped = $false
 $script:FunctionalHistoryComplete = $false
 
@@ -97,19 +98,12 @@ foreach ($assignmentName in @('baselineInstaller', 'candidateInstaller')) {
 function Write-Step { param($Message) }
 function Assert-NoNvidiaDriver { }
 
-function Set-FunctionalHistoryPhase {
-    param($PhaseName, $Status, $ErrorDetail='', $Observations=$null)
-    $phase = [ordered]@{
-        status = $Status
-        recordedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-    }
-    if ($ErrorDetail) { $phase['error'] = 'Generic error: phase failed' }
-    if ($Observations) { $phase['observations'] = $Observations }
-    $script:FunctionalHistoryEvidence.phases[$PhaseName] = $phase
-    $script:FunctionalHistoryEvidence.currentPhase = $PhaseName
-    if ($Status -eq 'failed') {
-        $script:FunctionalHistoryEvidence.overallStatus = 'failed'
-    }
+foreach ($functionName in @('Set-FunctionalHistoryPhase', 'Write-FunctionalHistoryEvidence')) {
+    $definitions = @($ast.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+    }, $true))
+    if ($definitions.Count -ne 1) { throw "Expected one production $functionName definition." }
+    Invoke-Expression $definitions[0].Extent.Text
 }
 
 function Assert-RetainedCandidateStaging {
@@ -121,16 +115,21 @@ function Assert-RetainedCandidateStaging {
 
 function Download-VerifiedBaseline {
     param($Destination)
+    if ($Destination -cne (Join-Path $Root 'baseline')) { throw 'Baseline download must use the owned artifact directory.' }
     $script:Events += 'download-baseline'
 }
 
 function Initialize-PreseededSettings {
     param($UserDataDir)
+    $script:InitializerCalls += @{ Kind = 'settings'; UserDataDir = $UserDataDir }
+    if ($Mode -eq 'settings-failure') { throw 'Synthetic settings initialization failure.' }
     $script:Events += 'settings'
 }
 
 function Initialize-SyntheticSentinels {
     param($UserDataDir, $CacheRoot)
+    $script:InitializerCalls += @{ Kind = 'sentinels'; UserDataDir = $UserDataDir; CacheRoot = $CacheRoot }
+    if ($Mode -eq 'sentinels-failure') { throw 'Synthetic sentinel initialization failure.' }
     $script:Events += 'sentinels'
 }
 
@@ -190,11 +189,6 @@ function Stop-OwnedHistoryProcess {
     $script:Stopped = $true
 }
 
-function Write-FunctionalHistoryEvidence {
-    param($EvidenceData)
-    $EvidenceData | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $evidencePath -Encoding utf8
-}
-
 $failure = $null
 $failureRecord = $null
 try {
@@ -228,6 +222,12 @@ foreach ($call in $script:ObservationCalls) {
         throw 'Observation must use the owned install, profile and expectations paths.'
     }
 }
+foreach ($call in $script:InitializerCalls) {
+    if ($call.UserDataDir -cne (Join-Path $Root 'profile\Eve') -or
+        ($call.Kind -eq 'sentinels' -and $call.CacheRoot -cne (Join-Path $Root 'hf'))) {
+        throw 'Initialization must use the owned profile and cache directories.'
+    }
+}
 if ($Mode -eq 'success') {
     if ($failure) { throw "Expected success but got failure: $failure" }
     if (-not $script:Stopped) { throw 'Cleanup was not called in finally block.' }
@@ -242,6 +242,12 @@ if ($Mode -eq 'success') {
         throw 'Required retained History lifecycle order was not established.'
     }
     if ($null -eq $evidence) { throw 'Evidence file was not created.' }
+    foreach ($phaseName in @('baseline_initialize', 'database_seed', 'baseline_read',
+        'candidate_upgrade_read_mutate', 'candidate_relaunch_verify', 'baseline_rollback_read')) {
+        if (-not $evidence.phases[$phaseName].Contains('observations')) {
+            throw "Production evidence lost observations for $phaseName."
+        }
+    }
     if ($evidence.overallStatus -ne 'passed') { throw "Expected overallStatus 'passed', got '$($evidence.overallStatus)'" }
     if (-not $script:FunctionalHistoryComplete) { throw 'Lifecycle did not complete successfully.' }
 } else {
@@ -258,6 +264,11 @@ if ($Mode -eq 'success') {
         $expectedPhase = 'candidate_verification'
         $expectedFailure = 'Synthetic candidate verification failure.'
         $expectedPrefix = @()
+    } elseif ($Mode -in @('settings-failure', 'sentinels-failure')) {
+        $expectedPhase = 'qa_profile_setup'
+        $expectedFailure = if ($Mode -eq 'settings-failure') { 'Synthetic settings initialization failure.' } else { 'Synthetic sentinel initialization failure.' }
+        $expectedPrefix = if ($Mode -eq 'settings-failure') { $expectedEvents[0..1] } else { $expectedEvents[0..2] }
+        if ($evidence.phases['baseline_download'].status -cne 'passed') { throw 'Setup failure changed the download outcome.' }
     } elseif ($Mode -eq 'cleanup-failure') {
         $expectedPhase = 'candidate_final_binding'
         $expectedFailure = 'Generic error: cleanup failed.'
