@@ -14,6 +14,55 @@ ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows lifecycle harness')
 
 
+def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    (scripts / 'retained-history-probe.mjs').write_text(
+        'console.error("benign warning");\n'
+        'console.log(JSON.stringify({status:"passed",closeRequested:true}));\n',
+        encoding='utf-8',
+    )
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+$script:RepoRoot = '{tmp_path.as_posix()}'
+function Write-Step {{ param($Message) }}
+$result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture
+if ($result.status -ne 'passed') {{ throw 'Probe result lost' }}
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_staging_stops_before_copy_when_release_verifier_exits_nonzero(tmp_path):
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    (scripts / 'release-artifacts.ps1').write_text('exit 1\n', encoding='utf-8')
+    retained = tmp_path / 'retained'
+    retained.mkdir()
+    (retained / 'fixture.txt').write_text('fixture', encoding='utf-8')
+    candidate = tmp_path / 'candidate'
+    candidate.mkdir()
+    digest = hashlib.sha256(b'fixture').hexdigest()
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+$script:RepoRoot = '{tmp_path.as_posix()}'
+function Get-RetainedCandidatePins {{
+    return @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
+}}
+function Copy-Item {{ throw 'COPY_REACHED' }}
+Assert-RetainedCandidateStaging -RetainedDir '{retained.as_posix()}' -CandidateArtifactDir '{candidate.as_posix()}'
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0
+    assert 'Retained candidate release verification failed' in result.stderr
+    assert 'COPY_REACHED' not in result.stderr
+    assert not list(candidate.iterdir())
+
+
 def test_scripts_parse_and_ast_intact():
     """Verify that installer-lifecycle-ci.ps1 and retained-history-ci.ps1 parse without errors."""
     for script_name in ['scripts/installer-lifecycle-ci.ps1', 'scripts/retained-history-ci.ps1']:

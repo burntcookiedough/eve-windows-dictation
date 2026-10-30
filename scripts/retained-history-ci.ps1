@@ -183,7 +183,7 @@ function Save-RetainedHistoryCandidate {
         }
 
         [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $targetFull)
-        Write-Step "Successfully downloaded and extracted retained candidate artifact ($artifactId) into $targetFull."
+        Write-Host "[retained-history] Successfully downloaded and extracted retained candidate artifact ($artifactId)."
     } finally {
         if (Test-Path -LiteralPath $zipPath) {
             Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
@@ -231,7 +231,11 @@ function Assert-RetainedCandidateStaging {
     }
 
     $releaseScript = Join-Path $script:RepoRoot 'scripts/release-artifacts.ps1'
+    $global:LASTEXITCODE = 0
     & $releaseScript -Mode Verify -ArtifactDir $retainedFull -ExpectedTag "v$($pins.CandidateVersion)" -ExpectedCommit $pins.CandidateCommit -ExpectedManifestSha256 $pins.ManifestSha256 -AllowUnsigned
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Retained candidate release verification failed; refusing to stage artifacts.'
+    }
 
     $stagedItems = @(
         @("Eve.Web.Setup.$($pins.CandidateVersion).exe", "Eve.Web.Setup.$($pins.CandidateVersion).exe"),
@@ -566,7 +570,7 @@ function Invoke-RetainedHistoryProbe {
         "--expectations=$ExpectationsPath"
     )
 
-    $output = & node @arguments 2>&1
+    $output = & node @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "CDP probe failed in phase '$Phase': required packaged-app observation was not established."
     }
