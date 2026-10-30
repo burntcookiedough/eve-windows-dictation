@@ -134,6 +134,34 @@ def test_scripts_parse_and_ast_intact():
         assert res.returncode == 0, res.stdout + res.stderr
 
 
+def test_history_mode_binds_candidate_version_before_installer_paths():
+    """A newer harness release must still consume the pinned alpha.8 candidate."""
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('{ROOT / 'scripts/retained-history-ci.ps1'}', [ref]$null, [ref]$null)
+$fn = $ast.Find({{ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-RetainedHistoryCi' }}, $true)
+$bindings = @($fn.Body.EndBlock.Statements | Where-Object {{
+    $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $_.Left.VariablePath.UserPath -eq 'script:CandidateVersion'
+}})
+if ($bindings.Count -ne 1) {{ throw 'Expected one retained candidate version binding' }}
+$script:CandidateVersion = '0.8.2-alpha.9'
+Invoke-Expression $bindings[0].Extent.Text
+if ($script:CandidateVersion -cne '0.8.2-alpha.8') {{ throw 'Retained version inherited harness release' }}
+$installer = $fn.Body.EndBlock.Statements | Where-Object {{
+    $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+    $_.Left.VariablePath.UserPath -eq 'candidateInstaller'
+}}
+if ($bindings[0].Extent.StartOffset -ge $installer.Extent.StartOffset) {{ throw 'Version binding follows installer path' }}
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize('runner,event,message', [
     ('github-hosted', 'pull_request', 'workflow_dispatch manual trigger'),
     ('self-hosted', 'workflow_dispatch', 'disposable GitHub-hosted Windows runner'),
@@ -415,14 +443,15 @@ def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
     assert f'SEQUENCE_PROOF={mode}' in res.stdout
 
 
-@pytest.mark.parametrize('phase,appearance,reject', [
-    ('baseline-read', 'dark', False),
-    ('candidate-relaunch-verify', 'light', False),
-    ('candidate-relaunch-verify', 'dark', True),
-    ('baseline-rollback-read', 'light', False),
-    ('baseline-rollback-read', 'dark', True),
+@pytest.mark.parametrize('phase,appearance,mismatch,rejection', [
+    ('baseline-read', 'dark', False, None),
+    ('candidate-relaunch-verify', 'light', False, None),
+    ('candidate-relaunch-verify', 'dark', False, 'Saved appearance did not persist'),
+    ('baseline-rollback-read', 'light', False, None),
+    ('baseline-rollback-read', 'dark', False, 'Saved appearance did not persist'),
+    ('baseline-read', 'dark', True, 'History records changed, duplicated or missing'),
 ])
-def test_real_observer_checks_history_and_appearance_persistence(phase, appearance, reject):
+def test_real_observer_checks_history_and_appearance_persistence(phase, appearance, mismatch, rejection):
     """Observe History without Settings and reject lost saved appearance after restart/rollback."""
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
@@ -431,6 +460,7 @@ import vm from 'node:vm';
 import {{observeHistory,sha256}} from '{probe}';
 const rows=[{{id:'first',timestamp:2,text:'fictional first'}},{{id:'second',timestamp:1,text:'fictional second'}}];
 const expected=rows.map(r=>({{id:r.id,timestamp:r.timestamp,textHash:sha256(r.text)}}));
+const apiRows={json.dumps(mismatch)} ? rows.map(r=>({{...r,text:'changed API fixture'}})) : rows;
 let navigated=false;
 const historyButton={{click(){{navigated=true;}}}};
 const settingsButton={{textContent:'Settings'}};
@@ -442,10 +472,10 @@ const document={{
 }};
 const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.8" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
  getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'{appearance}'}}),getServerStatus:()=>({{status:'idle'}}),
- getHistoryEntries:(offset,limit)=>({{entries:rows.slice(offset,offset+limit),hasMore:offset+limit<rows.length}})}}}};
+ getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
 const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
-if ({json.dumps(reject)}) {{
- await assert.rejects(observe,/Saved appearance did not persist/);
+if ({json.dumps(rejection)}) {{
+ await assert.rejects(observe,new RegExp({json.dumps(rejection)}));
 }} else {{
  const result=await observe();
  assert.equal(result.renderedCount,2);assert.equal(result.settingsMounted,false);assert.ok(navigated);

@@ -665,6 +665,8 @@ function Invoke-RetainedHistoryCi {
     Assert-RetainedHistoryCiHost -ExpectedCommit $ExpectedCommit -RepoRoot $script:RepoRoot
     Assert-NodeWebSocketCapability
 
+    # Harness release versions may advance independently of the immutable candidate.
+    $script:CandidateVersion = (Get-RetainedCandidatePins).CandidateVersion
     $script:FunctionalHistoryComplete = $false
     $script:FunctionalHistoryEvidence = [ordered]@{
         schema           = 1

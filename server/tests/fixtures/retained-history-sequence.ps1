@@ -51,6 +51,7 @@ $script:Events = @()
 $script:InstallDirs = @()
 $script:InstallerPaths = @()
 $script:StagingCalls = @()
+$script:ObservationCalls = @()
 $script:Stopped = $false
 $script:FunctionalHistoryComplete = $false
 
@@ -152,6 +153,7 @@ function Assert-Installed {
 
 function Observe-RetainedHistoryLaunch {
     param($Phase, $InstallDir, $UserDataDir, $ExpectationsPath)
+    $script:ObservationCalls += @{ Phase = $Phase; InstallDir = $InstallDir; UserDataDir = $UserDataDir; ExpectationsPath = $ExpectationsPath }
     if ($Mode -eq $Phase) { throw "Synthetic failure during observation phase $Phase." }
     $script:Events += "observe:$Phase"
     return @{ phase = $Phase; status = 'passed'; observations = @{ phase = $Phase }; closeRequested = $true }
@@ -217,6 +219,13 @@ foreach ($call in $script:StagingCalls) {
     if ($call.RetainedDir -cne (Join-Path $Root 'retained') -or
         $call.CandidateArtifactDir -cne (Join-Path $Root 'candidate')) {
         throw 'Staging must use the owned retained input and candidate destination directories.'
+    }
+}
+foreach ($call in $script:ObservationCalls) {
+    if ($call.InstallDir -cne (Join-Path $Root 'install\Programs\Eve') -or
+        $call.UserDataDir -cne (Join-Path $Root 'profile\Eve') -or
+        $call.ExpectationsPath -cne (Join-Path $Root 'expectations.json')) {
+        throw 'Observation must use the owned install, profile and expectations paths.'
     }
 }
 if ($Mode -eq 'success') {
