@@ -95,7 +95,7 @@ jobs:
 
       - name: Check candidate version
         shell: pwsh
-        run: uv run --no-project --python 3.11.17 python scripts/version.py check --tag v0.8.2-alpha.8
+        run: uv run --no-project --python 3.11.17 python scripts/version.py check --tag v0.8.2-alpha.9
 
       - name: Build candidate Windows web installer
         shell: pwsh
@@ -125,29 +125,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           . ./scripts/installer-candidate-artifacts.ps1
-          $retained = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          $retained = Join-Path $env:RUNNER_TEMP "eve-alpha9-candidate-artifacts-$env:GITHUB_RUN_ID"
           $candidate = Join-Path $env:RUNNER_TEMP "eve-alpha7-installer-lifecycle-$env:GITHUB_RUN_ID/candidate"
           if ($env:LIFECYCLE_OUTCOME -ne 'success') {
             Set-CandidatePhaseStatus -RetainedDir $retained -PhaseName 'overall' -Status 'failed' -ErrorDetail 'Lifecycle step did not complete; inspect workflow logs.'
           }
-          Assert-CandidateBinding -RetainedDir $retained -CandidateVersion '0.8.2-alpha.8' -CandidateInstaller (Join-Path $candidate 'Eve.Web.Setup.0.8.2-alpha.8.exe') -CandidatePayload (Join-Path $candidate 'murmur-0.8.2-alpha.8-x64.nsis.7z')
+          Assert-CandidateBinding -RetainedDir $retained -CandidateVersion '0.8.2-alpha.9' -CandidateInstaller (Join-Path $candidate 'Eve.Web.Setup.0.8.2-alpha.9.exe') -CandidatePayload (Join-Path $candidate 'murmur-0.8.2-alpha.9-x64.nsis.7z')
           'verified=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
       - name: Upload candidate QA artifacts
         if: always() && github.event_name == 'workflow_dispatch' && inputs.retain_candidate == true && steps.qa-upload.outputs.verified == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: eve-v0.8.2-alpha.8-unsigned-candidate-qa-${{ github.run_id }}
+          name: eve-v0.8.2-alpha.9-unsigned-candidate-qa-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/Eve.Web.Setup.0.8.2-alpha.8.exe
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/murmur-0.8.2-alpha.8-x64.nsis.7z
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/latest.yml
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/THIRD_PARTY_NOTICES.txt
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/SHA256SUMS.txt
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/SHA512SUMS.txt
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/eve-v0.8.2-alpha.8-artifact-manifest.json
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-payload-manifest.json
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-provenance.json
-            ${{ runner.temp }}/eve-alpha8-candidate-artifacts-${{ github.run_id }}/qa/candidate-phase-status.json
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/Eve.Web.Setup.0.8.2-alpha.9.exe
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/murmur-0.8.2-alpha.9-x64.nsis.7z
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/latest.yml
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/THIRD_PARTY_NOTICES.txt
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/SHA256SUMS.txt
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/SHA512SUMS.txt
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/eve-v0.8.2-alpha.9-artifact-manifest.json
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/qa/candidate-payload-manifest.json
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/qa/candidate-provenance.json
+            ${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/qa/candidate-phase-status.json
           retention-days: 7
           if-no-files-found: error

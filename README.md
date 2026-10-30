@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/burntcookiedough/eve-windows-dictation/releases"><img src="https://img.shields.io/badge/v0.8.2-alpha.8-orange?style=flat-square" alt="v0.8.2-alpha.8"></a>
+  <a href="https://github.com/burntcookiedough/eve-windows-dictation/releases"><img src="https://img.shields.io/badge/v0.8.2-alpha.9-orange?style=flat-square" alt="v0.8.2-alpha.9"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20x64-111111?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/engine-Faster--Whisper-111111?style=flat-square" alt="Faster-Whisper">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT License"></a>
