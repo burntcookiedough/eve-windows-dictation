@@ -29,7 +29,7 @@ def test_candidate_clean_install_is_isolated_and_fail_closed(tmp_path, mode):
 @pytest.mark.parametrize('mode', ['existing-profile', 'existing-install'])
 def test_collision_proof_rejects_an_unrelated_failure(tmp_path, mode):
     source = (ROOT / 'scripts/installer-lifecycle-ci.ps1').read_text(encoding='utf-8')
-    phase = "Write-Step 'Installing alpha.8 into a fresh installation and synthetic profile.'"
+    phase = "Write-Step 'Installing alpha.9 into a fresh installation and synthetic profile.'"
     assert source.count(phase) == 1
     mutated = tmp_path / 'lifecycle.ps1'
     mutated.write_text(source.replace(phase, "throw 'Synthetic unrelated phase failure.'"), encoding='utf-8')
