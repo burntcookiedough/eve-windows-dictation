@@ -50,6 +50,7 @@ $script:Installed = ''
 $script:Events = @()
 $script:InstallDirs = @()
 $script:InstallerPaths = @()
+$script:StagingCalls = @()
 $script:Stopped = $false
 $script:FunctionalHistoryComplete = $false
 
@@ -112,6 +113,7 @@ function Set-FunctionalHistoryPhase {
 
 function Assert-RetainedCandidateStaging {
     param($RetainedDir, $CandidateArtifactDir)
+    $script:StagingCalls += @{ RetainedDir = $RetainedDir; CandidateArtifactDir = $CandidateArtifactDir }
     if ($Mode -eq 'verification-failure') { throw 'Synthetic candidate verification failure.' }
     $script:Events += 'staging'
 }
@@ -211,6 +213,12 @@ $expectedEvents = @(
     'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.8',
     'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
 )
+foreach ($call in $script:StagingCalls) {
+    if ($call.RetainedDir -cne (Join-Path $Root 'retained') -or
+        $call.CandidateArtifactDir -cne (Join-Path $Root 'candidate')) {
+        throw 'Staging must use the owned retained input and candidate destination directories.'
+    }
+}
 if ($Mode -eq 'success') {
     if ($failure) { throw "Expected success but got failure: $failure" }
     if (-not $script:Stopped) { throw 'Cleanup was not called in finally block.' }

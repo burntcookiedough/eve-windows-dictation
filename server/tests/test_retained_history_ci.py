@@ -134,8 +134,12 @@ def test_scripts_parse_and_ast_intact():
         assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_host_guard_rejects_non_hosted_or_wrong_ref(tmp_path):
-    """Prove that Assert-RetainedHistoryCiHost fails closed on invalid environment or ref."""
+@pytest.mark.parametrize('runner,event,message', [
+    ('github-hosted', 'pull_request', 'workflow_dispatch manual trigger'),
+    ('self-hosted', 'workflow_dispatch', 'disposable GitHub-hosted Windows runner'),
+])
+def test_host_guard_rejects_non_hosted_or_wrong_event(tmp_path, runner, event, message):
+    """Reject each invalid host or event independently with otherwise valid context."""
     test_script = tmp_path / 'test_host.ps1'
     test_script.write_text(f"""
 $ErrorActionPreference = 'Stop'
@@ -144,9 +148,9 @@ Set-StrictMode -Version Latest
 . '{ROOT / 'scripts/retained-history-ci.ps1'}'
 
 $env:GITHUB_ACTIONS = 'true'
-$env:RUNNER_ENVIRONMENT = 'github-hosted'
+$env:RUNNER_ENVIRONMENT = '{runner}'
 $env:OS = 'Windows_NT'
-$env:GITHUB_EVENT_NAME = 'pull_request' # WRONG: must be workflow_dispatch
+$env:GITHUB_EVENT_NAME = '{event}'
 $env:GITHUB_REF = 'refs/heads/trunk'
 $env:RUNNER_TEMP = '{tmp_path.as_posix()}'
 $env:GITHUB_WORKSPACE = '{ROOT.as_posix()}'
@@ -157,7 +161,7 @@ Assert-RetainedHistoryCiHost -ExpectedCommit $env:GITHUB_SHA -RepoRoot '{ROOT.as
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
     assert res.returncode != 0
-    assert 'workflow_dispatch manual trigger' in res.stderr
+    assert message in res.stderr
 
 
 def test_host_guard_rejects_non_trunk_ref(tmp_path):
@@ -400,7 +404,7 @@ assert.throws(()=>assertHistoryResponse({{entries:[row],hasMore:true}},expected)
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-@pytest.mark.parametrize('mode', ['success', 'verification-failure', 'baseline-initialize',
+@pytest.mark.parametrize('mode', ['success', 'verification-failure', 'baseline-initialize', 'baseline-read',
     'candidate-upgrade-read-mutate', 'candidate-relaunch-verify', 'baseline-rollback-read', 'cleanup-failure'])
 def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
     res = subprocess.run(['pwsh', '-NoProfile', '-File',
@@ -411,7 +415,15 @@ def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
     assert f'SEQUENCE_PROOF={mode}' in res.stdout
 
 
-def test_real_observer_checks_history_and_ignores_settings_navigation_button():
+@pytest.mark.parametrize('phase,appearance,reject', [
+    ('baseline-read', 'dark', False),
+    ('candidate-relaunch-verify', 'light', False),
+    ('candidate-relaunch-verify', 'dark', True),
+    ('baseline-rollback-read', 'light', False),
+    ('baseline-rollback-read', 'dark', True),
+])
+def test_real_observer_checks_history_and_appearance_persistence(phase, appearance, reject):
+    """Observe History without Settings and reject lost saved appearance after restart/rollback."""
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
 import assert from 'node:assert/strict';
@@ -428,11 +440,16 @@ const document={{
  querySelectorAll(s){{if(s==='button')return [historyButton,settingsButton];
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
-const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
- getSettings:()=>({{serverAutoStart:false,startMinimized:false}}),getServerStatus:()=>({{status:'idle'}}),
+const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.8" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
+ getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'{appearance}'}}),getServerStatus:()=>({{status:'idle'}}),
  getHistoryEntries:(offset,limit)=>({{entries:rows.slice(offset,offset+limit),hasMore:offset+limit<rows.length}})}}}};
-const result=await observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-read',expected);
-assert.equal(result.renderedCount,2);assert.equal(result.settingsMounted,false);assert.ok(navigated);
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
+if ({json.dumps(reject)}) {{
+ await assert.rejects(observe,/Saved appearance did not persist/);
+}} else {{
+ const result=await observe();
+ assert.equal(result.renderedCount,2);assert.equal(result.settingsMounted,false);assert.ok(navigated);
+}}
 """
     res = subprocess.run(['node', '--input-type=module', '-e', code], capture_output=True, text=True, timeout=20)
     assert res.returncode == 0, res.stdout + res.stderr
