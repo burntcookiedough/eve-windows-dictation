@@ -216,8 +216,10 @@ assert.equal(o.publish,'never');assert.equal(o.config.win.signExecutable,false);
 assert.equal(o.win.length,1);assert.equal(o.win[0],'nsis-web');calls++;return Promise.resolve();}}},console,process});
 assert.equal(calls,1);console.log('UNSIGNED_PUBLISH_NEVER');
 """
+    # This Node probe has intermittently exceeded 15 seconds on hosted Windows.
+    # Keep a bounded timeout while allowing for runner startup and scheduling delays.
     result = subprocess.run(["node", "-e", driver], env=dict(os.environ, QA_BUILD_CODE=code),
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert "UNSIGNED_PUBLISH_NEVER" in result.stdout
 
