@@ -209,11 +209,24 @@ if ($Mode -eq 'success') {
     if ($script:InstallerPaths[1] -cne $expectedCandidate) {
         throw 'The candidate installation must use the staged candidate artifact.'
     }
+    $expectedEvents = @(
+        'staging', 'download-baseline', 'settings', 'sentinels',
+        'install:0.8.2-alpha.5', 'observe:baseline-initialize', 'seed', 'observe:baseline-read',
+        'staging', 'install:0.8.2-alpha.8', 'observe:candidate-upgrade-read-mutate',
+        'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.8',
+        'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
+    )
+    if (($script:Events -join '|') -cne ($expectedEvents -join '|')) {
+        throw 'Required retained History lifecycle order was not established.'
+    }
     if ($null -eq $evidence) { throw 'Evidence file was not created.' }
     if ($evidence.overallStatus -ne 'passed') { throw "Expected overallStatus 'passed', got '$($evidence.overallStatus)'" }
     if (-not $script:FunctionalHistoryComplete) { throw 'Lifecycle did not complete successfully.' }
 } else {
     if (-not $failure) { throw "Expected mode '$Mode' to fail, but it succeeded." }
+    if ($Mode -ne 'cleanup-failure' -and -not $script:Stopped) {
+        throw 'Cleanup was not called after lifecycle failure.'
+    }
     if ($Mode -eq 'verification-failure' -and ($script:InstallDirs.Count -ne 0 -or $script:InstallerPaths.Count -ne 0)) {
         throw 'Candidate verification failure must precede every installer invocation.'
     }
