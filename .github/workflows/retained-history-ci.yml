@@ -1,0 +1,89 @@
+name: Windows Retained History Acceptance Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: 'Required 40-character lowercase harness commit SHA to test on trunk'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: eve-retained-history-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  retained-history:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout harness source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require trunk manual dispatch context and exact harness commit
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:OS -ne 'Windows_NT') {
+            throw 'Retained History gate requires a disposable GitHub-hosted Windows runner.'
+          }
+          if ($env:GITHUB_REPOSITORY -cne 'burntcookiedough/eve-windows-dictation') { throw 'Unexpected repository.' }
+          if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch') {
+            throw 'Retained History gate is manual-only (workflow_dispatch).'
+          }
+          if ($env:GITHUB_REF -ne 'refs/heads/trunk') {
+            throw "Retained History gate is restricted to trunk, observed ref: $env:GITHUB_REF"
+          }
+          if (-not $env:EXPECTED_COMMIT -or $env:EXPECTED_COMMIT -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'workflow_dispatch requires expected_commit as a 40-character lowercase SHA.'
+          }
+          $gitHead = (git rev-parse HEAD).Trim()
+          if ($env:EXPECTED_COMMIT -ne $env:GITHUB_SHA -or $env:EXPECTED_COMMIT -ne $gitHead) {
+            throw 'expected_commit does not match the workflow event SHA or git HEAD.'
+          }
+
+          node -e "if(typeof WebSocket!=='function')process.exit(1)"
+          if ($LASTEXITCODE -ne 0) { throw 'Hosted Node lacks built-in WebSocket.' }
+          python -B -I -c "import sqlite3,sys; assert sys.version_info >= (3,9)"
+          if ($LASTEXITCODE -ne 0) { throw 'Hosted Python/SQLite is unavailable.' }
+
+      - name: Download and verify retained candidate artifact
+        id: download-candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          . ./scripts/installer-candidate-artifacts.ps1
+          . ./scripts/retained-history-ci.ps1
+          Save-RetainedHistoryCandidate -RetainedDir $retainedDir
+
+      - name: Run isolated Retained History acceptance lifecycle
+        id: lifecycle
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          ./scripts/installer-lifecycle-ci.ps1 -Mode RetainedHistory -RetainedArtifactDir $retainedDir -ExpectedCommit $env:EXPECTED_COMMIT
+
+      - name: Upload explicit aggregate JSON evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eve-retained-history-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/eve-alpha7-installer-lifecycle-${{ github.run_id }}/evidence/functional-history-evidence.json
+          retention-days: 7
+          if-no-files-found: warn
