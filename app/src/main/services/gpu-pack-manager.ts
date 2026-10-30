@@ -29,10 +29,10 @@ export interface GpuPackAssetDescriptor {
   readonly sha256: string;
 }
 
-/** The production trust root for the optional alpha.8 Windows x64 GPU pack. */
+/** The production trust root for the optional alpha.9 Windows x64 GPU pack. */
 export const PINNED_GPU_PACK_DESCRIPTOR: GpuPackDescriptor = {
   schemaVersion: 1,
-  appBuildId: '0.8.2-alpha.8',
+  appBuildId: '0.8.2-alpha.9',
   ctranslate2BuildId:
     'ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc',
   platform: 'win32-x64',
