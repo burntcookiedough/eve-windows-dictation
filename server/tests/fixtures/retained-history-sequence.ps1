@@ -214,6 +214,9 @@ if ($Mode -eq 'success') {
     if (-not $script:FunctionalHistoryComplete) { throw 'Lifecycle did not complete successfully.' }
 } else {
     if (-not $failure) { throw "Expected mode '$Mode' to fail, but it succeeded." }
+    if ($Mode -eq 'verification-failure' -and ($script:InstallDirs.Count -ne 0 -or $script:InstallerPaths.Count -ne 0)) {
+        throw 'Candidate verification failure must precede every installer invocation.'
+    }
     if ($null -eq $evidence) { throw 'Evidence file was not created on failure.' }
     if ($evidence.overallStatus -ne 'failed') { throw "Expected overallStatus 'failed' for mode '$Mode', got '$($evidence.overallStatus)'" }
 }
