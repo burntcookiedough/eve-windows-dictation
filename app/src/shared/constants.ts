@@ -89,10 +89,9 @@ export const GPU_PACK_CTRANSLATE2_BUILD_ID =
 
 // Overlay window constants
 export const OVERLAY_CONFIG = {
-  QUICK_WIDTH: 700,
-  LONG_WIDTH: 900,
-  HEIGHT: 320,
-  BOTTOM_MARGIN: 80,
+  WIDTH: 320,
+  HEIGHT: 56,
+  BOTTOM_MARGIN: 92,
 } as const;
 
 // Audio processing constants

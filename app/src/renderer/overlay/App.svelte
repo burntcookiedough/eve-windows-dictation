@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fly } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
   import Pill from './components/Pill.svelte';
-  import TextDisplay from './components/TextDisplay.svelte';
   import { audioCapture } from './audio-capture';
   import { OverlayPerfObserver } from './perf-observation';
+  import { condenseWarning, derivePillView, holdVoice, INTRO_HOLD_MS } from './pill-view';
   import { AUDIO_CONFIG } from '../../shared/constants';
+  import { countWords } from '../../shared/insights';
   import type {
     RecordingState,
     RecordingStatusPayload,
@@ -16,18 +15,77 @@
   } from '../../shared/types';
 
   let recordingState = $state<RecordingState>('idle');
-  let transcriptionText = $state('');
-  let transcriptionType = $state<'partial' | 'final'>('partial');
   let sessionMode = $state<DictationSessionMode>('quick');
   let audioLevels = $state<number[]>(new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0));
   let isVisible = $state(false);
   let warningMessage = $state('');
-  let statusMessage = $state('');
   let warningTimeout: ReturnType<typeof setTimeout> | null = null;
+  let isLongSession = $state(false);
+  let chunk = $state<{ index: number; total: number } | null>(null);
+  let wordCount = $state<number | null>(null);
+  let hasListened = $state(false);
+  let isSpeaking = $state(false);
+  let elapsedMs = $state(0);
+  let listenStartedAt = 0;
+  let voiceOpenUntil = 0;
+  let clockInterval: ReturnType<typeof setInterval> | null = null;
 
   let cleanupFns: Array<() => void> = [];
   let perfObserver: OverlayPerfObserver | null = null;
   let captureSessionId: number | undefined;
+
+  const pillView = $derived(derivePillView({
+    state: recordingState,
+    hasListened,
+    isSpeaking,
+    elapsedMs,
+    isLongSession,
+    chunk,
+    wordCount,
+    alert: warningMessage,
+  }));
+
+  function clearWarning() {
+    if (warningTimeout) {
+      clearTimeout(warningTimeout);
+      warningTimeout = null;
+    }
+    warningMessage = '';
+  }
+
+  function beginSession() {
+    clearWarning();
+    isLongSession = sessionMode === 'long';
+    chunk = null;
+    wordCount = null;
+    hasListened = false;
+    elapsedMs = 0;
+  }
+
+  function tickClock() {
+    const now = performance.now();
+    elapsedMs = now - listenStartedAt;
+    isSpeaking = now < voiceOpenUntil;
+  }
+
+  function startClock() {
+    if (!hasListened) {
+      hasListened = true;
+      listenStartedAt = performance.now();
+      voiceOpenUntil = listenStartedAt + INTRO_HOLD_MS;
+    }
+    if (clockInterval) return;
+    tickClock();
+    clockInterval = setInterval(tickClock, 200);
+  }
+
+  function stopClock() {
+    if (clockInterval) {
+      clearInterval(clockInterval);
+      clockInterval = null;
+    }
+    isSpeaking = false;
+  }
 
   function reportPerf(observer: OverlayPerfObserver | null) {
     if (!observer) return;
@@ -43,9 +101,12 @@
           observer?.mark('lastAudioAt');
           window.murmur.sendAudioData(buffer, sessionId);
         },
-        // On levels - update waveform
+        // On levels - drive the pill
         (levels) => {
           audioLevels = levels;
+          const now = performance.now();
+          voiceOpenUntil = holdVoice(levels[levels.length - 1] ?? 0, now, voiceOpenUntil);
+          isSpeaking = now < voiceOpenUntil;
         },
         // Options with device ID
         { deviceId, ...(observer ? { onCaptureReady: (timestamp: number) => {
@@ -82,28 +143,25 @@
     // Subscribe to recording state
     cleanupFns.push(
       window.murmur.onRecordingState((payload) => {
+        const previousState = recordingState;
         recordingState = payload.state;
         sessionMode = payload.mode ?? sessionMode;
         isVisible = payload.isRecording || recordingState === 'success' || recordingState === 'error';
 
-        // Reset text when starting new session
-        if (recordingState === 'listening') {
-          if (warningTimeout) {
-            clearTimeout(warningTimeout);
-            warningTimeout = null;
-          }
-          warningMessage = '';
-          transcriptionText = '';
-          transcriptionType = 'partial';
-          statusMessage = sessionMode === 'long' ? 'Long dictation' : 'Fast dictation';
+        // Main opens every session with idle then 'processing', before the server is ready
+        if (recordingState === 'processing' && previousState === 'idle') {
+          beginSession();
         }
-        if (recordingState === 'idle') {
-          statusMessage = '';
+
+        if (recordingState === 'listening' || recordingState === 'transcribing') {
+          startClock();
+        } else {
+          stopClock();
         }
       })
     );
 
-    // Subscribe to transcription updates
+    // The pill never shows transcript text; only the final word count is kept
     cleanupFns.push(
       window.murmur.onTranscription((payload: TranscriptionPayload) => {
         const observer = payload.perfTraceId === perfObserver?.snapshot().traceId ? perfObserver : null;
@@ -115,10 +173,8 @@
         } else {
           observer?.mark('finalReceivedAt');
         }
-        transcriptionText = payload.text;
-        transcriptionType = payload.type;
         if (payload.type === 'final') {
-          statusMessage = '';
+          wordCount = countWords(payload.text);
           if (observer) {
             void tick().then(() => {
               observer.mark('finalDomCommittedAt');
@@ -131,7 +187,7 @@
 
     cleanupFns.push(
       window.murmur.onWarning((payload: RecordingWarningPayload) => {
-        warningMessage = payload.message;
+        warningMessage = condenseWarning(payload.code, payload.message);
 
         if (warningTimeout) {
           clearTimeout(warningTimeout);
@@ -146,13 +202,11 @@
     cleanupFns.push(
       window.murmur.onStatus((payload: RecordingStatusPayload) => {
         if (payload.status === 'long_dictation_started') {
-          transcriptionText = '';
-          transcriptionType = 'partial';
-          statusMessage = 'Long dictation';
+          isLongSession = true;
         } else if (payload.status === 'long_dictation_processing') {
-          statusMessage = payload.chunkIndex && payload.chunkTotal
-            ? `Processing ${payload.chunkIndex}/${payload.chunkTotal}`
-            : 'Processing long dictation';
+          chunk = payload.chunkIndex && payload.chunkTotal
+            ? { index: payload.chunkIndex, total: payload.chunkTotal }
+            : null;
         }
       })
     );
@@ -193,55 +247,16 @@
 
   onDestroy(() => {
     stopAudioCapture();
-    if (warningTimeout) {
-      clearTimeout(warningTimeout);
-    }
+    stopClock();
+    clearWarning();
     cleanupFns.forEach(fn => fn());
     window.murmur.removeAllListeners();
   });
 </script>
 
 <div
-  class="relative h-screen w-screen pointer-events-none transition-all duration-[180ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] {isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+  class="flex h-screen w-screen items-center justify-center pointer-events-none transition-all duration-[180ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] {isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}"
   aria-hidden="true"
 >
-  <div class="absolute inset-x-0 bottom-[86px] flex flex-col items-center gap-3 px-4">
-    {#if warningMessage}
-      <div
-        class="max-w-xl rounded-[20px] border border-white/15 bg-black/95 px-4 py-2"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="flex items-center justify-center gap-2">
-          <span class="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400/35 motion-reduce:animate-none"></span>
-            <span class="relative inline-flex h-2 w-2 rounded-full bg-red-400"></span>
-          </span>
-          <p class="text-center text-xs font-medium text-zinc-200 [overflow-wrap:anywhere]">
-            {warningMessage}
-          </p>
-        </div>
-      </div>
-    {/if}
-
-    {#if transcriptionText}
-      <div in:fly={{ y: 50, duration: 220, easing: cubicOut }}>
-        <TextDisplay text={transcriptionText} isFinal={transcriptionType === 'final'} mode={sessionMode} />
-      </div>
-    {/if}
-
-    {#if statusMessage && isVisible && !transcriptionText}
-      <div class="rounded-full border border-white/15 bg-black/90 px-3 py-1">
-        <p class="text-center text-xs font-medium text-zinc-300">
-          {statusMessage}
-        </p>
-      </div>
-    {/if}
-  </div>
-
-  <div class="absolute inset-x-0 bottom-6 flex justify-center">
-    <div class="h-[50px] w-[150px]">
-      <Pill state={recordingState} levels={audioLevels} />
-    </div>
-  </div>
+  <Pill view={pillView} levels={audioLevels} />
 </div>
