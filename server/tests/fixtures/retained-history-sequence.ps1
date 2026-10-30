@@ -79,17 +79,18 @@ $userData = Join-Path $script:ProfileRoot 'Eve'
 $expectationsPath = Join-Path $script:RunRoot 'expectations.json'
 [ordered]@{ records = @() } | ConvertTo-Json | Set-Content -LiteralPath $expectationsPath -Encoding utf8
 
-$baselineInstaller = Join-Path $script:BaselineArtifactDir "Eve.Web.Setup.$script:BaselineVersion.exe"
-$candidateAssignments = @($invokeFn[0].Body.EndBlock.Statements | Where-Object {
-    $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-    $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
-    $_.Left.VariablePath.UserPath -eq 'candidateInstaller'
-})
-if ($candidateAssignments.Count -ne 1) { throw 'Expected exactly one production candidateInstaller assignment.' }
-foreach ($command in $candidateAssignments[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
-    if ($command.GetCommandName() -ne 'Join-Path') { throw 'Unexpected command in candidate installer assignment.' }
+foreach ($assignmentName in @('baselineInstaller', 'candidateInstaller')) {
+    $assignments = @($invokeFn[0].Body.EndBlock.Statements | Where-Object {
+        $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+        $_.Left.VariablePath.UserPath -eq $assignmentName
+    })
+    if ($assignments.Count -ne 1) { throw "Expected exactly one production $assignmentName assignment." }
+    foreach ($command in $assignments[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+        if ($command.GetCommandName() -ne 'Join-Path') { throw 'Unexpected command in installer assignment.' }
+    }
+    Invoke-Expression $assignments[0].Extent.Text
 }
-Invoke-Expression $candidateAssignments[0].Extent.Text
 
 function Write-Step { param($Message) }
 function Assert-NoNvidiaDriver { }
@@ -132,9 +133,13 @@ function Initialize-SyntheticSentinels {
 
 function Invoke-Installer {
     param($Installer, $InstallDir)
+    $expectedBaseline = Join-Path $script:BaselineArtifactDir "Eve.Web.Setup.$script:BaselineVersion.exe"
+    $expectedCandidate = Join-Path $script:CandidateArtifactDir "Eve.Web.Setup.$script:CandidateVersion.exe"
+    if ($Installer -ceq $expectedBaseline) { $script:Installed = $script:BaselineVersion }
+    elseif ($Installer -ceq $expectedCandidate) { $script:Installed = $script:CandidateVersion }
+    else { throw 'Installer path does not match a staged baseline or candidate artifact.' }
     $script:InstallDirs += $InstallDir
     $script:InstallerPaths += $Installer
-    $script:Installed = if ($Installer -like '*alpha.8*') { $script:CandidateVersion } else { $script:BaselineVersion }
     $script:Events += "install:$script:Installed"
 }
 
@@ -199,6 +204,13 @@ $evidence = if (Test-Path -LiteralPath $evidencePath) {
     Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json -AsHashtable
 } else { $null }
 
+$expectedEvents = @(
+    'staging', 'download-baseline', 'settings', 'sentinels',
+    'install:0.8.2-alpha.5', 'observe:baseline-initialize', 'seed', 'observe:baseline-read',
+    'staging', 'install:0.8.2-alpha.8', 'observe:candidate-upgrade-read-mutate',
+    'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.8',
+    'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
+)
 if ($Mode -eq 'success') {
     if ($failure) { throw "Expected success but got failure: $failure" }
     if (-not $script:Stopped) { throw 'Cleanup was not called in finally block.' }
@@ -209,13 +221,6 @@ if ($Mode -eq 'success') {
     if ($script:InstallerPaths[1] -cne $expectedCandidate) {
         throw 'The candidate installation must use the staged candidate artifact.'
     }
-    $expectedEvents = @(
-        'staging', 'download-baseline', 'settings', 'sentinels',
-        'install:0.8.2-alpha.5', 'observe:baseline-initialize', 'seed', 'observe:baseline-read',
-        'staging', 'install:0.8.2-alpha.8', 'observe:candidate-upgrade-read-mutate',
-        'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.8',
-        'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
-    )
     if (($script:Events -join '|') -cne ($expectedEvents -join '|')) {
         throw 'Required retained History lifecycle order was not established.'
     }
@@ -232,6 +237,26 @@ if ($Mode -eq 'success') {
     }
     if ($null -eq $evidence) { throw 'Evidence file was not created on failure.' }
     if ($evidence.overallStatus -ne 'failed') { throw "Expected overallStatus 'failed' for mode '$Mode', got '$($evidence.overallStatus)'" }
+    if ($Mode -eq 'verification-failure') {
+        $expectedPhase = 'candidate_verification'
+        $expectedFailure = 'Synthetic candidate verification failure.'
+        $expectedPrefix = @()
+    } elseif ($Mode -eq 'cleanup-failure') {
+        $expectedPhase = 'candidate_final_binding'
+        $expectedFailure = 'Generic error: cleanup failed.'
+        $expectedPrefix = $expectedEvents
+    } else {
+        $expectedPhase = $Mode.Replace('-', '_')
+        $expectedFailure = "Synthetic failure during observation phase $Mode."
+        $stopIndex = [array]::IndexOf($expectedEvents, "observe:$Mode")
+        if ($stopIndex -lt 1) { throw 'Unknown requested observation failure phase.' }
+        $expectedPrefix = $expectedEvents[0..($stopIndex - 1)]
+    }
+    if ($failure -cne $expectedFailure -or $evidence.currentPhase -cne $expectedPhase -or
+        ($Mode -ne 'cleanup-failure' -and $evidence.phases[$expectedPhase].status -cne 'failed') -or
+        ($script:Events -join '|') -cne ($expectedPrefix -join '|')) {
+        throw 'Sequence did not reach the requested failure phase with its required preceding lifecycle events.'
+    }
 }
 
 Write-Output "SEQUENCE_PROOF=$Mode"
