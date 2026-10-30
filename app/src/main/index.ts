@@ -128,14 +128,18 @@ function scheduleOverlayDismiss(
   }, dwellMs);
 }
 
-function showTransientOverlayError(message: string, mode: DictationSessionMode): void {
+function showTransientOverlayError(
+  code: 'engine_not_ready' | 'engine_failed',
+  message: string,
+  mode: DictationSessionMode
+): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
   const generation = beginOverlaySession();
-  positionOverlayOnActiveDisplay(overlayWindow, mode);
+  positionOverlayOnActiveDisplay(overlayWindow);
   showOverlay(overlayWindow);
   overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, {
-    code: 'engine_not_ready',
+    code,
     message,
   });
   sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
@@ -207,7 +211,11 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
       engineStatus: engineStatus?.status ?? 'unknown',
       message: engineStatus?.message,
     });
-    showTransientOverlayError(message, sessionMode);
+    showTransientOverlayError(
+      engineStatus?.status === 'error' ? 'engine_failed' : 'engine_not_ready',
+      message,
+      sessionMode
+    );
     return;
   }
 
@@ -225,10 +233,12 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   latestTranscription = null;
   latestStatus = null;
   updateConnectionState({ status: 'connecting' });
-  updateRecordingState({ state: 'processing', isRecording: true, mode: sessionMode });
+  // A restart can arrive before the last session's dismissal reached idle
+  overlayWindow.webContents.send(IPC_CHANNELS.STATE_RECORDING, { state: 'idle', isRecording: false, mode: sessionMode });
+  sendOverlayRecordingState({ state: 'processing', isRecording: true, mode: sessionMode });
 
   // Position and show overlay
-  positionOverlayOnActiveDisplay(overlayWindow, sessionMode);
+  positionOverlayOnActiveDisplay(overlayWindow);
   showOverlay(overlayWindow);
 
   // Initialize transcription service
@@ -398,7 +408,7 @@ async function stopRecording() {
   const capture = captureSession;
 
   // Tell overlay to stop audio capture
-  updateRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
+  sendOverlayRecordingState({ state: 'processing', isRecording: true, mode: recordingSessionMode });
   const drained = capture ? await capture.stop() : true;
   if (transcriptionService !== service) return;
   if (!drained) {
@@ -577,7 +587,7 @@ function setupDisplayChangeHandlers() {
     log.info('Display removed', { displayId: oldDisplay.id, bounds: oldDisplay.bounds });
     if (isRecording && overlayWindow) {
       // Reposition overlay to ensure it's on a valid display
-      positionOverlayOnActiveDisplay(overlayWindow, recordingSessionMode);
+      positionOverlayOnActiveDisplay(overlayWindow);
       log.debug('Repositioned overlay after display removal');
     }
   });
@@ -591,7 +601,7 @@ function setupDisplayChangeHandlers() {
     log.info('Display metrics changed', { displayId: display.id, changedMetrics });
     if (isRecording && overlayWindow) {
       // Reposition overlay in case work area changed
-      positionOverlayOnActiveDisplay(overlayWindow, recordingSessionMode);
+      positionOverlayOnActiveDisplay(overlayWindow);
       log.debug('Repositioned overlay after display metrics change');
     }
   });

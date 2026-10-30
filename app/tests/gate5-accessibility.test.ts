@@ -14,7 +14,6 @@ const hotkeyModal = source('../src/renderer/app/components/HotkeyCaptureModal.sv
 const toggle = source('../src/renderer/app/components/Toggle.svelte');
 const overlayView = source('../src/renderer/overlay/App.svelte');
 const overlayCss = source('../src/renderer/overlay/app.css');
-const overlayText = source('../src/renderer/overlay/components/TextDisplay.svelte');
 const overlayPill = source('../src/renderer/overlay/components/Pill.svelte');
 
 describe('Gate 5 accessibility contracts', () => {
@@ -72,13 +71,18 @@ describe('Gate 5 accessibility contracts', () => {
     expect(overlayView).not.toMatch(/<button|tabindex=|on(?:click|pointer|mouse)/);
   });
 
-  test('uses a fixed two-line auto-follow viewport without an operable scrollbar or glow', () => {
-    expect(overlayText).toContain('scrollRef.scrollTop = scrollRef.scrollHeight');
-    expect(overlayText).toContain('h-16');
-    expect(overlayText).toContain('h-11');
-    expect(overlayText).toContain('overflow-hidden');
-    expect(overlayText).not.toContain('line-clamp-2');
-    expect(overlayText).not.toContain('overflow-y-auto');
-    expect(overlayPill).not.toContain('shadow-[');
+  test('keeps every overlay message inside the pill, with no transcript surface', () => {
+    expect(overlayView).not.toContain('TextDisplay');
+    expect(overlayView).not.toContain('{warningMessage}');
+    expect(overlayView).toContain('<Pill view={pillView} levels={audioLevels} />');
+    expect(overlayPill).toContain('text-overflow: ellipsis');
+    expect(overlayPill).toContain('@media (forced-colors: active)');
+    expect(overlayPill).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  test('keeps the overlay at the top of the window stack while it shows', () => {
+    expect(overlayWindow).toContain("overlay.setAlwaysOnTop(true, 'screen-saver');");
+    expect(overlayWindow).toContain('topmostGuard = setInterval(');
+    expect(overlayWindow).toMatch(/hideOverlay[\s\S]*stopTopmostGuard\(\);[\s\S]*overlay\.hide\(\);/);
   });
 });

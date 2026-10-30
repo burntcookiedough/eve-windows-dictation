@@ -26,7 +26,7 @@ test(`actual main stop/audio IPC handlers preserve queued PCM and ${outcome} pro
     recordingSessionMode: 'quick', captureSession: capture, transcriptionService: service,
     overlayWindow: { isDestroyed: () => false, webContents },
     ipcMain: { on: (channel: string, fn: (...args: any[]) => void) => listeners.set(channel, fn) },
-    isPerfTraceEnabled: () => false, updateRecordingState: () => {},
+    isPerfTraceEnabled: () => false, sendOverlayRecordingState: () => {},
     getAudioFrameLevel: () => 0, broadcastRecordingState: () => {},
   };
   runInNewContext(script + '\nsetupAudioHandler();', context);
