@@ -5,8 +5,8 @@ const historyView = readFileSync(
   new URL('../src/renderer/app/views/HistoryView.svelte', import.meta.url),
   'utf8'
 );
-const overlayView = readFileSync(
-  new URL('../src/renderer/overlay/App.svelte', import.meta.url),
+const overlayPill = readFileSync(
+  new URL('../src/renderer/overlay/components/Pill.svelte', import.meta.url),
   'utf8'
 );
 const insightsView = readFileSync(
@@ -42,15 +42,10 @@ describe('renderer visual regression guards', () => {
     expect(historyView).toContain(':global(.empty-cactus) { width: 30px;');
   });
 
-  test('uses an accessible dark microphone warning instead of the amber card', () => {
-    const warning = overlayView.match(/\{#if warningMessage\}([\s\S]*?)\{\/if\}/)?.[1];
-    const warningCard = warning?.match(/<div\s+class="[^"]+"\s+role="status"\s+aria-live="polite"\s*>/)?.[0];
-    const warningIndicator = warning?.match(/<span\s+class="[^"]*animate-ping[^"]*"[^>]*>/)?.[0];
-
-    expect(warningCard).toContain('border-white/15 bg-black/95');
-    expect(warningCard).not.toContain('amber');
-    expect(warningIndicator).toContain('bg-red-400/35');
-    expect(warningIndicator).toContain('motion-reduce:animate-none');
+  test('marks warnings by turning the pill bead red instead of opening a card', () => {
+    expect(overlayPill).toContain('data-alert={view.isAlert}');
+    expect(overlayPill).toMatch(/\[data-alert='true'\] \.lobe \{\s+background: #f87171;/);
+    expect(overlayPill).not.toContain('amber');
   });
 
   test('keeps the approved Insights visual hierarchy backed by real trend data', () => {

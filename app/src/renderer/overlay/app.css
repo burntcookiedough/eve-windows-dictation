@@ -9,8 +9,8 @@
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  [class*="bg-black/"] {
-    background-color: #000 !important;
+  .eve-pill {
+    background: #000 !important;
   }
 }
 

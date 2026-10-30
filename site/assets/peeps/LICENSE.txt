@@ -1,0 +1,3 @@
+open-peeps-sheet.png: Open Peeps by Pablo Stanley (https://www.openpeeps.com),
+released under CC0 1.0 Universal (https://creativecommons.org/publicdomain/zero/1.0/).
+Arranged as a 15 x 7 sprite sheet of 240 x 324 px cells.

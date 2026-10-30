@@ -45,11 +45,11 @@ Most dictation tools send your voice to a server. Eve runs
 bundled with the app, so audio never leaves your computer. There is no account and no
 telemetry. Your transcripts stay on your machine.
 
-It stays out of the way. A small pill appears at the bottom of the screen while you
-talk, shows the words as they arrive, and disappears when the text is pasted.
+It stays out of the way. A translucent dot appears at the bottom of the screen, opens
+into a small timer pill while you talk, and disappears when the text is pasted.
 
 <p align="center">
-  <img src="site/assets/screens/eve-overlay.png" alt="The dictation pill: ready, listening, and showing a live transcript" width="100%">
+  <img src="site/assets/screens/eve-overlay.png" alt="The dictation pill in an earlier design, with a live transcript" width="100%">
 </p>
 
 ## A quick tour
