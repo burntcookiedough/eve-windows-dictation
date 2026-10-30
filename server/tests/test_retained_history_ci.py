@@ -14,6 +14,30 @@ ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.skipif(os.name != 'nt', reason='Windows lifecycle harness')
 
 
+@pytest.mark.parametrize('exit_code', [0, 17])
+def test_owned_exit_requires_success_from_retained_process(tmp_path, exit_code):
+    """Exercise the real process handle after exit, including a recycled PID lookup."""
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. '{ROOT / 'scripts/retained-history-ci.ps1'}'
+function Write-Step {{ param($Message) }}
+function Stop-OwnedHistoryProcess {{ throw 'Unexpected forced cleanup' }}
+$process = Start-Process pwsh -ArgumentList @('-NoProfile', '-Command', 'exit {exit_code}') -PassThru -WindowStyle Hidden
+$null = $process.Handle
+$info = [pscustomobject]@{{ Id = $process.Id; CreationTicks = $process.StartTime.ToUniversalTime().Ticks; Process = $process }}
+$process.WaitForExit()
+function Get-Process {{ return $null }}
+Wait-ForOwnedProcessExit -ProcInfo $info -TimeoutSeconds 2
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    if exit_code:
+        assert result.returncode != 0
+        assert 'nonzero or unavailable exit code' in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
@@ -380,3 +404,40 @@ assert.equal(result.renderedCount,2);assert.equal(result.settingsMounted,false);
 """
     res = subprocess.run(['node', '--input-type=module', '-e', code], capture_output=True, text=True, timeout=20)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_upgrade_observer_uses_search_control_and_requires_seeded_appearance():
+    """Exercise the actual observer against DOM input events and IPC mutations."""
+    probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
+    code = f"""
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {{observeHistory,sha256}} from '{probe}';
+const initial=[{{id:'fixture-hist-003',timestamp:3,text:'gamma baseline'}},
+ {{id:'fixture-hist-002-delete',timestamp:2,text:'beta temporary'}},
+ {{id:'fixture-hist-001',timestamp:1,text:'alpha baseline'}}];
+const expected=initial.map(r=>({{id:r.id,timestamp:r.timestamp,textHash:sha256(r.text)}}));
+async function exercise(appearance) {{
+ let rows=[...initial], navigated=false, searched=false;
+ const settings={{serverAutoStart:false,startMinimized:false,appearance}};
+ const input={{value:'',dispatchEvent(event){{assert.equal(event.type,'input');assert.ok(event.bubbles);searched=true;}}}};
+ const document={{querySelector(s){{if(s==='button[data-view="history"]')return {{click(){{navigated=true;}}}};
+   if(s==='input[type="search"]')return navigated?input:null;return null;}},
+   querySelectorAll(s){{return rows.filter(r=>!searched||r.text.includes(input.value)).map(r=>({{
+    textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
+ const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.8',getSettings:()=>({{...settings}}),
+  getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
+   const selected=rows.filter(r=>!filters?.text||r.text.includes(filters.text));
+   return {{entries:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length}};}},
+  updateSetting:(key,value)=>{{settings[key]=value;}},deleteHistoryEntry:id=>{{rows=rows.filter(r=>r.id!==id);}}}}}};
+ const session={{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document,Event}}))}};
+ const result=await observeHistory(session,'candidate-upgrade-read-mutate',expected);
+ assert.ok(searched);assert.equal(input.value,'baseline');assert.ok(result.searchControlVerified);
+ assert.equal(settings.appearance,'light');assert.equal(rows.length,2);
+}}
+await exercise('dark');
+await assert.rejects(exercise('light'),/Seeded appearance was not read/);
+"""
+    result = subprocess.run(['node', '--input-type=module', '-e', code],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr

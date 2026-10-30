@@ -125,8 +125,21 @@ export async function observeHistory(session, phase, expected) {
     value.texts.filter(text => sha256(text) === row.textHash).length === 1));
   assert.equal(rendered.settingsMounted, false);
   if (phase === 'candidate-upgrade-read-mutate') {
+    assert.equal(settings.appearance, 'dark', 'Seeded appearance was not read');
     const filtered = rows.filter(row => row.id !== 'fixture-hist-002-delete');
     assertHistoryResponse(await session.evaluate("window.murmurMain.getHistoryEntries(0,50,{text:'baseline'})"), filtered);
+    await session.evaluate(`(() => {
+      const input = document.querySelector('input[type="search"]');
+      if (!input) throw new Error('History search missing');
+      input.value = 'baseline';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await waitFor(() => session.evaluate(`(() => ({
+      settingsMounted: !!document.querySelector('.settings-view,[data-settings-general]'),
+      texts: [...document.querySelectorAll('p')].filter(p => !p.closest('[hidden],[inert]') &&
+        p.getBoundingClientRect().width > 0 && p.getBoundingClientRect().height > 0).map(p => p.textContent.trim())
+    }))()`), value => value && !value.settingsMounted && rows.every(row =>
+      value.texts.filter(text => sha256(text) === row.textHash).length === (filtered.includes(row) ? 1 : 0)));
     await session.evaluate("window.murmurMain.updateSetting('appearance','light')");
     assert.equal((await session.evaluate('window.murmurMain.getSettings()')).appearance, 'light');
     await session.evaluate("window.murmurMain.deleteHistoryEntry('fixture-hist-002-delete')");
@@ -134,7 +147,8 @@ export async function observeHistory(session, phase, expected) {
   } else if (phase === 'candidate-relaunch-verify' || phase === 'baseline-rollback-read') {
     assert.equal(settings.appearance, 'light', 'Saved appearance did not persist');
   }
-  return { version, records: actual, renderedCount: rows.length, settingsMounted: false, backendRunning: false };
+  return { version, records: actual, renderedCount: rows.length, settingsMounted: false, backendRunning: false,
+    searchControlVerified: phase === 'candidate-upgrade-read-mutate' };
 }
 
 export async function runProbePhase({ port, phase, installDir, expectations }) {

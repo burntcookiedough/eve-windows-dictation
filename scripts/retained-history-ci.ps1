@@ -455,6 +455,8 @@ function Launch-AppWithCdp {
     )
 
     $proc = Start-Process -FilePath $exePath -ArgumentList $arguments -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+    # Retain the original OS handle so exit status remains available after PID removal/reuse.
+    if ($proc) { $null = $proc.Handle }
     if (-not $proc -or $proc.HasExited) {
         throw "Failed to start Eve app from $exePath"
     }
@@ -509,23 +511,17 @@ function Wait-ForOwnedProcessExit {
     )
 
     $procId = [int]$ProcInfo.Id
-    $creationTicks = [long]$ProcInfo.CreationTicks
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        if (-not $p -or $p.HasExited) {
-            $script:OwnedAppPid = $null
-            $script:OwnedAppProcessInfo = $null
-            Write-Step "Process $procId exited gracefully."
-            return
+    $process = $ProcInfo.Process
+    if ($process.WaitForExit($TimeoutSeconds * 1000)) {
+        $process.Refresh()
+        $exitCode = $process.ExitCode
+        $script:OwnedAppPid = $null
+        $script:OwnedAppProcessInfo = $null
+        if ($null -eq $exitCode -or $exitCode -ne 0) {
+            throw "Process $procId returned a nonzero or unavailable exit code; graceful shutdown was not proved."
         }
-        if ($p.StartTime.ToUniversalTime().Ticks -ne $creationTicks) {
-            $script:OwnedAppPid = $null
-            $script:OwnedAppProcessInfo = $null
-            Write-Step "Process $procId PID was recycled; original instance exited."
-            return
-        }
-        Start-Sleep -Milliseconds 250
+        Write-Step "Process $procId exited gracefully with code 0."
+        return
     }
 
     Stop-OwnedHistoryProcess

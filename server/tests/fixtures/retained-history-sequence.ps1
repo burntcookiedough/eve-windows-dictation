@@ -48,6 +48,7 @@ $script:ExpectedCommit = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
 $script:RepoRoot = $Root
 $script:Installed = ''
 $script:Events = @()
+$script:InstallDirs = @()
 $script:Stopped = $false
 $script:FunctionalHistoryComplete = $false
 
@@ -121,6 +122,7 @@ function Initialize-SyntheticSentinels {
 
 function Invoke-Installer {
     param($Installer, $InstallDir)
+    $script:InstallDirs += $InstallDir
     $script:Installed = if ($Installer -like '*alpha.8*') { $script:CandidateVersion } else { $script:BaselineVersion }
     $script:Events += "install:$script:Installed"
 }
@@ -189,6 +191,9 @@ $evidence = if (Test-Path -LiteralPath $evidencePath) {
 if ($Mode -eq 'success') {
     if ($failure) { throw "Expected success but got failure: $failure" }
     if (-not $script:Stopped) { throw 'Cleanup was not called in finally block.' }
+    if ($script:InstallDirs.Count -ne 3 -or @($script:InstallDirs | Where-Object { $_ -cne $script:InstallDir }).Count) {
+        throw 'Every installation must target the owned install directory.'
+    }
     if ($null -eq $evidence) { throw 'Evidence file was not created.' }
     if ($evidence.overallStatus -ne 'passed') { throw "Expected overallStatus 'passed', got '$($evidence.overallStatus)'" }
     if (-not $script:FunctionalHistoryComplete) { throw 'Lifecycle did not complete successfully.' }
