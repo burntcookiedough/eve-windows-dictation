@@ -1,6 +1,8 @@
 # Eve v0.8.2-alpha.9 release notes
 
-**Channel:** Windows alpha pre-release candidate; not yet published.
+**Channel:** Published Windows alpha pre-release.
+
+[Download v0.8.2-alpha.9](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.9).
 
 The dictation overlay now uses a compact translucent pill with a voice-reactive
 bead. It expands while speaking and collapses to a breathing dot during silence.

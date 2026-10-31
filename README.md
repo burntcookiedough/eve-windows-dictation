@@ -35,10 +35,8 @@
 <br>
 
 > [!NOTE]
-> This source tree prepares **v0.8.2-alpha.9**, which is not yet published; see the
-> [candidate release notes](docs/releases/eve-v0.8.2-alpha.9-release-notes.md).
-> The latest published build is **v0.8.2-alpha.8**. Expect rough edges, and read its
-> [release notes](docs/releases/eve-v0.8.2-alpha.8-release-notes.md) before installing.
+> The latest published build is **v0.8.2-alpha.9**. Expect rough edges, and read the
+> [release notes](docs/releases/eve-v0.8.2-alpha.9-release-notes.md) before installing.
 
 ## Why Eve
 
