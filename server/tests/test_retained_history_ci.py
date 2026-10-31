@@ -540,3 +540,32 @@ await assert.rejects(exercise('dark',false),/Packaged app observation timed out/
     result = subprocess.run(['node', '--input-type=module', '-e', code],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_baseline_initialize_accepts_published_legacy_history_search():
+    """Alpha.5 History uses a labelled text input, unlike the candidate's search input."""
+    probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
+    code = f"""
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {{observeHistory}} from '{probe}';
+// Input contract from v0.8.2-alpha.5 HistoryView.svelte.
+const legacyInput={{type:'text',label:'Search transcriptions'}};
+let navigated=false;
+const historyButton={{textContent:'History',click(){{navigated=true;}}}};
+const document={{
+ querySelector(selector){{
+  if(selector==='input[type="text"][aria-label="Search transcriptions"]' && navigated)return legacyInput;
+  return null;
+ }},
+ querySelectorAll(selector){{return selector==='button'?[historyButton]:[];}}
+}};
+const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
+ getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'dark'}}),
+ getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
+const result=await observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[]);
+assert.ok(navigated);assert.equal(result.renderedCount,0);assert.equal(result.settingsMounted,false);
+"""
+    result = subprocess.run(['node', '--input-type=module', '-e', code],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr

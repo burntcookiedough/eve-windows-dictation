@@ -118,7 +118,8 @@ export async function observeHistory(session, phase, expected) {
   })()`);
   const rendered = await waitFor(() => session.evaluate(`(() => ({
     settingsMounted: !!document.querySelector('.settings-view,[data-settings-general]'),
-    historyMounted: !!document.querySelector('input[type="search"]'),
+    historyMounted: !!(document.querySelector('input[type="search"]') ||
+      document.querySelector('input[type="text"][aria-label="Search transcriptions"]')),
     texts: [...document.querySelectorAll('p')].filter(p => !p.closest('[hidden],[inert]') &&
       p.getBoundingClientRect().width > 0 && p.getBoundingClientRect().height > 0).map(p => p.textContent.trim())
   }))()`), value => value?.historyMounted && !value.settingsMounted && rows.every(row =>
