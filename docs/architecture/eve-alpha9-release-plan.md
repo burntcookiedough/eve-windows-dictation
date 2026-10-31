@@ -30,6 +30,16 @@ GPU descriptor to the candidate app version without changing its asset hashes.
    latest, then download public assets and compare their hashes. Preserve all
    historical tags, release assets and hashes.
 
+### Draft transport recovery
+
+Local payload uploads to the accepted alpha.9 draft timed out. The manual
+`alpha9-draft-payload.yml` workflow may transfer only the missing payload from
+successful retained-candidate run 41134097556 to draft 429752581. It pins the
+accepted source commit and manifest hash, validates every existing asset, and
+refuses replacement, incomplete assets, changed draft identity, or publication.
+It runs only from this repository's trunk and shares the promotion concurrency
+group. Publication still uses the existing protected `release.yml` workflow.
+
 ## Initial evidence
 
 PR #127 head 3348cbebde8eec8f77f1e5d6252adbbd48e9c337 passed all four required
