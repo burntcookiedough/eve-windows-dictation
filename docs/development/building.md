@@ -182,6 +182,21 @@ Actual lifecycle phase outcomes are recorded directly in the phase evidence; syn
 sentinel validation does not establish functional History persistence or physical
 microphone acceptance.
 
+### Hosted retained-candidate History acceptance
+
+Manual `workflow_dispatch` runs of `.github/workflows/retained-history-ci.yml`
+exercise packaged functional History acceptance on a disposable GitHub-hosted
+Windows runner. Rather than rebuilding a candidate, this lane consumes the
+cryptographically verified retained candidate artifact (`runId: 40751101623`)
+and tests packaged baseline schema initialization, fixed fictional row seeding,
+packaged renderer History read/filter/render, designated IPC deletion, exact
+persistence across relaunch, and baseline rollback via loopback CDP. It uploads
+one explicit aggregate JSON evidence file for 7 days with no raw transcription,
+profile, audio, or log uploads. The harness commit is guarded separately from
+the pinned candidate source; this lane never rebuilds or modifies that candidate.
+Execution requires its own approved run. Seeded-record persistence does not prove
+new dictation creation, reboot behavior, microphone capture, or editor insertion.
+
 `installer-smoke.ps1` refuses to run over an active target installation; close
 that session explicitly. It never stops existing Eve/Python processes by name.
 Forced cleanup retains handles to this run's launcher and validated descendants,

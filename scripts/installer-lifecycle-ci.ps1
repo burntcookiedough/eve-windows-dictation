@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$RetainedArtifactDir = '',
-    [string]$ExpectedCommit = ''
+    [string]$ExpectedCommit = '',
+    [ValidateSet('Default', 'RetainedHistory')][string]$Mode = 'Default'
 )
 
 Set-StrictMode -Version Latest
@@ -633,6 +634,11 @@ if (Test-Path -LiteralPath $script:InstallDir) { throw 'Test install destination
 if (Test-Path -LiteralPath (Join-Path $script:ProfileRoot 'Eve')) { throw 'Synthetic app profile exists before the first install.' }
 
 $candidateStatusPath = Join-Path $script:RetainedArtifactDir 'qa/candidate-phase-status.json'
+if ($Mode -eq 'RetainedHistory') {
+    . (Join-Path $PSScriptRoot 'retained-history-ci.ps1')
+    Invoke-RetainedHistoryCi -RetainedArtifactDir $script:RetainedArtifactDir -ExpectedCommit $script:ExpectedCommit
+    return
+}
 try {
     Assert-NoNvidiaDriver
     Move-And-CleanBuildOutput -CandidateDir $script:CandidateArtifactDir
