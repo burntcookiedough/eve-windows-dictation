@@ -1,0 +1,68 @@
+name: Recover Alpha.9 Draft Payload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eve-release-v0.8.2-alpha.9
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    if: github.repository == 'burntcookiedough/eve-windows-dictation' && github.ref == 'refs/heads/trunk'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify retained candidate and transfer only the missing draft payload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repository = 'burntcookiedough/eve-windows-dictation'
+          $commit = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
+          $tag = 'v0.8.2-alpha.9'
+          $releaseId = '429752581'
+          $payloadName = 'murmur-0.8.2-alpha.9-x64.nsis.7z'
+          $manifestHash = 'e180604fd9e59bbbe8ca6adb0929b2762883115ba908e30e74e421aaddab61ab'
+          $sourceRun = gh api "repos/$repository/actions/runs/41134097556" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $sourceRun.head_sha -ne $commit -or $sourceRun.conclusion -ne 'success') { throw 'Unexpected candidate run.' }
+          gh run download 41134097556 --repo $repository --name eve-v0.8.2-alpha.9-unsigned-candidate-qa-41134097556 --dir candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate download failed.' }
+          ./scripts/release-artifacts.ps1 -Mode Verify -ArtifactDir candidate -ExpectedTag $tag -ExpectedCommit $commit -ExpectedManifestSha256 $manifestHash -AllowUnsigned
+          if (-not $?) { throw 'Candidate verification failed.' }
+          $manifest = Get-Content candidate/eve-v0.8.2-alpha.9-artifact-manifest.json -Raw | ConvertFrom-Json
+          $expected = @{}
+          foreach ($entry in $manifest.assets) { $expected[$entry.name] = @{ bytes = [long]$entry.bytes; digest = "sha256:$($entry.sha256)" } }
+          $expected['eve-v0.8.2-alpha.9-artifact-manifest.json'] = @{ bytes = (Get-Item candidate/eve-v0.8.2-alpha.9-artifact-manifest.json).Length; digest = "sha256:$manifestHash" }
+          function Assert-DraftAssets([bool]$RequireComplete) {
+            $draft = gh api "repos/$repository/releases/$releaseId" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not $draft.draft -or -not $draft.prerelease -or $draft.tag_name -ne $tag -or $draft.target_commitish -ne $commit) { throw 'Draft identity or state changed.' }
+            $seen = @{}
+            foreach ($asset in $draft.assets) {
+              if (-not $expected.ContainsKey($asset.name) -or $seen.ContainsKey($asset.name)) { throw 'Unexpected or duplicate draft asset.' }
+              $seen[$asset.name] = $true
+              $binding = $expected[$asset.name]
+              if ($asset.state -ne 'uploaded' -or [long]$asset.size -ne $binding.bytes -or $asset.digest -ne $binding.digest) { throw "Incomplete or mismatched draft asset: $($asset.name)" }
+            }
+            foreach ($name in $expected.Keys) {
+              if (-not $seen.ContainsKey($name) -and ($RequireComplete -or $name -ne $payloadName)) { throw "Required draft asset missing: $name" }
+            }
+            return $seen.ContainsKey($payloadName)
+          }
+          $payloadPresent = Assert-DraftAssets $false
+          if (-not $payloadPresent) {
+            gh release upload $tag "candidate/$payloadName" --repo $repository
+            if ($LASTEXITCODE -ne 0) { throw 'Payload upload failed; no existing assets were replaced.' }
+          }
+          $null = Assert-DraftAssets $true
+          'Verified seven draft assets; publication remains owned by release.yml.' | Add-Content $env:GITHUB_STEP_SUMMARY
