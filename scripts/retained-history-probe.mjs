@@ -98,6 +98,8 @@ async function waitFor(observe, accept) {
 
 export async function observeHistory(session, phase, expected) {
   const version = phase.startsWith('candidate-') ? '0.8.2-alpha.8' : '0.8.2-alpha.5';
+  const transcriptSelector = version === '0.8.2-alpha.5'
+    ? 'button[aria-expanded] > p:first-of-type' : '[data-history-entry] .entry-text';
   assert.equal(await session.evaluate('window.murmurMain.getAppVersion()'), version);
   const settings = await session.evaluate('window.murmurMain.getSettings()');
   assert.equal(settings.serverAutoStart, false, 'Server auto-start must stay disabled');
@@ -118,10 +120,11 @@ export async function observeHistory(session, phase, expected) {
   })()`);
   const rendered = await waitFor(() => session.evaluate(`(() => ({
     settingsMounted: !!document.querySelector('.settings-view,[data-settings-general]'),
-    historyMounted: !!document.querySelector('input[type="search"]'),
-    texts: [...document.querySelectorAll('p')].filter(p => !p.closest('[hidden],[inert]') &&
+    historyMounted: !!(document.querySelector('input[type="search"]') ||
+      document.querySelector('input[type="text"][aria-label="Search transcriptions"]')),
+    texts: [...document.querySelectorAll(${JSON.stringify(transcriptSelector)})].filter(p => !p.closest('[hidden],[inert]') &&
       p.getBoundingClientRect().width > 0 && p.getBoundingClientRect().height > 0).map(p => p.textContent.trim())
-  }))()`), value => value?.historyMounted && !value.settingsMounted && rows.every(row =>
+  }))()`), value => value?.historyMounted && !value.settingsMounted && value.texts.length === rows.length && rows.every(row =>
     value.texts.filter(text => sha256(text) === row.textHash).length === 1));
   assert.equal(rendered.settingsMounted, false);
   if (phase === 'candidate-upgrade-read-mutate') {
@@ -136,9 +139,9 @@ export async function observeHistory(session, phase, expected) {
     })()`);
     await waitFor(() => session.evaluate(`(() => ({
       settingsMounted: !!document.querySelector('.settings-view,[data-settings-general]'),
-      texts: [...document.querySelectorAll('p')].filter(p => !p.closest('[hidden],[inert]') &&
+      texts: [...document.querySelectorAll(${JSON.stringify(transcriptSelector)})].filter(p => !p.closest('[hidden],[inert]') &&
         p.getBoundingClientRect().width > 0 && p.getBoundingClientRect().height > 0).map(p => p.textContent.trim())
-    }))()`), value => value && !value.settingsMounted && rows.every(row =>
+    }))()`), value => value && !value.settingsMounted && value.texts.length === filtered.length && rows.every(row =>
       value.texts.filter(text => sha256(text) === row.textHash).length === (filtered.includes(row) ? 1 : 0)));
     await session.evaluate("window.murmurMain.updateSetting('appearance','light')");
     assert.equal((await session.evaluate('window.murmurMain.getSettings()')).appearance, 'light');
@@ -147,7 +150,7 @@ export async function observeHistory(session, phase, expected) {
   } else if (phase === 'candidate-relaunch-verify' || phase === 'baseline-rollback-read') {
     assert.equal(settings.appearance, 'light', 'Saved appearance did not persist');
   }
-  return { version, records: actual, renderedCount: rows.length, settingsMounted: false, backendRunning: false,
+  return { version, records: actual, renderedCount: rendered.texts.length, settingsMounted: false, backendRunning: false,
     searchControlVerified: phase === 'candidate-upgrade-read-mutate' };
 }
 
