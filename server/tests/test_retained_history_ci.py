@@ -486,6 +486,7 @@ const document={{
  querySelector(s){{if(s==='button[data-view="history"]')return historyButton;
    if(s==='input[type="search"]')return navigated?{{}}:null;return null;}},
  querySelectorAll(s){{if(s==='button')return [historyButton,settingsButton];
+   if(s!=={json.dumps('[data-history-entry] .entry-text' if phase.startswith('candidate-') else 'button[aria-expanded] > p:first-of-type')})return [];
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
 const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.8" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
@@ -521,7 +522,8 @@ async function exercise(appearance, filterRows=true) {{
  const input={{value:'',dispatchEvent(event){{assert.equal(event.type,'input');assert.ok(event.bubbles);searched=true;}}}};
  const document={{querySelector(s){{if(s==='button[data-view="history"]')return {{click(){{navigated=true;}}}};
    if(s==='input[type="search"]')return navigated?input:null;return null;}},
-   querySelectorAll(s){{return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
+   querySelectorAll(s){{if(s!=='[data-history-entry] .entry-text')return [];
+    return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
  const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.8',getSettings:()=>({{...settings}}),
   getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
@@ -539,4 +541,43 @@ await assert.rejects(exercise('dark',false),/Packaged app observation timed out/
 """
     result = subprocess.run(['node', '--input-type=module', '-e', code],
                             capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('unexpected_transcript', [False, True])
+def test_baseline_initialize_accepts_empty_legacy_history_only(unexpected_transcript):
+    """Ignore empty-state copy but reject any visible transcript in the published baseline layout."""
+    probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
+    code = f"""
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {{observeHistory}} from '{probe}';
+// Input contract from v0.8.2-alpha.5 HistoryView.svelte.
+const legacyInput={{type:'text',label:'Search transcriptions'}};
+const paragraph=text=>({{textContent:text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}});
+const transcripts={json.dumps(unexpected_transcript)}?[paragraph('unexpected fictional transcript')]:[];
+let navigated=false;
+const historyButton={{textContent:'History',click(){{navigated=true;}}}};
+const document={{
+ querySelector(selector){{
+  if(selector==='input[type="text"][aria-label="Search transcriptions"]' && navigated)return legacyInput;
+  return null;
+ }},
+ querySelectorAll(selector){{
+  if(selector==='button')return [historyButton];
+  if(selector==='p')return [paragraph('Empty-state hint'),...transcripts];
+  if(selector==='button[aria-expanded] > p:first-of-type')return transcripts;
+  return [];
+ }}
+}};
+const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
+ getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'dark'}}),
+ getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[]);
+if({json.dumps(unexpected_transcript)}){{await assert.rejects(observe,/Packaged app observation timed out/);}}
+else{{const result=await observe();assert.equal(result.renderedCount,0);assert.equal(result.settingsMounted,false);}}
+assert.ok(navigated);
+"""
+    result = subprocess.run(['node', '--input-type=module', '-e', code],
+                            capture_output=True, text=True, timeout=25)
     assert result.returncode == 0, result.stdout + result.stderr
