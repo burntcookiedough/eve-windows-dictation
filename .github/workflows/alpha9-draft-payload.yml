@@ -16,6 +16,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -38,6 +39,7 @@ jobs:
           gh run download 41134097556 --repo $repository --name eve-v0.8.2-alpha.9-unsigned-candidate-qa-41134097556 --dir candidate
           if ($LASTEXITCODE -ne 0) { throw 'Candidate download failed.' }
           ./scripts/release-artifacts.ps1 -Mode Verify -ArtifactDir candidate -ExpectedTag $tag -ExpectedCommit $commit -ExpectedManifestSha256 $manifestHash -AllowUnsigned
+          if (-not $?) { throw 'Candidate verification failed.' }
           $manifest = Get-Content candidate/eve-v0.8.2-alpha.9-artifact-manifest.json -Raw | ConvertFrom-Json
           $expected = @{}
           foreach ($entry in $manifest.assets) { $expected[$entry.name] = @{ bytes = [long]$entry.bytes; digest = "sha256:$($entry.sha256)" } }
