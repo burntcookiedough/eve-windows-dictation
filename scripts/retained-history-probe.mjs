@@ -147,8 +147,11 @@ export async function observeHistory(session, phase, expected) {
     assert.equal((await session.evaluate('window.murmurMain.getSettings()')).appearance, 'light');
     await session.evaluate("window.murmurMain.deleteHistoryEntry('fixture-hist-002-delete')");
     assertHistoryResponse(await session.evaluate('window.murmurMain.getHistoryEntries(0,50)'), remaining);
-  } else if (phase === 'candidate-relaunch-verify' || phase === 'baseline-rollback-read') {
+  } else if (phase === 'candidate-relaunch-verify') {
     assert.equal(settings.appearance, 'light', 'Saved appearance did not persist');
+  } else if (phase === 'baseline-rollback-read') {
+    // The pinned alpha.5 baseline predates the appearance setting and never reports it.
+    assert.equal(settings.appearance, undefined, 'Baseline unexpectedly reports appearance');
   }
   return { version, records: actual, renderedCount: rendered.texts.length, settingsMounted: false, backendRunning: false,
     searchControlVerified: phase === 'candidate-upgrade-read-mutate' };

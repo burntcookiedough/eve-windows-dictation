@@ -513,15 +513,21 @@ def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
 
 
 @pytest.mark.parametrize('phase,appearance,mismatch,rejection', [
-    ('baseline-read', 'dark', False, None),
+    ('baseline-read', None, False, None),
     ('candidate-relaunch-verify', 'light', False, None),
     ('candidate-relaunch-verify', 'dark', False, 'Saved appearance did not persist'),
-    ('baseline-rollback-read', 'light', False, None),
-    ('baseline-rollback-read', 'dark', False, 'Saved appearance did not persist'),
-    ('baseline-read', 'dark', True, 'History records changed, duplicated or missing'),
+    ('baseline-rollback-read', None, False, None),
+    ('baseline-rollback-read', 'light', False, 'Baseline unexpectedly reports appearance'),
+    ('baseline-read', None, True, 'History records changed, duplicated or missing'),
 ])
 def test_real_observer_checks_history_and_appearance_persistence(phase, appearance, mismatch, rejection):
-    """Observe History without Settings and reject lost saved appearance after restart/rollback."""
+    """Observe History without Settings and reject lost saved appearance after restart.
+
+    The pinned alpha.5 baseline predates the appearance setting, so its fixture omits it.
+    """
+    settings = {'serverAutoStart': False, 'startMinimized': False}
+    if appearance is not None:
+        settings['appearance'] = appearance
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
 import assert from 'node:assert/strict';
@@ -541,7 +547,7 @@ const document={{
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
 const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.9" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
- getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'{appearance}'}}),getServerStatus:()=>({{status:'idle'}}),
+ getSettings:()=>({json.dumps(settings)}),getServerStatus:()=>({{status:'idle'}}),
  getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
 const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
 if ({json.dumps(rejection)}) {{
