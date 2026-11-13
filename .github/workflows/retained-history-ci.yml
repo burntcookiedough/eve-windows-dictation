@@ -57,14 +57,14 @@ jobs:
           python -B -I -c "import sqlite3,sys; assert sys.version_info >= (3,9)"
           if ($LASTEXITCODE -ne 0) { throw 'Hosted Python/SQLite is unavailable.' }
 
-      - name: Download and verify retained candidate artifact
+      - name: Download and verify published candidate release
         id: download-candidate
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-retained-candidate-artifacts-$env:GITHUB_RUN_ID"
           . ./scripts/installer-candidate-artifacts.ps1
           . ./scripts/retained-history-ci.ps1
           Save-RetainedHistoryCandidate -RetainedDir $retainedDir
@@ -76,7 +76,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
         run: |
-          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-alpha8-candidate-artifacts-$env:GITHUB_RUN_ID"
+          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-retained-candidate-artifacts-$env:GITHUB_RUN_ID"
           ./scripts/installer-lifecycle-ci.ps1 -Mode RetainedHistory -RetainedArtifactDir $retainedDir -ExpectedCommit $env:EXPECTED_COMMIT
 
       - name: Upload explicit aggregate JSON evidence
