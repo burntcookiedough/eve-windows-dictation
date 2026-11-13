@@ -137,6 +137,58 @@ Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -
     assert not list(candidate.iterdir())
 
 
+@pytest.mark.parametrize('field,value,message', [
+    ('target_commitish', '0' * 40, 'release identity or state differs'),
+    ('draft', True, 'release identity or state differs'),
+    ('asset_digest', 'sha256:' + '0' * 64, 'asset metadata differs from its pin: latest.yml'),
+])
+def test_candidate_download_rejects_release_drift_before_download(tmp_path, field, value, message):
+    """Published release metadata that drifts from the pins must stop before any asset download."""
+    release = {
+        'id': 429752581, 'draft': False, 'prerelease': True, 'tag_name': 'v0.8.2-alpha.9',
+        'target_commitish': 'b557f7dd772923d35612bde5d32bf8d9103ef42d',
+        'assets': [
+            {'name': 'Eve.Web.Setup.0.8.2-alpha.9.exe', 'id': 694519593, 'size': 654633, 'state': 'uploaded',
+             'digest': 'sha256:debfc43d275c947e4065586baf76d0a0d7acb10cd1fa5c16296396e3fd7cedef'},
+            {'name': 'latest.yml', 'id': 694519592, 'size': 596, 'state': 'uploaded',
+             'digest': 'sha256:df110ec1a628c119a654c01580fa4122d7de27389bd22b1f669a414104f00225'},
+            {'name': 'murmur-0.8.2-alpha.9-x64.nsis.7z', 'id': 695103834, 'size': 212196890, 'state': 'uploaded',
+             'digest': 'sha256:5908c899bc2caffe48b95c920d23d660be5227c45b844b92d01dfc81347f164c'},
+            {'name': 'eve-v0.8.2-alpha.9-artifact-manifest.json', 'id': 694519594, 'size': 2019, 'state': 'uploaded',
+             'digest': 'sha256:e180604fd9e59bbbe8ca6adb0929b2762883115ba908e30e74e421aaddab61ab'},
+            {'name': 'THIRD_PARTY_NOTICES.txt', 'id': 694519739, 'size': 9510, 'state': 'uploaded',
+             'digest': 'sha256:8b8359ccb1f406e734da60a4783d46c32d7255a4ffa0b3407be67602039b2b41'},
+            {'name': 'SHA256SUMS.txt', 'id': 694519606, 'size': 368, 'state': 'uploaded',
+             'digest': 'sha256:317b2e889f59f11a9982cc5234c245cf07acd017055e0964064fb2e330d7363e'},
+            {'name': 'SHA512SUMS.txt', 'id': 694519700, 'size': 624, 'state': 'uploaded',
+             'digest': 'sha256:81250d76e975f32fa155694290983e815841fb6e5c30fe114eb4ab55d6092c53'},
+        ],
+    }
+    if field == 'asset_digest':
+        release['assets'][1]['digest'] = value
+    else:
+        release[field] = value
+    release_json = tmp_path / 'release.json'
+    release_json.write_text(json.dumps(release), encoding='utf-8')
+    runner_temp = tmp_path / 'runner'
+    runner_temp.mkdir()
+    target = runner_temp / 'retained'
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$env:RUNNER_TEMP = {ps_literal(runner_temp)}
+function gh {{ $global:LASTEXITCODE = 0; Get-Content -LiteralPath {ps_literal(release_json)} -Raw }}
+function curl.exe {{ throw 'DOWNLOAD_REACHED' }}
+Save-RetainedHistoryCandidate -RetainedDir {ps_literal(target)}
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0
+    assert message in result.stderr, result.stdout + result.stderr
+    assert 'DOWNLOAD_REACHED' not in result.stderr
+    assert not list(target.iterdir())
+
+
 def test_scripts_parse_and_ast_intact():
     """Verify that installer-lifecycle-ci.ps1 and retained-history-ci.ps1 parse without errors."""
     for script_name in ['scripts/installer-lifecycle-ci.ps1', 'scripts/retained-history-ci.ps1']:
@@ -153,7 +205,7 @@ def test_scripts_parse_and_ast_intact():
 
 
 def test_history_mode_binds_candidate_version_before_installer_paths():
-    """A newer harness release must still consume the pinned alpha.8 candidate."""
+    """A newer harness release must still consume the pinned alpha.9 candidate."""
     command = f"""
 $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
@@ -165,9 +217,9 @@ $bindings = @($fn.Body.EndBlock.Statements | Where-Object {{
     $_.Left.VariablePath.UserPath -eq 'script:CandidateVersion'
 }})
 if ($bindings.Count -ne 1) {{ throw 'Expected one retained candidate version binding' }}
-$script:CandidateVersion = '0.8.2-alpha.9'
+$script:CandidateVersion = '0.8.2-alpha.10'
 Invoke-Expression $bindings[0].Extent.Text
-if ($script:CandidateVersion -cne '0.8.2-alpha.8') {{ throw 'Retained version inherited harness release' }}
+if ($script:CandidateVersion -cne '0.8.2-alpha.9') {{ throw 'Retained version inherited harness release' }}
 $installer = $fn.Body.EndBlock.Statements | Where-Object {{
     $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
     $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
@@ -272,13 +324,12 @@ def test_retained_staging_rejects_hash_mismatch(tmp_path):
 
     # Create dummy files with wrong contents
     for name in [
-        'Eve.Web.Setup.0.8.2-alpha.8.exe', 'murmur-0.8.2-alpha.8-x64.nsis.7z',
-        'eve-v0.8.2-alpha.8-artifact-manifest.json', 'latest.yml',
+        'Eve.Web.Setup.0.8.2-alpha.9.exe', 'murmur-0.8.2-alpha.9-x64.nsis.7z',
+        'eve-v0.8.2-alpha.9-artifact-manifest.json', 'latest.yml',
         'THIRD_PARTY_NOTICES.txt', 'SHA256SUMS.txt', 'SHA512SUMS.txt'
     ]:
         (retained_dir / name).write_text('corrupt', encoding='utf-8')
-    for name in ['candidate-payload-manifest.json', 'candidate-provenance.json', 'candidate-phase-status.json']:
-        (qa_dir / name).write_text('corrupt', encoding='utf-8')
+    (qa_dir / 'candidate-payload-manifest.json').write_text('corrupt', encoding='utf-8')
 
     test_script = tmp_path / 'test_corrupt.ps1'
     test_script.write_text(f"""
@@ -489,7 +540,7 @@ const document={{
    if(s!=={json.dumps('[data-history-entry] .entry-text' if phase.startswith('candidate-') else 'button[aria-expanded] > p:first-of-type')})return [];
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
-const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.8" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
+const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.9" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
  getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'{appearance}'}}),getServerStatus:()=>({{status:'idle'}}),
  getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
 const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
@@ -525,7 +576,7 @@ async function exercise(appearance, filterRows=true) {{
    querySelectorAll(s){{if(s!=='[data-history-entry] .entry-text')return [];
     return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
- const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.8',getSettings:()=>({{...settings}}),
+ const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.9',getSettings:()=>({{...settings}}),
   getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
    const selected=rows.filter(r=>!filters?.text||r.text.includes(filters.text));
    return {{entries:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length}};}},

@@ -97,7 +97,7 @@ async function waitFor(observe, accept) {
 }
 
 export async function observeHistory(session, phase, expected) {
-  const version = phase.startsWith('candidate-') ? '0.8.2-alpha.8' : '0.8.2-alpha.5';
+  const version = phase.startsWith('candidate-') ? '0.8.2-alpha.9' : '0.8.2-alpha.5';
   const transcriptSelector = version === '0.8.2-alpha.5'
     ? 'button[aria-expanded] > p:first-of-type' : '[data-history-entry] .entry-text';
   assert.equal(await session.evaluate('window.murmurMain.getAppVersion()'), version);

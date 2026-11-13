@@ -45,7 +45,7 @@ function Assert-RetainedHistoryCiHost {
 
     Assert-ExpectedCommit -Commit $ExpectedCommit -RepoRoot $RepoRoot
 
-    $candidateCommit = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
+    $candidateCommit = (Get-RetainedCandidatePins).CandidateCommit
     if ($ExpectedCommit.ToLowerInvariant() -eq $candidateCommit) {
         Write-Step "Note: Harness commit matches candidate source commit $candidateCommit."
     }
@@ -53,24 +53,30 @@ function Assert-RetainedHistoryCiHost {
 
 function Get-RetainedCandidatePins {
     return [ordered]@{
-        RunId                 = '40751101623'
-        ArtifactId            = '12844806461'
-        CandidateCommit       = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
-        CandidateVersion      = '0.8.2-alpha.8'
-        ZipSha256             = '19b180bbd9becdc19889a8a80dfb65cca3ddc54dc45e707d79761273cb6046dc'
-        ManifestSha256        = '54c5dc7a2d599074735aa2dd97aa6737c67cc7c1ed6c0532a921e778a2bcc876'
-        PayloadManifestSha256 = 'af28cfdb89bc6c4ae84f00d2c6dd345a3ec5e4f25be58f5e7f9f72df3f8f7bd0'
+        ReleaseId             = '429752581'
+        CandidateCommit       = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
+        CandidateVersion      = '0.8.2-alpha.9'
+        ManifestSha256        = 'e180604fd9e59bbbe8ca6adb0929b2762883115ba908e30e74e421aaddab61ab'
+        PayloadManifestSha256 = 'e5de8f80a86a96fe4163ba789e01b6bd74fb09d086dfdd55f7f177d084de37e1'
+        PayloadFileCount      = 5212
+        Assets = @(
+            [pscustomobject]@{ Name = 'Eve.Web.Setup.0.8.2-alpha.9.exe'; Id = '694519593'; Bytes = [int64]654633 }
+            [pscustomobject]@{ Name = 'murmur-0.8.2-alpha.9-x64.nsis.7z'; Id = '695103834'; Bytes = [int64]212196890 }
+            [pscustomobject]@{ Name = 'eve-v0.8.2-alpha.9-artifact-manifest.json'; Id = '694519594'; Bytes = [int64]2019 }
+            [pscustomobject]@{ Name = 'latest.yml'; Id = '694519592'; Bytes = [int64]596 }
+            [pscustomobject]@{ Name = 'THIRD_PARTY_NOTICES.txt'; Id = '694519739'; Bytes = [int64]9510 }
+            [pscustomobject]@{ Name = 'SHA256SUMS.txt'; Id = '694519606'; Bytes = [int64]368 }
+            [pscustomobject]@{ Name = 'SHA512SUMS.txt'; Id = '694519700'; Bytes = [int64]624 }
+        )
         Files = [ordered]@{
-            'Eve.Web.Setup.0.8.2-alpha.8.exe'          = '94f01264f473f9643d4b25537e7287321346c8a5ed393a9eab6644fce6f0345e'
-            'murmur-0.8.2-alpha.8-x64.nsis.7z'         = '27e4d32672ed618e5647fdcd4e35a156e756f7cb47a6704bbb1a530373befeb8'
-            'eve-v0.8.2-alpha.8-artifact-manifest.json' = '54c5dc7a2d599074735aa2dd97aa6737c67cc7c1ed6c0532a921e778a2bcc876'
-            'latest.yml'                               = 'b8f5762667e128f066e885ab7f90cf40f5eaa2ce1482a90ab4acebb9a06a9e84'
-            'THIRD_PARTY_NOTICES.txt'                  = '5bcd8c54d7dbeba506d516ef48c4753fb4663f51232ce1da172c570015b39e4b'
-            'SHA256SUMS.txt'                           = '10bd59d9d4bacee7238c51f50cb8d4797738d7dce47e32dd9c129085ba8e2d20'
-            'SHA512SUMS.txt'                           = 'eeae353330b9ddc164d354d85fa9963f58fa7e3a657da5c339369c95046240a1'
-            'qa/candidate-payload-manifest.json'       = 'af28cfdb89bc6c4ae84f00d2c6dd345a3ec5e4f25be58f5e7f9f72df3f8f7bd0'
-            'qa/candidate-provenance.json'             = 'c0e21aaeb15d702778acd54a13dc5e463f73d8164070e402ae177d45bfba7fe2'
-            'qa/candidate-phase-status.json'           = '5938fa5569db4f16a1fb86c49aca99d0144c217601d052d166933b464723cab3'
+            'Eve.Web.Setup.0.8.2-alpha.9.exe'           = 'debfc43d275c947e4065586baf76d0a0d7acb10cd1fa5c16296396e3fd7cedef'
+            'murmur-0.8.2-alpha.9-x64.nsis.7z'          = '5908c899bc2caffe48b95c920d23d660be5227c45b844b92d01dfc81347f164c'
+            'eve-v0.8.2-alpha.9-artifact-manifest.json' = 'e180604fd9e59bbbe8ca6adb0929b2762883115ba908e30e74e421aaddab61ab'
+            'latest.yml'                                = 'df110ec1a628c119a654c01580fa4122d7de27389bd22b1f669a414104f00225'
+            'THIRD_PARTY_NOTICES.txt'                   = '8b8359ccb1f406e734da60a4783d46c32d7255a4ffa0b3407be67602039b2b41'
+            'SHA256SUMS.txt'                            = '317b2e889f59f11a9982cc5234c245cf07acd017055e0964064fb2e330d7363e'
+            'SHA512SUMS.txt'                            = '81250d76e975f32fa155694290983e815841fb6e5c30fe114eb4ab55d6092c53'
+            'qa/candidate-payload-manifest.json'        = 'e5de8f80a86a96fe4163ba789e01b6bd74fb09d086dfdd55f7f177d084de37e1'
         }
     }
 }
@@ -106,89 +112,68 @@ function Save-RetainedHistoryCandidate {
         New-Item -ItemType Directory -Path $targetFull -Force | Out-Null
     }
 
-    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
-        throw 'curl.exe is required for artifact download.'
-    }
-
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { throw 'curl.exe is required for release asset download.' }
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI required for release identity verification.' }
     $pins = Get-RetainedCandidatePins
-    $runId = $pins.RunId
     $repository = 'burntcookiedough/eve-windows-dictation'
-    $artifactId = $pins.ArtifactId
-    $expectedSourceCommit = $pins.CandidateCommit
-    $expectedZipSha = $pins.ZipSha256
-    $expectedArtifactSize = [int64]212886597
+    $tag = "v$($pins.CandidateVersion)"
 
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI required for artifact identity verification.' }
-    & {
-        $json = & gh api "repos/$repository/actions/runs/$runId"
-        if ($LASTEXITCODE -ne 0) { throw 'Candidate run metadata unavailable.' }
-        $runMeta = $json | ConvertFrom-Json
-        if ($runMeta.head_sha.ToLowerInvariant() -ne $expectedSourceCommit.ToLowerInvariant()) {
-            throw "Artifact run head_sha mismatch: expected $expectedSourceCommit, got $($runMeta.head_sha)"
-        }
-        if ($runMeta.status -ne 'completed' -or $runMeta.conclusion -ne 'success') {
-            throw "Artifact run status is not successful: status=$($runMeta.status), conclusion=$($runMeta.conclusion)"
-        }
+    $json = & gh api "repos/$repository/releases/$($pins.ReleaseId)"
+    if ($LASTEXITCODE -ne 0) { throw 'Candidate release metadata unavailable.' }
+    $release = $json | Out-String | ConvertFrom-Json -Depth 30
+    if ([string]$release.id -ne $pins.ReleaseId -or $release.draft -ne $false -or $release.prerelease -ne $true -or
+        $release.tag_name -cne $tag -or $release.target_commitish -cne $pins.CandidateCommit) {
+        throw 'Published candidate release identity or state differs from the pinned candidate.'
+    }
+    $assets = @($release.assets)
+    $expectedNames = @($pins.Assets.Name | Sort-Object) -join "`n"
+    if ($assets.Count -ne $pins.Assets.Count -or (@($assets.name | Sort-Object) -join "`n") -ne $expectedNames) {
+        throw 'Published candidate asset allowlist differs from the pinned candidate.'
+    }
 
-        $json = & gh api "repos/$repository/actions/artifacts/$artifactId"
-        if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact metadata unavailable.' }
-        $artMeta = $json | ConvertFrom-Json
-        if ($artMeta.expired -ne $false -or [string]$artMeta.workflow_run.id -ne $runId -or
-            $artMeta.workflow_run.head_sha -cne $expectedSourceCommit -or $artMeta.digest -cne "sha256:$expectedZipSha") { throw 'Candidate artifact identity rejected.' }
-        if ([int64]$artMeta.size_in_bytes -ne $expectedArtifactSize) {
-            throw "Artifact size mismatch: expected $expectedArtifactSize, got $($artMeta.size_in_bytes)"
+    foreach ($pin in $pins.Assets) {
+        $asset = @($assets | Where-Object { $_.name -eq $pin.Name })
+        $digest = "sha256:$($pins.Files[$pin.Name])"
+        if ($asset.Count -ne 1 -or [string]$asset[0].id -ne $pin.Id -or [int64]$asset[0].size -ne $pin.Bytes -or
+            [string]$asset[0].digest -ne $digest -or $asset[0].state -ne 'uploaded') {
+            throw "Published candidate asset metadata differs from its pin: $($pin.Name)"
         }
     }
 
-    $zipPath = Join-Path $targetFull 'candidate-artifact.zip'
+    foreach ($pin in $pins.Assets) {
+        $digest = "sha256:$($pins.Files[$pin.Name])"
+        $targetPath = Join-Path $targetFull $pin.Name
+        & curl.exe --silent --show-error --fail --location --retry 3 --retry-all-errors --max-time 1800 `
+            --header "Authorization: Bearer $env:GH_TOKEN" `
+            --header 'Accept: application/octet-stream' `
+            --output $targetPath `
+            "https://api.github.com/repos/$repository/releases/assets/$($pin.Id)"
+        if ($LASTEXITCODE -ne 0) { throw "Authenticated download failed for $($pin.Name)." }
+        $actual = 'sha256:' + (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ((Get-Item -LiteralPath $targetPath).Length -ne $pin.Bytes -or $actual -ne $digest) {
+            throw "Downloaded candidate asset failed size or digest validation: $($pin.Name)"
+        }
+    }
+
+    # The published release has no payload manifest, so derive it from the pinned payload archive.
+    $sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+    if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) { throw '7-Zip is required to derive the candidate payload manifest.' }
+    $extractDir = Join-Path $runnerTempFull "eve-candidate-payload-extract-$PID"
+    if (Test-Path -LiteralPath $extractDir) { throw "Payload extraction directory already exists: $extractDir" }
     try {
-        $downloadUrl = "https://api.github.com/repos/$repository/actions/artifacts/$artifactId/zip"
-        $headers = @(
-            '-H', 'Accept: application/vnd.github+json',
-            '-H', "Authorization: Bearer $env:GH_TOKEN"
-        )
-        & curl.exe -f -s -S -L --max-time 1800 @headers $downloadUrl -o $zipPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "curl.exe download failed with exit code $LASTEXITCODE"
+        & $sevenZip x (Join-Path $targetFull "murmur-$($pins.CandidateVersion)-x64.nsis.7z") "-o$extractDir" -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7-Zip payload extraction failed with exit code $LASTEXITCODE." }
+        $qa = Join-Path $targetFull 'qa'
+        New-Item -ItemType Directory -Path $qa | Out-Null
+        $payloadManifest = Join-Path $qa 'candidate-payload-manifest.json'
+        New-InstalledPayloadManifest -SourceDir $extractDir -OutputFile $payloadManifest
+        if ((Get-FileHash -LiteralPath $payloadManifest -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pins.PayloadManifestSha256) {
+            throw 'Derived candidate payload manifest differs from the pinned manifest.'
         }
-
-        $actualZipSha = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualZipSha -ne $expectedZipSha.ToLowerInvariant()) {
-            throw "Downloaded artifact ZIP SHA-256 mismatch: expected $expectedZipSha, got $actualZipSha"
-        }
-
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-        try {
-            $entryNames = @($zipArchive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-            $expectedNames = @($pins.Files.Keys)
-            if ($entryNames.Count -ne 10) {
-                throw "Expected exactly 10 ZIP entries, got $($entryNames.Count)"
-            }
-            foreach ($name in $entryNames) {
-                if ($name -notin $expectedNames) {
-                    throw "Unexpected entry in candidate artifact ZIP: $name"
-                }
-                if ($name -match '\.\.' -or $name.StartsWith('/')) {
-                    throw "Invalid entry path in candidate artifact ZIP: $name"
-                }
-            }
-            foreach ($name in $expectedNames) {
-                if ($name -notin $entryNames) {
-                    throw "Missing expected entry in candidate artifact ZIP: $name"
-                }
-            }
-        } finally {
-            $zipArchive.Dispose()
-        }
-
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $targetFull)
-        Write-Host "[retained-history] Successfully downloaded and extracted retained candidate artifact ($artifactId)."
     } finally {
-        if (Test-Path -LiteralPath $zipPath) {
-            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
-        }
+        if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    Write-Host "[retained-history] Downloaded published $tag assets from release $($pins.ReleaseId) and derived the $($pins.PayloadFileCount)-file payload manifest."
 }
 
 function Assert-RetainedCandidateStaging {
@@ -671,7 +656,7 @@ function Invoke-RetainedHistoryCi {
     $script:FunctionalHistoryEvidence = [ordered]@{
         schema           = 1
         harnessCommit    = $ExpectedCommit
-        candidateCommit  = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
+        candidateCommit  = (Get-RetainedCandidatePins).CandidateCommit
         candidateVersion = $script:CandidateVersion
         startTimeUtc     = [DateTimeOffset]::UtcNow.ToString('o')
         currentPhase     = 'candidate_verification'

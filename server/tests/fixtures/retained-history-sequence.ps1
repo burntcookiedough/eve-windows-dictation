@@ -43,8 +43,8 @@ $script:CandidateArtifactDir = Join-Path $Root 'candidate'
 $script:BaselineArtifactDir = Join-Path $Root 'baseline'
 $script:RetainedArtifactDir = Join-Path $Root 'retained'
 $script:BaselineVersion = '0.8.2-alpha.5'
-$script:CandidateVersion = '0.8.2-alpha.8'
-$script:ExpectedCommit = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
+$script:CandidateVersion = '0.8.2-alpha.9'
+$script:ExpectedCommit = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
 $script:RepoRoot = $Root
 $script:Installed = ''
 $script:Events = @()
@@ -63,7 +63,7 @@ $evidencePath = Join-Path $evidenceDir 'functional-history-evidence.json'
 $script:FunctionalHistoryEvidence = [ordered]@{
     schema           = 1
     harnessCommit    = $script:ExpectedCommit
-    candidateCommit  = '555e303092ddd18f14c7a29723acaa4806c3f2e1'
+    candidateCommit  = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
     candidateVersion = $script:CandidateVersion
     startTimeUtc     = [DateTimeOffset]::UtcNow.ToString('o')
     currentPhase     = 'candidate_verification'
@@ -205,8 +205,8 @@ $evidence = if (Test-Path -LiteralPath $evidencePath) {
 $expectedEvents = @(
     'staging', 'download-baseline', 'settings', 'sentinels',
     'install:0.8.2-alpha.5', 'observe:baseline-initialize', 'seed', 'observe:baseline-read',
-    'staging', 'install:0.8.2-alpha.8', 'observe:candidate-upgrade-read-mutate',
-    'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.8',
+    'staging', 'install:0.8.2-alpha.9', 'observe:candidate-upgrade-read-mutate',
+    'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.9',
     'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
 )
 foreach ($call in $script:StagingCalls) {
