@@ -172,10 +172,12 @@ def test_stitch_text_preserves_repetition_without_timing_evidence() -> None:
     )
 
 
-def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
+@pytest.mark.parametrize("previous_has_word_timings", [False, True])
+def test_segment_dedup_requires_matching_text_and_audio_time(previous_has_word_timings) -> None:
     previous_chunk = AudioChunk(1, 2, 0, 400000, 0, 400000)
     current_chunk = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
-    old = TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9),))
+    words = (TranscribeWord(" That.", 24.3, 24.9),) if previous_has_word_timings else ()
+    old = TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9, words),))
     current = TranscribeResult("That. That was incredible.", 0.9, 2.0, (
         TranscribeSegment("That.", 0.05, 0.65),  # Same speech at absolute 24.30..24.90.
         TranscribeSegment("That was incredible.", 0.8, 2.0),  # New speech after 25.0.
@@ -189,6 +191,24 @@ def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
     # Ambiguous crossing segments are kept in full; word equality cannot delete them.
     crossing = TranscribeResult("That was that.", 0.9, 1.1, (TranscribeSegment("That was that.", 0.1, 1.1),))
     assert text_for_chunk(crossing, current_chunk, (previous_chunk, old)) == crossing.text
+
+
+@pytest.mark.parametrize("first_has_word_timings", [False, True])
+def test_segment_fallback_and_word_matching_share_prior_occurrences(first_has_word_timings) -> None:
+    previous = AudioChunk(1, 2, 0, 400000, 0, 400000)
+    current = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
+    old = TranscribeResult("very", 0.9, 24.75, (
+        TranscribeSegment("very", 24.25, 24.75, (TranscribeWord(" very", 24.25, 24.75),)),
+    ))
+    first_words = (TranscribeWord(" very", 0.0, 0.25),) if first_has_word_timings else ()
+    second_words = () if first_has_word_timings else (TranscribeWord(" very", 0.25, 0.5),)
+    result = TranscribeResult("very very useful", 0.9, 1.25, (
+        TranscribeSegment("very", 0.0, 0.25, first_words),
+        TranscribeSegment("very", 0.25, 0.5, second_words),
+        TranscribeSegment("useful", 0.8, 1.25),
+    ))
+    assert text_for_chunk(result, current, (previous, old)) == "very useful"
+
 
 @pytest.mark.parametrize("previous_count", [1, 2])
 @pytest.mark.parametrize("split_current", [False, True])
