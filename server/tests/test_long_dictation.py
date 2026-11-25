@@ -23,6 +23,8 @@ def _settings(**overrides: object) -> SimpleNamespace:
         "long_dictation_threshold_s": 30.0,
         "long_dictation_chunk_s": 25.0,
         "long_dictation_overlap_s": 0.75,
+        # These tests pin the legacy whole-buffer path; see test_incremental_commit.py.
+        "incremental_commit": False,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

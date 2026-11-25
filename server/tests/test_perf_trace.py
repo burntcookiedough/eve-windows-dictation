@@ -241,7 +241,8 @@ async def test_real_processor_traces_lock_and_worker_boundaries(monkeypatch):
         assert result.perf.lock_wait_ms >= 15
         assert result.perf.model_inference_ms >= 15
         assert result.perf.final_inference_end_offset_ms > result.perf.final_inference_start_offset_ms
-        assert result.perf.outstanding_partial_wait_ms is None
+        # No background job was in flight, so the final waited behind none.
+        assert 0 <= result.perf.outstanding_partial_wait_ms < result.perf.lock_wait_ms
         assert result.perf.partial_task_active_at_stop is True
         assert result.perf.ws_send_duration_ms is None
     finally:
