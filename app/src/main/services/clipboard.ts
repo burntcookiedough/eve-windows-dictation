@@ -250,11 +250,12 @@ async function readClipboardSnapshot(): Promise<ClipboardSnapshot> {
 }
 
 async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<void> {
+  const [firstItem] = snapshot.items;
   if (snapshot.items.length === 0) {
     clipboard.clear();
-  } else if (snapshot.items.length === 1 && snapshot.items[0].types.length === 1
-    && snapshot.items[0].types[0] === 'text/plain') {
-    const text = await snapshot.items[0].getType('text/plain');
+  } else if (snapshot.items.length === 1 && firstItem?.types.length === 1
+    && firstItem.types[0] === 'text/plain') {
+    const text = await firstItem.getType('text/plain');
     await clipboard.writeText(await text.text());
   } else {
     // Electron commits all items and formats in one atomic clipboard write.
