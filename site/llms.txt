@@ -1,0 +1,61 @@
+# Eve
+
+> Eve is a free, MIT-licensed push-to-talk dictation app for Windows. Hold a hotkey and speak; when you stop, Eve pastes the text into the active window. In the packaged app, speech recognition runs in a local service on your machine. The latest published release, v0.8.2-alpha.9, is an alpha pre-release.
+
+## What it does
+
+- Hotkeys: Ctrl+Win for quick notes, Ctrl+Shift+Win for long dictation. Hold to talk, or switch to toggle.
+- A small translucent pill shows a voice-reactive bead and a timer while you speak, and shrinks to a breathing dot in silence. It shows no transcript. Text is not typed into other apps while you speak.
+- Eve copies the final text, pastes it into the active window, and can then restore your previous clipboard.
+- Output styles: Raw Dictation pastes what you said. Clean Prompt, Codex Prompt, Message Rewrite, and Command Mode apply local, rule-based cleanup first.
+- Hotwords help with names, acronyms, and product terms. History can be searched and exported to JSON or CSV. Insights are calculated locally.
+- Speech engine: Faster-Whisper through CTranslate2. Models include large-v3-turbo (recommended, about 1.5 GB), large-v3 (about 2.9 GB, maximum accuracy), and small (about 0.5 GB, lighter hardware).
+
+## Install
+
+1. Download Eve.Web.Setup.<version>.exe from GitHub Releases.
+2. Run it. It is a small nsis-web installer that downloads the app during setup, so it needs an internet connection. It is unsigned, so Windows SmartScreen may ask you to confirm.
+3. Open Eve and hold Ctrl+Win. The speech model downloads from Hugging Face the first time you use it.
+
+Each release publishes SHA256SUMS.txt and SHA512SUMS.txt.
+
+## System requirements
+
+- Windows 10 or 11, x86-64.
+- RAM: 4 GB minimum; 8 GB or more recommended.
+- Disk: about 686 MB unpacked, measured on a September 2026 build candidate (not a new measurement of alpha.9). Allow more for speech models and the optional GPU pack.
+- Internet for the web installer payload and the first model download.
+- Microsoft Visual C++ Redistributable. Eve links to the official installer when it is missing.
+- No GPU needed.
+
+## Privacy
+
+- In the packaged app, speech recognition runs on your machine. Audio and transcripts are never uploaded.
+- No account and no telemetry.
+- History and Insights live in a local SQLite database. Long-dictation audio is temporary and is never written to History or logs.
+- The network is used to download the installer payload, model weights on first use, and the optional GPU pack if you install it. A developer can also connect to a separately started localhost speech service.
+- Copied diagnostics exclude logs, file paths, History, and transcript text. Review any report before sharing it.
+
+## Optional NVIDIA GPU pack
+
+- Eve works on the CPU. The NVIDIA CUDA pack is optional, downloaded separately from Settings, verified by hash, and speeds up transcription on supported GPUs.
+- The pinned pack is 494,950,029 bytes compressed and 771,188,224 bytes installed.
+- It needs a supported driver and sufficient VRAM. It has not been shown to work on every NVIDIA machine.
+
+## Release status
+
+v0.8.2-alpha.9 is an alpha pre-release. Its release notes state that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. No accuracy or latency figures are claimed here.
+
+## Links
+
+- [Website](https://burntcookiedough.github.io/eve-windows-dictation/): overview and FAQ
+- [Full text for language models](https://burntcookiedough.github.io/eve-windows-dictation/llms-full.txt): README, privacy boundaries, and release notes
+- [Download (GitHub Releases)](https://github.com/burntcookiedough/eve-windows-dictation/releases): installers and checksums
+- [v0.8.2-alpha.9 release notes](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md)
+- [Source code](https://github.com/burntcookiedough/eve-windows-dictation)
+- [Privacy boundaries](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/PRIVACY.md)
+- [Installer dependencies and requirements](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/installer-dependencies.md)
+- [Support](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/.github/SUPPORT.md)
+- [License (MIT)](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/LICENSE)
+
+Eve is derived from Murmur, the MIT-licensed project created by Raik Rohde.
