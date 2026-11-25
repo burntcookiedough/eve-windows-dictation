@@ -929,7 +929,7 @@
             <button type="button" class="settings-segment" class:selected={settings.appendSpace} aria-pressed={settings.appendSpace} onclick={() => updateSetting('appendSpace', !settings.appendSpace)}>space</button>
           </div>
         </SettingsRow>
-        <SettingsRow label="Afterwards" description="Choose which output actions Eve performs after dictation.">
+        <SettingsRow label="Afterwards" description="Restore applies after a paste only when auto-copy is off.">
           <div class="settings-segments" role="group" aria-label="After dictation actions">
             <button type="button" class="settings-segment" class:selected={settings.autoCopy} aria-pressed={settings.autoCopy} onclick={() => updateSetting('autoCopy', !settings.autoCopy)}>copy</button>
             <button type="button" class="settings-segment" class:selected={settings.autoPaste} aria-pressed={settings.autoPaste} onclick={() => updateSetting('autoPaste', !settings.autoPaste)}>paste</button>
