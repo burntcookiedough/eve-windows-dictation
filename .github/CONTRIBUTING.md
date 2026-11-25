@@ -14,8 +14,11 @@ Before contributing:
 In Windows PowerShell, run `powershell -NoProfile -File scripts/install-hooks.ps1`
 from the repository root. This sets `core.hooksPath` for the repository, including
 its linked worktrees. The pre-commit hook checks staged whitespace and rejects
-audio files, `.env*`, transcript JSON/JSONL, and files under `profiles/` or
-`user-data/`. Review your staged files before committing.
+audio files, `.env*` files other than `.env.example` and `.env.sample`,
+transcript JSON/JSONL, and files under `profiles/` or `user-data/`.
+Use `git commit --no-verify` as a deliberate override after reviewing the
+staged changes, such as when updating the tracked fixture
+`server/tests/ui/test_audio.wav`.
 
 Claude Code uses the project hook in `.claude/settings.json` when Node is on
 `PATH`. It blocks direct shell commands for protected Git and release operations.

@@ -7,7 +7,7 @@ on:
       - trunk
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
         run: bun run test:history
 
       - name: Type-check app
-        # gpu-pack-manager.ts has an existing error owned by the GPU pack workstream.
+        # Remove continue-on-error once PR #135 fixes TS2345 in gpu-pack-manager.ts.
         continue-on-error: true
         run: bun run typecheck
 

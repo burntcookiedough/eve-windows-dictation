@@ -20,6 +20,8 @@ handoffs out of public diffs and free of private data.
   and all conversations resolved. The required checks are `Trunk Integration Target`,
   `Version Consistency`, `App Test And Build`, and `Server Tests`.
 - Agents never tag or publish.
+- The Claude Code guard is a speed bump for accidental commands. Repository
+  permissions and branch protection enforce access.
 
 ## Final integration
 

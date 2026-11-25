@@ -1,20 +1,27 @@
 #!/bin/sh
 
-# Git matches staged paths directly, including paths with embedded newlines.
-git diff --cached --quiet --diff-filter=ACMRTUXB -- \
+check_private_paths() {
+    git diff --cached --quiet --no-renames --diff-filter=ACMRTUXB -- "$@"
+    case $? in
+        0) ;;
+        1)
+            echo "Commit blocked: staged files match private-data patterns. Review and unstage them." >&2
+            exit 1
+            ;;
+        *) exit 1 ;;
+    esac
+}
+
+# Keep template exclusions scoped to the .env rule.
+check_private_paths \
+    ':(glob,icase)**/.env*' ':(exclude,glob,icase)**/.env.example' \
+    ':(exclude,glob,icase)**/.env.sample'
+
+check_private_paths \
     ':(glob,icase)**/*.wav' ':(glob,icase)**/*.flac' \
     ':(glob,icase)**/*.mp3' ':(glob,icase)**/*.webm' \
     ':(glob,icase)**/*.ogg' ':(glob,icase)**/*.m4a' \
-    ':(glob,icase)**/.env*' ':(glob,icase)**/*transcript*.json' \
+    ':(glob,icase)**/*transcript*.json' \
     ':(glob,icase)**/*transcript*.jsonl' \
     ':(glob,icase)**/profiles/**' ':(glob,icase)**/user-data/**'
-case $? in
-    0) ;;
-    1)
-        echo "Commit blocked: staged files match private-data patterns. Review and unstage them." >&2
-        exit 1
-        ;;
-    *) exit 1 ;;
-esac
-
 exec git diff --cached --check
