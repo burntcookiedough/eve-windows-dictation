@@ -1,8 +1,10 @@
 # Eve: full text
 
-> Eve is a free, MIT-licensed, local-first dictation app for Windows. The latest published release, v0.8.2-alpha.9, is an alpha pre-release.
+> Eve is a free, MIT-licensed, local-first dictation app for Windows. It is pre-release software; see https://github.com/burntcookiedough/eve-windows-dictation/releases for the latest version and its notes.
 
-This file is assembled from the repository documents below, with HTML and images removed and links made absolute. The feature-status document is retired; it is included to say so, and it points to the roadmap and documentation index. Short version: https://burntcookiedough.github.io/eve-windows-dictation/llms.txt
+This file is assembled from the repository documents below, with HTML and images removed, links made absolute, and the README's version note replaced by a link to the latest release. The feature-status document is retired; it is included to say so, and it points to the roadmap and documentation index. Short version: https://burntcookiedough.github.io/eve-windows-dictation/llms.txt
+
+Model note, from https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/architecture/eve-cpu-first-run-decision.md: large-v3-turbo is the catalog's recommended model. New CPU-only profiles start on small for a faster first download. Turbo runs fastest with the optional GPU pack. Existing profiles keep their saved model.
 
 ---
 
@@ -14,8 +16,7 @@ Source: https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/REA
 
 Quiet, local dictation for Windows. Speech recognition runs on your machine.
 
-> The latest published build is **v0.8.2-alpha.9**. Expect rough edges, and read the
-> [release notes](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md) before installing.
+Eve is pre-release software. Expect rough edges, and read the [latest release notes](https://github.com/burntcookiedough/eve-windows-dictation/releases) before installing.
 
 ### Why Eve
 
@@ -152,34 +153,3 @@ This document has been retired. The historical feature tracking snapshot from 20
 Active project status and roadmap are tracked in:
 - [Project roadmap](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/project/roadmap.md)
 - [Documentation index](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/README.md)
-
----
-
-# Latest release notes
-
-Source: https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md
-
-## Eve v0.8.2-alpha.9 release notes
-
-**Channel:** Published Windows alpha pre-release.
-
-[Download v0.8.2-alpha.9](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.9).
-
-The dictation overlay now uses a compact translucent pill with a voice-reactive
-bead. It expands while speaking and collapses to a breathing dot during silence.
-Startup, elapsed time, Long Dictation progress, completion word count and short
-warnings appear inside the pill. The overlay transcript panel is removed; History
-and transcription processing remain available. The timer is visible while expanded.
-
-The overlay reasserts its topmost position without taking focus. Windows system
-surfaces and exclusive fullscreen applications can still cover it.
-
-The installer, profiles, protocols and model-cache identities are unchanged.
-Runtime dependencies and optional GPU pack asset URLs and hashes are unchanged.
-This candidate binds the existing optional GPU pack to alpha.9; reuse of an older
-installed pack across app versions is not introduced. The unsigned `nsis-web`
-installer needs internet access. Model weights and the optional NVIDIA pack are
-separate downloads.
-
-Automated tests and synthetic overlay checks do not establish real microphone
-dictation acceptance or clean-machine installer lifecycle acceptance.

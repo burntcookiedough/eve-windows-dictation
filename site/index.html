@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Eve: free local voice dictation for Windows (open source)</title>
-  <meta name="description" content="Eve is a free, open-source dictation app for Windows 10 and 11. Hold a hotkey, speak, and the text is pasted when you stop. Speech runs on your PC. Alpha.">
+  <meta name="description" content="Eve is a free, open-source dictation app for Windows 10 and 11. Hold a hotkey, speak, and the text is pasted when you stop. Speech runs on your PC. Pre-release.">
   <link rel="canonical" href="https://burntcookiedough.github.io/eve-windows-dictation/">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0b0b0b">
@@ -14,7 +14,7 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://burntcookiedough.github.io/eve-windows-dictation/">
   <meta property="og:title" content="Eve: free local voice dictation for Windows">
-  <meta property="og:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, alpha pre-release.">
+  <meta property="og:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, pre-release software.">
   <meta property="og:image" content="https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
   <meta property="og:image:alt" content="Talk. Eve pastes it. Local voice dictation for Windows, shown with the Eve cactus and its small dictation pill.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Eve: free local voice dictation for Windows">
-  <meta name="twitter:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, alpha pre-release.">
+  <meta name="twitter:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, pre-release software.">
   <meta name="twitter:image" content="https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png">
   <meta name="twitter:image:alt" content="Talk. Eve pastes it. Local voice dictation for Windows, shown with the Eve cactus and its small dictation pill.">
 
@@ -31,12 +31,12 @@
   <link rel="preload" href="assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 
-  <script type="application/ld+json">
+  <script type="application/ld+json" id="ld-app">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Eve",
-    "description": "Free, open-source push-to-talk dictation for Windows. Speech recognition runs on your own machine and Eve pastes the text when you stop. Alpha pre-release.",
+    "description": "Free, open-source push-to-talk dictation for Windows. Speech recognition runs on your own machine and Eve pastes the text when you stop. Pre-release software.",
     "url": "https://burntcookiedough.github.io/eve-windows-dictation/",
     "image": "https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png",
     "screenshot": "https://burntcookiedough.github.io/eve-windows-dictation/assets/screens/eve-home.png",
@@ -44,8 +44,7 @@
     "processorRequirements": "x86-64",
     "memoryRequirements": "4 GB minimum; 8 GB or more recommended",
     "applicationCategory": "UtilitiesApplication",
-    "softwareVersion": "v0.8.2-alpha.9",
-    "releaseNotes": "https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.9",
+    "releaseNotes": "https://github.com/burntcookiedough/eve-windows-dictation/releases",
     "downloadUrl": "https://github.com/burntcookiedough/eve-windows-dictation/releases",
     "license": "https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/LICENSE",
     "sameAs": "https://github.com/burntcookiedough/eve-windows-dictation",
@@ -91,7 +90,7 @@
       {
         "@type": "Question",
         "name": "Is Eve ready for everyday use?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Eve v0.8.2-alpha.9 is an alpha pre-release, so expect rough edges. Its release notes say that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. Eve is free and MIT licensed." }
+        "acceptedAnswer": { "@type": "Answer", "text": "Eve is pre-release software, so expect rough edges. Before you rely on it, read the latest release notes on GitHub Releases to see what has and has not been verified. Eve is free and MIT licensed." }
       }
     ]
   }
@@ -169,10 +168,10 @@
               <a class="button primary" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download for windows</a>
               <a class="button" href="https://github.com/burntcookiedough/eve-windows-dictation">view source</a>
             </div>
-            <p class="release-note mono"><span data-version>v0.8.2-alpha.9</span> · <span data-channel>alpha pre-release</span></p>
+            <p class="release-note mono"><span data-version>v0.8.2-alpha.9</span><span data-channel> · alpha pre-release</span></p>
           </div>
           <dl class="hero-meta">
-            <div><dt>version</dt><dd data-version>v0.8.2-alpha.9</dd></div>
+            <div><dt>license</dt><dd>MIT</dd></div>
             <div><dt>platform</dt><dd>windows 10 / 11, x64</dd></div>
             <div><dt>price</dt><dd>free · open source</dd></div>
           </dl>
@@ -355,7 +354,7 @@
           </article>
           <article class="feat">
             <p class="feat-n">05</p>
-            <div class="feat-vis" aria-hidden="true"><span>Kubernetes</span><span>CUDA</span><span>Priya</span><span>SQLite</span></div>
+            <div class="feat-vis" aria-hidden="true"><span>Kubernetes</span><span>CUDA</span><span>Alex Example</span><span>SQLite</span></div>
             <h3>Knows your words.</h3>
             <p>Hotwords help Eve spell names, acronyms, and product terms correctly.</p>
           </article>
@@ -363,7 +362,7 @@
             <p class="feat-n">06</p>
             <div class="feat-vis vis-column" aria-hidden="true"><span class="on">large-v3-turbo</span><span>large-v3</span><span>small</span></div>
             <h3>Faster-Whisper, your pick.</h3>
-            <p><code>large-v3-turbo</code> is recommended (about 1.5 GB), <code>large-v3</code> (about 2.9 GB) is for maximum accuracy, and <code>small</code> (about 0.5 GB) suits lighter hardware. The current model keeps working while a new one downloads.</p>
+            <p><code>large-v3-turbo</code> is recommended (about 1.5 GB), <code>large-v3</code> (about 2.9 GB) is for maximum accuracy, and <code>small</code> (about 0.5 GB) suits lighter hardware. New CPU-only profiles start on <code>small</code> for a faster first download. Turbo runs fastest with the optional GPU pack. The current model keeps working while a new one downloads.</p>
           </article>
           <article class="feat">
             <p class="feat-n">07</p>
@@ -417,7 +416,7 @@
         <div><dt>gpu</dt><dd>Not required. The optional NVIDIA pack needs a supported driver and enough GPU memory.</dd></div>
       </dl>
 
-      <p class="alpha-note"><b>This is an alpha pre-release.</b> Expect rough edges and read the <a href="https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md">v0.8.2-alpha.9 release notes</a> first. Checksums (<code>SHA256SUMS.txt</code>, <code>SHA512SUMS.txt</code>) are published with each release.</p>
+      <p class="release-status"><b>Eve is pre-release software.</b> Expect rough edges and read the <a data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">latest release notes</a> first. Checksums (<code>SHA256SUMS.txt</code>, <code>SHA512SUMS.txt</code>) are published with each release.</p>
     </section>
 
     <!-- 8 · questions -->
@@ -451,7 +450,7 @@
         </div>
         <div class="faq-item">
           <h3>Is Eve ready for everyday use?</h3>
-          <p>Eve v0.8.2-alpha.9 is an alpha pre-release, so expect rough edges. Its release notes say that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. Eve is free and MIT licensed.</p>
+          <p>Eve is pre-release software, so expect rough edges. Before you rely on it, read the latest release notes on GitHub Releases to see what has and has not been verified. Eve is free and MIT licensed.</p>
         </div>
       </div>
     </section>
@@ -460,7 +459,7 @@
   <footer class="footer">
     <div class="footer-cta">
       <h2>say <em>something.</em></h2>
-      <a class="button primary big" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download <span data-version>v0.8.2-alpha.9</span></a>
+      <a class="button primary big" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download for windows</a>
     </div>
 
     <div class="footer-links">

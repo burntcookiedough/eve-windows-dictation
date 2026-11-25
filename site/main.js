@@ -1,14 +1,27 @@
 const repo = 'burntcookiedough/eve-windows-dictation';
 
+// The channel comes from the tag; a stable release gets no label.
+function channelFor({ tag_name: tag, prerelease }) {
+  if (/-alpha\b/i.test(tag)) return 'alpha pre-release';
+  if (/-beta\b/i.test(tag)) return 'beta pre-release';
+  return prerelease || tag.includes('-') ? 'pre-release' : '';
+}
+
 // The release list also holds GPU runtime packs, so only accept app tags (v1.2.3...).
 fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`)
   .then((response) => (response.ok ? response.json() : []))
   .then((releases) => {
     const release = releases.find((r) => !r.draft && /^v\d/.test(r.tag_name));
     if (!release) return;
+    const channel = channelFor(release);
     document.querySelectorAll('[data-version]').forEach((el) => { el.textContent = release.tag_name; });
-    document.querySelectorAll('[data-channel]').forEach((el) => { el.textContent = release.prerelease ? 'alpha pre-release' : 'latest release'; });
-    document.querySelectorAll('[data-download]').forEach((el) => { el.href = release.html_url; });
+    document.querySelectorAll('[data-channel]').forEach((el) => { el.textContent = channel && ` · ${channel}`; });
+    // Anything that does not point into this repository leaves the static releases link in place.
+    if (String(release.html_url).startsWith(`https://github.com/${repo}/`)) {
+      document.querySelectorAll('[data-download]').forEach((el) => { el.href = release.html_url; });
+    }
+    const appData = document.getElementById('ld-app');
+    appData.textContent = JSON.stringify({ ...JSON.parse(appData.textContent), softwareVersion: release.tag_name });
   })
   .catch(() => {});
 

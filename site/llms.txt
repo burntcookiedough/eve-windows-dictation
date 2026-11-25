@@ -1,6 +1,6 @@
 # Eve
 
-> Eve is a free, MIT-licensed push-to-talk dictation app for Windows. Hold a hotkey and speak; when you stop, Eve pastes the text into the active window. In the packaged app, speech recognition runs in a local service on your machine. The latest published release, v0.8.2-alpha.9, is an alpha pre-release.
+> Eve is a free, MIT-licensed push-to-talk dictation app for Windows. Hold a hotkey and speak; when you stop, Eve pastes the text into the active window. In the packaged app, speech recognition runs in a local service on your machine. Eve is pre-release software; see the latest release for its version and notes.
 
 ## What it does
 
@@ -10,6 +10,7 @@
 - Output styles: Raw Dictation pastes what you said. Clean Prompt, Codex Prompt, Message Rewrite, and Command Mode apply local, rule-based cleanup first.
 - Hotwords help with names, acronyms, and product terms. History can be searched and exported to JSON or CSV. Insights are calculated locally.
 - Speech engine: Faster-Whisper through CTranslate2. Models include large-v3-turbo (recommended, about 1.5 GB), large-v3 (about 2.9 GB, maximum accuracy), and small (about 0.5 GB, lighter hardware).
+- New CPU-only profiles start on small for a faster first download. large-v3-turbo runs fastest with the optional GPU pack; the project's CPU tests found it too slow for ordinary short dictation. Existing profiles keep their saved model.
 
 ## Install
 
@@ -23,7 +24,7 @@ Each release publishes SHA256SUMS.txt and SHA512SUMS.txt.
 
 - Windows 10 or 11, x86-64.
 - RAM: 4 GB minimum; 8 GB or more recommended.
-- Disk: about 686 MB unpacked, measured on a September 2026 build candidate (not a new measurement of alpha.9). Allow more for speech models and the optional GPU pack.
+- Disk: about 686 MB unpacked, measured on a September 2026 build candidate (not a measurement of the latest release). Allow more for speech models and the optional GPU pack.
 - Internet for the web installer payload and the first model download.
 - Microsoft Visual C++ Redistributable. Eve links to the official installer when it is missing.
 - No GPU needed.
@@ -44,14 +45,15 @@ Each release publishes SHA256SUMS.txt and SHA512SUMS.txt.
 
 ## Release status
 
-v0.8.2-alpha.9 is an alpha pre-release. Its release notes state that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. No accuracy or latency figures are claimed here.
+Eve is pre-release software, so expect rough edges. Read the latest release notes to see what has and has not been verified. No accuracy or latency figures are claimed here.
 
 ## Links
 
 - [Website](https://burntcookiedough.github.io/eve-windows-dictation/): overview and FAQ
-- [Full text for language models](https://burntcookiedough.github.io/eve-windows-dictation/llms-full.txt): README, privacy boundaries, and release notes
+- [Full text for language models](https://burntcookiedough.github.io/eve-windows-dictation/llms-full.txt): README, privacy boundaries, and feature status
 - [Download (GitHub Releases)](https://github.com/burntcookiedough/eve-windows-dictation/releases): installers and checksums
-- [v0.8.2-alpha.9 release notes](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md)
+- [Latest release and release notes](https://github.com/burntcookiedough/eve-windows-dictation/releases)
+- [CPU first-run model decision](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/architecture/eve-cpu-first-run-decision.md)
 - [Source code](https://github.com/burntcookiedough/eve-windows-dictation)
 - [Privacy boundaries](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/PRIVACY.md)
 - [Installer dependencies and requirements](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/installer-dependencies.md)

@@ -928,8 +928,8 @@ kbd {
 .rows-tight > div { padding: 15px 0; }
 .rows-tight dd { font-size: 15px; font-weight: 400; }
 
-.alpha-note { max-width: 760px; margin-top: 32px; color: var(--fg2); font-size: 14px; }
-.alpha-note b { color: var(--fg); font-weight: 500; }
+.release-status { max-width: 760px; margin-top: 32px; color: var(--fg2); font-size: 14px; }
+.release-status b { color: var(--fg); font-weight: 500; }
 
 /* 8 · FAQ */
 
