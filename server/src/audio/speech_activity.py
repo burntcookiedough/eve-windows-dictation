@@ -26,6 +26,9 @@ _FALLBACK_NOISE_PERCENTILE = 20
 _FALLBACK_NOISE_RATIO = 1.8
 _FALLBACK_MIN_RMS = 0.001
 _FALLBACK_MAX_RMS = 0.12
+_FALLBACK_MAX_NOISE_RISE_PER_WINDOW = 0.00032  # 0.01 normalized RMS per second.
+_STATIONARY_RMS_WINDOWS = 32  # About one second of steady energy.
+_STATIONARY_RMS_RATIO = 1.15
 _silero_session: InferenceSession | None = None
 
 
@@ -79,7 +82,9 @@ class SpeechActivity:
         self.last_speech_sample: int | None = None
         self.pause_noise_floor: float | None = None
         self._remainder = np.empty(0, dtype=np.float32)
-        self._recent_rms: deque[float] = deque(maxlen=_RMS_HISTORY_WINDOWS)
+        self._noise_rms: deque[float] = deque(maxlen=_RMS_HISTORY_WINDOWS)
+        self._stationary_rms: deque[float] = deque(maxlen=_STATIONARY_RMS_WINDOWS)
+        self._fallback_noise_floor: float | None = None
         self._quiet_rms: deque[float] = deque(maxlen=_RMS_HISTORY_WINDOWS)
         self._silero: _SileroStream | None = None
         self._use_energy = False
@@ -108,7 +113,6 @@ class SpeechActivity:
             else:
                 for score, energy in zip(scores, rms):
                     threshold = _CONTINUATION_THRESHOLD if self._active else _SPEECH_THRESHOLD
-                    self._recent_rms.append(float(energy))
                     active = score >= threshold
                     if active:
                         if len(self._quiet_rms) >= _MIN_QUIET_WINDOWS:
@@ -119,14 +123,30 @@ class SpeechActivity:
                     else:
                         # A pause never supplies the reference for its own seal.
                         self._quiet_rms.append(float(energy))
+                        self._noise_rms.append(float(energy))
                     self._advance(active)
                 return
 
+        floor = self._fallback_noise_floor
+        if floor is None:
+            if self._noise_rms:
+                floor = float(np.percentile(self._noise_rms, _FALLBACK_NOISE_PERCENTILE))
+            else:
+                floor = float(rms[0]) if self.processed_samples == 0 else 0.0
         for energy in rms:
-            self._recent_rms.append(float(energy))
-            floor = float(np.percentile(self._recent_rms, _FALLBACK_NOISE_PERCENTILE))
+            level = float(energy)
+            self._stationary_rms.append(level)
             threshold = min(_FALLBACK_MAX_RMS, max(_FALLBACK_MIN_RMS, _FALLBACK_NOISE_RATIO * floor))
-            self._advance(energy > threshold)
+            active = level > threshold
+            if active and len(self._stationary_rms) == _STATIONARY_RMS_WINDOWS:
+                # A sustained, nearly constant level can be newly arrived fan noise.
+                active = max(self._stationary_rms) > _STATIONARY_RMS_RATIO * min(self._stationary_rms)
+            if not active:
+                self._noise_rms.append(level)
+                estimate = float(np.percentile(self._noise_rms, _FALLBACK_NOISE_PERCENTILE))
+                floor = min(estimate, floor + _FALLBACK_MAX_NOISE_RISE_PER_WINDOW)
+            self._advance(active)
+        self._fallback_noise_floor = floor
 
     @property
     def silero_pause_start(self) -> int | None:

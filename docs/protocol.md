@@ -107,8 +107,9 @@ hold-to-talk Quick, toggle Quick, and Long. The server processes incoming PCM
 with a streaming voice detector to time auto-stop and find recording-time pauses
 for incremental commits. A pause seal also checks frame RMS within 200 ms of
 the cut against a noise floor measured before that pause. If Silero fails, the
-session estimates its noise floor from the last two seconds of 32 ms RMS windows
-and caps the activity threshold between 0.001 and 0.12. With that fallback,
+session estimates its noise floor from recent 32 ms RMS windows classified as
+background, limits how quickly the floor can rise, and caps the activity
+threshold between 0.001 and 0.12. With that fallback,
 commits use forced boundaries with overlap. The regular dictation final decodes
 any nonempty uncommitted tail.
 
@@ -416,8 +417,9 @@ frame or that the underlying network transport has closed successfully.
 Chunk deduplication uses matching text and absolute audio times. Decodes of
 chunks that share audio request word timings so a boundary segment can preserve
 new speech while trimming a repeated prefix. Each trimmed word must lie in the
-shared audio and match a word at the same time in the previous decode. Text with
-ambiguous timing and repetitions at different times remain intact.
+shared audio and match a distinct word in order at the same time in the
+previous decode. Text with ambiguous timing and repetitions at different
+times remain intact.
 
 Cancellation of the async inference await does not stop native executor work.
 Processor teardown retains the generation lease through actual completion (or

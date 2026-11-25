@@ -4,6 +4,7 @@ import threading
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import audio.speech_activity as activity_module
 from audio.speech_activity import SpeechActivity, WINDOW_SAMPLES, _SileroStream
@@ -116,6 +117,20 @@ def test_fallback_keeps_detecting_soft_speech_below_fixed_threshold(monkeypatch)
     final_speech = activity.last_speech_sample
     activity.append(room_tone)
     assert activity.last_speech_sample == final_speech
+
+
+@pytest.mark.parametrize("voiced", [[115, 155] + [140] * 7, [140] * 9])
+def test_fallback_keeps_timing_repeated_soft_syllables_for_ten_seconds(monkeypatch, voiced):
+    monkeypatch.setattr(activity_module, "_silero_session", None)
+    activity = SpeechActivity()
+    activity.append(np.full(8 * WINDOW_SAMPLES, 36, dtype=np.int16))
+    syllable = np.repeat(np.array([36, *voiced], dtype=np.int16), WINDOW_SAMPLES)
+
+    # Each syllable has only one quiet window. A percentile of every window
+    # would eventually use speech to raise the threshold above the syllables.
+    for _ in range(35):
+        activity.append(syllable)
+        assert activity.last_speech_sample == activity.processed_samples
 
 
 def test_fallback_recalibrates_to_a_fan_above_fixed_threshold(monkeypatch):

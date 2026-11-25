@@ -148,6 +148,62 @@ async def test_failure_after_a_normal_recording_seal_emits_only_incomplete_recov
         context.audio_buffer.close()
 
 
+@pytest.mark.parametrize("stage", ["tail", "planning", "chunk"])
+async def test_spooled_read_failure_sends_accumulated_text_as_incomplete(monkeypatch, stage):
+    from audio.buffer import AudioBuffer
+
+    texts = iter(("sealed words", "completed chunk"))
+    calls = 0
+
+    def transcribe(audio, **kwargs):
+        nonlocal calls
+        calls += 1
+        return TranscribeResult(next(texts), 0.9, 0.5)
+
+    lease = SimpleNamespace(session=SimpleNamespace(transcribe=transcribe), close=lambda: None)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: SimpleNamespace(
+        min_audio_for_transcription=0.15, long_dictation_threshold_s=4.0, long_dictation_chunk_s=2.0,
+    ))
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: SimpleNamespace(
+        open_session=lambda _: lease,
+    ))
+    context = SessionContext(audio_buffer=AudioBuffer(_max_resident_bytes=64))
+    context.state_machine.transition_to(SessionState.STARTED)
+    context.audio_buffer.append(0, np.zeros(4 * 16000, dtype=np.int16))
+    processor = processor_module.TranscriptionProcessor(context)
+
+    try:
+        await processor.transcribe_partial()
+        assert processor._committed.text == "sealed words"
+        if stage != "tail":
+            context.audio_buffer.append(1, np.zeros(4 * 16000, dtype=np.int16))
+        read = context.audio_buffer.get_audio_range_float32
+
+        def short_read(start, end):
+            if stage != "chunk" or calls == 2:
+                raise OSError("short read from spool")
+            return read(start, end)
+
+        monkeypatch.setattr(context.audio_buffer, "get_audio_range_float32", short_read)
+        frames = []
+
+        async def send_json(frame):
+            frames.append(frame)
+
+        socket = SimpleNamespace(send_json=send_json)
+        await _finalize_session(FrameSender(socket, context.session_id), context, processor, ClosingReason.STOP_RECEIVED)
+
+        terminal = [frame for frame in frames if frame["type"] != "status"]
+        assert [frame["type"] for frame in terminal] == ["partial", "error", "closing"]
+        expected = "sealed words completed chunk" if stage == "chunk" else "sealed words"
+        assert terminal[0]["text"] == expected
+        assert "incomplete" in terminal[1]["message"].lower()
+        assert calls == (2 if stage == "chunk" else 1)
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
 @pytest.mark.parametrize("oom", [False, True])
 @pytest.mark.parametrize("through_handler", [False, True])
 async def test_lazy_failure_after_completed_chunks_retains_work(monkeypatch, oom, through_handler):

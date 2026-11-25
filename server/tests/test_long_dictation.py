@@ -13,7 +13,7 @@ from session.context import SessionContext
 import transcription.processor as processor_module
 from transcription.errors import VramExhaustedError
 from transcription.long_dictation import AudioChunk, plan_chunks, stitch_text, text_for_chunk
-from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord
 
 
 def _settings(**overrides: object) -> SimpleNamespace:
@@ -189,6 +189,37 @@ def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
     # Ambiguous crossing segments are kept in full; word equality cannot delete them.
     crossing = TranscribeResult("That was that.", 0.9, 1.1, (TranscribeSegment("That was that.", 0.1, 1.1),))
     assert text_for_chunk(crossing, current_chunk, (previous_chunk, old)) == crossing.text
+
+@pytest.mark.parametrize("previous_count", [1, 2])
+@pytest.mark.parametrize("split_current", [False, True])
+def test_overlapping_words_use_each_prior_occurrence_once(previous_count, split_current) -> None:
+    previous = AudioChunk(1, 2, 0, 400000, 0, 400000)
+    current = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
+    previous_words = (
+        (TranscribeWord(" very", 24.25, 24.75),)
+        if previous_count == 1
+        else (TranscribeWord(" very", 24.25, 24.5), TranscribeWord(" very", 24.5, 24.75))
+    )
+    old_text = " ".join(["very"] * previous_count)
+    old_segment = TranscribeSegment(old_text, 24.25, 24.75, previous_words)
+    words = (
+        TranscribeWord(" very", 0.0, 0.25),
+        TranscribeWord(" very", 0.25, 0.5),
+        TranscribeWord(" useful", 0.8, 1.25),
+    )
+    segments = (
+        (TranscribeSegment("very", 0.0, 0.25, words[:1]),
+         TranscribeSegment("very useful", 0.25, 1.25, words[1:]))
+        if split_current
+        else (TranscribeSegment("very very useful", 0.0, 1.25, words),)
+    )
+    result = text_for_chunk(
+        TranscribeResult("very very useful", 0.9, 1.25, segments),
+        current,
+        (previous, TranscribeResult(old_text, 0.9, 24.75, (old_segment,))),
+    )
+    assert result == ("very useful" if previous_count == 1 else "useful")
+
 
 @pytest.mark.asyncio
 async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
