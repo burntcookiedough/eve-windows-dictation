@@ -133,8 +133,10 @@ function blockedOperation(words, cwd, context) {
     if (refs.some((ref) => isTrunk(ref.split(':').at(-1)))) {
       return 'Pushes to trunk are blocked. Open a pull request from a topic branch.';
     }
-    for (const ref of refs) {
-      if (!ref || ref.includes(':') || ref.startsWith('refs/')) continue;
+    for (const refspec of refs) {
+      // Check the source side of `src:dst` too: an unqualified tag source publishes the tag.
+      const ref = (refspec || '').replace(/^\+/, '').split(':')[0];
+      if (!ref || ref.startsWith('refs/') || ref === 'HEAD' || ref === '@') continue;
       if (runGit('show-ref', '--verify', '--quiet', `refs/tags/${ref}`).status !== 0) continue;
       if (runGit('show-ref', '--verify', '--quiet', `refs/heads/${ref}`).status === 0) {
         return 'This name matches a branch and a tag. Push the branch by its full refs/heads/ name.';

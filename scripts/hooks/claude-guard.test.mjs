@@ -160,6 +160,12 @@ test('blocks protected operations and allows topic-branch work', () => {
     const tagPush = runGuard(cwd, 'git push origin custom-release');
     assert.equal(tagPush.status, 2);
     assert.match(tagPush.stderr, /Publishing Git tags/);
+    for (const refspec of ['custom-release:custom-release', 'custom-release:refs/heads/x']) {
+      const sourcePush = runGuard(cwd, `git push origin ${refspec}`);
+      assert.equal(sourcePush.status, 2, refspec);
+      assert.match(sourcePush.stderr, /Publishing Git tags/);
+    }
+    assert.equal(runGuard(cwd, 'git push origin topic/check:topic/check').status, 0);
     git('update-ref', 'refs/heads/custom-release', 'HEAD');
     const ambiguousPush = runGuard(cwd, 'git push origin custom-release');
     assert.equal(ambiguousPush.status, 2);
