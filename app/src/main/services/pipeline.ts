@@ -134,8 +134,11 @@ export async function dispatchToOutputs(
   pasteTargetWindowHandle?: number | null,
   perfTraceId?: string
 ): Promise<DispatchResult> {
-  // Auto-paste temporarily uses the clipboard and can restore the previous value.
-  if (settings.autoPaste && entry.text) {
+  // A failed start-window capture leaves copy and History as the available outputs.
+  if (
+    settings.autoPaste && entry.text && typeof pasteTargetWindowHandle === 'number'
+    && Number.isSafeInteger(pasteTargetWindowHandle) && pasteTargetWindowHandle > 0
+  ) {
     try {
       await pasteText(entry.text, {
         restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,

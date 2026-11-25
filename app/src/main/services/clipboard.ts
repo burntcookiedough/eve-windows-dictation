@@ -5,12 +5,17 @@ import { writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createLogger } from '../lib/logger.js';
 import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
+import { isClipboardSequence, isPasteAbortCode, NativePasteAbortedError, PasteHelperUnavailableError, pasteHelper } from './paste-helper.js';
+import type { AuthorizePaste } from './paste-helper.js';
+import { buildSendInputScriptContent, PasteAbortCode } from './paste-helper-script.js';
+
+export { buildSendInputScriptContent } from './paste-helper-script.js';
 
 const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
 const MIN_RESTORE_DELAY_MS = 750;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
-const FOREGROUND_WINDOW_TIMEOUT_MS = 2000;
+let pasteLifetime = new AbortController();
 
 // VBScript for keyboard simulation — much faster startup than PowerShell (~50ms vs ~300ms).
 // Written to userData once and reused via cscript.
@@ -41,143 +46,6 @@ function ensurePasteScript(): string {
     log.debug('Created paste helper script', { path: pasteScriptPath });
   }
   return pasteScriptPath;
-}
-
-export function buildSendInputScriptContent(): string {
-  return `
-param([long]$TargetWindowHandle = 0)
-
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public class NativePaste {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct INPUT {
-    public uint type;
-    public InputUnion U;
-  }
-
-  [StructLayout(LayoutKind.Explicit)]
-  public struct InputUnion {
-    [FieldOffset(0)] public MOUSEINPUT mi;
-    [FieldOffset(0)] public KEYBDINPUT ki;
-    [FieldOffset(0)] public HARDWAREINPUT hi;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct MOUSEINPUT {
-    public int dx;
-    public int dy;
-    public uint mouseData;
-    public uint dwFlags;
-    public uint time;
-    public IntPtr dwExtraInfo;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct KEYBDINPUT {
-    public ushort wVk;
-    public ushort wScan;
-    public uint dwFlags;
-    public uint time;
-    public IntPtr dwExtraInfo;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct HARDWAREINPUT {
-    public uint uMsg;
-    public ushort wParamL;
-    public ushort wParamH;
-  }
-
-  [DllImport("user32.dll", SetLastError=true)]
-  public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-  [DllImport("user32.dll")]
-  public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")]
-  public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")]
-  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")]
-  public static extern bool IsIconic(IntPtr hWnd);
-
-  public const uint INPUT_KEYBOARD = 1;
-  public const uint KEYEVENTF_KEYUP = 0x0002;
-  public const ushort VK_CONTROL = 0x11;
-  public const ushort VK_MENU = 0x12;
-  public const ushort VK_V = 0x56;
-  public const int SW_RESTORE = 9;
-  private const int FOREGROUND_WAIT_MS = 750;
-  private const int FOREGROUND_POLL_MS = 25;
-
-  private static void SendKey(ushort virtualKey, bool keyUp) {
-    INPUT[] inputs = new INPUT[1];
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].U.ki.wVk = virtualKey;
-    inputs[0].U.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
-    uint sent = SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != 1) {
-      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-    }
-  }
-
-  private static void AllowForegroundSwitch() {
-    SendKey(VK_MENU, false);
-    SendKey(VK_MENU, true);
-  }
-
-  private static bool WaitForForeground(IntPtr target) {
-    int waitedMs = 0;
-    while (GetForegroundWindow() != target && waitedMs < FOREGROUND_WAIT_MS) {
-      System.Threading.Thread.Sleep(FOREGROUND_POLL_MS);
-      waitedMs += FOREGROUND_POLL_MS;
-    }
-    return GetForegroundWindow() == target;
-  }
-
-  public static void Paste(long targetWindowHandle) {
-    if (targetWindowHandle != 0) {
-      IntPtr target = new IntPtr(targetWindowHandle);
-      if (IsWindow(target)) {
-        // The overlay is non-focusable, so the original editor normally remains
-        // foreground. Do not reactivate an already-active top-level window: some
-        // Chromium editors lose their focused child control when that happens.
-        if (GetForegroundWindow() != target) {
-          AllowForegroundSwitch();
-          if (IsIconic(target)) {
-            ShowWindow(target, SW_RESTORE);
-            System.Threading.Thread.Sleep(80);
-          }
-          bool activationRequested = SetForegroundWindow(target);
-          if (!activationRequested && GetForegroundWindow() != target) {
-            throw new InvalidOperationException("Could not focus target window before paste.");
-          }
-          if (!WaitForForeground(target)) {
-            throw new InvalidOperationException("Target window is not foreground before paste.");
-          }
-        }
-      } else {
-        throw new InvalidOperationException("Target window no longer exists before paste.");
-      }
-    }
-
-    INPUT[] inputs = new INPUT[4];
-    inputs[0].type = INPUT_KEYBOARD; inputs[0].U.ki.wVk = VK_CONTROL;
-    inputs[1].type = INPUT_KEYBOARD; inputs[1].U.ki.wVk = VK_V;
-    inputs[2].type = INPUT_KEYBOARD; inputs[2].U.ki.wVk = VK_V; inputs[2].U.ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs[3].type = INPUT_KEYBOARD; inputs[3].U.ki.wVk = VK_CONTROL; inputs[3].U.ki.dwFlags = KEYEVENTF_KEYUP;
-    uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != inputs.Length) {
-      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-    }
-  }
-}
-"@
-[NativePaste]::Paste($TargetWindowHandle)
-`.trimStart();
 }
 
 function ensureSendInputScript(): string {
@@ -250,11 +118,12 @@ async function readClipboardSnapshot(): Promise<ClipboardSnapshot> {
 }
 
 async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<void> {
+  const [firstItem] = snapshot.items;
   if (snapshot.items.length === 0) {
     clipboard.clear();
-  } else if (snapshot.items.length === 1 && snapshot.items[0].types.length === 1
-    && snapshot.items[0].types[0] === 'text/plain') {
-    const text = await snapshot.items[0].getType('text/plain');
+  } else if (snapshot.items.length === 1 && firstItem?.types.length === 1
+    && firstItem.types[0] === 'text/plain') {
+    const text = await firstItem.getType('text/plain');
     await clipboard.writeText(await text.text());
   } else {
     // Electron commits all items and formats in one atomic clipboard write.
@@ -262,98 +131,73 @@ async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<vo
   }
 }
 
-export function getForegroundWindowHandle(): Promise<number | null> {
-  return new Promise((resolve) => {
-    execFile(
-      'powershell',
-      [
-        '-NoProfile',
-        '-Command',
-        `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public class NativeWindow {
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetForegroundWindow();
+export async function getForegroundWindowHandle(): Promise<number | null> {
+  try {
+    return await pasteHelper.foreground();
+  } catch {
+    return null;
+  }
 }
-"@
-[NativeWindow]::GetForegroundWindow().ToInt64()
-`.trim(),
-      ],
-      {
-        windowsHide: true,
-        timeout: FOREGROUND_WINDOW_TIMEOUT_MS,
-      },
-      (error, stdout) => {
-        if (error) {
-          log.error('Failed to capture foreground window', { error });
-          resolve(null);
-          return;
-        }
 
-        const handle = Number.parseInt(stdout.trim(), 10);
-        resolve(Number.isFinite(handle) && handle > 0 ? handle : null);
-      }
-    );
-  });
+export function suspendClipboardPaste(): void {
+  pasteLifetime.abort();
+  pasteHelper.shutdown();
+}
+
+export function resumeClipboardPaste(): void {
+  if (!pasteLifetime.signal.aborted) return;
+  pasteLifetime = new AbortController();
+  pasteHelper.resume();
 }
 
 export async function simulatePaste(
-  method: 'sendinput' | 'vbscript' = 'sendinput',
-  targetWindowHandle?: number | null
+  method: 'sendinput' | 'vbscript',
+  targetWindowHandle: number,
+  clipboardSequence: number | null,
+  perfTraceId?: string,
+  authorize: AuthorizePaste = async dispatch => dispatch()
 ): Promise<void> {
-  const hasTargetWindow = Number.isFinite(targetWindowHandle) && Number(targetWindowHandle) > 0;
-
-  if (method === 'sendinput') {
-    const script = ensureSendInputScript();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        execFile(
-          'powershell',
-          [
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            script,
-            '-TargetWindowHandle',
-            String(targetWindowHandle ?? 0),
-          ],
-          {
-            windowsHide: true,
-            timeout: PASTE_PROCESS_TIMEOUT_MS,
-          },
-          (error) => {
-            if (error) {
-              reject(error);
-            } else {
-              resolve();
-            }
-          }
-        );
-      });
-      return;
-    } catch (error) {
-      if (hasTargetWindow) {
-        log.error('Targeted SendInput paste failed', { error: error as Error });
-      } else {
-        log.error('SendInput paste failed', { error: error as Error });
-      }
-      throw error;
-    }
+  const { signal } = pasteLifetime;
+  if (signal.aborted) return;
+  if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
+    throw new Error('Invalid paste target window handle');
   }
-
-  const script = ensurePasteScript();
-  return new Promise<void>((resolve, reject) => {
-    execFile('cscript', ['//NoLogo', '//B', script], (error) => {
-      if (error) {
-        log.error('Failed to simulate paste', { error });
-        reject(error);
-      } else {
-        resolve();
+  try {
+    if (method === 'vbscript') {
+      await authorize(() => runOneShotPaste('cscript', ['//NoLogo', '//B', ensurePasteScript()], signal, perfTraceId));
+    } else {
+      if (!isClipboardSequence(clipboardSequence)) return;
+      try {
+        await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, authorize);
+      } catch (error) {
+        if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
+        if (signal.aborted) return;
+        const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureSendInputScript(),
+          '-TargetWindowHandle', String(targetWindowHandle), '-ClipboardSequence', String(clipboardSequence)];
+        await authorize(() => runOneShotPaste('powershell', args, signal, perfTraceId));
       }
+    }
+  } catch (error) {
+    if (signal.aborted) return;
+    if (error instanceof NativePasteAbortedError) throw error;
+    log.error('Paste dispatch failed', { error: error as Error });
+    throw error;
+  }
+}
+
+async function runOneShotPaste(command: string, args: string[], signal: AbortSignal, perfTraceId?: string): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve, reject) => {
+    if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
+    execFile(command, args, {
+      windowsHide: true,
+      timeout: PASTE_PROCESS_TIMEOUT_MS,
+      signal,
+    }, (error) => {
+      if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
+      if (command === 'powershell' && isPasteAbortCode(error?.code)) reject(new NativePasteAbortedError(error.code));
+      else if (error) reject(error);
+      else resolve();
     });
   });
 }
@@ -363,7 +207,7 @@ export interface PasteTextOptions {
   restoreClipboard: boolean;
   restoreDelayMs: number;
   method: 'sendinput' | 'vbscript';
-  targetWindowHandle?: number | null;
+  targetWindowHandle: number;
 }
 
 function delay(ms: number): Promise<void> {
@@ -483,6 +327,8 @@ function enqueuePasteCriticalSection(operation: () => Promise<void>): Promise<vo
 }
 
 export async function pasteText(text: string, options: PasteTextOptions): Promise<void> {
+  const { signal } = pasteLifetime;
+  if (signal.aborted) return;
   const pasteGeneration = ++latestPasteGeneration;
   let sequence: PasteSequence | null = null;
   let baselineSnapshot: ClipboardSnapshot | null = null;
@@ -490,10 +336,10 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
   return enqueuePasteCriticalSection(async () => {
     let clipboardOwnershipSignature: string | null = null;
     try {
-      if (pasteGeneration !== latestPasteGeneration) return;
+      if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
       if (options.restoreClipboard) {
         const operation = await beginPasteOperation();
-        if (pasteGeneration !== latestPasteGeneration) return;
+        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
         sequence = operation.sequence;
         baselineSnapshot = operation.baselineSnapshot;
       } else if (activePasteSequence) {
@@ -502,6 +348,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
+      const sequenceRequest = options.method === 'sendinput' && !signal.aborted
+        ? pasteHelper.clipboardSequence().catch(() => null)
+        : null;
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
@@ -521,19 +370,38 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         sequence.ownedSignature = clipboardOwnershipSignature;
       }
 
-      if (pasteGeneration !== latestPasteGeneration) return;
+      const clipboardSequence = await sequenceRequest;
+      if (options.method === 'sendinput' && clipboardSequence === null) return;
+      if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
       await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
+      if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteSettleCompletedAt');
       if (pasteGeneration !== latestPasteGeneration) return;
       const currentSnapshot = await readClipboardSnapshot();
       if (pasteGeneration !== latestPasteGeneration) return;
-      if (currentSnapshot.signature !== clipboardOwnershipSignature) {
+      const stillOwnsClipboard = currentSnapshot.signature === clipboardOwnershipSignature;
+      if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteOwnershipCheckedAt');
+      if (!stillOwnsClipboard) {
         if (sequence && activePasteSequence === sequence) {
           discardPasteSequence(sequence);
         }
         return;
       }
       if (pasteGeneration !== latestPasteGeneration) return;
-      await simulatePaste(options.method, options.targetWindowHandle);
+      const authorize: AuthorizePaste = async dispatch => {
+        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
+        const snapshot = await readClipboardSnapshot().catch(() => null);
+        if (!snapshot || signal.aborted || pasteGeneration !== latestPasteGeneration) return;
+        if (snapshot.signature !== clipboardOwnershipSignature) {
+          if (sequence) discardPasteSequence(sequence);
+          return;
+        }
+        return dispatch();
+      };
+      if (signal.aborted) return;
+      await simulatePaste(options.method, options.targetWindowHandle, clipboardSequence, options.perfTraceId, authorize);
+    } catch (error) {
+      if (!(error instanceof NativePasteAbortedError)) throw error;
+      if (error.code === PasteAbortCode.ClipboardChanged && sequence) discardPasteSequence(sequence);
     } finally {
       if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
         sequence = activePasteSequence;

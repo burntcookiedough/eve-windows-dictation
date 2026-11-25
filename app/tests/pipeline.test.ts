@@ -148,6 +148,7 @@ describe('processFinalTranscription', () => {
       { ...settings, autoPaste: true, autoCopy: false, restoreClipboardAfterPaste: true },
       { save: (entry: TranscriptionEntry) => saved.push(entry) },
       'quick',
+      12345,
     );
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);

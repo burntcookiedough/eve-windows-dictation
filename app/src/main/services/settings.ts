@@ -21,6 +21,12 @@ const store = new Store<Settings>({
   },
 });
 
+// Keep the hotkey path independent of settings-file reads before foreground capture.
+export let autoPasteEnabled = store.get('autoPaste');
+store.onDidChange('autoPaste', value => {
+  autoPasteEnabled = value ?? DEFAULT_SETTINGS.autoPaste;
+});
+
 /**
  * Validate that a hotkey object has the correct shape
  */

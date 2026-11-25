@@ -14,8 +14,9 @@ import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
-import { getForegroundWindowHandle } from './services/clipboard.js';
-import { getSettings, getSetting } from './services/settings.js';
+import { getForegroundWindowHandle, suspendClipboardPaste } from './services/clipboard.js';
+import { pasteHelper } from './services/paste-helper.js';
+import { autoPasteEnabled, getSettings, getSetting } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { GPU_PACK_CTRANSLATE2_BUILD_ID, IPC_CHANNELS } from '../shared/constants.js';
@@ -145,7 +146,6 @@ function showTransientOverlayError(
   sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
   scheduleOverlayDismiss(generation, mode, 'error');
 }
-let currentPasteTargetWindowHandlePromise: Promise<number | null> | null = null;
 
 function broadcastRecordingState<T>(channel: string, payload: T): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -185,6 +185,8 @@ function getRecordingDebugState(): RecordingDebugState {
 
 async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick') {
   if (isRecording || isStopping || !overlayWindow) return;
+  const autoPaste = source === 'normal' && autoPasteEnabled;
+  const pasteTargetWindowHandlePromise = autoPaste ? getForegroundWindowHandle() : null;
 
   // Packaged builds only trust the URL discovered from the managed server.
   const serverState = serverManager?.getState();
@@ -227,9 +229,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   recordingTerminalOverride = null;
   recordingSource = source;
   recordingSessionMode = sessionMode;
-  currentPasteTargetWindowHandlePromise = source === 'normal'
-    ? getForegroundWindowHandle()
-    : null;
+  const { hotwordsEnabled, hotwordsCsl } = getSettings();
   latestTranscription = null;
   latestStatus = null;
   updateConnectionState({ status: 'connecting' });
@@ -247,8 +247,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   const silenceTimeout = sessionMode === 'quick' && isHoldMode
     ? 300
     : getSetting('silenceTimeout');
-  const settings = getSettings();
-  const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
+  const hotwords = hotwordsEnabled ? buildHotwordsPrompt(hotwordsCsl) : undefined;
 
   // Development can connect to a separately started localhost server.
   const serverUrl = discoveredServerUrl ?? LOCAL_SERVER_URL;
@@ -265,7 +264,6 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   transcriptionService = service;
   let serviceCapture: CaptureSession | null = null;
   const serviceSessionMode = sessionMode;
-  const servicePasteTargetWindowHandlePromise = currentPasteTargetWindowHandlePromise;
 
   service.onRecordingState((payload) => {
     if (transcriptionService !== service) return;
@@ -311,13 +309,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     }
 
     if (frame.text) {
-      const pasteTargetWindowHandle = await servicePasteTargetWindowHandlePromise
+      const pasteTargetWindowHandle = await pasteTargetWindowHandlePromise
         ?.catch(() => null) ?? null;
 
       // Process through pipeline (post-processing, clipboard, paste, history)
       const result = await processFinalTranscription(
         frame,
-        getSettings(),
+        { ...getSettings(), autoPaste },
         historyService,
         serviceSessionMode,
         pasteTargetWindowHandle,
@@ -357,7 +355,6 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     recordingSource = null;
     recordingSessionMode = 'quick';
     recordingTerminalOverride = null;
-    currentPasteTargetWindowHandlePromise = null;
 
     scheduleOverlayDismiss(sessionGeneration, closedSessionMode, terminalState);
 
@@ -445,8 +442,8 @@ function toggleLongRecording(): void {
       stopRecording();
     }
   } else {
-    log.info('Long dictation started');
     startRecording('normal', 'long');
+    log.info('Long dictation started');
   }
 }
 
@@ -660,15 +657,12 @@ async function startApplication(): Promise<void> {
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService({
     onHoldStart: () => {
-      if (getSetting('holdToTalk')) {
-        log.info('Quick dictation started (hold mode)');
+      if (!isRecording) {
         startRecording('normal', 'quick');
-      } else if (isRecording) {
+        log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
+      } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
         stopRecording();
-      } else {
-        log.info('Quick dictation started (toggle mode)');
-        startRecording('normal', 'quick');
       }
     },
     onHoldEnd: () => {
@@ -678,12 +672,12 @@ async function startApplication(): Promise<void> {
       }
     },
     onDoubleTap: () => {
-      log.info('Long dictation toggled (double-tap)');
       toggleLongRecording();
+      log.info('Long dictation toggled (double-tap)');
     },
     onLongShortcut: () => {
-      log.info('Long dictation toggled (long hotkey)');
       toggleLongRecording();
+      log.info('Long dictation toggled (long hotkey)');
     },
   });
 
@@ -713,6 +707,11 @@ async function startApplication(): Promise<void> {
     }
   }
 
+  if (getSetting('autoPaste') && serverManager.getState().status === 'running') {
+    void pasteHelper.warmUp().catch(() => {
+      log.debug('Paste helper prewarm failed');
+    });
+  }
   log.info('Eve ready');
 
   // Handle app lifecycle
@@ -746,6 +745,7 @@ app.on('will-quit', async (event) => {
   event.preventDefault();
 
   // Cleanup
+  suspendClipboardPaste();
   transcriptionService?.stop();
   historyService?.close();
   await serverManager?.cleanup();
