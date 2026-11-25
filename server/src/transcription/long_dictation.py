@@ -47,26 +47,33 @@ def plan_chunks(
     sample_rate: int = AUDIO_SAMPLE_RATE,
     silence_search_s: float = 1.5,
     silence_window_s: float = 0.12,
+    start_sample: int = 0,
+    end_sample: int | None = None,
 ) -> list[AudioChunk]:
-    """Plan mostly fixed chunks, nudging boundaries to nearby low-energy audio."""
-    if len(audio) == 0:
+    """Plan mostly fixed chunks, nudging boundaries to nearby low-energy audio.
+
+    ``start_sample``/``end_sample`` restrict planning to an absolute range of
+    ``audio``; returned chunks keep absolute sample offsets.
+    """
+    total_samples = len(audio) if end_sample is None else min(len(audio), end_sample)
+    if total_samples <= start_sample:
         return []
 
     chunk_samples = max(1, int(chunk_s * sample_rate))
     overlap_samples = max(0, int(overlap_s * sample_rate))
-    total_samples = len(audio)
 
     logical_ranges: list[tuple[int, int]] = []
-    logical_start = 0
+    logical_start = max(0, start_sample)
     while logical_start < total_samples:
         target_end = min(total_samples, logical_start + chunk_samples)
         if target_end < total_samples:
-            target_end = _find_quiet_boundary(
+            target_end = find_quiet_boundary(
                 audio,
                 target_end,
                 sample_rate=sample_rate,
                 search_s=silence_search_s,
                 window_s=silence_window_s,
+                limit=total_samples,
             )
             target_end = max(logical_start + sample_rate, target_end)
         logical_ranges.append((logical_start, target_end))
@@ -128,17 +135,19 @@ def text_for_chunk(
     ])
 
 
-def _find_quiet_boundary(
+def find_quiet_boundary(
     audio: NDArray[np.float32] | AudioBuffer,
     target_sample: int,
     *,
-    sample_rate: int,
-    search_s: float,
-    window_s: float,
+    sample_rate: int = AUDIO_SAMPLE_RATE,
+    search_s: float = 1.5,
+    window_s: float = 0.12,
+    limit: int | None = None,
 ) -> int:
+    """Return the quietest sample within ``search_s`` of ``target_sample``."""
     radius = max(1, int(search_s * sample_rate))
     window = max(1, int(window_s * sample_rate))
-    total_samples = len(audio)
+    total_samples = len(audio) if limit is None else min(len(audio), limit)
     lo = max(window, target_sample - radius)
     hi = min(total_samples - window, target_sample + radius)
     if lo >= hi:
