@@ -31,7 +31,7 @@ import {
 } from './server-startup.js';
 import { buildChildEnvironment } from './server-environment.js';
 import { BoundedLogDeliveryQueue, ServerLogFramer } from './server-log-transport.js';
-import type { GpuPackManager, ValidatedGpuRuntime } from './gpu-pack-manager.js';
+import type { GpuPackManager, RuntimeLease, ValidatedGpuRuntime } from './gpu-pack-manager.js';
 
 const log = createLogger('ServerManager');
 

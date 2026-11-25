@@ -5,7 +5,11 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Performance');
 const ID_REGEX = /^[a-zA-Z0-9_.-]{1,64}$/;
-const mainEvents = ['captureCommandAt', 'stopRequestedAt', 'lastAudioDispatchedAt', 'stopDispatchedAt', 'firstPartialReceivedAt', 'finalReceivedAt', 'historyCompletedAt', 'clipboardCompletedAt'] as const;
+const mainEvents = [
+  'captureCommandAt', 'stopRequestedAt', 'lastAudioDispatchedAt', 'stopDispatchedAt',
+  'firstPartialReceivedAt', 'finalReceivedAt', 'historyCompletedAt', 'clipboardCompletedAt',
+  'pasteSettleCompletedAt', 'pasteOwnershipCheckedAt', 'pasteHelperRequestSentAt', 'pasteHelperResponseAt',
+] as const;
 type MainEvent = typeof mainEvents[number];
 const rendererEvents = ['captureStartedAt', 'captureReadyAt', 'lastAudioAt', 'stopRequestedAt', 'firstPartialReceivedAt', 'finalReceivedAt', 'finalDomCommittedAt'] as const;
 const serverDurations = ['last_audio_offset_ms', 'stop_to_lock_wait_ms', 'lock_wait_ms', 'outstanding_partial_wait_ms', 'executor_queue_wait_ms', 'final_inference_start_offset_ms', 'final_inference_end_offset_ms', 'model_inference_ms', 'ws_send_duration_ms'] as const;
