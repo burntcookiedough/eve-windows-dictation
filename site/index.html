@@ -3,78 +3,177 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Eve — talk, and it types. Local dictation for Windows.</title>
-  <meta name="description" content="Hold a hotkey, speak, and your words land wherever you were typing. Eve runs speech recognition on your own machine.">
+  <title>Eve: free local voice dictation for Windows (open source)</title>
+  <meta name="description" content="Eve is a free, open-source dictation app for Windows 10 and 11. Hold a hotkey, speak, and the text is pasted when you stop. Speech runs on your PC. Alpha.">
+  <link rel="canonical" href="https://burntcookiedough.github.io/eve-windows-dictation/">
+  <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0b0b0b">
+
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Eve — talk, and it types.">
-  <meta property="og:description" content="Hold a hotkey, speak, and your words land wherever you were typing. Speech recognition runs on your machine.">
-  <meta property="og:image" content="https://burntcookiedough.github.io/eve-windows-dictation/assets/screens/eve-hero.png">
+  <meta property="og:site_name" content="Eve">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:url" content="https://burntcookiedough.github.io/eve-windows-dictation/">
+  <meta property="og:title" content="Eve: free local voice dictation for Windows">
+  <meta property="og:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, alpha pre-release.">
+  <meta property="og:image" content="https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Talk. Eve pastes it. Local voice dictation for Windows, shown with the Eve cactus and its small dictation pill.">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Eve: free local voice dictation for Windows">
+  <meta name="twitter:description" content="Hold a hotkey, speak, and Eve pastes the text when you stop. Speech recognition runs on your own PC. Open source, alpha pre-release.">
+  <meta name="twitter:image" content="https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png">
+  <meta name="twitter:image:alt" content="Talk. Eve pastes it. Local voice dictation for Windows, shown with the Eve cactus and its small dictation pill.">
+
   <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt">
   <link rel="preload" href="assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Eve",
+    "description": "Free, open-source push-to-talk dictation for Windows. Speech recognition runs on your own machine and Eve pastes the text when you stop. Alpha pre-release.",
+    "url": "https://burntcookiedough.github.io/eve-windows-dictation/",
+    "image": "https://burntcookiedough.github.io/eve-windows-dictation/assets/og.png",
+    "screenshot": "https://burntcookiedough.github.io/eve-windows-dictation/assets/screens/eve-home.png",
+    "operatingSystem": "Windows 10, Windows 11",
+    "processorRequirements": "x86-64",
+    "memoryRequirements": "4 GB minimum; 8 GB or more recommended",
+    "applicationCategory": "UtilitiesApplication",
+    "softwareVersion": "v0.8.2-alpha.9",
+    "releaseNotes": "https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/v0.8.2-alpha.9",
+    "downloadUrl": "https://github.com/burntcookiedough/eve-windows-dictation/releases",
+    "license": "https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/LICENSE",
+    "sameAs": "https://github.com/burntcookiedough/eve-windows-dictation",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": 0, "priceCurrency": "USD" }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Does Eve process speech locally?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. In the packaged app, speech recognition runs in a local service on your machine, and audio and transcripts are never uploaded. Eve still needs the network for downloads: the web installer payload, the speech model on first use, and the optional GPU pack if you install it." }
+      },
+      {
+        "@type": "Question",
+        "name": "What data does Eve keep, and where?",
+        "acceptedAnswer": { "@type": "Answer", "text": "There is no account and no telemetry. History and Insights live in a local SQLite database, normally under %APPDATA%\\Eve. Long-dictation audio is temporary and is never written to History or logs. Copied diagnostics exclude logs, file paths, History, and transcript text, but review any report before you share it." }
+      },
+      {
+        "@type": "Question",
+        "name": "Do I need an NVIDIA GPU?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. Eve runs on the CPU. The optional NVIDIA CUDA pack is a separate download of about 495 MB (about 771 MB installed), verified by hash, that you install from Settings. It needs a supported driver and enough GPU memory, and it has not been shown to work on every NVIDIA machine." }
+      },
+      {
+        "@type": "Question",
+        "name": "Why does Windows SmartScreen warn about the installer?",
+        "acceptedAnswer": { "@type": "Answer", "text": "The Eve installer is unsigned, so Windows SmartScreen may ask you to confirm before it runs. Download it only from the project's GitHub Releases page. Each release publishes SHA256SUMS.txt and SHA512SUMS.txt so you can check the files." }
+      },
+      {
+        "@type": "Question",
+        "name": "What are the system requirements?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Windows 10 or 11 on x86-64, at least 4 GB of RAM (8 GB or more recommended), and an internet connection for the web installer and the first model download. A September 2026 build candidate measured about 686 MB unpacked; allow more space for speech models and the optional GPU pack. The Microsoft Visual C++ Redistributable is required, and Eve links to the official installer when it is missing." }
+      },
+      {
+        "@type": "Question",
+        "name": "Does Eve type into my app while I am still speaking?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. The small pill shows a timer and status, not a transcript. After you stop, Eve transcribes and pastes the text into the active window once. It can then restore your previous clipboard." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Eve ready for everyday use?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Eve v0.8.2-alpha.9 is an alpha pre-release, so expect rough edges. Its release notes say that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. Eve is free and MIT licensed." }
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <a class="skip" href="#main">skip to content</a>
-  <div class="grain" aria-hidden="true"></div>
+
+  <!-- The goo filter from the app's Pill.svelte: it melts the three dots into one bead. -->
+  <svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <filter id="eve-mercury" x="-150%" y="-150%" width="400%" height="400%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5"/>
+      <feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6"/>
+    </filter>
+  </svg>
 
   <header class="nav">
     <a class="brand" href="#top" aria-label="Eve home">
       <svg class="brand-cactus" viewBox="20 6 160 208" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M100 152 H82 Q60 152 60 130 V106" stroke-width="28"/><path d="M100 124 H120 Q142 124 142 102 V78" stroke-width="28"/><path d="M100 214 V50" stroke-width="38"/></g></svg>
-      <span>eve</span>
+      <span>EVE</span>
     </a>
     <nav class="nav-links" aria-label="Sections">
       <a href="#pill">pill</a>
       <a href="#app">app</a>
       <a href="#features">features</a>
       <a href="#privacy">privacy</a>
+      <a href="#faq">faq</a>
       <a href="https://github.com/burntcookiedough/eve-windows-dictation">github</a>
     </nav>
     <a class="nav-cta" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download</a>
   </header>
 
   <main id="main">
-    <!-- 1 · hero: pinned, the cactus listens to the pill -->
-    <section class="hero" id="top" data-pin>
+    <!-- 1 · hero: the cactus listens while the pill runs through one dictation -->
+    <section class="hero" id="top" data-pin aria-labelledby="hero-title">
       <div class="hero-stage">
-        <div class="dots-bg" data-depth="0.15" aria-hidden="true"></div>
         <p class="ghost" data-depth="0.35" aria-hidden="true">speak</p>
 
-        <h1 class="hero-title">
+        <h1 class="hero-title" id="hero-title">
+          <span class="sr-only">Eve, local voice dictation for Windows: </span>
           <span class="ht-left">talk.</span>
-          <span class="ht-right">eve <em>types</em> it.</span>
+          <span class="ht-right">eve <em>pastes</em> it.</span>
         </h1>
 
-        <div class="hero-cactus" data-depth="0.6">
-          <svg class="cactus" viewBox="20 6 160 208" aria-hidden="true" focusable="false">
+        <div class="hero-cactus" data-depth="0.6" aria-hidden="true">
+          <div class="rings" data-hero-rings><span></span><span></span><span></span></div>
+          <svg class="cactus cactus--idle" viewBox="20 6 160 208" focusable="false">
             <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
               <path class="c-armL" pathLength="1" d="M100 152 H82 Q60 152 60 130 V106" stroke-width="28"/>
               <path class="c-armR" pathLength="1" d="M100 124 H120 Q142 124 142 102 V78" stroke-width="28"/>
               <path class="c-trunk" pathLength="1" d="M100 214 V50" stroke-width="38"/>
             </g>
           </svg>
-          <span class="horizon" aria-hidden="true"></span>
+          <span class="horizon"></span>
+          <p class="hero-status"><i data-hero-dot></i><span data-hero-state>listening · 0:07</span></p>
         </div>
 
         <div class="hero-pill" aria-hidden="true">
-          <p class="bubble" data-hero-bubble></p>
-          <div class="pill" data-hero-pill></div>
-          <p class="pill-hint"><span data-hero-state>ready</span> · hold <kbd>ctrl</kbd><kbd>win</kbd></p>
+          <div class="pill-box" data-hero-pill>
+            <div class="pill-wrap">
+              <div class="eve-pill" data-phase="live" data-open="true" data-alert="false">
+                <svg class="check" viewBox="0 0 12 12"><path d="M2 6.4 4.8 9.2 10 3.4" pathLength="1"/></svg>
+                <div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div>
+                <div class="label-slot"><p class="label"><span class="tag"></span><span class="text">0:07</span></p></div>
+              </div>
+            </div>
+          </div>
+          <p class="pill-hint">the app’s dictation pill, enlarged · hold <kbd>ctrl</kbd><kbd>win</kbd></p>
         </div>
 
         <div class="hero-foot">
           <div class="hero-copy">
-            <p class="lede">Hold a hotkey, say what you mean, and the words land wherever you were typing. Speech recognition runs on your own machine. No account, no cloud.</p>
+            <p class="lede">Eve is a free, open-source dictation app for Windows. Hold a hotkey and speak. When you stop, the text is pasted into the active window. Speech recognition runs on your own machine.</p>
             <div class="actions">
               <a class="button primary" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download for windows</a>
               <a class="button" href="https://github.com/burntcookiedough/eve-windows-dictation">view source</a>
             </div>
+            <p class="release-note mono"><span data-version>v0.8.2-alpha.9</span> · <span data-channel>alpha pre-release</span></p>
           </div>
           <dl class="hero-meta">
-            <div><dt>version</dt><dd data-version>v0.8.2-alpha.8</dd></div>
-            <div><dt>platform</dt><dd>windows x64</dd></div>
+            <div><dt>version</dt><dd data-version>v0.8.2-alpha.9</dd></div>
+            <div><dt>platform</dt><dd>windows 10 / 11, x64</dd></div>
             <div><dt>price</dt><dd>free · open source</dd></div>
           </dl>
         </div>
@@ -86,29 +185,36 @@
     <!-- 2 · the pill, told by scrolling -->
     <section class="story" id="pill" data-pin aria-labelledby="story-title">
       <div class="story-stage">
-        <p class="story-big" data-story-big aria-hidden="true">01</p>
+        <p class="story-big" data-story-big aria-hidden="true">05</p>
         <div class="story-head">
-          <p class="label">01 · the pill</p>
+          <p class="label-mono">01 · the pill</p>
           <h2 id="story-title">It stays <em>out of the way.</em></h2>
-          <p class="story-sub">A small pill rises from the bottom of the screen while you talk, shows the words as they arrive, and slips away once the text is pasted. No window to switch to.</p>
+          <p class="section-sub">A small glass pill sits near the bottom of the screen. It widens and shows a timer while it hears you, then shrinks to a breathing dot in silence. It shows no transcript. When you stop, Eve transcribes and pastes the text once.</p>
         </div>
 
         <ol class="story-steps" aria-label="What happens when you dictate">
           <li data-step="0"><span>01</span>ready</li>
           <li data-step="1"><span>02</span>listening</li>
-          <li data-step="2"><span>03</span>live transcript</li>
-          <li data-step="3"><span>04</span>pasted</li>
+          <li data-step="2"><span>03</span>quiet</li>
+          <li data-step="3"><span>04</span>transcribing</li>
+          <li data-step="4"><span>05</span>pasted</li>
         </ol>
 
         <div class="story-scene" aria-hidden="true">
-          <div class="editor">
-            <div class="editor-bar"><span class="editor-brand">message · draft</span><span>to: team</span></div>
-            <p class="editor-text"><span class="editor-typed" data-story-typed>Draft a short update for the team: long dictation is merged, and chunked processing keeps memory flat.</span><span class="caret"></span></p>
+          <div class="editor" data-story-editor>
+            <div class="editor-bar"><span>message · draft</span><span data-story-note>pasted once</span></div>
+            <p class="editor-text"><span data-story-typed>Draft a short update for the team: long dictation is merged, and chunked processing keeps memory flat.</span><span class="caret"></span></p>
           </div>
-          <div class="story-pill-wrap">
-            <p class="bubble" data-story-bubble></p>
-            <div class="pill" data-story-pill></div>
+          <div class="pill-box" data-story-pill>
+            <div class="pill-wrap">
+              <div class="eve-pill" data-phase="done" data-open="true" data-alert="false">
+                <svg class="check" viewBox="0 0 12 12"><path d="M2 6.4 4.8 9.2 10 3.4" pathLength="1"/></svg>
+                <div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div>
+                <div class="label-slot"><p class="label"><span class="tag"></span><span class="text">17 words</span></p></div>
+              </div>
+            </div>
           </div>
+          <p class="story-caption">Illustration with demo text. Timings are not a speed claim.</p>
         </div>
 
         <dl class="keys">
@@ -118,26 +224,81 @@
       </div>
     </section>
 
+    <!-- every state the pill can show, frozen side by side -->
+    <section class="states" aria-labelledby="states-title">
+      <h3 id="states-title" class="label-mono">every state, one small pill</h3>
+      <ul class="state-grid">
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="starting" data-open="true" data-alert="false"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label">Starting</p></div></div></div></div>
+          <p><b>starting</b> the session is opening.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="live" data-open="true" data-alert="false" style="--left:.78;--right:.42;--middle:.6"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label">0:07</p></div></div></div></div>
+          <p><b>listening</b> the bead follows your voice, next to a timer.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="live" data-open="false" data-alert="false"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label">0:09</p></div></div></div></div>
+          <p><b>quiet</b> in silence it shrinks to a breathing dot.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="live" data-open="true" data-alert="false" style="--left:.5;--right:.7;--middle:.35"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label"><span class="tag">Long</span>12:34</p></div></div></div></div>
+          <p><b>long dictation</b> tagged next to the timer.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="working" data-open="true" data-alert="false"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label">Transcribing 2/5</p></div></div></div></div>
+          <p><b>transcribing</b> long sessions show chunk progress.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="done" data-open="true" data-alert="false"><svg class="check" viewBox="0 0 12 12"><path d="M2 6.4 4.8 9.2 10 3.4" pathLength="1"/></svg><div class="label-slot"><p class="label">17 words</p></div></div></div></div>
+          <p><b>done</b> a word count, then it leaves.</p>
+        </li>
+        <li>
+          <div class="pill-box" aria-hidden="true"><div class="pill-wrap"><div class="eve-pill" data-phase="error" data-open="true" data-alert="true"><div class="mercury"><span class="lobe lobe-left"></span><span class="lobe lobe-middle"></span><span class="lobe lobe-right"></span></div><div class="label-slot"><p class="label">Mic blocked</p></div></div></div></div>
+          <p><b>warning</b> a short reason, in red.</p>
+        </li>
+      </ul>
+    </section>
+
     <!-- 3 · the app windows fan out of a stack -->
     <section class="fan" id="app" data-pin aria-labelledby="fan-title">
       <div class="fan-stage">
         <p class="fan-back" aria-hidden="true">one calm place</p>
         <div class="fan-head">
-          <p class="label">02 · the app</p>
+          <p class="label-mono">02 · the app</p>
           <h2 id="fan-title">Everything you said, <em>in one calm place.</em></h2>
         </div>
-        <div class="fan-deck" tabindex="0" role="region" aria-label="App screenshots">
-          <figure class="win" data-win="left">
-            <img src="assets/screens/eve-insights.png" alt="Eve Insights: words over time, time saved compared with typing, and a year of activity" width="1200" height="1800" loading="lazy">
-            <figcaption><b>insights</b> words over time, time saved, a full year of activity. Calculated locally.</figcaption>
+        <div class="fan-deck" tabindex="0" role="region" aria-label="App screenshots with demo data">
+          <figure class="win" data-win="a">
+            <picture>
+              <source srcset="assets/screens/eve-insights-light.webp" type="image/webp" media="(prefers-color-scheme: light)">
+              <source srcset="assets/screens/eve-insights.webp" type="image/webp">
+              <img src="assets/screens/eve-insights.png" alt="Eve Insights window: words dictated over 30 days, time spoken, pace, confidence, and a year of activity (demo data)" width="720" height="1080" loading="lazy" decoding="async">
+            </picture>
+            <figcaption><b>insights</b> words over time and a year of activity. Calculated locally.</figcaption>
           </figure>
-          <figure class="win" data-win="right">
-            <img src="assets/screens/eve-history.png" alt="Eve History: searchable list of past dictations" width="1200" height="1800" loading="lazy">
-            <figcaption><b>history</b> search every dictation, filter, export to JSON or CSV.</figcaption>
-          </figure>
-          <figure class="win" data-win="center">
-            <img src="assets/screens/eve-home.png" alt="Eve Home: today's words, pace, streak, and the last thing you said" width="1200" height="1800" loading="lazy">
+          <figure class="win" data-win="b">
+            <picture>
+              <source srcset="assets/screens/eve-home-light.webp" type="image/webp" media="(prefers-color-scheme: light)">
+              <source srcset="assets/screens/eve-home.webp" type="image/webp">
+              <img src="assets/screens/eve-home.png" alt="Eve Home window: the cactus, today's word count, speaking pace, streak, and the last dictation (demo data)" width="720" height="1080" loading="lazy" decoding="async">
+            </picture>
             <figcaption><b>home</b> words, pace, streak, and the last thing you said.</figcaption>
+          </figure>
+          <figure class="win" data-win="c">
+            <picture>
+              <source srcset="assets/screens/eve-history-light.webp" type="image/webp" media="(prefers-color-scheme: light)">
+              <source srcset="assets/screens/eve-history.webp" type="image/webp">
+              <img src="assets/screens/eve-history.png" alt="Eve History window: a searchable list of past dictations with filters and export (demo data)" width="720" height="1080" loading="lazy" decoding="async">
+            </picture>
+            <figcaption><b>history</b> search, filter, and export to JSON or CSV.</figcaption>
+          </figure>
+          <figure class="win" data-win="d">
+            <picture>
+              <source srcset="assets/screens/eve-settings-light.webp" type="image/webp" media="(prefers-color-scheme: light)">
+              <source srcset="assets/screens/eve-settings.webp" type="image/webp">
+              <img src="assets/screens/eve-settings.png" alt="Eve Settings window: hotkeys, microphone, output style, vocabulary, and speech model" width="720" height="1080" loading="lazy" decoding="async">
+            </picture>
+            <figcaption><b>settings</b> hotkeys, microphone, output style, and model.</figcaption>
           </figure>
         </div>
       </div>
@@ -147,16 +308,16 @@
     <section class="adds" data-pin aria-labelledby="adds-title">
       <div class="adds-stage">
         <div class="adds-head">
-          <p class="label">03 · insights</p>
+          <p class="label-mono">03 · insights</p>
           <h2 id="adds-title">Your voice <em>adds up.</em></h2>
         </div>
         <div class="heat" data-heat aria-hidden="true"></div>
         <div class="adds-stats">
-          <div><p class="stat" data-count="21217">21,217</p><p class="label">words dictated</p></div>
-          <div><p class="stat" data-count="225">225</p><p class="label">active days</p></div>
-          <div><p class="stat" data-count="151" data-suffix=" wpm">151 wpm</p><p class="label">speaking pace</p></div>
+          <div><p class="stat" data-count="17764">17,764</p><p class="label-mono">words this year</p></div>
+          <div><p class="stat" data-count="227">227</p><p class="label-mono">active days</p></div>
+          <div><p class="stat" data-count="150" data-suffix=" wpm">150 wpm</p><p class="label-mono">speaking pace, 30 days</p></div>
         </div>
-        <p class="adds-note">Illustration with demo data. Your numbers stay in a SQLite file on your machine.</p>
+        <p class="adds-note">Illustration with demo data. Your numbers stay in a SQLite database on your machine.</p>
       </div>
     </section>
 
@@ -164,66 +325,72 @@
     <section class="track" id="features" data-pin aria-labelledby="track-title">
       <div class="track-stage">
         <div class="track-head">
-          <p class="label">04 · what it does</p>
+          <p class="label-mono">04 · what it does</p>
           <h2 id="track-title">Small app. <em>Big ears.</em></h2>
         </div>
         <div class="track-rail" data-rail tabindex="0" role="region" aria-label="Features">
           <article class="feat">
             <p class="feat-n">01</p>
-            <div class="feat-vis vis-chunks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <h3>Talk for as long as you need.</h3>
-            <p>Long recordings spool to a temporary file and are transcribed in chunks, so memory stays flat. The audio is deleted when the session ends.</p>
+            <div class="feat-vis vis-keys" aria-hidden="true"><p><kbd>ctrl</kbd><kbd>win</kbd><span>quick</span></p><p><kbd>ctrl</kbd><kbd>shift</kbd><kbd>win</kbd><span>long</span></p></div>
+            <h3>Two ways to talk.</h3>
+            <p>Quick notes or long dictation, each on its own hotkey. Hold to talk, or switch to toggle.</p>
           </article>
           <article class="feat">
             <p class="feat-n">02</p>
-            <div class="feat-vis vis-paste" aria-hidden="true"><span>clipboard</span><b>→</b><span>active window</span><b>→</b><span>restored</span></div>
-            <h3>Lands where you were typing.</h3>
-            <p>Eve copies, pastes into the active window, and can put your previous clipboard back afterwards.</p>
+            <div class="feat-vis vis-chunks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <h3>Long dictation stays light.</h3>
+            <p>Long recordings spool to a temporary file and are transcribed in chunks, so memory use stays flat. The audio is deleted when the session ends.</p>
           </article>
           <article class="feat">
             <p class="feat-n">03</p>
-            <div class="feat-vis vis-styles" aria-hidden="true"><s>so um basically ship it</s><span>Ship it.</span></div>
-            <h3>Raw, or tidied up.</h3>
-            <p>Keep exactly what you said, or use Clean Prompt, Codex Prompt, Message Rewrite, or Command Mode for local, rule-based cleanup.</p>
+            <div class="feat-vis vis-paste" aria-hidden="true"><span>clipboard</span><b>→</b><span>active window</span><b>→</b><span>restored</span></div>
+            <h3>Pasted where you were.</h3>
+            <p>Eve copies the text, pastes it into the active window, and can then restore your previous clipboard.</p>
           </article>
           <article class="feat">
             <p class="feat-n">04</p>
-            <div class="feat-vis vis-chips" aria-hidden="true"><span>Kubernetes</span><span>CUDA</span><span>Priya</span><span>SQLite</span></div>
-            <h3>Knows your words.</h3>
-            <p>Hotwords help Eve spell names, acronyms, and product terms the way you do.</p>
+            <div class="feat-vis vis-styles" aria-hidden="true"><span class="on">raw dictation</span><span>clean prompt</span><span>codex prompt</span><span>message rewrite</span><span>command mode</span></div>
+            <h3>Raw, or tidied up.</h3>
+            <p>Paste exactly what you said with Raw Dictation, or let another output style tidy it with local, rule-based cleanup first.</p>
           </article>
           <article class="feat">
             <p class="feat-n">05</p>
-            <div class="feat-vis vis-models" aria-hidden="true"><span class="on">large-v3-turbo</span><span>large-v3</span><span>small</span></div>
-            <h3>Faster-Whisper, your pick.</h3>
-            <p><code>large-v3-turbo</code> by default, <code>large-v3</code> for maximum accuracy, or <code>small</code> for lighter hardware. Switching never interrupts the current model.</p>
+            <div class="feat-vis" aria-hidden="true"><span>Kubernetes</span><span>CUDA</span><span>Priya</span><span>SQLite</span></div>
+            <h3>Knows your words.</h3>
+            <p>Hotwords help Eve spell names, acronyms, and product terms correctly.</p>
           </article>
           <article class="feat">
             <p class="feat-n">06</p>
-            <div class="feat-vis vis-hw" aria-hidden="true"><span class="on">cpu</span><span>gpu · cuda pack</span></div>
+            <div class="feat-vis vis-column" aria-hidden="true"><span class="on">large-v3-turbo</span><span>large-v3</span><span>small</span></div>
+            <h3>Faster-Whisper, your pick.</h3>
+            <p><code>large-v3-turbo</code> is recommended (about 1.5 GB), <code>large-v3</code> (about 2.9 GB) is for maximum accuracy, and <code>small</code> (about 0.5 GB) suits lighter hardware. The current model keeps working while a new one downloads.</p>
+          </article>
+          <article class="feat">
+            <p class="feat-n">07</p>
+            <div class="feat-vis vis-column" aria-hidden="true"><span class="on">cpu</span><span>gpu · cuda pack</span></div>
             <h3>CPU first. GPU optional.</h3>
-            <p>Works out of the box on the CPU. An optional NVIDIA CUDA pack, verified by hash, speeds things up on supported GPUs.</p>
+            <p>Eve works on the CPU. An optional NVIDIA CUDA pack, downloaded separately (about 495 MB) and verified by hash, speeds up transcription on supported GPUs.</p>
           </article>
         </div>
       </div>
     </section>
 
-    <!-- 6 · privacy: the page turns to the app's light theme -->
+    <!-- 6 · privacy: in dark mode the page turns to the app's light theme -->
     <section class="privacy" id="privacy" data-tone="light" aria-labelledby="privacy-title">
-      <p class="label">05 · privacy</p>
-      <h2 id="privacy-title" class="scrub" data-scrub>Your voice never leaves your computer. No account. No cloud. No telemetry.</h2>
+      <p class="label-mono">05 · privacy</p>
+      <h2 id="privacy-title" class="scrub" data-scrub>Your audio stays on your computer. No account. No telemetry.</h2>
       <dl class="rows">
-        <div class="reveal"><dt>recognition</dt><dd>Speech runs in a service bundled with the app. Audio and transcripts are never uploaded.</dd></div>
-        <div class="reveal"><dt>history</dt><dd>History and Insights live in a SQLite file on your machine. Long-dictation audio is temporary.</dd></div>
-        <div class="reveal"><dt>network</dt><dd>Only for downloads: the installer payload, model weights on first use, and the optional GPU pack.</dd></div>
-        <div class="reveal"><dt>telemetry</dt><dd>None. No account, no analytics. Copied diagnostics exclude logs, paths, and transcript text.</dd></div>
+        <div class="reveal"><dt>recognition</dt><dd>Speech recognition runs in a local service bundled with the app. Audio and transcripts are never uploaded.</dd></div>
+        <div class="reveal"><dt>history</dt><dd>History and Insights live in a local SQLite database. Long-dictation audio is temporary and is never written to History or logs.</dd></div>
+        <div class="reveal"><dt>network</dt><dd>The app uses it for downloads: the installer payload, model weights on first use, and the optional GPU pack if you install it.</dd></div>
+        <div class="reveal"><dt>diagnostics</dt><dd>No telemetry. Copied diagnostics exclude logs, file paths, History, and transcript text. Review any report before you share it.</dd></div>
       </dl>
       <a class="link" href="https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/PRIVACY.md">read the privacy details →</a>
     </section>
 
     <!-- 7 · install -->
     <section class="install" id="install" data-tone="light" aria-labelledby="install-title">
-      <p class="label">06 · install</p>
+      <p class="label-mono">06 · install</p>
       <h2 id="install-title">Three steps. <em>Then talk.</em></h2>
       <ol class="steps">
         <li class="reveal">
@@ -232,32 +399,81 @@
         </li>
         <li class="reveal">
           <span class="step-n" aria-hidden="true">2</span>
-          <div><h3>run it</h3><p>The small web installer fetches the app, so stay online. It's unsigned for now, so SmartScreen may ask you to confirm.</p></div>
+          <div><h3>run it</h3><p>The small web installer downloads the app during setup, so stay online. It is unsigned, so Windows SmartScreen may ask you to confirm.</p></div>
         </li>
         <li class="reveal">
           <span class="step-n" aria-hidden="true">3</span>
-          <div><h3>hold &amp; speak</h3><p>Hold <kbd>ctrl</kbd><kbd>win</kbd> and talk. The speech model downloads the first time.</p></div>
+          <div><h3>hold &amp; speak</h3><p>Open Eve and hold <kbd>ctrl</kbd><kbd>win</kbd>. The speech model downloads from Hugging Face the first time you use it.</p></div>
         </li>
       </ol>
+
+      <h3 class="label-mono req-title" id="requirements">system requirements</h3>
+      <dl class="rows rows-tight">
+        <div><dt>windows</dt><dd>Windows 10 or 11, x86-64.</dd></div>
+        <div><dt>memory</dt><dd>4 GB minimum; 8 GB or more recommended.</dd></div>
+        <div><dt>disk</dt><dd>About 686 MB unpacked, measured on a September 2026 build candidate. Allow more for speech models and the optional GPU pack.</dd></div>
+        <div><dt>internet</dt><dd>Needed for the web installer and the first model download.</dd></div>
+        <div><dt>runtime</dt><dd>Microsoft Visual C++ Redistributable. Eve links to the official installer when it is missing.</dd></div>
+        <div><dt>gpu</dt><dd>Not required. The optional NVIDIA pack needs a supported driver and enough GPU memory.</dd></div>
+      </dl>
+
+      <p class="alpha-note"><b>This is an alpha pre-release.</b> Expect rough edges and read the <a href="https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/releases/eve-v0.8.2-alpha.9-release-notes.md">v0.8.2-alpha.9 release notes</a> first. Checksums (<code>SHA256SUMS.txt</code>, <code>SHA512SUMS.txt</code>) are published with each release.</p>
+    </section>
+
+    <!-- 8 · questions -->
+    <section class="faq" id="faq" aria-labelledby="faq-title">
+      <p class="label-mono">07 · faq</p>
+      <h2 id="faq-title">Questions, <em>answered plainly.</em></h2>
+      <div class="faq-list">
+        <div class="faq-item">
+          <h3>Does Eve process speech locally?</h3>
+          <p>Yes. In the packaged app, speech recognition runs in a local service on your machine, and audio and transcripts are never uploaded. Eve still needs the network for downloads: the web installer payload, the speech model on first use, and the optional GPU pack if you install it.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What data does Eve keep, and where?</h3>
+          <p>There is no account and no telemetry. History and Insights live in a local SQLite database, normally under %APPDATA%\Eve. Long-dictation audio is temporary and is never written to History or logs. Copied diagnostics exclude logs, file paths, History, and transcript text, but review any report before you share it.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Do I need an NVIDIA GPU?</h3>
+          <p>No. Eve runs on the CPU. The optional NVIDIA CUDA pack is a separate download of about 495 MB (about 771 MB installed), verified by hash, that you install from Settings. It needs a supported driver and enough GPU memory, and it has not been shown to work on every NVIDIA machine.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Why does Windows SmartScreen warn about the installer?</h3>
+          <p>The Eve installer is unsigned, so Windows SmartScreen may ask you to confirm before it runs. Download it only from the project's GitHub Releases page. Each release publishes SHA256SUMS.txt and SHA512SUMS.txt so you can check the files.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What are the system requirements?</h3>
+          <p>Windows 10 or 11 on x86-64, at least 4 GB of RAM (8 GB or more recommended), and an internet connection for the web installer and the first model download. A September 2026 build candidate measured about 686 MB unpacked; allow more space for speech models and the optional GPU pack. The Microsoft Visual C++ Redistributable is required, and Eve links to the official installer when it is missing.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Does Eve type into my app while I am still speaking?</h3>
+          <p>No. The small pill shows a timer and status, not a transcript. After you stop, Eve transcribes and pastes the text into the active window once. It can then restore your previous clipboard.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Is Eve ready for everyday use?</h3>
+          <p>Eve v0.8.2-alpha.9 is an alpha pre-release, so expect rough edges. Its release notes say that automated tests and synthetic overlay checks do not establish real microphone dictation acceptance or clean-machine installer lifecycle acceptance. Eve is free and MIT licensed.</p>
+        </div>
+      </div>
     </section>
   </main>
 
   <footer class="footer">
     <div class="footer-cta">
       <h2>say <em>something.</em></h2>
-      <a class="button primary big" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download <span data-version>v0.8.2-alpha.8</span></a>
+      <a class="button primary big" data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">download <span data-version>v0.8.2-alpha.9</span></a>
     </div>
 
     <div class="footer-links">
-      <p class="footer-note">Eve is MIT licensed and derived from Murmur by Raik Rohde. Speech recognition by Faster-Whisper.</p>
+      <p class="footer-note">Eve is MIT licensed and derived from Murmur by Raik Rohde. Speech recognition by Faster-Whisper and CTranslate2.</p>
       <nav aria-label="Project">
-        <p class="label">project</p>
+        <p class="label-mono">project</p>
         <a href="https://github.com/burntcookiedough/eve-windows-dictation">github</a>
         <a href="https://github.com/burntcookiedough/eve-windows-dictation/tree/trunk/docs">docs</a>
         <a href="https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/.github/SUPPORT.md">support</a>
+        <a href="llms.txt">llms.txt</a>
       </nav>
       <nav aria-label="Get Eve">
-        <p class="label">get it</p>
+        <p class="label-mono">get it</p>
         <a data-download href="https://github.com/burntcookiedough/eve-windows-dictation/releases">latest release</a>
         <a href="#install">install guide</a>
         <a href="#top">back to top ↑</a>
@@ -268,7 +484,6 @@
       <p class="crowd-word">eve</p>
       <canvas class="crowd-canvas"></canvas>
     </div>
-
   </footer>
 
   <script src="main.js" defer></script>

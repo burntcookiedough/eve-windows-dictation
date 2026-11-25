@@ -1,10 +1,13 @@
 const repo = 'burntcookiedough/eve-windows-dictation';
 
-fetch(`https://api.github.com/repos/${repo}/releases?per_page=1`)
+// The release list also holds GPU runtime packs, so only accept app tags (v1.2.3...).
+fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`)
   .then((response) => (response.ok ? response.json() : []))
-  .then(([release]) => {
+  .then((releases) => {
+    const release = releases.find((r) => !r.draft && /^v\d/.test(r.tag_name));
     if (!release) return;
     document.querySelectorAll('[data-version]').forEach((el) => { el.textContent = release.tag_name; });
+    document.querySelectorAll('[data-channel]').forEach((el) => { el.textContent = release.prerelease ? 'alpha pre-release' : 'latest release'; });
     document.querySelectorAll('[data-download]').forEach((el) => { el.href = release.html_url; });
   })
   .catch(() => {});
@@ -24,103 +27,142 @@ const easeOut = (t) => 1 - (1 - t) ** 3;
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
-/* ---------- the pill, rebuilt from the overlay ---------- */
+/* ---------- the pill: the app's overlay states, driven by a pretend voice ---------- */
 
-function makePill(el, count = 30) {
-  const bars = Array.from({ length: count }, () => el.appendChild(document.createElement('i')));
-  const seeds = bars.map((_, i) => 1.3 + ((i * 7919) % 97) / 40);
+// From overlay/pill-view.ts and main/index.ts.
+const VOICE_HOLD_MS = 800;
+const INTRO_HOLD_MS = 1600;
+const SUCCESS_DWELL_MS = 900;
+
+// The markup and CSS port overlay/components/Pill.svelte; this only sets its props.
+function makePill(box) {
+  const pill = $('.eve-pill', box);
+  const text = $('.text', pill);
+  const put = (key, value) => { if (pill.dataset[key] !== value) pill.dataset[key] = value; };
   return {
-    el,
-    render(t, level) {
-      const c = (count - 1) / 2;
-      bars.forEach((bar, i) => {
-        const envelope = Math.exp(-(((i - c) / (count * 0.26)) ** 2));
-        const wobble = 0.35 + 0.65 * Math.abs(Math.sin(t * seeds[i] * 0.006 + i * 1.3));
-        bar.style.height = `${3 + level * envelope * wobble * 44}px`;
-      });
+    show({ phase, open = true, label = '', visible = true }) {
+      pill.classList.toggle('is-hidden', !visible);
+      put('phase', phase);
+      put('open', String(open));
+      // Like the app, keep the last label while closing so it clips away instead of blinking out.
+      if (label && text.textContent !== label) text.textContent = label;
+    },
+    // Each lobe reads the voice a moment apart (1, 5 and 10 frames of 40 ms history).
+    listen(now, speaking) {
+      const lobe = (ago) => (speaking ? Math.sqrt(voice(now - ago)) : 0).toFixed(3);
+      pill.style.setProperty('--left', lobe(0));
+      pill.style.setProperty('--right', lobe(160));
+      pill.style.setProperty('--middle', lobe(360));
     },
   };
 }
 
-// Smooth voice-ish level from time: 0 when silent, ~0.4–1 while talking.
-const voice = (t) => clamp(0.55 + 0.3 * Math.sin(t * 0.0047) + 0.2 * Math.sin(t * 0.013 + 1.7));
+// Smooth voice-like level in 0..1, with syllable-sized dips.
+const voice = (t) => clamp(0.55 + 0.3 * Math.sin(t * 0.0047) + 0.2 * Math.sin(t * 0.013 + 1.7)) * (0.45 + 0.55 * Math.abs(Math.sin(t * 0.0105)));
+const timer = (ms) => `0:${String(Math.floor(ms / 1000)).padStart(2, '0')}`;
 
-/* ---------- hero: cactus listens to the pill ---------- */
+/* ---------- hero: the cactus mirrors the app's Home view during one dictation ---------- */
 
 const cactus = $('.hero-cactus .cactus');
-const armL = $('.c-armL', cactus);
-const armR = $('.c-armR', cactus);
 const heroPill = makePill($('[data-hero-pill]'));
-const heroBubble = $('[data-hero-bubble]');
 const heroState = $('[data-hero-state]');
+const heroDot = $('[data-hero-dot]');
+const heroRings = $('[data-hero-rings]');
 
-if (reduced) {
-  cactus.classList.add('is-idle');
-} else {
-  cactus.classList.add('is-drawing');
-  setTimeout(() => { cactus.classList.remove('is-drawing'); cactus.classList.add('is-idle'); }, 2500);
+function setCactus(state, level = 0) {
+  for (const name of ['idle', 'listening', 'transcribing', 'done']) cactus.classList.toggle(`cactus--${name}`, name === state);
+  cactus.style.setProperty('--lvl', level.toFixed(3));
 }
 
-const heroLines = [
-  'Remind me to review the installer pull request before lunch.',
-  'Reply to Priya: thanks for the notes, revised copy by Thursday.',
-  'Write a commit message that says separate failed replay requests.',
-];
+function setHeroStatus(text, state) {
+  if (heroState.textContent !== text) heroState.textContent = text;
+  const dot = state === 'listening' || state === 'transcribing' ? `is-${state}` : '';
+  if (heroDot.className !== dot) heroDot.className = dot;
+  heroRings.classList.toggle('is-active', state === 'listening');
+}
+
+if (!reduced) {
+  cactus.classList.add('cactus--draw');
+  setTimeout(() => cactus.classList.remove('cactus--draw'), 2500);
+}
 
 const heroLoop = (() => {
-  let line = 0;
-  let start = performance.now() + 2600;
+  // Two spoken stretches with a pause long enough to show the quiet dot.
+  const speech = [[0, 2600], [4700, 6400]];
+  const marks = { idle: 900, starting: 1800, live: 8200, working: 9700 };
+  marks.done = marks.working + SUCCESS_DWELL_MS;
+  const end = marks.done + 1600;
+  let start = performance.now() + 1600;
   return (now) => {
-    const words = heroLines[line].split(' ');
+    if (now - start > end) start = now;
     const t = now - start;
-    const talkStart = 1300;
-    const talkEnd = talkStart + 600 + words.length * 190;
-    const end = talkEnd + 2000;
-    if (t > end) { line = (line + 1) % heroLines.length; start = now; }
-    const talking = t > talkStart && t < talkEnd;
-    const level = talking ? voice(now) : 0;
-    heroPill.render(now, level);
-    armL.style.transform = `rotate(${level * 16}deg)`;
-    armR.style.transform = `rotate(${level * -16}deg)`;
-    const shown = clamp(Math.floor((t - talkStart - 600) / 190) + 1, 0, words.length);
-    heroBubble.textContent = t > talkStart + 600 ? words.slice(0, shown).join(' ') : '';
-    heroBubble.classList.toggle('is-on', t > talkStart + 600 && t < end - 500);
-    heroState.textContent = talking ? 'listening' : t > talkEnd && t < end - 500 ? 'pasted' : 'ready';
+    if (t < marks.idle || t >= marks.done) {
+      heroPill.show({ phase: t < marks.idle ? 'live' : 'done', open: t >= marks.done, visible: false });
+      setCactus('idle');
+      setHeroStatus('ready', 'idle');
+    } else if (t < marks.starting) {
+      heroPill.show({ phase: 'starting', label: 'Starting' });
+      setCactus('idle');
+      setHeroStatus('starting', 'transcribing');
+    } else if (t < marks.live) {
+      const at = t - marks.starting;
+      const speaking = speech.some(([from, to]) => at >= from && at < to);
+      const open = at < INTRO_HOLD_MS || speech.some(([from, to]) => at >= from && at < to + VOICE_HOLD_MS);
+      heroPill.show({ phase: 'live', open, label: timer(at) });
+      heroPill.listen(now, speaking);
+      setCactus('listening', speaking ? voice(now) : 0);
+      setHeroStatus(`listening · 0:${timer(at).slice(2)}`, 'listening');
+    } else if (t < marks.working) {
+      heroPill.show({ phase: 'working', label: 'Transcribing' });
+      setCactus('transcribing');
+      setHeroStatus('transcribing', 'transcribing');
+    } else {
+      heroPill.show({ phase: 'done', label: '11 words' });
+      setCactus('done');
+      setHeroStatus('done', 'idle');
+    }
   };
 })();
 
-// Reduced motion: one still frame of the pill mid-transcript instead of the loop.
+// Reduced motion: one still, listening frame instead of the loop.
 function holdHero() {
-  heroPill.render(0, 0.7);
-  armL.style.transform = armR.style.transform = '';
-  heroBubble.textContent = heroLines[0];
-  heroBubble.classList.add('is-on');
-  heroState.textContent = 'listening';
+  heroPill.show({ phase: 'live', label: '0:07' });
+  heroPill.listen(0, false);
+  setCactus('idle');
+  setHeroStatus('listening · 0:07', 'listening');
 }
 if (reduced) holdHero();
 
-/* ---------- story: ready → listening → transcript → pasted ---------- */
+/* ---------- story: ready → listening → quiet → transcribing → pasted once ---------- */
 
 const storyPill = makePill($('[data-story-pill]'));
-const storyBubble = $('[data-story-bubble]');
+const storyEditor = $('[data-story-editor]');
 const storyTyped = $('[data-story-typed]');
+const storyNote = $('[data-story-note]');
 const storySteps = $$('.story-steps li');
 const storyBig = $('[data-story-big]');
-const storyWords = 'Draft a short update for the team: long dictation is merged, and chunked processing keeps memory flat.'.split(' ');
+const storyLine = storyTyped.textContent;
+const storyCount = `${storyLine.split(' ').length} words`;
 
 function renderStory(p, now) {
-  const step = p < 0.18 ? 0 : p < 0.38 ? 1 : p < 0.76 ? 2 : 3;
+  const step = p < 0.12 ? 0 : p < 0.44 ? 1 : p < 0.6 ? 2 : p < 0.76 ? 3 : 4;
   storySteps.forEach((li, i) => li.classList.toggle('is-on', i === step));
-  storyBig.textContent = `0${step + 1}`;
-  storyBig.style.transform = `translate3d(0, ${(0.5 - p) * 30}vh, 0)`;
-  storyPill.render(now, step === 1 || step === 2 ? voice(now) : 0);
-  const shown = Math.ceil(range(p, 0.4, 0.72) * storyWords.length);
-  storyBubble.textContent = storyWords.slice(0, shown).join(' ');
-  storyBubble.classList.toggle('is-on', step === 2 && shown > 0);
-  storyTyped.textContent = step === 3 ? storyWords.join(' ') : '';
-  const away = range(p, 0.8, 0.95);
-  storyPill.el.style.transform = `translateY(${away * 40}px)`;
-  storyPill.el.style.opacity = String(1 - away * 0.7);
+  if (storyBig.textContent !== `0${step + 1}`) storyBig.textContent = `0${step + 1}`;
+  storyBig.style.transform = isStatic ? '' : `translate3d(0, ${(0.5 - p) * 30}vh, 0)`;
+  const label = timer(range(p, 0.12, 0.6) * 7000);
+  if (step === 0) storyPill.show({ phase: 'live', open: false, visible: false });
+  else if (step === 1) storyPill.show({ phase: 'live', label });
+  else if (step === 2) storyPill.show({ phase: 'live', open: false, label });
+  else if (step === 3) storyPill.show({ phase: 'working', label: 'Transcribing' });
+  // The pill leaves after its done state; reduced motion keeps the still frame.
+  else storyPill.show({ phase: 'done', label: storyCount, visible: reduced || p < 0.93 });
+  storyPill.listen(now, step === 1 && !reduced);
+  // Nothing reaches the editor until the end: the whole text arrives in one paste.
+  const text = step === 4 ? storyLine : '';
+  if (storyTyped.textContent !== text) storyTyped.textContent = text;
+  storyEditor.classList.toggle('is-pasted', step === 4);
+  const note = step === 4 ? 'pasted once' : 'waiting for you to stop';
+  if (storyNote.textContent !== note) storyNote.textContent = note;
 }
 
 /* ---------- fan: windows rise out of a stack ---------- */
@@ -128,20 +170,21 @@ function renderStory(p, now) {
 const wins = $$('.win');
 const fanBack = $('.fan-back');
 const poses = {
-  left: { x: -1, y: 34, ry: 16, rz: -3, s: 0.96, z: -120 },
-  center: { x: 0, y: -14, ry: 0, rz: 0, s: 1.06, z: 40 },
-  right: { x: 1, y: 34, ry: -16, rz: 3, s: 0.96, z: -120 },
+  a: { x: -1.5, y: 30, ry: 13, rz: -3, s: 0.95, z: -90 },
+  b: { x: -0.5, y: -6, ry: 4, rz: -1, s: 1, z: 20 },
+  c: { x: 0.5, y: -6, ry: -4, rz: 1, s: 1, z: 20 },
+  d: { x: 1.5, y: 30, ry: -13, rz: 3, s: 0.95, z: -90 },
 };
 
 function renderFan(p) {
   const e = easeInOut(range(p, 0.02, 0.62));
-  const spread = Math.min(innerWidth * 0.26, 400);
+  const spread = Math.min(innerWidth * 0.235, wins[0].offsetWidth + 40);
   wins.forEach((win, i) => {
     const pose = poses[win.dataset.win];
     const x = lerp(0, pose.x * spread, e);
-    const y = lerp(innerHeight * 0.22 + i * 14, pose.y, e);
+    const y = lerp(innerHeight * 0.22 + i * 12, pose.y, e);
     const rx = lerp(55, 0, e);
-    const rz = lerp((i - 1) * 4, pose.rz, e);
+    const rz = lerp((i - 1.5) * 4, pose.rz, e);
     win.style.transform = `translate3d(${x}px, ${y}px, ${lerp(-200, pose.z, e)}px) rotateX(${rx}deg) rotateY(${pose.ry * e}deg) rotateZ(${rz}deg) scale(${lerp(0.82, pose.s, e)})`;
     win.style.setProperty('--cap', String(range(p, 0.62, 0.82)));
   });
@@ -153,14 +196,14 @@ function renderFan(p) {
 const heat = $('[data-heat]');
 const cells = [];
 {
-  let s = 20261028;
+  let s = 20261031;
   const rand = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const frag = document.createDocumentFragment();
   for (let row = 0; row < 7; row++) {
     for (let col = 0; col < 53; col++) {
       const i = document.createElement('i');
       const r = rand();
-      i.dataset.l = r < 0.3 ? '1' : r < 0.6 ? '2' : r < 0.85 ? '3' : '4';
+      i.style.setProperty('--o', r < 0.38 ? '0.07' : r < 0.58 ? '0.24' : r < 0.76 ? '0.45' : r < 0.9 ? '0.7' : '0.95');
       cells.push({ el: i, at: (col / 53) * 0.86 + rand() * 0.12, on: false });
       frag.appendChild(i);
     }
@@ -210,9 +253,13 @@ function renderScrub() {
   scrubWords.forEach((w, i) => w.classList.toggle('on', i < n));
 }
 
-/* ---------- tone: privacy turns the page to the app's light theme ---------- */
+/* ---------- tone: in dark mode, privacy turns the page to the app's light theme ---------- */
 
 const themeMeta = $('meta[name="theme-color"]');
+const syncThemeColor = () => { themeMeta.content = getComputedStyle(root).getPropertyValue('--bg').trim(); };
+const lightQuery = matchMedia('(prefers-color-scheme: light)');
+if (lightQuery.addEventListener) lightQuery.addEventListener('change', syncThemeColor);
+syncThemeColor();
 const lit = new Set();
 if ('IntersectionObserver' in window) {
   const toneObserver = new IntersectionObserver((entries) => {
@@ -220,7 +267,7 @@ if ('IntersectionObserver' in window) {
       if (entry.isIntersecting) lit.add(entry.target); else lit.delete(entry.target);
     }
     if (lit.size) root.dataset.tone = 'light'; else delete root.dataset.tone;
-    themeMeta.content = lit.size ? '#f4f4f2' : '#0b0b0b';
+    syncThemeColor();
   }, { rootMargin: '-49% 0px -50% 0px' });
   $$('[data-tone="light"]').forEach((el) => toneObserver.observe(el));
 }
@@ -255,7 +302,6 @@ const heroParts = {
   ghost: $('.ghost'),
   pill: $('.hero-pill'),
   foot: $('.hero-foot'),
-  dots: $('.dots-bg'),
   cue: $('.scroll-cue'),
 };
 const depthEls = $$('[data-depth]');
@@ -303,8 +349,8 @@ function frame(now) {
 
   if (isStatic) {
     // Reduced motion holds one readable frame; narrow screens auto-play the story.
-    if (reduced) renderStory(0.72, 0);
-    else renderStory(((now / 11000) % 1) * 0.98, now);
+    if (reduced) renderStory(0.84, 0);
+    else renderStory((now / 12000) % 1, now);
     if (!staticAddsStart && !reduced) {
       const rect = heat.getBoundingClientRect();
       if (rect.top < innerHeight * 0.85 && rect.bottom > 0) staticAddsStart = now;
@@ -321,7 +367,6 @@ function frame(now) {
       heroParts.cactus.style.transform = `translate3d(0, ${hp * 6}vh, 0) scale(${1 + hp * 1.1})`;
       heroParts.cactus.style.opacity = String(1 - range(h, 0.7, 1));
       heroParts.ghost.style.transform = `translate(-50%, calc(-50% - ${hp * 18}vh)) scale(${1 + hp * 0.25})`;
-      heroParts.dots.style.transform = `scale(${1 + hp * 0.35})`;
       const fade = 1 - range(h, 0, 0.35);
       heroParts.pill.style.opacity = heroParts.foot.style.opacity = heroParts.cue.style.opacity = String(fade);
       heroParts.pill.style.transform = `translate(-50%, ${(1 - fade) * 60}px)`;
@@ -457,7 +502,12 @@ requestAnimationFrame(frame);
     }
   }
 
-  const load = () => { sheet.onload = start; sheet.src = 'assets/peeps/open-peeps-sheet.png'; };
+  const load = () => {
+    sheet.onload = start;
+    // Browsers without AVIF fall back to the PNG.
+    sheet.onerror = () => { sheet.onerror = null; sheet.src = 'assets/peeps/open-peeps-sheet.png'; };
+    sheet.src = 'assets/peeps/open-peeps-sheet.avif';
+  };
   if ('IntersectionObserver' in window) {
     new IntersectionObserver((entries, obs) => {
       if (!entries[0].isIntersecting) return;
