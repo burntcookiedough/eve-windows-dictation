@@ -56,7 +56,7 @@ function commandName(program) {
 function blockedOperation(words, cwd, context) {
   const [program, ...args] = words;
   const executable = commandName(program);
-  if (['cd', 'set-location', 'pushd'].includes(executable)) {
+  if (['cd', 'chdir', 'sl', 'set-location', 'pushd', 'push-location'].includes(executable)) {
     context.changed = true;
     return;
   }

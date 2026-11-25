@@ -78,8 +78,11 @@ test('blocks protected operations and allows topic-branch work', () => {
       'git switch trunk && git reset --hard HEAD~1',
       'git checkout trunk; git reset --hard',
       'cd other && git reset --hard',
+      'ChDiR other; git reset --hard',
+      'SL other; git reset --hard',
       'Set-Location other; git reset --hard',
       'pushd other; git reset --hard',
+      'Push-Location other; git reset --hard',
       'git -C other status && git reset --hard',
       'git switch trunk && bash -c "git reset --hard"',
     ]) {

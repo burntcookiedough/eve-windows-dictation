@@ -70,8 +70,6 @@ jobs:
         run: bun run test:history
 
       - name: Type-check app
-        # Remove continue-on-error once PR #135 fixes TS2345 in gpu-pack-manager.ts.
-        continue-on-error: true
         run: bun run typecheck
 
       - name: Build app
