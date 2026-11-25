@@ -1,6 +1,6 @@
+import type { MurmurAPI } from '../main/preload/overlay.js';
 import type {
   AvailableEngine,
-  AudioCaptureErrorPayload,
   ConnectionStatePayload,
   EngineStatus,
   GpuPackState,
@@ -15,8 +15,6 @@ import type {
   InsightsResponse,
   RecordingDebugState,
   RecordingStatePayload,
-  RecordingStatusPayload,
-  RecordingWarningPayload,
   ServerLogEntry,
   ServerSettingsResponse,
   ServerStatePayload,
@@ -77,19 +75,7 @@ declare global {
       getAvailableEngines: () => Promise<AvailableEngine[]>;
       removeAllListeners: () => void;
     };
-    murmur: {
-      onRecordingState: (callback: (state: RecordingStatePayload) => void) => () => void;
-      onConnectionState: (callback: (state: ConnectionStatePayload) => void) => () => void;
-      onTranscription: (callback: (data: TranscriptionPayload) => void) => () => void;
-      onWarning: (callback: (warning: RecordingWarningPayload) => void) => () => void;
-      onStatus: (callback: (status: RecordingStatusPayload) => void) => () => void;
-      onStartRecording: (callback: (deviceId?: string) => void) => () => void;
-      onStopRecording: (callback: () => void) => () => void;
-      sendAudioData: (buffer: ArrayBuffer) => void;
-      reportAudioCaptureError: (payload: AudioCaptureErrorPayload) => void;
-      copyToClipboard: (text: string) => void;
-      removeAllListeners: () => void;
-    };
+    murmur: MurmurAPI;
   }
 }
 

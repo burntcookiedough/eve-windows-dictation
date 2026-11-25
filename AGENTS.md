@@ -37,6 +37,8 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
 
 - Keep changes focused; preserve existing user changes and do not rewrite history.
 - Run the smallest relevant tests, then required full checks. Review `git diff --check`.
+- Set up [local hooks](.github/CONTRIBUTING.md#local-hooks) in a new clone.
+- Follow the [parallel agent workflow](docs/development/agent-workflow.md#parallel-agents) when working alongside other agents.
 - Extended collaboration and validation guidance: [agent workflow](docs/development/agent-workflow.md).
 
 ## Commit attribution

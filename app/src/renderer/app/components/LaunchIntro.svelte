@@ -38,7 +38,7 @@
 
   onMount(() => {
     let active = true;
-    let finishTimer: ReturnType<typeof setTimeout> | null = null;
+    let finishTimer: number | null = null;
     const runFrame = requestAnimationFrame(() => { running = true; });
     const flightTimer = window.setTimeout(() => {
       if (!active || !plant) return;

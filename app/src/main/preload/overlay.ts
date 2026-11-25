@@ -105,9 +105,3 @@ contextBridge.exposeInMainWorld('murmur', murmurAPI);
 
 // TypeScript declaration for the exposed API
 export type MurmurAPI = typeof murmurAPI;
-
-declare global {
-  interface Window {
-    murmur: typeof murmurAPI;
-  }
-}
