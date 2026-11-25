@@ -49,7 +49,7 @@ It stays out of the way. A translucent dot appears at the bottom of the screen, 
 into a small timer pill while you talk, and disappears when the text is pasted.
 
 <p align="center">
-  <img src="site/assets/screens/eve-overlay.png" alt="The dictation pill in an earlier design, with a live transcript" width="100%">
+  <img src="site/assets/screens/eve-overlay.png" alt="Eve's compact dictation pill while speaking, in silence, while transcribing, and when done" width="100%">
 </p>
 
 ## A quick tour
