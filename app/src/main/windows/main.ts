@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getMainWindowBounds, setMainWindowBounds, getSettings } from '../services/settings.js';
 import { getEveIcon } from '../services/app-icon.js';
+import { resumeClipboardPaste, suspendClipboardPaste } from '../services/clipboard.js';
 import { fitMainWindowBounds } from './main-window-bounds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +17,7 @@ const QUIT_FLUSH_TIMEOUT_MS = 10_000;
 
 // Wait for deferred History deletes before the app closes its database services.
 app.on('before-quit', (event) => {
+  suspendClipboardPaste();
   if (isQuitting) return;
   const window = mainWindowForQuit;
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
@@ -44,6 +46,7 @@ app.on('before-quit', (event) => {
     .catch((error: unknown) => {
       console.error('Failed to flush History deletes during app shutdown:', error);
       quitFlushPending = false;
+      resumeClipboardPaste();
       if (!window.isDestroyed()) showMainWindow(window);
     });
 });
