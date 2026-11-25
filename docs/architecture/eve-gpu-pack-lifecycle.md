@@ -3,8 +3,39 @@
 The Electron main process owns the optional NVIDIA component. The application
 descriptor remains the trust root for the two production assets: **494,950,029
 compressed bytes** and **771,188,224 installed bytes**. Downloaded metadata cannot
-replace its pinned URLs, sizes, hashes, or app/CTranslate2/platform identity.
+replace its pinned URLs, sizes, hashes, or CTranslate2 and platform identity.
 Model weights and user profiles have separate owners and lifecycles.
+
+## One pinned pack across releases
+
+Eve pins the [GPU pack release tag](https://github.com/burntcookiedough/eve-windows-dictation/releases/tag/gpu-pack-v0.8.2-alpha.6-c19a9ccabb3051651e77d1fe2f3432bfdbf0bc679dadad51ed012e36a14fd6bf)
+through the two exact asset URLs in `PINNED_GPU_PACK_DESCRIPTOR`. The descriptor
+also pins the schema, Windows x64 platform, CTranslate2 wheel build ID, and each
+compressed asset and installed DLL's size and SHA-256. See [pack provenance](eve-gpu-pack-provenance.md)
+for the assets and their upstream source.
+
+Eve releases share the pack as long as these pins still apply. Schema 1 keeps the
+historical `appBuildId` value `0.8.2-alpha.9` in storage metadata so the pack ID,
+installed directory, and interrupted downloads remain valid across upgrades and
+rollback. The running app version plays no role in GPU pack selection. Eve
+re-hashes the installed DLLs before handing their directory to the server, so a
+healthy alpha.9 installation is reused in place without downloading it again.
+
+When CTranslate2 or CUDA changes, rotate the pack deliberately.
+
+1. Identify the Windows x64 CPython 3.11 CTranslate2 wheel version and SHA-256
+   in `server/uv.lock`. Select and verify the NVIDIA redistributable DLLs against
+   that wheel. Follow the release plan and pack provenance for preparation and
+   hardware validation.
+2. Once publication is authorized, publish the validated assets under a new GPU
+   pack release tag. Update the descriptor with the exact URLs, compressed and
+   installed sizes and hashes, and CTranslate2 build ID. Update
+   `GPU_PACK_CTRANSLATE2_BUILD_ID` if the wheel changed. Preserve the schema 1
+   storage metadata value for rollback compatibility.
+3. Run `python scripts/version.py check`. The existing Version Consistency job
+   verifies the descriptor and runtime wheel ID against `server/uv.lock`. Run the
+   [Windows lifecycle validation](../development/gpu-pack-lifecycle-validation.md)
+   for the rotated pack, including upgrade, rollback, and CPU fallback.
 
 ## State and transition contract
 

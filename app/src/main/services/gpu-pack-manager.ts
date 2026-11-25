@@ -6,6 +6,9 @@ import { pipeline } from 'node:stream/promises';
 import { createBrotliDecompress } from 'node:zlib';
 
 const GPU_PACK_SCHEMA_VERSION = 1;
+// Schema 1 includes this historical value in its storage ID. Keep it fixed so
+// alpha.9 installations, partial downloads, and runtime leases keep their paths.
+const V1_MANIFEST_APP_BUILD_ID = '0.8.2-alpha.9';
 const GPU_PACK_MANIFEST_NAME = 'gpu-pack.json';
 const STAGE_MARKER_NAME = '.stage-marker.json';
 const LOCK_FILE_NAME = 'gpu-pack.lock';
@@ -29,10 +32,9 @@ export interface GpuPackAssetDescriptor {
   readonly sha256: string;
 }
 
-/** The production trust root for the optional alpha.9 Windows x64 GPU pack. */
+/** The production trust root for the optional Windows x64 GPU pack. */
 export const PINNED_GPU_PACK_DESCRIPTOR: GpuPackDescriptor = {
   schemaVersion: 1,
-  appBuildId: '0.8.2-alpha.9',
   ctranslate2BuildId:
     'ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc',
   platform: 'win32-x64',
@@ -58,16 +60,14 @@ export const PINNED_GPU_PACK_DESCRIPTOR: GpuPackDescriptor = {
 
 export interface GpuPackDescriptor {
   readonly schemaVersion: 1;
-  readonly appBuildId: string;
   readonly ctranslate2BuildId: string;
   readonly platform: 'win32-x64';
   readonly assets: readonly [GpuPackAssetDescriptor, GpuPackAssetDescriptor];
 }
 
 export interface GpuPackIdentity {
-  readonly appBuildId: string;
   readonly ctranslate2BuildId: string;
-  readonly platform: 'win32-x64';
+  readonly platform: string;
 }
 
 export type GpuPackFailureCode =
@@ -133,7 +133,6 @@ const validatedRuntimeBrand: unique symbol = Symbol('validatedGpuRuntime');
 export interface ValidatedGpuRuntime {
   readonly directory: string;
   readonly packId: string;
-  readonly appBuildId: string;
   readonly ctranslate2BuildId: string;
   readonly [validatedRuntimeBrand]: true;
 }
@@ -162,7 +161,6 @@ export interface GpuPackManager {
 }
 
 interface NormalizedDescriptor {
-  readonly appBuildId: string;
   readonly ctranslate2BuildId: string;
   readonly platform: 'win32-x64';
   readonly assets: readonly [GpuPackAssetDescriptor, GpuPackAssetDescriptor];
@@ -421,7 +419,6 @@ function parseCanonicalPartialMetadata(
     if (descriptor) {
       if (
         value.packId !== descriptor.packId ||
-        value.appBuildId !== descriptor.appBuildId ||
         value.ctranslate2BuildId !== descriptor.ctranslate2BuildId
       ) {
         return null;
@@ -469,7 +466,6 @@ function parseCanonicalStageMarker(contents: string): StageMarkerRecord | null {
 function normalizeDescriptor(value: GpuPackDescriptor | null): NormalizedDescriptor | null {
   if (!isRecord(value) || value.schemaVersion !== GPU_PACK_SCHEMA_VERSION) return null;
   if (
-    !isSafeIdentity(value.appBuildId) ||
     !isSafeIdentity(value.ctranslate2BuildId) ||
     value.platform !== 'win32-x64' ||
     !Array.isArray(value.assets) ||
@@ -514,14 +510,13 @@ function normalizeDescriptor(value: GpuPackDescriptor | null): NormalizedDescrip
     sha256,
   }));
   const packId = calculatePackId({
-    appBuildId: value.appBuildId,
+    appBuildId: V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: value.ctranslate2BuildId,
     platform: value.platform,
     files,
   });
 
   return {
-    appBuildId: value.appBuildId,
     ctranslate2BuildId: value.ctranslate2BuildId,
     platform: value.platform,
     assets: [first, second],
@@ -564,7 +559,7 @@ function manifestText(descriptor: NormalizedDescriptor): string {
   const manifest: PackManifest = {
     schemaVersion: GPU_PACK_SCHEMA_VERSION,
     packId: descriptor.packId,
-    appBuildId: descriptor.appBuildId,
+    appBuildId: V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: descriptor.ctranslate2BuildId,
     platform: descriptor.platform,
     files: descriptor.assets.map(({ fileName, bytes, sha256 }) => ({
@@ -799,7 +794,7 @@ async function writePartialMeta(
   const meta: PartialMetadata = {
     schemaVersion: 1,
     packId: descriptor.packId,
-    appBuildId: descriptor.appBuildId,
+    appBuildId: V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: descriptor.ctranslate2BuildId,
     url: asset.url,
     assetIndex: index,
@@ -838,7 +833,6 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
     unavailableCode = 'invalid_descriptor';
   } else if (
     options.identity.platform !== descriptor.platform ||
-    options.identity.appBuildId !== descriptor.appBuildId ||
     options.identity.ctranslate2BuildId !== descriptor.ctranslate2BuildId
   ) {
     unavailableCode = 'incompatible_build';
@@ -2138,7 +2132,6 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         return Object.freeze({
           directory: packDirectory(),
           packId: descriptor!.packId,
-          appBuildId: descriptor!.appBuildId,
           ctranslate2BuildId: descriptor!.ctranslate2BuildId,
           [validatedRuntimeBrand]: true as const,
         });
@@ -2194,7 +2187,6 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
         const runtime: ValidatedGpuRuntime = Object.freeze({
           directory: packDirectory(),
           packId: descriptor!.packId,
-          appBuildId: descriptor!.appBuildId,
           ctranslate2BuildId: descriptor!.ctranslate2BuildId,
           [validatedRuntimeBrand]: true as const,
         });
