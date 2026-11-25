@@ -406,7 +406,7 @@ class TranscriptionProcessor:
             and cached.result.last_speech_end is not None
             and cached.chunk.start_sample
             + int(cached.result.last_speech_end * AUDIO_SAMPLE_RATE)
-            >= tail.logical_start_sample
+            > tail.logical_start_sample
             and cached.chunk.start_sample == tail.start_sample
             and is_settled(audio_buffer, cached, total)
         ):

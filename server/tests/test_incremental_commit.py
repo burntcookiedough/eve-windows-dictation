@@ -380,9 +380,11 @@ async def test_partial_speech_timing_never_moves_backwards(monkeypatch) -> None:
         context.audio_buffer.close()
 
 
-async def test_reuse_requires_speech_after_the_committed_end(monkeypatch) -> None:
+@pytest.mark.parametrize("overlap_speech_end_s", [0.5, 0.75])  # inside, and exactly at the end
+async def test_reuse_requires_speech_after_the_committed_end(monkeypatch, overlap_speech_end_s) -> None:
     # After a forced seal, a tail decode whose only speech was in the overlap
-    # heard nothing uncommitted; quiet speech after it must still be decoded.
+    # (ending at the committed end at the latest) heard nothing uncommitted;
+    # quiet speech after it must still be decoded.
     session = _scripted(monkeypatch, [TranscribeResult("quiet words", 0.6, 1.4)])
     context = _context()
     processor = processor_module.TranscriptionProcessor(context)
@@ -395,7 +397,7 @@ async def test_reuse_requires_speech_after_the_committed_end(monkeypatch) -> Non
         decoded_to = 6 * RATE
         processor._tail = Decode(
             AudioChunk(1, 1, end - overlap, decoded_to, end, decoded_to),
-            TranscribeResult("", 0.0, 0.5),  # speech ends inside the overlap
+            TranscribeResult("", 0.0, overlap_speech_end_s),
         )
         assert is_settled(context.audio_buffer, processor._tail, context.audio_buffer.sample_count)
 
