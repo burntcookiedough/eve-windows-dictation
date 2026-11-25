@@ -4,11 +4,9 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createBrotliDecompress } from 'node:zlib';
+import { GPU_PACK_V1_MANIFEST_APP_BUILD_ID } from '../../shared/constants.js';
 
 const GPU_PACK_SCHEMA_VERSION = 1;
-// Schema 1 includes this historical value in its storage ID. Keep it fixed so
-// alpha.9 installations, partial downloads, and runtime leases keep their paths.
-const V1_MANIFEST_APP_BUILD_ID = '0.8.2-alpha.9';
 const GPU_PACK_MANIFEST_NAME = 'gpu-pack.json';
 const STAGE_MARKER_NAME = '.stage-marker.json';
 const LOCK_FILE_NAME = 'gpu-pack.lock';
@@ -510,7 +508,7 @@ function normalizeDescriptor(value: GpuPackDescriptor | null): NormalizedDescrip
     sha256,
   }));
   const packId = calculatePackId({
-    appBuildId: V1_MANIFEST_APP_BUILD_ID,
+    appBuildId: GPU_PACK_V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: value.ctranslate2BuildId,
     platform: value.platform,
     files,
@@ -559,7 +557,7 @@ function manifestText(descriptor: NormalizedDescriptor): string {
   const manifest: PackManifest = {
     schemaVersion: GPU_PACK_SCHEMA_VERSION,
     packId: descriptor.packId,
-    appBuildId: V1_MANIFEST_APP_BUILD_ID,
+    appBuildId: GPU_PACK_V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: descriptor.ctranslate2BuildId,
     platform: descriptor.platform,
     files: descriptor.assets.map(({ fileName, bytes, sha256 }) => ({
@@ -794,7 +792,7 @@ async function writePartialMeta(
   const meta: PartialMetadata = {
     schemaVersion: 1,
     packId: descriptor.packId,
-    appBuildId: V1_MANIFEST_APP_BUILD_ID,
+    appBuildId: GPU_PACK_V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId: descriptor.ctranslate2BuildId,
     url: asset.url,
     assetIndex: index,
@@ -2020,9 +2018,9 @@ export function createGpuPackManager(options: GpuPackManagerOptions): GpuPackMan
           }
         } else if (entry.isFile()) {
           // 3. Stale leases use the same bounded identity/liveness validation.
-          const leaseMatch = entry.name.match(/^\.gpu-lease-([a-f0-9]{64})-(.+)\.json$/);
-          if (leaseMatch) {
-            await isPackLeased(leaseMatch[1]);
+          const leasedPackId = entry.name.match(/^\.gpu-lease-([a-f0-9]{64})-(.+)\.json$/)?.[1];
+          if (leasedPackId) {
+            await isPackLeased(leasedPackId);
           }
           // 4. Owned partials
           else if (

@@ -19,14 +19,18 @@ historical `appBuildId` value `0.8.2-alpha.9` in storage metadata so the pack ID
 installed directory, and interrupted downloads remain valid across upgrades and
 rollback. The running app version plays no role in GPU pack selection. Eve
 re-hashes the installed DLLs before handing their directory to the server, so a
-healthy alpha.9 installation is reused in place without downloading it again.
+healthy pack installed by alpha.9 or later can be reused in place. Packs installed
+by alpha.6 through alpha.8 use different pack IDs and require a fresh download
+of the pinned pack after upgrading.
 
 When CTranslate2 or CUDA changes, rotate the pack deliberately.
 
 1. Identify the Windows x64 CPython 3.11 CTranslate2 wheel version and SHA-256
    in `server/uv.lock`. Select and verify the NVIDIA redistributable DLLs against
-   that wheel. Follow the release plan and pack provenance for preparation and
-   hardware validation.
+   that wheel. Run `node scripts/prepare-gpu-pack.mjs` with `--archive`,
+   `--output`, and `--ctranslate2-build-id`. The script uses Eve's fixed schema 1
+   storage identity to generate the candidate pack ID and descriptor draft.
+   Follow the release plan and pack provenance for hardware validation.
 2. Once publication is authorized, publish the validated assets under a new GPU
    pack release tag. Update the descriptor with the exact URLs, compressed and
    installed sizes and hashes, and CTranslate2 build ID. Update

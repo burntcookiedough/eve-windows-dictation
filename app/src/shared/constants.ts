@@ -87,6 +87,10 @@ export const IPC_CHANNELS = {
 export const GPU_PACK_CTRANSLATE2_BUILD_ID =
   'ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc' as const;
 
+// Schema 1 hashes this historical value into the pack ID used by alpha.9
+// installations, partial downloads, and leases. Keep it fixed across releases.
+export const GPU_PACK_V1_MANIFEST_APP_BUILD_ID = '0.8.2-alpha.9';
+
 // Overlay window constants
 export const OVERLAY_CONFIG = {
   WIDTH: 320,
