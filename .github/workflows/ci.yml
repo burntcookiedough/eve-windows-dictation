@@ -6,6 +6,10 @@ on:
     branches:
       - trunk
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   merge-target:
     name: Trunk Integration Target
@@ -59,8 +63,16 @@ jobs:
       - name: Run app tests
         run: bun test
 
+      - name: Test Claude Code guard
+        run: node --test ../scripts/hooks/claude-guard.test.mjs
+
       - name: Run Insights database migration test
         run: bun run test:history
+
+      - name: Type-check app
+        # gpu-pack-manager.ts has an existing error owned by the GPU pack workstream.
+        continue-on-error: true
+        run: bun run typecheck
 
       - name: Build app
         run: bun run build
@@ -89,3 +101,7 @@ jobs:
       - name: Run server tests
         working-directory: server
         run: uv run --no-sync pytest
+
+      - name: Lint server
+        working-directory: server
+        run: uv run --no-sync ruff check

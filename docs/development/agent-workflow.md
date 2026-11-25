@@ -4,6 +4,23 @@ Use a focused branch and a concise local task contract. Inspect the relevant cod
 docs, and release controls before editing. Keep local task contracts, logs, screenshots, and
 handoffs out of public diffs and free of private data.
 
+## Parallel agents
+
+- Use one branch and one dedicated worktree per task. Never share a worktree with
+  another agent. Fetch `origin` and start a `<type>/<topic>` branch from fresh
+  `origin/trunk`.
+- Rebase onto fresh `origin/trunk` before opening a PR. Keep each PR focused on
+  one purpose.
+- Assign one owner at a time to each high-conflict file.
+  - `server/src/transcription/processor.py`
+  - `server/src/websocket/handler.py`
+  - `app/src/main/index.ts`
+  - `.github/workflows/ci.yml`
+- Merge only with all required checks green on the exact PR head, a clean review,
+  and all conversations resolved. The required checks are `Trunk Integration Target`,
+  `Version Consistency`, `App Test And Build`, and `Server Tests`.
+- Agents never tag or publish.
+
 ## Final integration
 
 Stacked feature branches may use incremental pull requests for review, but the

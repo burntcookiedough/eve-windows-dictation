@@ -21,6 +21,9 @@
     "build:main": "node scripts/build-main.js",
     "build:renderer": "vite build",
     "test:history": "node tests/run-history-insights-check.mjs",
+    "typecheck": "bun run --parallel --no-exit-on-error typecheck:main typecheck:renderer",
+    "typecheck:main": "tsc --noEmit -p tsconfig.main.json",
+    "typecheck:renderer": "svelte-check --tsconfig ./tsconfig.json",
     "preview": "vite preview",
     "package": "bun run notices:generate && bun run build && electron-builder",
     "notices:generate": "pwsh -NoProfile -File ../scripts/generate-third-party-notices.ps1",
@@ -39,6 +42,7 @@
     "electron-builder": "^26.15.3",
     "electron-builder-squirrel-windows": "26.15.3",
     "esbuild": "^0.28.1",
+    "svelte-check": "^4.7.8",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
     "vite": "^7.3.6"
