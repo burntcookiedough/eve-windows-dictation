@@ -18,8 +18,57 @@ describe('passive correlated diagnostics', () => {
     delete process.env.MURMUR_PERF_TRACE;
     expect(isPerfTraceEnabled()).toBe(false);
     expect(manager.startTrace('off')).toBeNull();
+    manager.mark('off', 'hotkeyAt', 5);
+    expect(manager.renderer(new OverlayPerfObserver('off', 10).snapshot())).toBe(false);
+    manager.completeTrace('off');
     expect(manager.getRecentTraces()).toEqual([]);
+    expect(loggedTraces).toEqual([]);
     for (const value of ['', 'a'.repeat(65), 'private speech', '../../profile', null]) expect(validateCorrelationId(value)).toBe(false);
+  });
+  it('exports ordered startup marks and calculates spans on the main clock', () => {
+    manager.startTrace('startup');
+    const step = performance.now() / 8;
+    manager.mark('startup', 'hotkeyAt', 0);
+    manager.mark('startup', 'recordingStartDispatchedAt', step);
+    manager.mark('startup', 'wsOpenedAt', 2 * step);
+    manager.mark('startup', 'wsReadyAt', 3 * step);
+    manager.mark('startup', 'captureCommandAt', 4 * step);
+    expect(manager.getRecentTraces()[0]!.startupSpansMs).toEqual({
+      hotkeyToReady: 3 * step, readyToCaptureReadyObserved: null, hotkeyToFirstAudioSent: null,
+    });
+
+    const overlay = new OverlayPerfObserver('startup', 10_000);
+    overlay.mark('mediaResolvedAt', 10_010);
+    overlay.mark('contextCreatedAt', 10_020);
+    overlay.mark('workletModuleLoadedAt', 10_030);
+    overlay.mark('captureReadyAt', 10_040);
+    const syntheticPcm = new Int16Array([12345, -23456]);
+    expect(manager.renderer({ ...overlay.snapshot(), audio: syntheticPcm })).toBe(false);
+    expect(manager.getRecentTraces()[0]!.main.captureReadyObservedAt).toBeNull();
+    expect(manager.renderer(overlay.snapshot())).toBe(true);
+    const readyObservedAt = loggedTraces.at(-1)!.main.captureReadyObservedAt!;
+
+    overlay.mark('firstAudioPostedAt', 10_050);
+    manager.mark('startup', 'firstAudioSentAt', readyObservedAt + 10);
+    manager.mark('startup', 'firstAudioSentAt', readyObservedAt + 20);
+    expect(manager.renderer(overlay.snapshot())).toBe(true);
+    manager.completeTrace('startup');
+
+    const trace = loggedTraces.at(-1)!;
+    const { main, renderer } = trace;
+    const mainMarks = [main.hotkeyAt, main.recordingStartDispatchedAt, main.wsOpenedAt,
+      main.wsReadyAt, main.captureCommandAt, main.captureReadyObservedAt, main.firstAudioSentAt];
+    expect(mainMarks).toEqual([...mainMarks].sort((a, b) => a! - b!));
+    expect(main.captureReadyObservedAt).toBe(readyObservedAt);
+    expect([renderer!.captureStartedAt, renderer!.mediaResolvedAt, renderer!.contextCreatedAt,
+      renderer!.workletModuleLoadedAt, renderer!.captureReadyAt, renderer!.firstAudioPostedAt])
+      .toEqual([10_000, 10_010, 10_020, 10_030, 10_040, 10_050]);
+    expect(trace.startupSpansMs).toEqual({
+      hotkeyToReady: 3 * step,
+      readyToCaptureReadyObserved: readyObservedAt - 3 * step,
+      hotkeyToFirstAudioSent: readyObservedAt + 10,
+    });
+    expect(JSON.stringify(loggedTraces)).not.toContain('-23456');
   });
   it('keeps overlapping callbacks in their own sessions and missing stages null', () => {
     manager.startTrace('old'); manager.startTrace('new');

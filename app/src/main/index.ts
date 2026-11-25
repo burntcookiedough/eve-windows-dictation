@@ -49,7 +49,7 @@ let isRecording = false;
 let recordingSource: 'lab' | 'normal' | null = null;
 let recordingSessionMode: DictationSessionMode = 'quick';
 let isStopping = false;
-let startLongAfterStop = false;
+let startLongAfterStop: { hotkeyAt: number | undefined } | null = null;
 let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false, mode: 'quick' };
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
@@ -183,8 +183,9 @@ function getRecordingDebugState(): RecordingDebugState {
   };
 }
 
-async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick') {
+async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick', hotkeyAt?: number) {
   if (isRecording || isStopping || !overlayWindow) return;
+  const dispatchedAt = isPerfTraceEnabled() ? performance.now() : undefined;
   const autoPaste = source === 'normal' && autoPasteEnabled;
   const pasteTargetWindowHandlePromise = autoPaste ? getForegroundWindowHandle() : null;
 
@@ -223,6 +224,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
   const sessionGeneration = beginOverlaySession();
   const serviceTraceId = perfTraceManager.startTrace()?.correlationId;
+  if (hotkeyAt !== undefined) perfTraceManager.mark(serviceTraceId, 'hotkeyAt', hotkeyAt);
+  if (dispatchedAt !== undefined) perfTraceManager.mark(serviceTraceId, 'recordingStartDispatchedAt', dispatchedAt);
   recordingPerfTraceId = serviceTraceId;
 
   isRecording = true;
@@ -359,8 +362,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     scheduleOverlayDismiss(sessionGeneration, closedSessionMode, terminalState);
 
     if (shouldStartLongAfterStop) {
-      startLongAfterStop = false;
-      void startRecording('normal', 'long');
+      startLongAfterStop = null;
+      void startRecording('normal', 'long', shouldStartLongAfterStop.hotkeyAt);
     }
   });
 
@@ -372,13 +375,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     }
     // Tell overlay to start audio capture with selected device
     const deviceId = getSetting('selectedDeviceId');
-    perfTraceManager.mark(serviceTraceId, 'captureCommandAt');
     serviceCapture = new CaptureSession(
       sessionGeneration,
       buffer => service.sendAudioBuffer(buffer),
       () => overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, true),
     );
     captureSession = serviceCapture;
+    perfTraceManager.mark(serviceTraceId, 'captureCommandAt');
     overlayWindow.webContents.send(IPC_CHANNELS.COMMAND_START_RECORDING, deviceId, serviceTraceId, sessionGeneration);
   } catch (error) {
     if (transcriptionService !== service) {
@@ -422,27 +425,27 @@ async function stopRecording() {
   service?.stop();
 }
 
-function queueLongRecordingAfterStop(): void {
-  startLongAfterStop = true;
+function queueLongRecordingAfterStop(hotkeyAt?: number): void {
+  startLongAfterStop = { hotkeyAt };
   if (!isRecording && !isStopping) {
-    startLongAfterStop = false;
-    void startRecording('normal', 'long');
+    startLongAfterStop = null;
+    void startRecording('normal', 'long', hotkeyAt);
   }
 }
 
-function toggleLongRecording(): void {
+function toggleLongRecording(hotkeyAt?: number): void {
   if (isRecording && recordingSessionMode === 'long') {
     log.info('Long dictation stopped');
-    startLongAfterStop = false;
+    startLongAfterStop = null;
     stopRecording();
   } else if (isRecording || isStopping) {
     log.info('Long dictation queued after quick dictation stop');
-    queueLongRecordingAfterStop();
+    queueLongRecordingAfterStop(hotkeyAt);
     if (isRecording) {
       stopRecording();
     }
   } else {
-    startRecording('normal', 'long');
+    startRecording('normal', 'long', hotkeyAt);
     log.info('Long dictation started');
   }
 }
@@ -656,9 +659,9 @@ async function startApplication(): Promise<void> {
   }
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService({
-    onHoldStart: () => {
+    onHoldStart: (hotkeyAt) => {
       if (!isRecording) {
-        startRecording('normal', 'quick');
+        startRecording('normal', 'quick', hotkeyAt);
         log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
       } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
@@ -671,12 +674,12 @@ async function startApplication(): Promise<void> {
         stopRecording();
       }
     },
-    onDoubleTap: () => {
-      toggleLongRecording();
+    onDoubleTap: (hotkeyAt) => {
+      toggleLongRecording(hotkeyAt);
       log.info('Long dictation toggled (double-tap)');
     },
-    onLongShortcut: () => {
-      toggleLongRecording();
+    onLongShortcut: (hotkeyAt) => {
+      toggleLongRecording(hotkeyAt);
       log.info('Long dictation toggled (long hotkey)');
     },
   });

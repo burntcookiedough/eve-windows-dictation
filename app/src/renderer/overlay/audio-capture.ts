@@ -11,9 +11,12 @@ export interface AudioCaptureOptions {
   responsiveRatio?: number;
   deviceId?: string; // 'default' or undefined uses system default
   onCaptureReady?: (timestamp: number) => void;
+  onCaptureStage?: (stage: 'mediaResolvedAt' | 'contextCreatedAt' | 'workletModuleLoadedAt') => void;
 }
 
-const DEFAULTS: Required<Omit<AudioCaptureOptions, 'onCaptureReady'>> = {
+type CaptureSettings = Required<Omit<AudioCaptureOptions, 'onCaptureReady' | 'onCaptureStage'>>;
+
+const DEFAULTS: CaptureSettings = {
   historyLength: WAVEFORM_BARS,
   historyUpdateMs: 40,
   normalizationSmooth: 0.97,
@@ -37,7 +40,7 @@ export class AudioCapture {
   private onAudioData: ((buffer: ArrayBuffer) => void) | null = null;
   private onLevels: ((levels: number[]) => void) | null = null;
 
-  private options: Required<Omit<AudioCaptureOptions, 'onCaptureReady'>> = DEFAULTS;
+  private options: CaptureSettings = DEFAULTS;
 
   private levelHistory: number[] = [];
   private currentLevel = 0;
@@ -85,11 +88,13 @@ export class AudioCapture {
         this.disposeMedia(stream, null);
         return;
       }
+      try { options?.onCaptureStage?.('mediaResolvedAt'); } catch { /* diagnostic only */ }
       this.stream = stream;
 
       const audioContext = new AudioContext({
         sampleRate: TARGET_SAMPLE_RATE,
       });
+      try { options?.onCaptureStage?.('contextCreatedAt'); } catch { /* diagnostic only */ }
       this.audioContext = audioContext;
 
       // Use a Blob URL for the worklet to avoid Vite inlining raw TypeScript
@@ -122,6 +127,9 @@ registerProcessor('audio-processor', AudioProcessor);
       const workletUrl = URL.createObjectURL(blob);
       try {
         await audioContext.audioWorklet.addModule(workletUrl);
+        if (generation === this.startGeneration) {
+          try { options?.onCaptureStage?.('workletModuleLoadedAt'); } catch { /* diagnostic only */ }
+        }
       } finally {
         URL.revokeObjectURL(workletUrl);
       }
