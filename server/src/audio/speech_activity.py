@@ -1,9 +1,18 @@
 """Streaming activity on the 16 kHz PCM sample clock."""
 
+from __future__ import annotations
+
+import asyncio
 import logging
+from collections import deque
+from statistics import median
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from onnxruntime import InferenceSession
 
 logger = logging.getLogger(__name__)
 
@@ -11,17 +20,38 @@ WINDOW_SAMPLES = 512
 _CONTEXT_SAMPLES = 64
 _SPEECH_THRESHOLD = 0.5
 _CONTINUATION_THRESHOLD = 0.35
-_FALLBACK_RMS_THRESHOLD = 0.01
+_RMS_HISTORY_WINDOWS = 64  # About two seconds of 32 ms windows.
+_MIN_QUIET_WINDOWS = 3
+_FALLBACK_NOISE_PERCENTILE = 20
+_FALLBACK_NOISE_RATIO = 1.8
+_FALLBACK_MIN_RMS = 0.001
+_FALLBACK_MAX_RMS = 0.12
+_silero_session: InferenceSession | None = None
+
+
+def _load_silero_session() -> InferenceSession:
+    from faster_whisper.vad import get_vad_model
+
+    return get_vad_model().session
+
+
+async def warm_silero() -> None:
+    """Load the shared inference session off the event loop before serving audio."""
+    global _silero_session
+    try:
+        _silero_session = await asyncio.to_thread(_load_silero_session)
+    except Exception:
+        _silero_session = None
+        logger.warning("Could not warm streaming Silero; speech activity will use energy")
 
 
 class _SileroStream:
     """Carry the bundled model's recurrent state and context across deliveries."""
 
     def __init__(self) -> None:
-        # Keep the import lazy so a missing optional runtime can fall back.
-        from faster_whisper.vad import get_vad_model
-
-        self._session = get_vad_model().session
+        if _silero_session is None:
+            raise RuntimeError("Streaming Silero is unavailable")
+        self._session = _silero_session
         self._h = np.zeros((1, 1, 128), dtype=np.float32)
         self._c = np.zeros_like(self._h)
         self._context = np.zeros(_CONTEXT_SAMPLES, dtype=np.float32)
@@ -47,7 +77,10 @@ class SpeechActivity:
     def __init__(self) -> None:
         self.processed_samples = 0
         self.last_speech_sample: int | None = None
+        self.pause_noise_floor: float | None = None
         self._remainder = np.empty(0, dtype=np.float32)
+        self._recent_rms: deque[float] = deque(maxlen=_RMS_HISTORY_WINDOWS)
+        self._quiet_rms: deque[float] = deque(maxlen=_RMS_HISTORY_WINDOWS)
         self._silero: _SileroStream | None = None
         self._use_energy = False
         self._active = False
@@ -59,6 +92,7 @@ class SpeechActivity:
         if complete == 0:
             return
         frames = audio[:complete].reshape(-1, WINDOW_SAMPLES)
+        rms = np.sqrt(np.mean(np.square(frames), axis=1))
 
         if not self._use_energy:
             try:
@@ -66,20 +100,33 @@ class SpeechActivity:
                     self._silero = _SileroStream()
                 scores = self._silero.probabilities(frames)
             except Exception:
-                # Reprocess only this delivery and use fixed, per-window RMS
-                # for the rest of the session. The sample clock stays intact.
+                # Reprocess this delivery against the recent energy history.
+                # The sample clock stays intact.
                 logger.warning("Streaming Silero unavailable; using energy for speech activity")
                 self._use_energy = True
                 self._silero = None
             else:
-                for score in scores:
+                for score, energy in zip(scores, rms):
                     threshold = _CONTINUATION_THRESHOLD if self._active else _SPEECH_THRESHOLD
-                    self._advance(score >= threshold)
+                    self._recent_rms.append(float(energy))
+                    active = score >= threshold
+                    if active:
+                        if len(self._quiet_rms) >= _MIN_QUIET_WINDOWS:
+                            floor = median(self._quiet_rms)
+                            if self.pause_noise_floor is None or floor < self.pause_noise_floor:
+                                self.pause_noise_floor = floor
+                        self._quiet_rms.clear()
+                    else:
+                        # A pause never supplies the reference for its own seal.
+                        self._quiet_rms.append(float(energy))
+                    self._advance(active)
                 return
 
-        rms = np.sqrt(np.mean(np.square(frames), axis=1))
         for energy in rms:
-            self._advance(energy >= _FALLBACK_RMS_THRESHOLD)
+            self._recent_rms.append(float(energy))
+            floor = float(np.percentile(self._recent_rms, _FALLBACK_NOISE_PERCENTILE))
+            threshold = min(_FALLBACK_MAX_RMS, max(_FALLBACK_MIN_RMS, _FALLBACK_NOISE_RATIO * floor))
+            self._advance(energy > threshold)
 
     @property
     def silero_pause_start(self) -> int | None:

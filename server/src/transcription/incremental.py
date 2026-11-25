@@ -20,6 +20,7 @@ FRAME_SAMPLES = AUDIO_SAMPLE_RATE // 50  # 20 ms energy frames
 # A pause must last this long before it may hold a seal; stop closures and
 # inter-word gaps inside one phrase are much shorter.
 MIN_SEAL_SILENCE_S = 0.4
+QUIET_NOISE_RATIO = 3.0
 # Reusing a decode needs this much model-confirmed non-speech at its end.
 SETTLED_GUARD_S = 0.3
 # That stretch must be steady noise (p95 within 6 dB of its median), and new
@@ -141,12 +142,17 @@ def plan_seal(
     pause_start = speech_activity.silero_pause_start
     pause_end = min(speech_activity.processed_samples, total_samples)
     silence_samples = int(MIN_SEAL_SILENCE_S * rate)
+    guard_samples = silence_samples // 2
+    noise_floor = speech_activity.pause_noise_floor
     boundary = None
-    if pause_start is not None and pause_start > committed_end:
+    if noise_floor is not None and pause_start is not None and pause_start > committed_end:
         if pause_end - pause_start >= silence_samples:
             midpoint = min(latest, (pause_start + pause_end) // 2)
-            if midpoint >= max(earliest, pause_start + silence_samples // 2):
-                boundary = midpoint
+            if midpoint >= max(earliest, pause_start + guard_samples):
+                rms = frame_rms(buffer, midpoint - guard_samples, midpoint + guard_samples)
+                limit = QUIET_NOISE_RATIO * max(noise_floor, SETTLED_ABS_FLOOR)
+                if len(rms) and float(rms.max()) <= limit:
+                    boundary = midpoint
 
     overlap = 0
     if boundary is None:

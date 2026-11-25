@@ -1,5 +1,6 @@
 """Coverage for streaming Silero state and the bounded fallback clock."""
 
+import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -8,7 +9,7 @@ import audio.speech_activity as activity_module
 from audio.speech_activity import SpeechActivity, WINDOW_SAMPLES, _SileroStream
 
 
-def test_streaming_scores_match_bundled_batch_and_isolate_state():
+async def test_streaming_scores_match_bundled_batch_and_isolate_state(monkeypatch):
     from faster_whisper.vad import get_vad_model
 
     audio = np.random.default_rng(27).normal(0, 0.15, 11 * WINDOW_SAMPLES).astype(np.float32)
@@ -16,6 +17,8 @@ def test_streaming_scores_match_bundled_batch_and_isolate_state():
     # The batch wrapper zeros the final context via a view into its input.
     # Give it a disposable last window to keep every tested sample intact.
     expected = get_vad_model()(np.pad(audio, (0, WINDOW_SAMPLES))).ravel()[:-1]
+    monkeypatch.setattr(activity_module, "_silero_session", None)
+    await activity_module.warm_silero()
     first = _SileroStream()
     second = _SileroStream()
 
@@ -52,22 +55,25 @@ def test_arbitrary_pcm_partitions_carry_remainder_and_keep_monotonic_samples(mon
     np.testing.assert_array_equal(np.concatenate(observed), audio.astype(np.float32) / 32768)
 
 
-def test_failed_model_load_uses_energy_once_without_qualifying_as_silero_pause(monkeypatch):
-    attempts = 0
+async def test_failed_startup_warm_runs_off_loop_and_audio_uses_energy_without_retry(monkeypatch):
+    load_threads = []
+    loop_thread = threading.get_ident()
 
     def broken_model():
-        nonlocal attempts
-        attempts += 1
+        load_threads.append(threading.get_ident())
         raise ImportError("missing runtime")
 
-    monkeypatch.setattr(activity_module, "_SileroStream", broken_model)
+    monkeypatch.setattr(activity_module, "_silero_session", None)
+    monkeypatch.setattr(activity_module, "_load_silero_session", broken_model)
+    await activity_module.warm_silero()
     activity = SpeechActivity()
-    activity.append(np.full(WINDOW_SAMPLES, 1000, dtype=np.int16))
-    activity.append(np.full(WINDOW_SAMPLES, 200, dtype=np.int16))
+    activity.append(np.zeros(WINDOW_SAMPLES, dtype=np.int16))
+    activity.append(np.full(WINDOW_SAMPLES, 120, dtype=np.int16))
+    activity.append(np.full(WINDOW_SAMPLES, 10, dtype=np.int16))
 
-    assert attempts == 1
-    assert activity.last_speech_sample == WINDOW_SAMPLES
-    assert activity.processed_samples == 2 * WINDOW_SAMPLES
+    assert len(load_threads) == 1 and load_threads[0] != loop_thread
+    assert activity.last_speech_sample == 2 * WINDOW_SAMPLES
+    assert activity.processed_samples == 3 * WINDOW_SAMPLES
     assert activity.silero_pause_start is None
 
 
@@ -94,3 +100,41 @@ def test_mid_session_failure_preserves_clock_and_recovers_current_frame(monkeypa
     assert activity.last_speech_sample == activity.processed_samples == 4 * WINDOW_SAMPLES
     assert activity.silero_pause_start is None
     assert calls == 2
+
+
+def test_fallback_keeps_detecting_soft_speech_below_fixed_threshold(monkeypatch):
+    monkeypatch.setattr(activity_module, "_silero_session", None)
+    activity = SpeechActivity()
+    room_tone = np.full(8 * WINDOW_SAMPLES, 36, dtype=np.int16)
+    # Syllables and short gaps continue for eight seconds at less than 0.01 RMS.
+    syllables = np.repeat(np.tile([36, 115, 155, 140, 42], 50), WINDOW_SAMPLES).astype(np.int16)
+    activity.append(room_tone)
+    for delivery in np.split(syllables, 10):
+        activity.append(delivery)
+        assert activity.last_speech_sample == activity.processed_samples - WINDOW_SAMPLES
+
+    final_speech = activity.last_speech_sample
+    activity.append(room_tone)
+    assert activity.last_speech_sample == final_speech
+
+
+def test_fallback_recalibrates_to_a_fan_above_fixed_threshold(monkeypatch):
+    monkeypatch.setattr(activity_module, "_silero_session", None)
+    # A fan fluctuates slightly and remains louder than 0.01 RMS.
+    fan = np.repeat(np.tile([490, 515, 510, 495], 20), WINDOW_SAMPLES).astype(np.int16)
+    warm_start = SpeechActivity()
+    for delivery in np.split(fan, 4):
+        warm_start.append(delivery)
+    assert warm_start.last_speech_sample is None
+
+    switched_on = SpeechActivity()
+    switched_on.append(np.full(64 * WINDOW_SAMPLES, 30, dtype=np.int16))
+    for delivery in np.split(fan, 4):
+        switched_on.append(delivery)
+    settling_speech = switched_on.last_speech_sample
+    assert settling_speech is not None
+    for _ in range(3):
+        for delivery in np.split(fan, 4):
+            switched_on.append(delivery)
+    assert switched_on.processed_samples - settling_speech > 5 * 16000
+    assert switched_on.last_speech_sample == settling_speech

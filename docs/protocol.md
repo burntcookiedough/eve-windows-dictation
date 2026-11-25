@@ -105,10 +105,12 @@ Initiates a transcription session.
 Omitting `speculative_partials` now selects final-only dictation, including
 hold-to-talk Quick, toggle Quick, and Long. The server processes incoming PCM
 with a streaming voice detector to time auto-stop and find recording-time pauses
-for incremental commits. If Silero fails, the session uses a fixed 0.01 RMS
-threshold over 32 ms windows for the activity clock. With that fallback, commits
-use forced boundaries with overlap. The regular dictation final decodes any
-nonempty uncommitted tail.
+for incremental commits. A pause seal also checks frame RMS within 200 ms of
+the cut against a noise floor measured before that pause. If Silero fails, the
+session estimates its noise floor from the last two seconds of 32 ms RMS windows
+and caps the activity threshold between 0.001 and 0.12. With that fallback,
+commits use forced boundaries with overlap. The regular dictation final decodes
+any nonempty uncommitted tail.
 
 ### stop (Client → Server)
 

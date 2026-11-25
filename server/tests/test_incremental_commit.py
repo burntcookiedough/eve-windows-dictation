@@ -220,6 +220,35 @@ async def test_final_decodes_only_the_uncommitted_tail(engine) -> None:
         context.audio_buffer.close()
 
 
+async def test_pause_energy_guard_keeps_whispered_word_intact(engine, monkeypatch) -> None:
+    # The recognizer can hear this word even though the streaming activity model misses it.
+    def probabilities(frames):
+        return np.where(np.max(np.abs(frames), axis=1) >= 1500 / 32768, 0.9, 0.05)
+
+    monkeypatch.setattr(activity_module, "_SileroStream", lambda: SimpleNamespace(probabilities=probabilities))
+    spoken, expected = _speech([40], word_gap_s=0.0, trailing_s=0.1)
+    whisper = _burst(750, 0.6)  # The fake recognizer calls this w-5.
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        _append(context, 0, spoken)
+        _append(context, 1, np.concatenate((whisper, _noise(0.1))))
+
+        pause_start = context.speech_activity.silero_pause_start
+        vad_cut = (pause_start + context.speech_activity.processed_samples) // 2
+        assert len(spoken) < vad_cut < len(spoken) + len(whisper)
+        assert processor._plan_seal(context.audio_buffer.sample_count) is None
+        assert await processor.transcribe_partial() is None
+        assert engine.calls == []
+
+        result = await processor.transcribe_final()
+        assert result.text == f"{expected} w-5"
+        assert len(engine.calls) == 1
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
 async def test_forced_seals_without_pauses_stitch_overlap_exactly(engine) -> None:
     # Contiguous words with no gaps: no sealable pause, so every seal is forced
     # and lands inside a word. Only overlap lets the next decode re-hear it.
