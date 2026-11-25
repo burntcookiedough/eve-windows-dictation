@@ -16,7 +16,7 @@ import transcription.processor as processor_module
 from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 from transcription.incremental import CommittedTranscript, Decode, is_settled, plan_seal
 from transcription.long_dictation import AudioChunk
-from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord
 
 RATE = 16000
 WORD_S = 0.3
@@ -267,6 +267,51 @@ async def test_forced_seals_without_pauses_stitch_overlap_exactly(engine) -> Non
         # The second commit re-heard the first forced boundary.
         second = processor._committed.previous.chunk
         assert second.logical_start_sample - second.start_sample == overlap
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_forced_seal_dedupes_words_inside_a_crossing_segment(monkeypatch) -> None:
+    session = _scripted(monkeypatch, [])
+    alignments = []
+    transcribe = session.transcribe
+
+    def capture_options(audio, *, hotwords, options):
+        alignments.append(options.word_timestamps)
+        return transcribe(audio, hotwords=hotwords, options=options)
+
+    monkeypatch.setattr(session, "transcribe", capture_options)
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        _append(context, 0, np.zeros(27 * RATE, dtype=np.int16))
+        chunk, overlap = processor._plan_seal(context.audio_buffer.sample_count)
+        assert overlap == int(0.75 * RATE)
+        replay_start = chunk.end_s - overlap / RATE
+        session.results.extend([
+            TranscribeResult("same thing.", 0.9, chunk.end_s - 0.15, (TranscribeSegment(
+                "same thing.", replay_start, chunk.end_s - 0.15,
+                (TranscribeWord(" same", replay_start, replay_start + 0.24),
+                 TranscribeWord(" thing.", replay_start + 0.24, replay_start + 0.60)),
+            ),)),
+            TranscribeResult("same thing. Same thing follows.", 0.9, 1.4, (TranscribeSegment(
+                "same thing. Same thing follows.", 0.0, 1.4,
+                (TranscribeWord(" same", 0.0, 0.24),
+                 TranscribeWord(" thing.", 0.24, 0.61),
+                 TranscribeWord(" Same", 0.8, 0.92),
+                 TranscribeWord(" thing", 0.92, 1.1),
+                 TranscribeWord(" follows.", 1.1, 1.4)),
+            ),)),
+        ])
+        await processor.transcribe_partial()
+        assert processor._committed.text == "same thing."
+
+        result = await processor.transcribe_final()
+
+        assert result.text == "same thing. Same thing follows."
+        assert session.calls == 2
+        assert alignments == [True, True]
     finally:
         processor.close()
         context.audio_buffer.close()

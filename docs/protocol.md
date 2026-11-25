@@ -413,12 +413,11 @@ shared teardown also closes it defensively. A timed-out close attempt releases
 the session's resources without claiming that the peer received a terminal
 frame or that the underlying network transport has closed successfully.
 
-Chunk deduplication requires matching segment text at overlapping absolute audio
-times. Equal words at different times remain intact. Segments crossing the
-overlap boundary, or transcripts without timing evidence, are retained in full;
-this conservative policy can leave ambiguous overlap repeated rather than
-delete potentially intentional speech. Decoder defaults are unchanged. Packaged
-accuracy and boundary behavior still require product validation.
+Chunk deduplication uses matching text and absolute audio times. Decodes of
+chunks that share audio request word timings so a boundary segment can preserve
+new speech while trimming a repeated prefix. Each trimmed word must lie in the
+shared audio and match a word at the same time in the previous decode. Text with
+ambiguous timing and repetitions at different times remain intact.
 
 Cancellation of the async inference await does not stop native executor work.
 Processor teardown retains the generation lease through actual completion (or

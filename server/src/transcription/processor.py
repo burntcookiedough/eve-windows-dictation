@@ -43,6 +43,8 @@ _RETRY_OPTIONS: Final = TranscribeOptions(
     beam_size=3,
     mode="long_chunk",
 )
+_OVERLAP_CHUNK_OPTIONS: Final = replace(_LONG_CHUNK_OPTIONS, word_timestamps=True)
+_OVERLAP_RETRY_OPTIONS: Final = replace(_RETRY_OPTIONS, word_timestamps=True)
 
 # Shared thread pool for transcription
 _executor: ThreadPoolExecutor | None = None
@@ -243,6 +245,7 @@ class TranscriptionProcessor:
         try:
             result, failure = await self._decode_long_chunk(
                 audio, loop=asyncio.get_running_loop(), for_commit=True,
+                align_words=next_overlap > 0 or chunk.start_sample < chunk.logical_start_sample,
             )
             if failure is not None:
                 raise failure
@@ -260,8 +263,7 @@ class TranscriptionProcessor:
 
     @staticmethod
     def _tail_options(tail: AudioChunk) -> TranscribeOptions | None:
-        # Overlap dedupe needs segment timestamps; otherwise keep engine defaults.
-        return _LONG_CHUNK_OPTIONS if tail.start_sample < tail.logical_start_sample else None
+        return _OVERLAP_CHUNK_OPTIONS if tail.start_sample < tail.logical_start_sample else None
 
     async def transcribe_final(
         self,
@@ -421,15 +423,20 @@ class TranscriptionProcessor:
     ) -> TranscribeResult:
         loop = asyncio.get_running_loop()
         audio_buffer = self._context.audio_buffer
-        for chunk in chunks:
+        for index, chunk in enumerate(chunks):
             if progress_callback is not None:
                 await progress_callback(chunk.index, chunk.total)
             chunk_audio = audio_buffer.get_audio_range_float32(
                 chunk.start_sample, chunk.end_sample
             )
             try:
+                next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
                 result, failure = await self._decode_long_chunk(
                     chunk_audio, loop=loop, perf_collector=perf_collector,
+                    align_words=(
+                        chunk.start_sample < chunk.logical_start_sample
+                        or (next_chunk is not None and next_chunk.start_sample < next_chunk.logical_start_sample)
+                    ),
                 )
             except Exception as error:
                 raise IncompleteTranscriptionError(
@@ -452,6 +459,7 @@ class TranscriptionProcessor:
         loop: asyncio.AbstractEventLoop,
         perf_collector: dict[str, float] | None = None,
         for_commit: bool = False,
+        align_words: bool = False,
     ) -> tuple[TranscribeResult | None, IncompleteTranscriptionError | None]:
         """Decode one long chunk, retrying a suspicious result with safer options.
 
@@ -464,7 +472,9 @@ class TranscriptionProcessor:
         failure: IncompleteTranscriptionError | None = None
         try:
             result = await self._run_transcribe(
-                chunk_audio, loop=loop, options=_LONG_CHUNK_OPTIONS, perf_collector=perf_collector,
+                chunk_audio, loop=loop,
+                options=_OVERLAP_CHUNK_OPTIONS if align_words else _LONG_CHUNK_OPTIONS,
+                perf_collector=perf_collector,
             )
         except IncompleteTranscriptionError as error:
             failure = error
@@ -480,7 +490,7 @@ class TranscriptionProcessor:
                 retry_result = await self._run_transcribe(
                     chunk_audio,
                     loop=loop,
-                    options=_RETRY_OPTIONS,
+                    options=_OVERLAP_RETRY_OPTIONS if align_words else _RETRY_OPTIONS,
                     perf_collector=perf_collector,
                 )
             except VramExhaustedError as error:
