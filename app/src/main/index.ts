@@ -620,9 +620,8 @@ async function startApplication(): Promise<void> {
     descriptor: PINNED_GPU_PACK_DESCRIPTOR,
     root: resolveGpuPackStorageRoot(),
     identity: {
-      appBuildId: app.getVersion(),
       ctranslate2BuildId: GPU_PACK_CTRANSLATE2_BUILD_ID,
-      platform: 'win32-x64',
+      platform: `${process.platform}-${process.arch}`,
     },
   });
 

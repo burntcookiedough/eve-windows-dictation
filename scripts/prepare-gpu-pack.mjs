@@ -14,6 +14,7 @@ import {
   createBrotliCompress,
   createBrotliDecompress,
 } from 'node:zlib';
+import { GPU_PACK_V1_MANIFEST_APP_BUILD_ID } from '../app/src/shared/constants.ts';
 
 const OFFICIAL_MANIFEST_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/redistrib_12.9.1.json';
 const NVIDIA_ARCHIVE_NAME = 'libcublas-windows-x86_64-12.9.1.4-archive.zip';
@@ -48,29 +49,32 @@ const assets = [
 ];
 
 const usage = `Usage:
-  node scripts/prepare-gpu-pack.mjs --archive <verified NVIDIA ZIP> --output <new directory outside the repository and user profile> --app-build-id <Eve version> --ctranslate2-build-id <pinned CTranslate2 identity>
+  node scripts/prepare-gpu-pack.mjs --archive <verified NVIDIA ZIP> --output <new directory outside the repository and user profile> --ctranslate2-build-id <pinned CTranslate2 identity>
 
 The command validates the official CUDA 12.9.1 archive, extracts only the two named cuBLAS DLL entries into a temporary staging directory, and writes Brotli quality-5 candidate assets plus an unpublished descriptor draft. It never edits application source or uploads files.
 
 Example:
-  node scripts/prepare-gpu-pack.mjs --archive E:\\eve-cuda-12.9.1-cublas.zip --output E:\\eve-alpha6-gpu-pack-candidate --app-build-id 0.8.2-alpha.6 --ctranslate2-build-id ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc`;
+  node scripts/prepare-gpu-pack.mjs --archive E:\\eve-cuda-12.9.1-cublas.zip --output E:\\eve-gpu-pack-candidate --ctranslate2-build-id ctranslate2-4.6.3-cp311-cp311-win_amd64-sha256:fa2f3dcda893a3f4dedeb32b5059e4085738934d93ea8dccdce4bbef2be5d3dc`;
 
 function parseArguments(argv) {
+  const requiredOptions = ['--archive', '--output', '--ctranslate2-build-id'];
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     if (key === '--help' || key === '-h') return { help: true };
-    if (!key?.startsWith('--')) throw new Error(`Unexpected argument: ${key ?? ''}`);
+    if (!requiredOptions.includes(key)) throw new Error(`Unexpected argument: ${key}`);
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     if (values.has(key)) throw new Error(`Argument repeated: ${key}`);
     values.set(key, value);
     index += 1;
   }
+  for (const key of requiredOptions) {
+    if (!values.has(key)) throw new Error(`Required argument missing: ${key}`);
+  }
   return {
     archive: values.get('--archive'),
     output: values.get('--output'),
-    appBuildId: values.get('--app-build-id'),
     ctranslate2BuildId: values.get('--ctranslate2-build-id'),
     help: false,
   };
@@ -216,11 +220,11 @@ async function verifyCompressedRoundTrip(compressedPath, expectedAsset) {
   }
 }
 
-function candidateManifest(appBuildId, ctranslate2BuildId, generatedAssets) {
+function candidateManifest(ctranslate2BuildId, generatedAssets) {
   const files = generatedAssets.map(({ fileName, bytes, sha256 }) => ({ fileName, bytes, sha256 }));
   const identity = {
     schemaVersion: SCHEMA_VERSION,
-    appBuildId,
+    appBuildId: GPU_PACK_V1_MANIFEST_APP_BUILD_ID,
     ctranslate2BuildId,
     platform: PLATFORM,
     files,
@@ -241,7 +245,6 @@ function candidateManifest(appBuildId, ctranslate2BuildId, generatedAssets) {
     packId,
     descriptorDraft: {
       schemaVersion: SCHEMA_VERSION,
-      appBuildId,
       ctranslate2BuildId,
       platform: PLATFORM,
       assets: generatedAssets.map((asset) => ({
@@ -281,11 +284,8 @@ This draft does not decide whether a separately hosted, user-requested pack meet
 async function buildCandidate(options) {
   if (process.platform !== 'win32') throw new Error('Run this Windows-only pack preparation script from Windows PowerShell');
   assertPinnedCompressionToolchain();
-  for (const [label, value] of [['--archive', options.archive], ['--output', options.output], ['--app-build-id', options.appBuildId], ['--ctranslate2-build-id', options.ctranslate2BuildId]]) {
-    if (!value) throw new Error(`Required argument missing: ${label}`);
-  }
-  for (const [label, value] of [['app build ID', options.appBuildId], ['CTranslate2 build ID', options.ctranslate2BuildId]]) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) throw new Error(`Invalid ${label}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(options.ctranslate2BuildId)) {
+    throw new Error('Invalid CTranslate2 build ID');
   }
   if (!path.isAbsolute(options.archive) || !path.isAbsolute(options.output)) {
     throw new Error('--archive and --output must be absolute paths');
@@ -353,7 +353,7 @@ async function buildCandidate(options) {
     }
 
     await fs.rm(rawDir, { recursive: true, force: false });
-    const manifest = candidateManifest(options.appBuildId, options.ctranslate2BuildId, generatedAssets);
+    const manifest = candidateManifest(options.ctranslate2BuildId, generatedAssets);
     await fs.writeFile(path.join(stageDir, 'gpu-pack-candidate.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     await fs.writeFile(path.join(stageDir, 'NVIDIA-CUDA-12.9.1-NOTICE-DRAFT.md'), noticeDraft, { flag: 'wx' });
 

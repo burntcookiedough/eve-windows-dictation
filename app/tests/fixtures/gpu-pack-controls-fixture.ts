@@ -512,8 +512,10 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
     });
 
     test('Wrapper PID difference does not release lease or clear server state while server is still alive', async () => {
+      const appVersion = '0.9.0-beta.1';
       const mockWrapperChild = new MockChildProcess(1001);
       let leaseReleased = false;
+      let spawnedEnv: NodeJS.ProcessEnv | undefined;
       const boundPids: number[] = [];
 
       const mockLease: RuntimeLease = {
@@ -539,7 +541,7 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
 
       const deps: ServerManagerDeps = {
         isPackaged: true,
-        appVersion: '1.0.0-test',
+        appVersion,
         isProcessAlive: (pid) => {
           if (pid === 1001) return wrapperAlive;
           if (pid === 2002) return daemonAlive;
@@ -556,19 +558,22 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
             MURMUR_GPU_PACK_ID: gpuRuntime?.packId,
           },
         }),
-        spawn: (() => mockWrapperChild as any) as any,
+        spawn: ((_cmd: string, _args: string[], options: any) => {
+          spawnedEnv = options.env;
+          return mockWrapperChild as any;
+        }) as any,
         waitForPidFile: async () => ({
           pid: 2002, // Server daemon PID differs from wrapper PID 1001
           port: 9005,
           startedAt: Date.now(),
-          appBuildId: '1.0.0-test',
+          appBuildId: appVersion,
         }),
         waitForHealth: async () => {
           // Exit before startup completes, after the owned daemon is discovered.
           wrapperAlive = false;
           mockWrapperChild.emit('exit', 0, null);
-          return { healthy: true, version: '1.0.0-test', runtime: {
-            app_build: '1.0.0-test', server_build: '1.0.0-test', pack_id: 'gpu-pack-test-wrapper',
+          return { healthy: true, version: appVersion, runtime: {
+            app_build: appVersion, server_build: appVersion, pack_id: mockLease.runtime.packId,
           } };
         },
       };
@@ -576,6 +581,7 @@ describe('B6 GPU Pack Controls & Server Runtime Lease', () => {
       const manager = new ServerManager(mockGpuManager as GpuPackManager, deps);
       await (manager as any).startOnce();
 
+      expect(spawnedEnv?.MURMUR_GPU_PACK_ID).toBe(mockLease.runtime.packId);
       expect(boundPids).toContain(1001);
       expect(boundPids).toContain(2002);
       expect(manager.getState().status).toBe('running');
