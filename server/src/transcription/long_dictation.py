@@ -62,8 +62,9 @@ def plan_chunks(
     chunk_samples = max(1, int(chunk_s * sample_rate))
     overlap_samples = max(0, int(overlap_s * sample_rate))
 
+    plan_start = max(0, start_sample)
     logical_ranges: list[tuple[int, int]] = []
-    logical_start = max(0, start_sample)
+    logical_start = plan_start
     while logical_start < total_samples:
         target_end = min(total_samples, logical_start + chunk_samples)
         if target_end < total_samples:
@@ -84,7 +85,8 @@ def plan_chunks(
     for index, (logical_start_sample, logical_end_sample) in enumerate(logical_ranges, start=1):
         start_sample = logical_start_sample
         if index > 1:
-            start_sample = max(0, logical_start_sample - overlap_samples)
+            # Overlap never reaches before the planned range (committed audio).
+            start_sample = max(plan_start, logical_start_sample - overlap_samples)
         chunks.append(
             AudioChunk(
                 index=index,

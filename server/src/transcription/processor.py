@@ -286,7 +286,7 @@ class TranscriptionProcessor:
         )
         try:
             result, failure = await self._decode_long_chunk(
-                audio, loop=asyncio.get_running_loop(), retry_unless_finalizing=True,
+                audio, loop=asyncio.get_running_loop(), for_commit=True,
             )
             if failure is not None:
                 raise failure
@@ -400,9 +400,13 @@ class TranscriptionProcessor:
         if (
             self._incremental
             and cached is not None
-            # A decode that heard no speech proves nothing about quiet speech
+            # A decode that heard no uncommitted speech (none at all, or only
+            # in a forced-seal overlap) proves nothing about quiet speech
             # after it; decoding the tail on stop is cheap in that case.
             and cached.result.last_speech_end is not None
+            and cached.chunk.start_sample
+            + int(cached.result.last_speech_end * AUDIO_SAMPLE_RATE)
+            >= tail.logical_start_sample
             and cached.chunk.start_sample == tail.start_sample
             and is_settled(audio_buffer, cached, total)
         ):
@@ -483,13 +487,15 @@ class TranscriptionProcessor:
         *,
         loop: asyncio.AbstractEventLoop,
         perf_collector: dict[str, float] | None = None,
-        retry_unless_finalizing: bool = False,
+        for_commit: bool = False,
     ) -> tuple[TranscribeResult | None, IncompleteTranscriptionError | None]:
         """Decode one long chunk, retrying a suspicious result with safer options.
 
-        Returns ``(None, None)`` when ``retry_unless_finalizing`` is set and stop
-        arrived before a needed retry, so a background commit stays bounded to
-        one decode once the final is waiting.
+        ``for_commit`` marks a background commit, whose result becomes
+        permanent. It returns ``(None, None)`` when stop arrived before a needed
+        retry, so a commit stays bounded to one decode once the final is
+        waiting, and it reports a retry that ran out of VRAM as a failure
+        instead of keeping the suspicious first pass.
         """
         failure: IncompleteTranscriptionError | None = None
         try:
@@ -504,7 +510,7 @@ class TranscriptionProcessor:
                 last_speech_end=None,
             )
         if failure is None and self._is_suspicious_long_chunk(result):
-            if retry_unless_finalizing and self._finalizing:
+            if for_commit and self._finalizing:
                 return None, None
             try:
                 retry_result = await self._run_transcribe(
@@ -513,7 +519,11 @@ class TranscriptionProcessor:
                     options=_RETRY_OPTIONS,
                     perf_collector=perf_collector,
                 )
-            except VramExhaustedError:
+            except VramExhaustedError as error:
+                if for_commit:
+                    # Never make a suspicious first pass permanent; the final
+                    # decodes this range and keeps its own OOM behaviour.
+                    return result, error
                 logger.warning(
                     "[%s] VRAM exhausted during long dictation retry; "
                     "keeping first chunk result",

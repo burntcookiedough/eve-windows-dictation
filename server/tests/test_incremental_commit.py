@@ -275,20 +275,24 @@ async def test_empty_first_decode_is_never_reused_once_speech_arrives(engine) ->
 class _ScriptedSession:
     """Returns prepared results in order; models a decoder that hears whispers."""
 
-    def __init__(self, results: list[TranscribeResult]) -> None:
+    def __init__(self, results: list[TranscribeResult | BaseException]) -> None:
         self.results = results
         self.calls = 0
 
     def transcribe(self, audio, *, hotwords=None, options=None) -> TranscribeResult:
         result = self.results[min(self.calls, len(self.results) - 1)]
         self.calls += 1
+        if isinstance(result, BaseException):
+            raise result
         return result
 
     def close(self) -> None:
         return
 
 
-def _scripted(monkeypatch: pytest.MonkeyPatch, results: list[TranscribeResult]) -> _ScriptedSession:
+def _scripted(
+    monkeypatch: pytest.MonkeyPatch, results: list[TranscribeResult | BaseException],
+) -> _ScriptedSession:
     session = _ScriptedSession(results)
     runtime = SimpleNamespace(
         open_session=lambda _id: SimpleNamespace(session=session, close=lambda: None),
@@ -354,16 +358,78 @@ async def test_partial_speech_timing_never_moves_backwards(monkeypatch) -> None:
     ])
     context = _context()
     processor = processor_module.TranscriptionProcessor(context)
+
+    async def step(sequence: int, seconds: float):
+        # Each step is louder than the last, so none is skipped as settled.
+        context.audio_buffer.append(sequence, _burst(3000 * 3 ** sequence, seconds))
+        return await processor.transcribe_partial()
+
     try:
-        for sequence in range(3):
-            # Each step is louder than the last, so none is skipped as settled.
-            context.audio_buffer.append(sequence, _burst(3000 * 3 ** sequence, 1.0))
-            result = await processor.transcribe_partial()
-            if result is not None and result.last_speech_end is not None:
-                context.last_speech_time = context.audio_start_time + result.last_speech_end
-        assert result.text == "a b c"
-        assert result.last_speech_end == 3.0
+        first = await step(0, 3.5)  # long enough for its 3.0 s speech end
+        assert first.text == "a b" and first.last_speech_end == 3.0
+        context.last_speech_time = context.audio_start_time + first.last_speech_end
+
+        assert await step(1, 1.0) is None  # unchanged text writes timing directly
         assert context.last_speech_time == context.audio_start_time + 3.0
+
+        third = await step(2, 1.0)
+        assert third.text == "a b c"
+        assert third.last_speech_end == 3.0
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_reuse_requires_speech_after_the_committed_end(monkeypatch) -> None:
+    # After a forced seal, a tail decode whose only speech was in the overlap
+    # heard nothing uncommitted; quiet speech after it must still be decoded.
+    session = _scripted(monkeypatch, [TranscribeResult("quiet words", 0.6, 1.4)])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    end, overlap = 5 * RATE, int(0.75 * RATE)
+    try:
+        context.audio_buffer.append(0, _noise(6.6))
+        processor._committed = CommittedTranscript(
+            end_sample=end, overlap_samples=overlap, texts=["committed words"],
+        )
+        decoded_to = 6 * RATE
+        processor._tail = Decode(
+            AudioChunk(1, 1, end - overlap, decoded_to, end, decoded_to),
+            TranscribeResult("", 0.0, 0.5),  # speech ends inside the overlap
+        )
+        assert is_settled(context.audio_buffer, processor._tail, context.audio_buffer.sample_count)
+
+        result = await processor.transcribe_final()
+
+        assert session.calls == 1
+        assert result.text == "committed words quiet words"
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_commit_retry_out_of_vram_is_a_failed_commit(monkeypatch) -> None:
+    audio, _ = _speech([5, 6, 4, 7, 5, 6])
+    session = _scripted(monkeypatch, [
+        TranscribeResult("w0 maybe", 0.2, 3.0),  # suspicious first pass
+        VramExhaustedError(last_result=None),  # its retry runs out of VRAM
+        TranscribeResult("final words", 0.9, 16.0),
+    ])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        context.audio_buffer.append(0, audio)
+        assert processor._plan_seal(len(audio)) is not None
+        with pytest.raises(VramExhaustedError):
+            await processor.transcribe_partial()
+        assert processor._committed.texts == []
+        assert processor._committed.end_sample == 0
+        assert processor._incremental is False  # commits off for this session
+
+        result = await processor.transcribe_final()
+
+        assert session.calls == 3
+        assert result.text == "final words"
     finally:
         processor.close()
         context.audio_buffer.close()
@@ -683,6 +749,38 @@ def test_is_settled_rejects_transients_soft_speech_and_long_gaps() -> None:
     assert not _settled_case(quiet, np.concatenate([_noise(0.5, seed=12), _burst(150)]))
     # A no-segment decode needs a steady window too, and a bounded gap.
     assert not _settled_case(quiet, _noise(11.0, seed=12))
+
+
+def test_is_settled_hears_a_trailing_partial_frame() -> None:
+    # 20 ms of silence then 19 ms of loud audio: the loud part is a leftover
+    # partial frame and must still count.
+    quiet = _noise(0.6, seed=11)
+    assert not _settled_case(quiet, np.concatenate([_noise(0.02, seed=12), _burst(8000, 0.019)]))
+
+
+def test_forced_seal_overlap_never_reaches_before_its_own_decode() -> None:
+    audio, _ = _speech([40], word_gap_s=0.0)  # no pauses: the seal is forced
+    buffer = _buffer(audio)
+    try:
+        committed_end = RATE
+        chunk, overlap = plan_seal(
+            buffer, committed_end=committed_end, total_samples=len(audio),
+            seal_after_s=0.5, chunk_s=2.0, overlap_s=5.0,
+        )
+        assert chunk.start_sample == committed_end
+        assert 0 < overlap == chunk.end_sample - chunk.start_sample
+    finally:
+        buffer.close()
+
+
+def test_plan_chunks_overlap_never_reaches_before_the_planned_range() -> None:
+    from transcription.long_dictation import plan_chunks
+
+    audio = np.zeros(30 * RATE, dtype=np.float32)
+    chunks = plan_chunks(audio, chunk_s=2.0, overlap_s=5.0, start_sample=20 * RATE)
+    assert len(chunks) > 1
+    assert min(chunk.start_sample for chunk in chunks) == 20 * RATE
+    assert chunks[1].start_sample == 20 * RATE < chunks[1].logical_start_sample
 
 
 def test_committed_transcript_dedupes_overlap_with_timed_segments() -> None:

@@ -94,8 +94,15 @@ class CommittedTranscript:
         )
 
 
-def frame_rms(buffer: AudioBuffer, start_sample: int, end_sample: int) -> np.ndarray:
-    """RMS of consecutive 20 ms frames in ``[start_sample, end_sample)``."""
+def frame_rms(
+    buffer: AudioBuffer, start_sample: int, end_sample: int, *, include_partial: bool = False,
+) -> np.ndarray:
+    """RMS of consecutive 20 ms frames in ``[start_sample, end_sample)``.
+
+    Pause detection uses complete frames only, so a frame count is a duration.
+    ``include_partial`` appends the leftover samples as one more frame, for
+    checks that must hear every sample.
+    """
     audio = buffer.get_audio_range_float32(start_sample, end_sample)
     frames = len(audio) // FRAME_SAMPLES
     if frames == 0:
@@ -103,7 +110,11 @@ def frame_rms(buffer: AudioBuffer, start_sample: int, end_sample: int) -> np.nda
             return np.zeros(0, dtype=np.float64)
         return np.array([np.sqrt(np.mean(np.square(audio, dtype=np.float64)))])
     shaped = audio[: frames * FRAME_SAMPLES].reshape(frames, FRAME_SAMPLES)
-    return np.sqrt(np.mean(np.square(shaped, dtype=np.float64), axis=1))
+    rms = np.sqrt(np.mean(np.square(shaped, dtype=np.float64), axis=1))
+    leftover = audio[frames * FRAME_SAMPLES:]
+    if include_partial and len(leftover):
+        rms = np.append(rms, np.sqrt(np.mean(np.square(leftover, dtype=np.float64))))
+    return rms
 
 
 def plan_seal(
@@ -144,6 +155,9 @@ def plan_seal(
         boundary = max(committed_end + rate, boundary)
         overlap = max(0, int(overlap_s * rate))
     start = max(0, committed_end - overlap_samples)
+    # The next tail may only re-hear audio this decode heard; otherwise it
+    # would repeat words committed earlier that dedupe cannot match.
+    overlap = min(overlap, boundary - start)
     chunk = AudioChunk(1, 1, start, boundary, committed_end, boundary)
     return chunk, overlap
 
@@ -200,7 +214,7 @@ def is_settled(buffer: AudioBuffer, decode: Decode, total_samples: int) -> bool:
     if chunk.end_sample - speech_end < int(SETTLED_GUARD_S * rate):
         return False
     reference = frame_rms(buffer, speech_end, chunk.end_sample)
-    new_audio = frame_rms(buffer, chunk.end_sample, total_samples)
+    new_audio = frame_rms(buffer, chunk.end_sample, total_samples, include_partial=True)
     if len(reference) == 0 or len(new_audio) == 0:
         return False
     floor = max(float(np.median(reference)), SETTLED_ABS_FLOOR)
