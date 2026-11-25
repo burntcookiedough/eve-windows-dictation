@@ -13,12 +13,13 @@ import {
   type GpuPackDescriptor,
   type GpuPackIdentity,
 } from '../src/main/services/gpu-pack-manager';
+import { GPU_PACK_CTRANSLATE2_BUILD_ID } from '../src/shared/constants';
 
-const identity: GpuPackIdentity = {
-  appBuildId: 'eve-0.8.2-test.1',
+const identity = {
   ctranslate2BuildId: 'ctranslate2-4.6.3-test-wheel-a1b2',
   platform: 'win32-x64',
-};
+} as const satisfies GpuPackIdentity;
+const alpha9ManifestBuildId = '0.8.2-alpha.9';
 
 const scratchRoots: string[] = [];
 
@@ -59,7 +60,6 @@ function fixture() {
 
   const descriptor: GpuPackDescriptor = {
     schemaVersion: 1,
-    appBuildId: identity.appBuildId,
     ctranslate2BuildId: identity.ctranslate2BuildId,
     platform: identity.platform,
     assets,
@@ -101,14 +101,14 @@ function managerFor(
 }
 
 describe('GPU pack manager', () => {
-  test('production descriptor accepts the current release and rejects a different app identity', async () => {
+  test('production descriptor selects the same pack for the current and newer app versions', async () => {
     const appPackage = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { version: string };
     const root = await temporaryRoot();
-    const productionIdentity: GpuPackIdentity = {
+    const productionIdentity = {
       appBuildId: appPackage.version,
-      ctranslate2BuildId: PINNED_GPU_PACK_DESCRIPTOR.ctranslate2BuildId,
+      ctranslate2BuildId: GPU_PACK_CTRANSLATE2_BUILD_ID,
       platform: PINNED_GPU_PACK_DESCRIPTOR.platform,
     };
     let assetRequests = 0;
@@ -117,30 +117,64 @@ describe('GPU pack manager', () => {
       throw new Error('The production descriptor check must not download assets');
     };
 
-    expect(PINNED_GPU_PACK_DESCRIPTOR.appBuildId).toBe(appPackage.version);
     const compatible = createGpuPackManager({
       root,
       descriptor: PINNED_GPU_PACK_DESCRIPTOR,
       identity: productionIdentity,
       source,
     });
-    expect((await compatible.getState()).status).toBe('missing');
+    const state = await compatible.getState();
+    expect(state.status).toBe('missing');
 
-    const incompatible = createGpuPackManager({
-      root: `${root}-wrong-identity`,
+    const newerIdentity = { ...productionIdentity, appBuildId: '999.0.0-test' };
+    const newer = createGpuPackManager({
+      root,
       descriptor: PINNED_GPU_PACK_DESCRIPTOR,
-      identity: { ...productionIdentity, appBuildId: '0.8.2-alpha.6' },
+      identity: newerIdentity,
       source,
     });
-    expect(await incompatible.getState()).toEqual({
-      status: 'unavailable',
-      code: 'incompatible_build',
-    });
-    expect(await incompatible.install()).toEqual({
-      status: 'unavailable',
-      code: 'incompatible_build',
-    });
+    expect(await newer.getState()).toEqual(state);
     expect(assetRequests).toBe(0);
+  });
+
+  test('a newer app reuses an alpha.9 manifest and its DLLs without downloading', async () => {
+    const root = await temporaryRoot();
+    const data = fixture();
+    const legacyIdentity = {
+      schemaVersion: 1,
+      appBuildId: alpha9ManifestBuildId,
+      ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
+      platform: data.descriptor.platform,
+      files: data.assets.map(({ fileName, bytes, sha256 }) => ({ fileName, bytes, sha256 })),
+    };
+    const packId = sha256(Buffer.from(JSON.stringify(legacyIdentity)));
+    const { schemaVersion, ...metadata } = legacyIdentity;
+    const manifest = `${JSON.stringify({ schemaVersion, packId, ...metadata })}\n`;
+    const directory = path.join(root, `gpu-pack-${packId}`);
+    const manifestPath = path.join(directory, 'gpu-pack.json');
+    await mkdir(directory, { recursive: true });
+    await writeFile(manifestPath, manifest);
+    for (const { fileName, contents } of data.files) {
+      await writeFile(path.join(directory, fileName), contents);
+    }
+
+    const newerIdentity = { ...identity, appBuildId: '0.9.0-beta.1' };
+    const manager = createGpuPackManager({
+      root,
+      descriptor: data.descriptor,
+      identity: newerIdentity,
+      source: data.source,
+    });
+    const ready = { status: 'ready', packId, restartRequired: true };
+    expect(await manager.getState()).toEqual(ready);
+    expect(await manager.getValidatedRuntime()).toMatchObject({ directory, packId });
+    const lease = await manager.acquireRuntime();
+    expect(lease?.runtime.packId).toBe(packId);
+    await lease?.release();
+    expect(await manager.install()).toEqual(ready);
+    expect(await manager.repair()).toEqual(ready);
+    expect(data.calls).toEqual([]);
+    expect(await readFile(manifestPath, 'utf8')).toBe(manifest);
   });
 
   test('missing pinned descriptor is unavailable and does not touch disk or network', async () => {
@@ -181,7 +215,6 @@ describe('GPU pack manager', () => {
     expect(runtime).not.toBeNull();
     if (!runtime) throw new Error('Expected validated runtime');
     expect(runtime.packId).toBe(ready.packId);
-    expect(runtime.appBuildId).toBe(identity.appBuildId);
     expect(runtime.ctranslate2BuildId).toBe(identity.ctranslate2BuildId);
     for (const file of data.files) {
       expect(await readFile(path.join(runtime.directory, file.fileName))).toEqual(file.contents);
@@ -195,13 +228,15 @@ describe('GPU pack manager', () => {
     expect(data.calls).toHaveLength(2);
   });
 
-  test('repairs an installed pack whose bytes changed after publication', async () => {
+  test('rejects and repairs an installed DLL whose hash changed at the same size', async () => {
     const root = await temporaryRoot();
     const { manager, data } = managerFor(root);
     expect((await manager.install()).status).toBe('ready');
     const runtime = await manager.getValidatedRuntime();
     if (!runtime) throw new Error('Expected validated runtime');
-    await writeFile(path.join(runtime.directory, data.files[0].fileName), 'corrupt');
+    const tampered = Buffer.from(data.files[0].contents);
+    tampered[0] = 0;
+    await writeFile(path.join(runtime.directory, data.files[0].fileName), tampered);
     expect(await manager.getState()).toMatchObject({ status: 'failed', code: 'pack_invalid', retryable: true });
     expect(await manager.getValidatedRuntime()).toBeNull();
     expect((await manager.install()).status).toBe('ready');
@@ -212,22 +247,22 @@ describe('GPU pack manager', () => {
   test('keeps the current and newest validated prior pack across upgrades without deleting unknown entries or links', async () => {
     const root = await temporaryRoot();
     const data = fixture();
-    const managerForBuild = (appBuildId: string) =>
+    const managerForBuild = (ctranslate2BuildId: string) =>
       createGpuPackManager({
         root,
-        descriptor: { ...data.descriptor, appBuildId },
-        identity: { ...identity, appBuildId },
+        descriptor: { ...data.descriptor, ctranslate2BuildId },
+        identity: { ...identity, ctranslate2BuildId },
         source: data.source,
       });
-    const installBuild = async (appBuildId: string) => {
-      const state = await managerForBuild(appBuildId).install();
-      if (state.status !== 'ready') throw new Error(`Expected ${appBuildId} pack to install`);
+    const installBuild = async (ctranslate2BuildId: string) => {
+      const state = await managerForBuild(ctranslate2BuildId).install();
+      if (state.status !== 'ready') throw new Error(`Expected ${ctranslate2BuildId} pack to install`);
       return state.packId;
     };
 
-    const firstBuild = 'eve-0.8.2-test.1';
-    const secondBuild = 'eve-0.8.2-test.2';
-    const currentBuild = 'eve-0.8.2-test.3';
+    const firstBuild = 'ctranslate2-test-wheel-1';
+    const secondBuild = 'ctranslate2-test-wheel-2';
+    const currentBuild = 'ctranslate2-test-wheel-3';
     const firstPackId = await installBuild(firstBuild);
     const firstDirectory = path.join(root, `gpu-pack-${firstPackId}`);
     await utimes(firstDirectory, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'));
@@ -431,12 +466,12 @@ describe('GPU pack manager', () => {
     expect(await readdir(root)).toEqual([]);
   });
 
-  test('requires exact app and CTranslate2 build identities before reading or downloading', async () => {
+  test('requires the exact CTranslate2 build and platform before reading or downloading', async () => {
     const root = await temporaryRoot();
     const data = fixture();
     const mismatchedIdentities: GpuPackIdentity[] = [
-      { ...identity, appBuildId: 'eve-next-build' },
       { ...identity, ctranslate2BuildId: 'ctranslate2-other-wheel' },
+      { ...identity, platform: 'win32-arm64' },
     ];
 
     for (const mismatch of mismatchedIdentities) {
@@ -638,7 +673,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId,
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: firstAsset.url,
       assetIndex: 0,
@@ -695,7 +730,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId,
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: firstAsset.url,
       assetIndex: 0,
@@ -749,7 +784,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId,
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: firstAsset.url,
       assetIndex: 0,
@@ -802,7 +837,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId,
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: firstAsset.url,
       assetIndex: 0,
@@ -1457,7 +1492,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId: (managerFor(root, { descriptor: data.descriptor }).manager.getState() as any).packId ?? '',
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: data.assets[0].url,
       assetIndex: 0,
@@ -1702,7 +1737,7 @@ function createFixtureHttpServer(
       stageId: '.gpu-stage-abandoned-1234',
       packId,
       createdAt: Date.now() - 10000,
-      manifest: { schemaVersion: 1, packId, ...identity,
+      manifest: { schemaVersion: 1, packId, appBuildId: alpha9ManifestBuildId, ...identity,
         files: data.assets.map(({ fileName, bytes, sha256 }) => ({ fileName, bytes, sha256 })),
       },
     };
@@ -1836,9 +1871,9 @@ function createFixtureHttpServer(
     await manager.install();
     const lease = await manager.acquireRuntime();
     if (!lease) throw new Error('Lease missing');
-    const nextDescriptor = { ...data.descriptor, appBuildId: 'eve-test-next' };
+    const nextDescriptor = { ...data.descriptor, ctranslate2BuildId: 'ctranslate2-test-next' };
     const next = createGpuPackManager({ root, descriptor: nextDescriptor,
-      identity: { ...identity, appBuildId: nextDescriptor.appBuildId }, source: data.source });
+      identity: { ...identity, ctranslate2BuildId: nextDescriptor.ctranslate2BuildId }, source: data.source });
     expect((await next.install()).status).toBe('ready');
     const runtime = await next.getValidatedRuntime();
     if (!runtime) throw new Error('Next runtime missing');
@@ -1870,9 +1905,9 @@ function createFixtureHttpServer(
       expect((await manager.install()).status).toBe('ready');
       const current = await manager.getValidatedRuntime();
       if (!current) throw new Error('Runtime missing');
-      const nextDescriptor = { ...data.descriptor, appBuildId: 'eve-failed-publication-test' };
+      const nextDescriptor = { ...data.descriptor, ctranslate2BuildId: 'ctranslate2-failed-publication-test' };
       const next = createGpuPackManager({ root, descriptor: nextDescriptor,
-        identity: { ...identity, appBuildId: nextDescriptor.appBuildId }, source: data.source });
+        identity: { ...identity, ctranslate2BuildId: nextDescriptor.ctranslate2BuildId }, source: data.source });
       const originalRename = fs.promises.rename.bind(fs.promises);
       let failedStage = '';
       const renameSpy = spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
@@ -1961,7 +1996,7 @@ function createFixtureHttpServer(
     const meta = {
       schemaVersion: 1,
       packId,
-      appBuildId: data.descriptor.appBuildId,
+      appBuildId: alpha9ManifestBuildId,
       ctranslate2BuildId: data.descriptor.ctranslate2BuildId,
       url: firstAsset.url,
       assetIndex: 0,

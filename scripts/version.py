@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage Eve version consistency across app/server/user-facing files."""
+"""Manage Eve version consistency and check the pinned GPU pack wheel."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_PACKAGE = ROOT / "app" / "package.json"
@@ -17,6 +18,8 @@ SERVER_VERSION_FILE = ROOT / "server" / "src" / "version.py"
 SERVER_UV_LOCK = ROOT / "server" / "uv.lock"
 README_FILE = ROOT / "README.md"
 RELEASE_VERIFY_FILE = ROOT / "scripts" / "release-verify.ps1"
+GPU_PACK_MANAGER = ROOT / "app" / "src" / "main" / "services" / "gpu-pack-manager.ts"
+APP_CONSTANTS = ROOT / "app" / "src" / "shared" / "constants.ts"
 
 SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
@@ -92,6 +95,34 @@ def read_release_verify_version() -> str:
     if not match:
         raise ValueError(f"Could not find ExpectedVersion in {RELEASE_VERIFY_FILE}")
     return match.group(2)
+
+
+def check_gpu_pack_wheel() -> None:
+    lock = tomllib.loads(SERVER_UV_LOCK.read_text(encoding="utf-8"))
+    packages = [package for package in lock["package"] if package["name"] == "ctranslate2"]
+    if len(packages) != 1:
+        raise ValueError("Expected one locked CTranslate2 package in server/uv.lock.")
+
+    package = packages[0]
+    wheel_build = f"ctranslate2-{package['version']}-cp311-cp311-win_amd64"
+    hashes = [
+        wheel.get("hash", "")
+        for wheel in package.get("wheels", [])
+        if urlsplit(wheel.get("url", "")).path.endswith(f"/{wheel_build}.whl")
+    ]
+    if len(hashes) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", hashes[0]):
+        raise ValueError(f"Expected one SHA-256 for {wheel_build}.whl in server/uv.lock.")
+
+    locked_build_id = f"{wheel_build}-{hashes[0]}"
+    for source, pattern in [
+        (GPU_PACK_MANAGER, r"^  ctranslate2BuildId:\s*'([^']+)',"),
+        (APP_CONSTANTS, r"^export const GPU_PACK_CTRANSLATE2_BUILD_ID\s*=\s*'([^']+)'"),
+    ]:
+        build_ids = re.findall(pattern, source.read_text(encoding="utf-8"), re.MULTILINE)
+        if build_ids != [locked_build_id]:
+            raise ValueError(
+                f"{source.relative_to(ROOT)} must pin the CTranslate2 wheel {locked_build_id}."
+            )
 
 
 def collect_versions() -> dict[str, str]:
@@ -197,6 +228,12 @@ def check_versions(expected_tag: str | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    try:
+        check_gpu_pack_wheel()
+    except (OSError, KeyError, ValueError) as error:
+        print(f"{error} The GPU pack must be rotated deliberately.", file=sys.stderr)
+        return 1
 
     print(f"Version check passed: {version}")
     return 0
