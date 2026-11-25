@@ -69,6 +69,7 @@ app.on('second-instance', () => {
 });
 
 const OVERLAY_SUCCESS_DWELL_MS = 900;
+const OVERLAY_NOTICE_DWELL_MS = 1500;
 const OVERLAY_ERROR_DWELL_MS = 2200;
 const OVERLAY_EXIT_ANIMATION_MS = 200;
 
@@ -108,11 +109,12 @@ function scheduleOverlayDismiss(
   terminalState: RecordingStatePayload['state']
 ): void {
   clearOverlayDismissTimers();
-  const dwellMs = terminalState === 'error'
-    ? OVERLAY_ERROR_DWELL_MS
-    : terminalState === 'success'
-      ? OVERLAY_SUCCESS_DWELL_MS
-      : 0;
+  const dwellByState: Partial<Record<RecordingStatePayload['state'], number>> = {
+    error: OVERLAY_ERROR_DWELL_MS,
+    notice: OVERLAY_NOTICE_DWELL_MS,
+    success: OVERLAY_SUCCESS_DWELL_MS,
+  };
+  const dwellMs = dwellByState[terminalState] ?? 0;
 
   overlayExitTimer = setTimeout(() => {
     overlayExitTimer = null;
@@ -127,6 +129,12 @@ function scheduleOverlayDismiss(
       }
     }, OVERLAY_EXIT_ANIMATION_MS);
   }, dwellMs);
+}
+
+function showRecordingBusy(): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, { code: 'recording_busy', message: 'Busy' });
+  }
 }
 
 function showTransientOverlayError(
@@ -291,46 +299,45 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
   // Set up transcription callbacks
   service.onFinal(async (frame: TextFrameFinal, receivedAt?: number) => {
-    if (transcriptionService !== service) {
-      return;
-    }
-    if (recordingTerminalOverride) return;
+    if (transcriptionService !== service || recordingTerminalOverride) return 'failed';
     if (serviceCapture && !serviceCapture.canCommit) {
-      recordingTerminalOverride = 'error';
-      sendOverlayRecordingState({ state: 'error', isRecording: false, mode: serviceSessionMode });
-      service.abort('Server finalized before capture drained; available text is incomplete.');
-      return;
+      log.warn('Server finalized before capture drained; available text is incomplete.');
+      return 'failed';
+    }
+    isRecording = false;
+    isStopping = true;
+    if (currentRecordingState.state !== 'processing') {
+      sendOverlayRecordingState({ state: 'processing', isRecording: true, mode: serviceSessionMode });
     }
     serviceCapture?.close();
+    if (captureSession === serviceCapture) captureSession = null;
     overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, false);
     if (receivedAt !== undefined) perfTraceManager.mark(serviceTraceId, 'finalReceivedAt', receivedAt);
     perfTraceManager.server(serviceTraceId, frame.perf);
 
-    if (source !== 'normal') {
+    if (source !== 'normal' || !frame.text) {
       perfTraceManager.completeTrace(serviceTraceId);
       return;
     }
 
-    if (frame.text) {
-      const pasteTargetWindowHandle = await pasteTargetWindowHandlePromise
-        ?.catch(() => null) ?? null;
+    const pasteTargetWindowHandle = await pasteTargetWindowHandlePromise?.catch(() => null) ?? null;
+    const result = await processFinalTranscription(
+      frame,
+      { ...getSettings(), autoPaste },
+      historyService,
+      serviceSessionMode,
+      pasteTargetWindowHandle,
+      serviceTraceId
+    );
 
-      // Process through pipeline (post-processing, clipboard, paste, history)
-      const result = await processFinalTranscription(
-        frame,
-        { ...getSettings(), autoPaste },
-        historyService,
-        serviceSessionMode,
-        pasteTargetWindowHandle,
-        serviceTraceId
-      );
-
-      // Keep Home and History current when dictation happens while Eve is in the tray.
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
-      }
+    if (result.entryWithGroup && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
     }
     perfTraceManager.completeTrace(serviceTraceId);
+    const { delivery } = result;
+    if (delivery.kind === 'skipped_unsafe') return delivery.copied ? 'copied_not_pasted' : 'paste_skipped';
+    if (delivery.kind !== 'failed' && result.historyFailed) return 'history_failed';
+    return delivery.kind;
   });
 
   service.onClose(() => {
@@ -347,7 +354,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     overlayWindow?.webContents.send(IPC_CHANNELS.COMMAND_STOP_RECORDING, sessionGeneration, false);
 
     // End Lab state immediately while allowing the overlay to dwell on its
-    // success/error state before its renderer exit transition and native hide.
+    // result before its renderer exit transition and native hide.
     updateRecordingState({ state: 'idle', isRecording: false, mode: closedSessionMode });
 
     isRecording = false;
@@ -434,16 +441,16 @@ function queueLongRecordingAfterStop(hotkeyAt?: number): void {
 }
 
 function toggleLongRecording(hotkeyAt?: number): void {
-  if (isRecording && recordingSessionMode === 'long') {
+  if (isStopping) {
+    showRecordingBusy();
+  } else if (isRecording && recordingSessionMode === 'long') {
     log.info('Long dictation stopped');
     startLongAfterStop = null;
     stopRecording();
-  } else if (isRecording || isStopping) {
+  } else if (isRecording) {
     log.info('Long dictation queued after quick dictation stop');
     queueLongRecordingAfterStop(hotkeyAt);
-    if (isRecording) {
-      stopRecording();
-    }
+    stopRecording();
   } else {
     startRecording('normal', 'long', hotkeyAt);
     log.info('Long dictation started');
@@ -660,7 +667,9 @@ async function startApplication(): Promise<void> {
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService({
     onHoldStart: (hotkeyAt) => {
-      if (!isRecording) {
+      if (isStopping) {
+        showRecordingBusy();
+      } else if (!isRecording) {
         startRecording('normal', 'quick', hotkeyAt);
         log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
       } else if (!getSetting('holdToTalk')) {

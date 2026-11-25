@@ -8,7 +8,7 @@ import type {
 } from '../../shared/types.js';
 import type { TextFrameFinal } from '../../shared/protocol.js';
 import { countWords } from '../../shared/insights.js';
-import { copyToClipboard, pasteText } from './clipboard.js';
+import { copyToClipboard, pasteText, type ClipboardCopyOutcome, type ClipboardPasteOutcome } from './clipboard.js';
 import type { HistoryService } from './history.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -119,9 +119,13 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   };
 }
 
+export type DeliveryOutcome = ClipboardCopyOutcome | ClipboardPasteOutcome | { kind: 'saved' };
+
 export interface DispatchResult {
   entry: TranscriptionEntry;
-  entryWithGroup: HistoryEntryWithGroup;
+  entryWithGroup: HistoryEntryWithGroup | null;
+  delivery: DeliveryOutcome;
+  historyFailed: boolean;
 }
 
 /**
@@ -130,62 +134,59 @@ export interface DispatchResult {
 export async function dispatchToOutputs(
   entry: TranscriptionEntry,
   settings: Settings,
-  historyService: HistoryService | null,
+  historyService: Pick<HistoryService, 'save'> | null,
   pasteTargetWindowHandle?: number | null,
   perfTraceId?: string
 ): Promise<DispatchResult> {
-  // A failed start-window capture leaves copy and History as the available outputs.
-  if (
-    settings.autoPaste && entry.text && typeof pasteTargetWindowHandle === 'number'
-    && Number.isSafeInteger(pasteTargetWindowHandle) && pasteTargetWindowHandle > 0
-  ) {
-    try {
-      await pasteText(entry.text, {
+  let delivery: DeliveryOutcome | undefined;
+  try {
+    if (settings.autoPaste && entry.text) {
+      delivery = await pasteText(entry.text, {
         restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
         restoreDelayMs: settings.clipboardRestoreDelayMs,
         method: settings.pasteMethod,
-        targetWindowHandle: pasteTargetWindowHandle,
+        targetWindowHandle: pasteTargetWindowHandle ?? null,
         ...(perfTraceId ? { perfTraceId } : {}),
       });
-    } catch {
-      log.error('Auto-paste failed');
       if (settings.autoCopy) {
-        try {
-          await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
-        } catch {
-          log.error('Automatic clipboard fallback failed');
+        if (delivery.kind === 'failed') {
+          await copyToClipboard(entry.text, perfTraceId);
+        } else if (delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+          const copy = await copyToClipboard(entry.text, perfTraceId);
+          delivery = copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
         }
       }
+    } else if (settings.autoCopy && entry.text) {
+      delivery = await copyToClipboard(entry.text, perfTraceId);
     }
-  } else if (settings.autoCopy && entry.text) {
-    try {
-      await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
-    } catch {
-      log.error('Automatic clipboard copy failed');
-    }
+  } catch {
+    log.error('Clipboard delivery did not complete');
+    delivery = { kind: 'failed' };
   }
 
-  // Save to history
+  let entryWithGroup: HistoryEntryWithGroup | null = null;
+  let historyFailed = false;
   if (historyService) {
     try {
       const histStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       historyService.save(entry);
+      entryWithGroup = { ...entry, dateGroup: computeDateGroup(entry.timestamp) };
       if (histStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(perfTraceId, 'history', completedAt - histStart, completedAt);
       }
     } catch (err) {
       log.error('Failed to save to history', { error: err as Error });
+      historyFailed = true;
     }
   }
 
-  // Build entry with date group for push notifications
-  const entryWithGroup: HistoryEntryWithGroup = {
-    ...entry,
-    dateGroup: computeDateGroup(entry.timestamp),
+  return {
+    entry,
+    entryWithGroup,
+    delivery: delivery ?? (entryWithGroup ? { kind: 'saved' } : { kind: 'failed' }),
+    historyFailed,
   };
-
-  return { entry, entryWithGroup };
 }
 
 /**
@@ -194,7 +195,7 @@ export async function dispatchToOutputs(
 export async function processFinalTranscription(
   frame: TextFrameFinal,
   settings: Settings,
-  historyService: HistoryService | null,
+  historyService: Pick<HistoryService, 'save'> | null,
   sessionMode: DictationSessionMode = 'quick',
   pasteTargetWindowHandle?: number | null,
   perfTraceId?: string

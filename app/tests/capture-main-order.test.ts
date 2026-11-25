@@ -27,6 +27,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       IPC_CHANNELS, app: { isPackaged: false }, serverManager: null, mainWindow: null,
       overlayWindow: { webContents: { send: () => {} } },
       isRecording: false, isStopping: false, recordingPerfTraceId: undefined,
+      currentRecordingState: { state: 'processing' },
       recordingTerminalOverride: null, recordingSource: null, recordingSessionMode: 'quick',
       transcriptionService: null, captureSession: null, latestTranscription: null, latestStatus: null,
       historyService: null, LOCAL_SERVER_URL: 'ws://localhost',
@@ -55,6 +56,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       processFinalTranscription: async (_frame: unknown, settings: { autoPaste: boolean; autoCopy: boolean },
         _history: unknown, _mode: unknown, target: number | null) => {
         output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target };
+        return { delivery: { kind: 'pasted' } };
       },
     };
     await runInNewContext(script + `\nstartRecording('${source}');`, context);
@@ -68,6 +70,53 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       autoPaste: initial, autoCopy, target: initial ? 12345 : null,
     });
   }
+});
+
+test('hotkeys signal Busy during finalization and retain startup timestamps when accepted', () => {
+  const source = ts.createSourceFile('index.ts', readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+  const functions = source.statements.filter(node => ts.isFunctionDeclaration(node)
+    && ['showRecordingBusy', 'toggleLongRecording'].includes(node.name?.text ?? ''));
+  expect(functions).toHaveLength(2);
+  let onHoldStart: ts.Expression | undefined;
+  function findHotkeySetup(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 'setupHotkeyService') {
+      const options = node.arguments[0];
+      if (options && ts.isObjectLiteralExpression(options)) {
+        const property = options.properties.find(prop => prop.name?.getText(source) === 'onHoldStart');
+        if (property && ts.isPropertyAssignment(property)) onHoldStart = property.initializer;
+      }
+    }
+    ts.forEachChild(node, findHotkeySetup);
+  }
+  findHotkeySetup(source);
+  const script = ts.transpileModule([
+    ...functions.map(node => node.getText(source)),
+    `const quickHotkey = ${onHoldStart!.getText(source)};`,
+  ].join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const events: unknown[] = [];
+  const context = {
+    isStopping: true, isRecording: false, recordingSessionMode: 'quick', IPC_CHANNELS,
+    overlayWindow: { isDestroyed: () => false, webContents: { send: (...args: unknown[]) => events.push(args) } },
+    queueLongRecordingAfterStop: (hotkeyAt: number) => events.push(['queued', hotkeyAt]),
+    startRecording: (...args: unknown[]) => events.push(['started', ...args]),
+    stopRecording: () => events.push('stopped'),
+    log: { info: () => {} },
+    getSetting: () => false,
+  };
+
+  runInNewContext(script + '\nquickHotkey(10); toggleLongRecording(20);', context);
+  const pulse = [IPC_CHANNELS.STATE_WARNING, { code: 'recording_busy', message: 'Busy' }];
+  expect(events).toEqual([pulse, pulse]);
+
+  events.length = 0;
+  context.isStopping = false;
+  runInNewContext(script + '\nquickHotkey(30); toggleLongRecording(40);', context);
+  expect(events).toEqual([['started', 'normal', 'quick', 30], ['started', 'normal', 'long', 40]]);
+
+  events.length = 0;
+  context.isRecording = true;
+  runInNewContext(script + '\ntoggleLongRecording(50);', context);
+  expect(events).toEqual([['queued', 50], 'stopped']);
 });
 
 for (const outcome of ['drained', 'failed', 'superseded'] as const) {

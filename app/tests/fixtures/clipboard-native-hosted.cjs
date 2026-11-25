@@ -24,11 +24,11 @@ app.whenReady().then(async () => {
     outfile: bundle, bundle: true, platform: 'node', format: 'cjs', external: ['electron'] });
   const { copyToClipboard, readFromClipboard } = require(bundle);
   const marker = 'EVE_ALPHA7_HOSTED_SYNTHETIC_CLIPBOARD';
-  await copyToClipboard(marker);
+  assert.equal((await copyToClipboard(marker)).kind, 'copied');
   // Read only after the synthetic write has succeeded; no initial clipboard read.
   assert.equal(await readFromClipboard(), marker);
   assert.ok((await clipboard.read()).some(item => item.types.includes('text/plain')));
-  await copyToClipboard('');
+  assert.equal((await copyToClipboard('')).kind, 'copied');
   process.stdout.write('HOSTED_CLIPBOARD_PROOF=passed\n');
   app.quit();
 }).catch(() => {

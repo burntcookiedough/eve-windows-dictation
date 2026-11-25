@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { perfTraceManager } from '../src/main/services/perf-trace.js';
 import { PasteAbortCode } from '../src/main/services/paste-helper-script.js';
+import type { ClipboardCopyOutcome } from '../src/main/services/clipboard.js';
 import { DEFAULT_SETTINGS } from '../src/shared/types.js';
 import type { Settings, TranscriptionEntry } from '../src/shared/types.js';
 
@@ -265,12 +266,12 @@ describe('pasteText', () => {
     expect(clipboardWrites).toEqual(['copied text']);
   });
 
-  test('rejects copy when Electron rejects the clipboard write', async () => {
+  test('reports copy failure when Electron rejects the clipboard write', async () => {
     clipboardWriteText.mockImplementationOnce(async () => {
       throw new Error('synthetic write failure');
     });
 
-    await expect(copyToClipboard('copied text')).rejects.toThrow('Could not write to clipboard.');
+    await expect(copyToClipboard('copied text')).resolves.toEqual({ kind: 'failed' });
     expect(clipboardWrites).toEqual([]);
   });
 
@@ -307,7 +308,7 @@ describe('pasteText', () => {
       restoreDelayMs: 1,
       method: 'sendinput',
       targetWindowHandle: 12345,
-    })).rejects.toThrow('synthetic read failure');
+    })).resolves.toEqual({ kind: 'failed' });
 
     expect(clipboardWrites).toEqual([]);
     expect(execFile).not.toHaveBeenCalled();
@@ -355,13 +356,11 @@ describe('pasteText', () => {
     const failure = pasteText('second text', {
       restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
       targetWindowHandle: 12345,
-    }).then(() => null, (error: unknown) => error);
+    });
     await new Promise((resolve) => setTimeout(resolve, oldTimerFired ? 800 : 0));
     expect(rejectRead).toBeDefined();
     rejectRead?.(new Error('Synthetic successor snapshot failure'));
-    const error = await failure;
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe('Synthetic successor snapshot failure');
+    expect(await failure).toEqual({ kind: 'failed' });
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     expect(clipboardWrites).toEqual(['first text']);
@@ -575,7 +574,12 @@ describe('pasteText', () => {
   });
 
   test('runs VBScript only when explicitly selected', async () => {
-    await simulatePaste('vbscript', 12345, null);
+    const foreground = spyOn(pasteHelper, 'foreground').mockResolvedValue(12345);
+    try {
+      await expect(simulatePaste('vbscript', 12345, null)).resolves.toBe(true);
+    } finally {
+      foreground.mockRestore();
+    }
 
     expect(execFile).toHaveBeenCalledTimes(1);
     expect(execFile.mock.calls[0]?.[0]).toBe('cscript');
@@ -834,7 +838,7 @@ describe('pasteText', () => {
       restoreDelayMs: 1,
       method: 'sendinput',
       targetWindowHandle: 12345,
-    })).rejects.toThrow('OS format cannot be read');
+    })).resolves.toEqual({ kind: 'failed' });
 
     expect(clipboardWrites).toEqual([]);
     expect(clipboardItemWrites).toEqual([]);
@@ -861,6 +865,25 @@ describe('persistent paste helper', () => {
     for (const child of children.splice(0)) child.crash();
     execFile.mockImplementation(execFileStub);
   });
+
+  for (const handle of [23456, 0]) {
+    test(`skips VBScript when the foreground is different or unavailable (${handle})`, async () => {
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'previous' })], 'previous');
+      const child = nextHelper((request, helper) => {
+        if (request.type === 'ready') helper.reply(request, 'ready');
+        if (request.type === 'foreground') helper.reply(request, 'foreground', { handle });
+      });
+      await pasteHelper.warmUp();
+      await expect(pasteText('Synthetic dictation', {
+        method: 'vbscript', targetWindowHandle: 12345,
+        restoreClipboard: true, restoreDelayMs: 1,
+      })).resolves.toEqual({ kind: 'skipped_unsafe', reason: 'foreground_changed', copied: true });
+      expect(child.requests.map(({ type }) => type)).toEqual(['ready', 'foreground']);
+      expect(execFile).not.toHaveBeenCalled();
+      await new Promise(resolve => setTimeout(resolve, 800));
+      expect(clipboardText).toBe('Synthetic dictation');
+    });
+  }
 
   test('uses one hidden PowerShell process for foreground and several pastes', async () => {
     const child = nextHelper();
@@ -913,11 +936,14 @@ describe('persistent paste helper', () => {
         }
       });
       await pasteHelper.warmUp();
-      await pasteText('Synthetic dictation', {
+      const outcome = await pasteText('Synthetic dictation', {
         method: 'sendinput', targetWindowHandle: 12345,
         restoreClipboard: false, restoreDelayMs: 750,
       });
       expect(clipboardAtSample).toBe('Synthetic dictation');
+      expect(outcome).toEqual(expectedSequence
+        ? { kind: 'pasted' }
+        : { kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: true });
       expect(clipboardText).toBe('Synthetic dictation');
       expect(child.requests.map(({ type }) => type)).toEqual(
         expectedSequence ? ['ready', 'sequence', 'paste', 'commit'] : ['ready', 'sequence']
@@ -959,10 +985,11 @@ describe('persistent paste helper', () => {
       if (request.type === 'paste') helper.reply(request, 'prepared');
       else if (request.type === 'commit') helper.reply(request, 'aborted', { code: PasteAbortCode.ClipboardChanged });
     });
-    await pasteText('Synthetic dictation', {
+    const outcome = await pasteText('Synthetic dictation', {
       method: 'sendinput', targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
     });
     await new Promise(resolve => setTimeout(resolve, 800));
+    expect(outcome).toEqual({ kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: false });
     expect(clipboardText).toBe('Synthetic dictation');
     expect(execFile).not.toHaveBeenCalled();
   });
@@ -1057,11 +1084,14 @@ describe('persistent paste helper', () => {
         throw new Error('Paste finished before preparation');
       })]);
 
-      let newerOperation: Promise<void> | undefined;
+      let newerOperation: Promise<ClipboardCopyOutcome> | undefined;
       if (outcome === 'newer operation') newerOperation = copyToClipboard('New synthetic copy');
       else setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'New synthetic copy' })], 'New synthetic copy');
       if (outcome !== 'prepare timeout') child.reply(request, 'prepared');
-      await paste;
+      const delivery = await paste;
+      if (outcome === 'newer operation') {
+        expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'superseded', copied: false });
+      }
       await newerOperation;
       if (outcome === 'prepare timeout') child.reply(request, 'prepared');
 

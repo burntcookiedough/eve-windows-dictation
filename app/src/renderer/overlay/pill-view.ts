@@ -1,4 +1,4 @@
-import type { RecordingState } from '../../shared/types';
+import type { RecordingDelivery, RecordingState } from '../../shared/types';
 
 export const VOICE_THRESHOLD = 0.08;
 /** Long enough to ride out the gaps between words without the pill flapping. */
@@ -17,6 +17,8 @@ export interface PillInput {
   chunk: { index: number; total: number } | null;
   wordCount: number | null;
   alert: string;
+  busy?: boolean;
+  delivery?: RecordingDelivery;
 }
 
 export interface PillView {
@@ -25,6 +27,7 @@ export interface PillView {
   tag: string;
   isOpen: boolean;
   isAlert: boolean;
+  busy: boolean;
 }
 
 export function formatElapsed(ms: number): string {
@@ -63,17 +66,37 @@ export function holdVoice(level: number, now: number, openUntil: number): number
 
 export function derivePillView(input: PillInput): PillView {
   const { state, alert } = input;
-  const closed = { tag: '', isAlert: false };
+  const closed = { tag: '', isAlert: false, busy: input.busy ?? false };
 
   switch (state) {
     case 'idle':
       return { ...closed, phase: 'idle', label: '', isOpen: false };
     case 'error':
-      return { ...closed, phase: 'error', label: alert || 'Failed', isOpen: true, isAlert: true };
-    case 'success':
-      return { ...closed, phase: 'done', label: formatWordCount(input.wordCount), isOpen: true };
+      return {
+        ...closed,
+        phase: 'error',
+        label: input.delivery === 'history_failed' ? 'History save failed'
+          : input.delivery === 'failed' ? 'Delivery failed'
+          : alert || 'Failed',
+        isOpen: true,
+        isAlert: true,
+      };
+    case 'notice':
+      return {
+        ...closed, phase: 'error',
+        label: input.delivery === 'copied_not_pasted' ? 'Copied, not pasted' : 'Paste skipped',
+        isOpen: true, isAlert: true,
+      };
+    case 'success': {
+      const label = input.delivery === 'pasted' ? 'Paste sent'
+        : input.delivery === 'copied' ? 'Copied'
+        : input.delivery === 'saved' ? 'Saved to History'
+        : formatWordCount(input.wordCount);
+      return { ...closed, phase: 'done', label, isOpen: true };
+    }
     case 'processing': {
       const phase = input.hasListened ? 'working' : 'starting';
+      if (input.busy) return { ...closed, phase, label: 'Busy', isOpen: true, isAlert: true };
       if (alert) return { ...closed, phase, label: alert, isOpen: true, isAlert: true };
       if (!input.hasListened) return { ...closed, phase, label: 'Starting', isOpen: true };
       return {
@@ -87,11 +110,11 @@ export function derivePillView(input: PillInput): PillView {
     case 'transcribing':
       if (alert) return { ...closed, phase: 'live', label: alert, isOpen: true, isAlert: true };
       return {
+        ...closed,
         phase: 'live',
         label: formatElapsed(input.elapsedMs),
         tag: input.isLongSession ? 'Long' : '',
         isOpen: input.isSpeaking,
-        isAlert: false,
       };
   }
 }

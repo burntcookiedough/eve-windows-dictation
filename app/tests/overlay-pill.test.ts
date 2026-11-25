@@ -85,6 +85,23 @@ describe('derivePillView', () => {
     expect(derivePillView({ ...base, state: 'error' }).label).toBe('Failed');
   });
 
+  test.each([
+    ['success', 'pasted', 'Paste sent', false],
+    ['success', 'copied', 'Copied', false],
+    ['success', 'saved', 'Saved to History', false],
+    ['notice', 'copied_not_pasted', 'Copied, not pasted', true],
+    ['notice', 'paste_skipped', 'Paste skipped', true],
+    ['error', 'failed', 'Delivery failed', true],
+    ['error', 'history_failed', 'History save failed', true],
+  ] as const)('shows %s delivery %s with a compact status label', (state, delivery, label, isAlert) => {
+    expect(derivePillView({ ...base, state, delivery, busy: true })).toMatchObject({ label, isAlert, isOpen: true });
+  });
+
+  test('shows a busy pulse during finalization and then resumes the working label', () => {
+    expect(derivePillView({ ...base, state: 'processing', busy: true })).toMatchObject({ phase: 'working', label: 'Busy', isAlert: true });
+    expect(derivePillView({ ...base, state: 'processing', busy: false })).toMatchObject({ phase: 'working', label: 'Transcribing', isAlert: false });
+  });
+
   test('forces the pill open for a warning even in silence', () => {
     expect(derivePillView({ ...base, isSpeaking: false, alert: 'GPU memory low' })).toMatchObject({ label: 'GPU memory low', isOpen: true, isAlert: true, tag: '' });
   });
