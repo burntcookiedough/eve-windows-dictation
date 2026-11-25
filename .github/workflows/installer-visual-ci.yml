@@ -35,7 +35,7 @@ jobs:
       EVE_VISUAL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Checkout the candidate PR head without persisted credentials
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
@@ -58,12 +58,12 @@ jobs:
         run: ./scripts/installer-visual-ci.ps1 -Mode Initialize
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload diagnostic and visual evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eve-alpha6-installer-visual-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/eve-alpha6-installer-visual-${{ github.run_id }}-${{ github.run_attempt }}/evidence
