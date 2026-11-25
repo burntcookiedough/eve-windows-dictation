@@ -30,8 +30,9 @@ SETTLED_GUARD_S = 0.3
 # in either fails the check, so the caller decodes again.
 SETTLED_NOISE_RATIO = 2.0
 SETTLED_ABS_FLOOR = 1e-4
-# Never let one decode stand in for more than this much later audio.
-SETTLED_MAX_NEW_S = 10.0
+# Never let one decode stand in for more than this much later audio: speech at
+# room-noise level (a whisper) can pass the energy check, so bound what it hides.
+SETTLED_MAX_NEW_S = 3.0
 FORCE_SEAL_SEARCH_S = 1.5
 
 

@@ -210,7 +210,10 @@ class TranscriptionProcessor:
             else None
         )
         if last_speech_end is not None:
-            self._reported_speech_end = max(self._reported_speech_end or 0.0, last_speech_end)
+            # A window that hears speech only in its overlap must not rewind
+            # the silence monitor's speech time.
+            last_speech_end = max(self._reported_speech_end or 0.0, last_speech_end)
+            self._reported_speech_end = last_speech_end
 
         if long_mode:
             # Live text stays suppressed in long mode; whole-recording partial
@@ -397,6 +400,9 @@ class TranscriptionProcessor:
         if (
             self._incremental
             and cached is not None
+            # A decode that heard no speech proves nothing about quiet speech
+            # after it; decoding the tail on stop is cheap in that case.
+            and cached.result.last_speech_end is not None
             and cached.chunk.start_sample == tail.start_sample
             and is_settled(audio_buffer, cached, total)
         ):

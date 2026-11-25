@@ -272,6 +272,103 @@ async def test_empty_first_decode_is_never_reused_once_speech_arrives(engine) ->
         context.audio_buffer.close()
 
 
+class _ScriptedSession:
+    """Returns prepared results in order; models a decoder that hears whispers."""
+
+    def __init__(self, results: list[TranscribeResult]) -> None:
+        self.results = results
+        self.calls = 0
+
+    def transcribe(self, audio, *, hotwords=None, options=None) -> TranscribeResult:
+        result = self.results[min(self.calls, len(self.results) - 1)]
+        self.calls += 1
+        return result
+
+    def close(self) -> None:
+        return
+
+
+def _scripted(monkeypatch: pytest.MonkeyPatch, results: list[TranscribeResult]) -> _ScriptedSession:
+    session = _ScriptedSession(results)
+    runtime = SimpleNamespace(
+        open_session=lambda _id: SimpleNamespace(session=session, close=lambda: None),
+    )
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: _settings())
+    return session
+
+
+async def test_stop_after_an_empty_decode_always_decodes_the_tail(monkeypatch) -> None:
+    # Speech at 1.5x the room noise passes the energy check, but the model may
+    # still hear it. A decode that heard nothing must never stand in for it.
+    session = _scripted(monkeypatch, [
+        TranscribeResult("", 0.0, None),
+        TranscribeResult("quiet words", 0.6, 2.4),
+    ])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        context.audio_buffer.append(0, _noise(0.5))
+        assert await processor.transcribe_partial() is None
+        assert session.calls == 1
+        context.audio_buffer.append(1, _burst(26, 2.0))  # ~1.5x noise RMS
+        assert await processor.transcribe_partial() is None  # skipped as settled
+
+        result = await processor.transcribe_final()
+
+        assert session.calls == 2
+        assert result.text == "quiet words"
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_whispered_continuation_beyond_reuse_cap_is_redecoded(monkeypatch) -> None:
+    session = _scripted(monkeypatch, [
+        TranscribeResult("loud words", 0.9, 0.5),
+        TranscribeResult("loud words quiet words", 0.8, 4.5),
+    ])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        context.audio_buffer.append(0, np.concatenate([_noise(0.1), _burst(4000), _noise(0.5, seed=4)]))
+        partial = await processor.transcribe_partial()
+        assert partial.text == "loud words"
+        context.audio_buffer.append(1, _burst(21, 4.0))  # ~1.2x noise, 4 s
+
+        result = await processor.transcribe_final()
+
+        assert session.calls == 2
+        assert result.text == "loud words quiet words"
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_partial_speech_timing_never_moves_backwards(monkeypatch) -> None:
+    # Later windows can hear less (say only their overlap); timing must hold.
+    _scripted(monkeypatch, [
+        TranscribeResult("a b", 0.9, 3.0),
+        TranscribeResult("a b", 0.9, 1.0),  # unchanged text branch
+        TranscribeResult("a b c", 0.9, 2.0),  # emitted branch
+    ])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        for sequence in range(3):
+            # Each step is louder than the last, so none is skipped as settled.
+            context.audio_buffer.append(sequence, _burst(3000 * 3 ** sequence, 1.0))
+            result = await processor.transcribe_partial()
+            if result is not None and result.last_speech_end is not None:
+                context.last_speech_time = context.audio_start_time + result.last_speech_end
+        assert result.text == "a b c"
+        assert result.last_speech_end == 3.0
+        assert context.last_speech_time == context.audio_start_time + 3.0
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
 async def test_speech_after_last_decode_is_decoded_on_stop(engine) -> None:
     audio, expected = _speech([4, 5], trailing_s=1.0)
     more = _more_speech(3)
