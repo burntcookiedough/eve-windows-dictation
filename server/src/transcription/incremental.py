@@ -25,9 +25,13 @@ MIN_SEAL_SNR = 4.0
 QUIET_NOISE_RATIO = 3.0
 # Reusing a decode needs this much model-confirmed non-speech at its end.
 SETTLED_GUARD_S = 0.3
-# New audio may be at most 6 dB louder than that confirmed non-speech.
+# That stretch must be steady noise (p95 within 6 dB of its median), and new
+# audio may be at most 6 dB above that median. A click, breath or soft speech
+# in either fails the check, so the caller decodes again.
 SETTLED_NOISE_RATIO = 2.0
 SETTLED_ABS_FLOOR = 1e-4
+# Never let one decode stand in for more than this much later audio.
+SETTLED_MAX_NEW_S = 10.0
 FORCE_SEAL_SEARCH_S = 1.5
 
 
@@ -105,6 +109,7 @@ def plan_seal(
     buffer: AudioBuffer,
     *,
     committed_end: int,
+    overlap_samples: int = 0,
     total_samples: int,
     seal_after_s: float,
     chunk_s: float,
@@ -116,6 +121,8 @@ def plan_seal(
     past the committed end, cutting inside silence with no overlap. Without
     such a pause, force-seals near ``chunk_s`` at the quietest point and keeps
     ``overlap_s`` so the next decode can be stitched with ``text_for_chunk``.
+    ``overlap_samples`` is the overlap a previous forced seal left pending; the
+    sealed chunk re-hears it so a word cut at that boundary is not lost.
     """
     rate = AUDIO_SAMPLE_RATE
     earliest = committed_end + int(seal_after_s * rate)
@@ -135,7 +142,8 @@ def plan_seal(
         )
         boundary = max(committed_end + rate, boundary)
         overlap = max(0, int(overlap_s * rate))
-    chunk = AudioChunk(1, 1, committed_end, boundary, committed_end, boundary)
+    start = max(0, committed_end - overlap_samples)
+    chunk = AudioChunk(1, 1, start, boundary, committed_end, boundary)
     return chunk, overlap
 
 
@@ -170,11 +178,12 @@ def _latest_pause_midpoint(
 def is_settled(buffer: AudioBuffer, decode: Decode, total_samples: int) -> bool:
     """True when nothing but silence arrived after ``decode``'s audio.
 
-    The decode must have seen ``SETTLED_GUARD_S`` of non-speech after its last
-    speech, and no later 20 ms frame may exceed that stretch's loudest frame by
-    more than 6 dB. The reference is audio the model classified as non-speech,
-    so the check adapts to the room's noise floor; when in doubt it fails and
-    the caller decodes again.
+    A decode that covered all audio is trivially settled. Otherwise it must
+    have heard ``SETTLED_GUARD_S`` of non-speech after its last speech (its
+    whole window when it heard none). That stretch must be steady noise, and
+    every later 20 ms frame must stay within 6 dB of its median. At most
+    ``SETTLED_MAX_NEW_S`` of later audio may be covered. When in doubt this
+    returns False and the caller decodes again.
     """
     chunk, result = decode.chunk, decode.result
     if total_samples < chunk.end_sample:
@@ -182,6 +191,8 @@ def is_settled(buffer: AudioBuffer, decode: Decode, total_samples: int) -> bool:
     if total_samples == chunk.end_sample:
         return True
     rate = AUDIO_SAMPLE_RATE
+    if total_samples - chunk.end_sample > int(SETTLED_MAX_NEW_S * rate):
+        return False
     speech_end = chunk.start_sample
     if result.last_speech_end is not None:
         speech_end = chunk.start_sample + int(result.last_speech_end * rate)
@@ -191,5 +202,8 @@ def is_settled(buffer: AudioBuffer, decode: Decode, total_samples: int) -> bool:
     new_audio = frame_rms(buffer, chunk.end_sample, total_samples)
     if len(reference) == 0 or len(new_audio) == 0:
         return False
-    limit = max(SETTLED_NOISE_RATIO * float(reference.max()), SETTLED_ABS_FLOOR)
+    floor = max(float(np.median(reference)), SETTLED_ABS_FLOOR)
+    limit = SETTLED_NOISE_RATIO * floor
+    if float(np.percentile(reference, 95)) > limit:
+        return False  # The "non-speech" stretch holds a transient or speech.
     return float(new_audio.max()) <= limit

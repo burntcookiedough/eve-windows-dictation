@@ -40,7 +40,27 @@ def _settings(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
-def _speech(phrases: list[int], *, pause_s: float = PAUSE_S, trailing_s: float = 0.0) -> tuple[np.ndarray, str]:
+EDGE_QUIET_S = 0.1  # Recordings start and end with a little room tone.
+MIN_SPEECH_S = 0.2  # Like Silero VAD: shorter bursts (clicks) are not speech.
+
+
+def _noise(seconds: float, seed: int = 7) -> np.ndarray:
+    return np.random.default_rng(seed).integers(-30, 31, int(seconds * RATE)).astype(np.int16)
+
+
+def _burst(amplitude: int, seconds: float = WORD_S) -> np.ndarray:
+    burst = np.full(int(seconds * RATE), amplitude, dtype=np.int16)
+    burst[1::2] *= -1
+    return burst
+
+
+def _speech(
+    phrases: list[int],
+    *,
+    pause_s: float = PAUSE_S,
+    word_gap_s: float = WORD_GAP_S,
+    trailing_s: float = EDGE_QUIET_S,
+) -> tuple[np.ndarray, str]:
     """Synthetic speech: each word is a square-wave burst whose amplitude is its id."""
     rng = np.random.default_rng(7)
     parts: list[np.ndarray] = []
@@ -49,17 +69,15 @@ def _speech(phrases: list[int], *, pause_s: float = PAUSE_S, trailing_s: float =
     def quiet(seconds: float) -> None:
         parts.append(rng.integers(-30, 31, int(seconds * RATE)).astype(np.int16))
 
+    quiet(EDGE_QUIET_S)
     word_id = 0
     for phrase_index, length in enumerate(phrases):
         if phrase_index:
             quiet(pause_s)
         for position in range(length):
-            if position:
-                quiet(WORD_GAP_S)
-            amplitude = BASE_AMP + AMP_STEP * (word_id % 100)
-            burst = np.full(int(WORD_S * RATE), amplitude, dtype=np.int16)
-            burst[1::2] *= -1
-            parts.append(burst)
+            if position and word_gap_s:
+                quiet(word_gap_s)
+            parts.append(_burst(BASE_AMP + AMP_STEP * (word_id % 100)))
             words.append(f"w{word_id % 100}")
             word_id += 1
     quiet(trailing_s)
@@ -68,15 +86,16 @@ def _speech(phrases: list[int], *, pause_s: float = PAUSE_S, trailing_s: float =
 
 def _more_speech(words: int) -> np.ndarray:
     """A pause, then ``words`` new words (ids restart at w0)."""
-    pause = np.random.default_rng(3).integers(-30, 31, int(PAUSE_S * RATE)).astype(np.int16)
-    return np.concatenate([pause, _speech([words])[0]])
+    return np.concatenate([_noise(PAUSE_S, seed=3), _speech([words])[0]])
 
 
 class _WordSession:
-    """Deterministic fake engine: recognizes complete bursts as words.
+    """Deterministic fake engine: recognizes complete word bursts.
 
-    A burst cut by the start of the audio is unrecognizable and dropped, like a
-    fragment the model cannot hear; one cut by the end is still recognized.
+    A burst cut by either edge of the decoded audio is a fragment the model
+    cannot hear and is dropped, so a seal that cuts a word loses it unless the
+    next decode re-hears it through overlap. Bursts under ``MIN_SPEECH_S`` are
+    not speech, like VAD.
     """
 
     def __init__(self) -> None:
@@ -101,20 +120,19 @@ class _WordSession:
 def _recognize(audio: np.ndarray, options: TranscribeOptions | None) -> TranscribeResult:
     frame = RATE // 100
     count = len(audio) // frame
-    rms = np.sqrt(np.mean(np.square(audio[: count * frame].reshape(count, frame)), axis=1))
-    active = np.append(rms > ACTIVE_RMS, False)
+    levels = np.median(np.abs(audio[: count * frame].reshape(count, frame)), axis=1) * 32768.0
+    # Word id per 10 ms frame; adjacent words differ in amplitude.
+    ids = [round((level - BASE_AMP) / AMP_STEP) if level > 500 else None for level in levels]
     segments: list[TranscribeSegment] = []
-    start = None
-    for index, is_active in enumerate(active):
-        if is_active and start is None:
-            start = index
-        elif not is_active and start is not None:
-            begin, end = start * frame, index * frame
-            if begin > 0 or end - begin >= int(WORD_S * RATE) - frame:
-                amplitude = float(np.median(np.abs(audio[begin:end]))) * 32768.0
-                word = f"w{round((amplitude - BASE_AMP) / AMP_STEP)}"
-                segments.append(TranscribeSegment(word, begin / RATE, end / RATE))
-            start = None
+    start = 0
+    for index in range(1, count + 1):
+        if index < count and ids[index] == ids[start]:
+            continue
+        begin, end = start * frame, index * frame
+        is_word = ids[start] is not None and end - begin >= MIN_SPEECH_S * RATE
+        if is_word and begin > 0 and index < count:
+            segments.append(TranscribeSegment(f"w{ids[start]}", begin / RATE, end / RATE))
+        start = index
     if not segments:
         return TranscribeResult(text="", confidence=0.0, last_speech_end=None)
     timed = options is not None and options.mode == "long_chunk" and options.without_timestamps is False
@@ -192,18 +210,23 @@ async def test_final_decodes_only_the_uncommitted_tail(engine) -> None:
 
 
 async def test_forced_seals_without_pauses_stitch_overlap_exactly(engine) -> None:
-    # One unbroken phrase: no sealable pause, so seals are forced with overlap.
-    audio, expected = _speech([140])  # ~59 s
+    # Contiguous words with no gaps: no sealable pause, so every seal is forced
+    # and lands inside a word. Only overlap lets the next decode re-hear it.
+    audio, expected = _speech([200], word_gap_s=0.0)  # ~60 s
     context = _context()
     processor = processor_module.TranscriptionProcessor(context)
+    overlap = int(0.75 * RATE)
     try:
         await _record(processor, context, audio)
-        assert processor._committed.end_sample >= 25 * RATE
-        assert processor._committed.overlap_samples == int(0.75 * RATE)
 
         result = await processor.transcribe_final()
 
         assert result.text == expected  # No duplicated or dropped words.
+        assert processor._committed.end_sample >= 45 * RATE  # Two forced seals.
+        assert processor._committed.overlap_samples == overlap
+        # The second commit re-heard the first forced boundary.
+        second = processor._committed.previous.chunk
+        assert second.logical_start_sample - second.start_sample == overlap
     finally:
         processor.close()
         context.audio_buffer.close()
@@ -223,6 +246,27 @@ async def test_silent_tail_reuses_last_decode_without_new_inference(engine) -> N
         assert engine.calls[before:] == []
         assert result.text == expected
         assert result.is_empty is False
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_empty_first_decode_is_never_reused_once_speech_arrives(engine) -> None:
+    # A first partial that heard only a click returns no segments. Soft speech
+    # at under twice the click's level must still be decoded, not skipped.
+    start = np.concatenate([_noise(0.1), _burst(1500, 0.04), _noise(0.36, seed=5)])
+    words, expected = _speech([5])  # amplitudes 2000..3000
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        context.audio_buffer.append(0, start)
+        assert await processor.transcribe_partial() is None  # empty decode, cached
+        assert processor._tail is not None and processor._tail.result.last_speech_end is None
+        await _record(processor, context, words)
+
+        result = await processor.transcribe_final()
+
+        assert result.text == expected
     finally:
         processor.close()
         context.audio_buffer.close()
@@ -428,6 +472,26 @@ async def test_hotwords_reach_commit_partial_and_final_decodes(engine) -> None:
         context.audio_buffer.close()
 
 
+async def test_commit_advances_speech_timing_but_never_rewinds_it(engine) -> None:
+    audio, _ = _speech([5, 6, 4, 7, 5, 6])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        # A backlog: the first job is a commit, before any partial reported.
+        context.audio_buffer.append(0, audio)
+        committed = await processor.transcribe_partial()
+        assert processor._committed.texts
+        assert committed is not None and committed.is_empty
+        assert committed.last_speech_end == processor._committed.last_speech_end
+        partial = await processor.transcribe_partial()
+        assert partial.last_speech_end > committed.last_speech_end
+        # A later commit whose speech ends before the reported time stays silent.
+        assert processor._commit_speech_timing(len(audio), 0.0) is None
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
 async def test_partial_speech_timing_is_absolute_after_a_commit(engine) -> None:
     audio, _ = _speech([5, 6, 4, 7, 5, 6])
     context = _context()
@@ -495,6 +559,33 @@ def test_is_settled_requires_confirmed_silence_and_no_new_energy() -> None:
         assert not is_settled(buffer, speaking, len(audio))
     finally:
         buffer.close()
+
+
+def _settled_case(reference: np.ndarray, new_audio: np.ndarray) -> bool:
+    """A decode that heard one word, then ``reference`` (non-speech), then ``new_audio``."""
+    word = np.concatenate([_noise(0.1), _burst(4000)])
+    heard = np.concatenate([word, reference])
+    buffer = _buffer(np.concatenate([heard, new_audio]))
+    try:
+        speech_end = len(word) / RATE
+        decode = Decode(
+            AudioChunk(1, 1, 0, len(heard), 0, len(heard)),
+            TranscribeResult("w8", 0.9, speech_end),
+        )
+        return is_settled(buffer, decode, len(heard) + len(new_audio))
+    finally:
+        buffer.close()
+
+
+def test_is_settled_rejects_transients_soft_speech_and_long_gaps() -> None:
+    quiet = _noise(0.6, seed=11)
+    assert _settled_case(quiet, _noise(2.0, seed=12))
+    # A click inside the reference stretch must not raise the limit.
+    with_click = np.concatenate([quiet[:4800], _burst(1500, 0.04), quiet[4800:]])
+    assert not _settled_case(with_click, _noise(1.0, seed=12))
+    assert not _settled_case(quiet, np.concatenate([_noise(0.5, seed=12), _burst(150)]))
+    # A no-segment decode needs a steady window too, and a bounded gap.
+    assert not _settled_case(quiet, _noise(11.0, seed=12))
 
 
 def test_committed_transcript_dedupes_overlap_with_timed_segments() -> None:
