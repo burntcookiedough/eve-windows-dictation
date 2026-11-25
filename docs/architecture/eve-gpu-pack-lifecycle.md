@@ -27,7 +27,12 @@ When CTranslate2 or CUDA changes, rotate the pack deliberately.
 
 1. Identify the Windows x64 CPython 3.11 CTranslate2 wheel version and SHA-256
    in `server/uv.lock`. Select and verify the NVIDIA redistributable DLLs against
-   that wheel. Run `node scripts/prepare-gpu-pack.mjs` with `--archive`,
+   that wheel. If the CUDA redistributable changes, first update the preparation
+   pins in `scripts/prepare-gpu-pack.mjs` (the NVIDIA manifest and archive URLs,
+   archive name, size and SHA-256, and each DLL's installed and compressed size
+   and SHA-256), and verify them against NVIDIA's official redistributable
+   manifest. The script rejects any other archive before extraction. Keep the
+   existing pins when only the CTranslate2 wheel changes. Run `node scripts/prepare-gpu-pack.mjs` with `--archive`,
    `--output`, and `--ctranslate2-build-id`. The script uses Eve's fixed schema 1
    storage identity to generate the candidate pack ID and descriptor draft.
    Follow the release plan and pack provenance for hardware validation.
