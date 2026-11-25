@@ -33,8 +33,12 @@ lifecycle, privacy, and editor tests. `final_inference_start_offset_ms` and
 `final_inference_end_offset_ms` are worker boundaries relative to the server final
 processing entry; the inference duration sums observed completed calls.
 `partial_task_active_at_stop` observes the asynchronous partial task, not proof
-that cancelled native work stopped. `outstanding_partial_wait_ms` stays null
-because lock contention cannot safely attribute that delay. Only tested
+that cancelled native work stopped. `outstanding_partial_wait_ms` is the final's
+wait on its own session's work lock, behind at most one bounded background job
+(a partial or an incremental commit) of that session; it does not include waits on
+the global inference lock. `lock_wait_ms` is that wait plus the global
+inference-lock wait, and `stop_to_lock_wait_ms` ends when the final starts
+waiting on the session work lock. Only tested
 boundaries may be reported as observed; tests do not establish product timings. The isolated editor's local insertion span
 and a whole stop-to-insertion measurement are different results. When one observer
 cannot observe both boundaries, whole insertion latency remains unavailable.
