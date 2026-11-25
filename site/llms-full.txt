@@ -1,0 +1,155 @@
+# Eve: full text
+
+> Eve is a free, MIT-licensed, local-first dictation app for Windows. It is pre-release software; see https://github.com/burntcookiedough/eve-windows-dictation/releases for the latest version and its notes.
+
+This file is assembled from the repository documents below, with HTML and images removed, links made absolute, and the README's version note replaced by a link to the latest release. The feature-status document is retired; it is included to say so, and it points to the roadmap and documentation index. Short version: https://burntcookiedough.github.io/eve-windows-dictation/llms.txt
+
+Model note, from https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/architecture/eve-cpu-first-run-decision.md: large-v3-turbo is the catalog's recommended model. New CPU-only profiles start on small for a faster first download. Turbo runs fastest with the optional GPU pack. Existing profiles keep their saved model.
+
+---
+
+# Overview (README)
+
+Source: https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/README.md
+
+## Eve
+
+Quiet, local dictation for Windows. Speech recognition runs on your machine.
+
+Eve is pre-release software. Expect rough edges, and read the [latest release notes](https://github.com/burntcookiedough/eve-windows-dictation/releases) before installing.
+
+### Why Eve
+
+Most dictation tools send your voice to a server. Eve runs
+[Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) in a small speech service
+bundled with the app, so audio never leaves your computer. There is no account and no
+telemetry. Your transcripts stay on your machine.
+
+It stays out of the way. A translucent dot appears at the bottom of the screen, opens
+into a small timer pill while you talk, and disappears when the text is pasted.
+
+### A quick tour
+
+- **Home**: Today's words, speaking pace, your streak, and the last thing you said, all in one place.
+- **Insights**: Words over time, time saved compared with typing, and a year of activity. Calculated locally from your History.
+- **History**: Every dictation, searchable and filterable by quick, long, or edited. Copy, delete, or export to JSON or CSV.
+- **Settings**: Hotkeys, microphone, output style, vocabulary, and speech model. Changes save as you go.
+
+### What it does
+
+- **Two ways to talk.** Use Ctrl+Win for quick notes and
+  Ctrl+Shift+Win for long dictation. Hold to talk, or switch to toggle.
+- **Long dictation that stays light.** Long recordings are spooled to a temporary file
+  and transcribed in chunks, so memory use stays flat. The audio is deleted when the session ends.
+- **Text goes where you need it.** Eve copies the text, pastes it into the active window,
+  and can then restore your previous clipboard.
+- **Output styles.** Paste exactly what you said with Raw Dictation, or let Clean Prompt,
+  Codex Prompt, Message Rewrite, or Command Mode tidy it up with local, rule-based cleanup first.
+- **Your vocabulary.** Hotwords help Eve spell names, acronyms, and product terms correctly.
+- **Pick your model.** Choose `large-v3-turbo` (recommended, about 1.5 GB), `large-v3` for
+  maximum accuracy, or `small` for lighter hardware. The current model keeps working while a new one downloads.
+- **CPU by default, GPU if you want it.** Eve works out of the box on the CPU. An optional
+  NVIDIA CUDA pack, downloaded separately and verified by hash, speeds up transcription on supported GPUs.
+
+### Install
+
+1. Download `Eve.Web.Setup.<version>.exe` from
+   [GitHub Releases](https://github.com/burntcookiedough/eve-windows-dictation/releases).
+2. Run it. This is a small `nsis-web` installer that downloads the app during setup, so you need
+   an internet connection. It is **unsigned**, so Windows SmartScreen may ask you to confirm.
+3. Open Eve and hold Ctrl+Win. The speech model downloads from Hugging Face the first time you use it.
+
+Checksums (`SHA256SUMS.txt`, `SHA512SUMS.txt`) are published with each release.
+
+### Privacy
+
+- Speech recognition runs in a local service on your machine. Audio and transcripts are never uploaded.
+- History and Insights live in a local SQLite database. Long-dictation audio is temporary
+  and is never written to History or logs.
+- The network is used only to download the installer payload, model weights on first use,
+  and the optional GPU pack if you install it.
+- Copied diagnostics exclude logs, file paths, History, and transcript text.
+
+Full details are in [PRIVACY.md](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/PRIVACY.md).
+
+### Build from source
+
+Eve is an Electron + Svelte app (`app/`) with a Python FastAPI/WebSocket speech service (`server/`).
+You need Bun, uv, Python 3.11, and PowerShell 7. Run everything from Windows PowerShell, not WSL.
+
+```powershell
+Set-Location app
+bun install --frozen-lockfile
+bun run build
+
+Set-Location ../server
+uv sync --extra whisper --group dev --frozen
+uv run pytest
+```
+
+See [Building Eve on Windows](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/development/building.md) for running the dev server,
+packaging, and release checks, and the [protocol](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/protocol.md) for how the app talks to the speech service.
+
+### Contributing
+
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/.github/CONTRIBUTING.md),
+and please never include real dictated text, audio, or personal paths in reports, fixtures, or screenshots.
+For help, see [SUPPORT.md](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/.github/SUPPORT.md). For security issues, see [SECURITY.md](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/.github/SECURITY.md).
+
+### Credits
+
+Eve is derived from [Murmur](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/NOTICE.md), the MIT-licensed project created by Raik Rohde.
+Speech recognition is powered by Faster-Whisper and CTranslate2.
+Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/THIRD_PARTY_NOTICES.md).
+
+Released under the [MIT License](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/LICENSE).
+
+---
+
+# Privacy boundaries (PRIVACY.md)
+
+Source: https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/PRIVACY.md
+
+## Privacy boundaries
+
+The default packaged configuration performs speech recognition on the user's machine. Microphone audio travels from the Electron renderer through the main process to the packaged Python service over a WebSocket on that machine. Final transcripts and derived History/Insights data are stored locally.
+
+### Network access
+
+Network access is still required in these cases:
+
+- the NSIS web installer downloads the application payload from GitHub Releases;
+- an engine downloads its model files from Hugging Face on first use;
+- a user explicitly installs optional NVIDIA GPU support from Eve's versioned GitHub Release assets;
+- a developer runs a separately started localhost speech service during development.
+
+Packaged Eve keeps speech processing on its bundled local service. The optional GPU download sends no audio or transcripts. Eve does not expose a configurable external-server endpoint.
+
+### Local data
+
+Current Eve builds use a separate Electron profile, normally `%APPDATA%\Eve` on Windows. It contains app settings, persisted server settings (`server-settings.json`), and the SQLite transcription History/Insights database (`history.db`). Model files use the relevant Hugging Face cache location. Optional GPU support files normally live under `%LOCALAPPDATA%\Eve\gpu-packs`, separately from the profile's speech data.
+
+The historical Murmur v0.6.3 release uses its own profile, normally `%APPDATA%\murmur`. Eve does not import that profile's History, settings, hotwords, browser storage, credentials, or external-server configuration. Naming changes do not authorize moving or deleting legacy data. Shared third-party model caches may be reused without reading Murmur userData.
+
+Developer data-reset tools have narrower scopes than the whole profile. See [local data and reset scope](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/development/building.md#local-data-and-reset-scope) before resetting settings or History. The [historical Murmur setup guide](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/windows-local-cuda-dictation.md) retains its original paths as release evidence.
+
+### Diagnostics and contributions
+
+The in-app diagnostics copy feature is designed around an allowlisted summary and excludes logs, paths, History, and transcription text. Users should still review any report before sharing it.
+
+Do not add telemetry or analytics without a separate privacy review, explicit documentation, and user-visible controls. Test fixtures, screenshots, crash reports, and pull requests must not contain private dictated text, audio, clipboard data, tokens, device labels, or unredacted paths.
+
+---
+
+# Feature status (retired document)
+
+Source: https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/development/feature-status.md
+
+## Feature status
+
+This document has been retired. The historical feature tracking snapshot from 2026-02-02 is preserved in:
+- [Historical feature status](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/archive/development/feature-status.md)
+
+Active project status and roadmap are tracked in:
+- [Project roadmap](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/project/roadmap.md)
+- [Documentation index](https://github.com/burntcookiedough/eve-windows-dictation/blob/trunk/docs/README.md)
