@@ -1,14 +1,15 @@
 import { spawn } from 'child_process';
 import type { ChildProcessByStdio } from 'child_process';
 import type { Readable, Writable } from 'node:stream';
-import { buildPersistentPasteScript } from './paste-helper-script.js';
+import { buildPersistentPasteScript, PasteAbortCode } from './paste-helper-script.js';
 import { perfTraceManager } from './perf-trace.js';
 
-const FOREGROUND_TIMEOUT_MS = 100;
+const SNAPSHOT_TIMEOUT_MS = 100;
 const PASTE_TIMEOUT_MS = 5000;
 const MAX_REPLY_LENGTH = 4096;
 
-type RequestType = 'ready' | 'foreground' | 'paste' | 'commit' | 'discard';
+type RequestType = 'ready' | 'foreground' | 'sequence' | 'paste' | 'commit' | 'discard';
+type NativePasteAbortCode = typeof PasteAbortCode[keyof typeof PasteAbortCode];
 
 export type AuthorizePaste = (dispatch: () => void | Promise<void>) => Promise<void>;
 
@@ -27,6 +28,27 @@ interface HelperConnection {
   requests: Map<number, PendingRequest>;
   output: string;
   ready: boolean;
+}
+
+interface PasteRequest {
+  targetWindowHandle: number;
+  clipboardSequence: number;
+  perfTraceId?: string;
+  authorize?: AuthorizePaste;
+}
+
+export function isClipboardSequence(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 0xffffffff;
+}
+
+export function isPasteAbortCode(value: unknown): value is NativePasteAbortCode {
+  return value === PasteAbortCode.ClipboardChanged || value === PasteAbortCode.ForegroundChanged;
+}
+
+export class NativePasteAbortedError extends Error {
+  constructor(readonly code: NativePasteAbortCode) {
+    super(code === PasteAbortCode.ClipboardChanged ? 'Clipboard changed before paste' : 'Foreground changed before paste');
+  }
 }
 
 export class PasteHelperUnavailableError extends Error {
@@ -52,14 +74,20 @@ export class PersistentPasteHelper {
       return null;
     }
     if (!this.connection.ready || this.connection.requests.size > 0) return null;
-    return this.request('foreground', FOREGROUND_TIMEOUT_MS);
+    return this.request('foreground', SNAPSHOT_TIMEOUT_MS);
   }
 
-  async paste(targetWindowHandle: number, perfTraceId?: string, authorize?: AuthorizePaste): Promise<void> {
+  async clipboardSequence(): Promise<number | null> {
+    if (!this.connection?.ready) return null;
+    return this.request('sequence', SNAPSHOT_TIMEOUT_MS);
+  }
+
+  async paste(targetWindowHandle: number, clipboardSequence: number, perfTraceId?: string, authorize?: AuthorizePaste): Promise<void> {
     if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
       throw new Error('Invalid paste target window handle');
     }
-    await this.request('paste', PASTE_TIMEOUT_MS, targetWindowHandle, perfTraceId, authorize);
+    if (!isClipboardSequence(clipboardSequence)) throw new Error('Invalid paste clipboard sequence');
+    await this.request('paste', PASTE_TIMEOUT_MS, { targetWindowHandle, clipboardSequence, perfTraceId, authorize });
   }
 
   shutdown(): void {
@@ -69,12 +97,14 @@ export class PersistentPasteHelper {
     }
   }
 
+  resume(): void {
+    this.stopped = false;
+  }
+
   private request(
-    type: 'ready' | 'foreground' | 'paste',
+    type: 'ready' | 'foreground' | 'sequence' | 'paste',
     timeoutMs: number,
-    targetWindowHandle?: number,
-    perfTraceId?: string,
-    authorize?: AuthorizePaste
+    paste?: PasteRequest
   ): Promise<number | null> {
     if (this.stopped) {
       return Promise.reject(new PasteHelperUnavailableError('Paste helper shut down', false));
@@ -89,9 +119,10 @@ export class PersistentPasteHelper {
     return new Promise((resolve, reject) => {
       const expiresAt = performance.now() + timeoutMs;
       const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out'), timeoutMs);
+      const { perfTraceId, authorize, targetWindowHandle, clipboardSequence } = paste ?? {};
       connection.requests.set(id, { type, timeout, expiresAt, perfTraceId, authorize, resolve, reject });
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
-      this.send(connection, { id, type, targetWindowHandle });
+      this.send(connection, { id, type, targetWindowHandle, clipboardSequence });
     });
   }
 
@@ -130,7 +161,7 @@ export class PersistentPasteHelper {
 
   private send(
     connection: HelperConnection,
-    request: { id: number; type: RequestType; targetWindowHandle?: number }
+    request: { id: number; type: RequestType; targetWindowHandle?: number; clipboardSequence?: number }
   ): void {
     try {
       connection.child.stdin.write(JSON.stringify(request) + '\n');
@@ -147,7 +178,7 @@ export class PersistentPasteHelper {
       return false;
     }
     if (!response || typeof response !== 'object') return false;
-    const { id, type, handle, error } = response as Record<string, unknown>;
+    const { id, type, handle, sequence, code, error } = response as Record<string, unknown>;
     if (typeof id !== 'number') return false;
     const pending = connection.requests.get(id);
     if (!pending) return false;
@@ -163,7 +194,7 @@ export class PersistentPasteHelper {
       return true;
     }
 
-    let foreground: number | null = null;
+    let result: number | null = null;
     let failure: Error | null = null;
     switch (pending.type) {
       case 'ready':
@@ -172,10 +203,15 @@ export class PersistentPasteHelper {
         break;
       case 'foreground':
         if (type !== 'foreground' || typeof handle !== 'number' || !Number.isSafeInteger(handle)) return false;
-        foreground = handle > 0 ? handle : null;
+        result = handle > 0 ? handle : null;
+        break;
+      case 'sequence':
+        if (type !== 'sequence' || (sequence !== 0 && !isClipboardSequence(sequence))) return false;
+        if (isClipboardSequence(sequence)) result = sequence;
         break;
       case 'commit':
         if (type === 'failed' && typeof error === 'string') failure = new Error(error);
+        else if (type === 'aborted' && isPasteAbortCode(code)) failure = new NativePasteAbortedError(code);
         else if (type !== 'pasted') return false;
         break;
       default:
@@ -186,7 +222,7 @@ export class PersistentPasteHelper {
     clearTimeout(pending.timeout);
     if (pending.perfTraceId) perfTraceManager.mark(pending.perfTraceId, 'pasteHelperResponseAt');
     if (failure) pending.reject(failure);
-    else pending.resolve(foreground);
+    else pending.resolve(result);
     return true;
   }
 

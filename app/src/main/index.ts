@@ -14,9 +14,9 @@ import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
-import { getForegroundWindowHandle, shutdownClipboardPaste } from './services/clipboard.js';
+import { getForegroundWindowHandle, suspendClipboardPaste } from './services/clipboard.js';
 import { pasteHelper } from './services/paste-helper.js';
-import { getSettings, getSetting } from './services/settings.js';
+import { autoPasteEnabled, getSettings, getSetting } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { GPU_PACK_CTRANSLATE2_BUILD_ID, IPC_CHANNELS } from '../shared/constants.js';
@@ -185,6 +185,8 @@ function getRecordingDebugState(): RecordingDebugState {
 
 async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick') {
   if (isRecording || isStopping || !overlayWindow) return;
+  const autoPaste = source === 'normal' && autoPasteEnabled;
+  const pasteTargetWindowHandlePromise = autoPaste ? getForegroundWindowHandle() : null;
 
   // Packaged builds only trust the URL discovered from the managed server.
   const serverState = serverManager?.getState();
@@ -227,10 +229,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   recordingTerminalOverride = null;
   recordingSource = source;
   recordingSessionMode = sessionMode;
-  const { autoPaste, hotwordsEnabled, hotwordsCsl } = getSettings();
-  const pasteTargetWindowHandlePromise = source === 'normal' && autoPaste
-    ? getForegroundWindowHandle()
-    : null;
+  const { hotwordsEnabled, hotwordsCsl } = getSettings();
   latestTranscription = null;
   latestStatus = null;
   updateConnectionState({ status: 'connecting' });
@@ -442,8 +441,8 @@ function toggleLongRecording(): void {
       stopRecording();
     }
   } else {
-    log.info('Long dictation started');
     startRecording('normal', 'long');
+    log.info('Long dictation started');
   }
 }
 
@@ -657,15 +656,12 @@ async function startApplication(): Promise<void> {
   // Set up global hotkey (supports hold-to-talk and toggle modes)
   setupHotkeyService({
     onHoldStart: () => {
-      if (getSetting('holdToTalk')) {
-        log.info('Quick dictation started (hold mode)');
+      if (!isRecording) {
         startRecording('normal', 'quick');
-      } else if (isRecording) {
+        log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
+      } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
         stopRecording();
-      } else {
-        log.info('Quick dictation started (toggle mode)');
-        startRecording('normal', 'quick');
       }
     },
     onHoldEnd: () => {
@@ -675,12 +671,12 @@ async function startApplication(): Promise<void> {
       }
     },
     onDoubleTap: () => {
-      log.info('Long dictation toggled (double-tap)');
       toggleLongRecording();
+      log.info('Long dictation toggled (double-tap)');
     },
     onLongShortcut: () => {
-      log.info('Long dictation toggled (long hotkey)');
       toggleLongRecording();
+      log.info('Long dictation toggled (long hotkey)');
     },
   });
 
@@ -748,7 +744,7 @@ app.on('will-quit', async (event) => {
   event.preventDefault();
 
   // Cleanup
-  shutdownClipboardPaste();
+  suspendClipboardPaste();
   transcriptionService?.stop();
   historyService?.close();
   await serverManager?.cleanup();

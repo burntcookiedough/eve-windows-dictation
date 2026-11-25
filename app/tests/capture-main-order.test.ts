@@ -20,6 +20,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
   ] as const) {
     let autoPaste: boolean = initial;
     let captures = 0;
+    const events: string[] = [];
     let output: { autoPaste: boolean; autoCopy: boolean; target: number | null } | undefined;
     let onFinal!: (frame: { text: string }) => Promise<void>;
     const context = {
@@ -31,11 +32,15 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       historyService: null, LOCAL_SERVER_URL: 'ws://localhost',
       beginOverlaySession: () => 1,
       perfTraceManager: { startTrace: () => null, mark: () => {}, server: () => {}, completeTrace: () => {} },
-      getSettings: () => ({ autoPaste, autoCopy, hotwordsEnabled: false }),
+      get autoPasteEnabled() { return autoPaste; },
+      getSettings: () => {
+        events.push('settings');
+        return { autoPaste, autoCopy, hotwordsEnabled: false };
+      },
       getSetting: () => false,
-      getForegroundWindowHandle: async () => { captures++; return 12345; },
+      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return 12345; },
       updateConnectionState: () => {}, sendOverlayRecordingState: () => {},
-      positionOverlayOnActiveDisplay: () => {}, showOverlay: () => {},
+      positionOverlayOnActiveDisplay: () => {}, showOverlay: () => events.push('overlay'),
       TranscriptionService: class {
         onRecordingState() {}
         onConnectionState() {}
@@ -52,6 +57,9 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       },
     };
     await runInNewContext(script + `\nstartRecording('${source}');`, context);
+    expect(events).toEqual(source === 'normal' && initial
+      ? ['foreground', 'settings', 'overlay']
+      : ['settings', 'overlay']);
     autoPaste = updated;
     await onFinal({ text: 'Synthetic final text' });
     expect(captures).toBe(source === 'normal' && initial ? 1 : 0);

@@ -1,3 +1,8 @@
+export const PasteAbortCode = {
+  ClipboardChanged: 20,
+  ForegroundChanged: 21,
+} as const;
+
 // Both launch paths use the same native window checks and SendInput sequence.
 const ADD_NATIVE_PASTE_TYPE = `
 Add-Type @"
@@ -56,6 +61,8 @@ public class NativePaste {
   public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")]
   public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern uint GetClipboardSequenceNumber();
 
   public const uint INPUT_KEYBOARD = 1;
   public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -91,7 +98,7 @@ public class NativePaste {
     return GetForegroundWindow() == target;
   }
 
-  public static void Paste(long targetWindowHandle) {
+  public static int Paste(long targetWindowHandle, uint expectedClipboardSequence) {
     if (targetWindowHandle != 0) {
       IntPtr target = new IntPtr(targetWindowHandle);
       if (IsWindow(target)) {
@@ -122,10 +129,18 @@ public class NativePaste {
     inputs[1].type = INPUT_KEYBOARD; inputs[1].U.ki.wVk = VK_V;
     inputs[2].type = INPUT_KEYBOARD; inputs[2].U.ki.wVk = VK_V; inputs[2].U.ki.dwFlags = KEYEVENTF_KEYUP;
     inputs[3].type = INPUT_KEYBOARD; inputs[3].U.ki.wVk = VK_CONTROL; inputs[3].U.ki.dwFlags = KEYEVENTF_KEYUP;
-    uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+    int inputSize = Marshal.SizeOf(typeof(INPUT));
+    if (expectedClipboardSequence == 0 || GetClipboardSequenceNumber() != expectedClipboardSequence) {
+      return ${PasteAbortCode.ClipboardChanged};
+    }
+    if (GetForegroundWindow() != new IntPtr(targetWindowHandle)) {
+      return ${PasteAbortCode.ForegroundChanged};
+    }
+    uint sent = SendInput((uint)inputs.Length, inputs, inputSize);
     if (sent != inputs.Length) {
       throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
+    return 0;
   }
 }
 "@
@@ -133,11 +148,15 @@ public class NativePaste {
 
 export function buildSendInputScriptContent(): string {
   return `
-param([Parameter(Mandatory=$true)][long]$TargetWindowHandle)
+param(
+  [Parameter(Mandatory=$true)][long]$TargetWindowHandle,
+  [Parameter(Mandatory=$true)][uint32]$ClipboardSequence
+)
 
+$ErrorActionPreference = 'Stop'
 ${ADD_NATIVE_PASTE_TYPE}
 if ($TargetWindowHandle -le 0) { throw 'Invalid paste target window handle.' }
-[NativePaste]::Paste($TargetWindowHandle)
+exit ([NativePaste]::Paste($TargetWindowHandle, $ClipboardSequence))
 `.trimStart();
 }
 
@@ -162,19 +181,27 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     'foreground' {
       $reply.handle = [NativePaste]::GetForegroundWindow().ToInt64()
     }
+    'sequence' {
+      $reply.sequence = [NativePaste]::GetClipboardSequenceNumber()
+    }
     'paste' {
       $target = [long]$request.targetWindowHandle
       if ($target -le 0) { throw 'Invalid paste target window handle.' }
-      $prepared[$id] = $target
+      $prepared[$id] = @{ target = $target; sequence = [uint32]$request.clipboardSequence }
       $reply.type = 'prepared'
     }
     'commit' {
       if (!$prepared.ContainsKey($id)) { throw 'Paste was not prepared.' }
-      $target = $prepared[$id]
+      $paste = $prepared[$id]
       $prepared.Remove($id)
       try {
-        [NativePaste]::Paste($target)
-        $reply.type = 'pasted'
+        $code = [NativePaste]::Paste($paste.target, $paste.sequence)
+        if ($code -eq 0) {
+          $reply.type = 'pasted'
+        } else {
+          $reply.type = 'aborted'
+          $reply.code = $code
+        }
       } catch {
         $reply.type = 'failed'
         $reply.error = $_.Exception.GetBaseException().Message

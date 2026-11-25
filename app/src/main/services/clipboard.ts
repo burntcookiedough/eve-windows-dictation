@@ -5,9 +5,9 @@ import { writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createLogger } from '../lib/logger.js';
 import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
-import { PasteHelperUnavailableError, pasteHelper } from './paste-helper.js';
+import { isClipboardSequence, isPasteAbortCode, NativePasteAbortedError, PasteHelperUnavailableError, pasteHelper } from './paste-helper.js';
 import type { AuthorizePaste } from './paste-helper.js';
-import { buildSendInputScriptContent } from './paste-helper-script.js';
+import { buildSendInputScriptContent, PasteAbortCode } from './paste-helper-script.js';
 
 export { buildSendInputScriptContent } from './paste-helper-script.js';
 
@@ -15,8 +15,7 @@ const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
 const MIN_RESTORE_DELAY_MS = 750;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
-const oneShotPastes = new Set<AbortController>();
-let pasteShuttingDown = false;
+let pasteLifetime = new AbortController();
 
 // VBScript for keyboard simulation — much faster startup than PowerShell (~50ms vs ~300ms).
 // Written to userData once and reused via cscript.
@@ -140,63 +139,67 @@ export async function getForegroundWindowHandle(): Promise<number | null> {
   }
 }
 
-export function shutdownClipboardPaste(): void {
-  pasteShuttingDown = true;
+export function suspendClipboardPaste(): void {
+  pasteLifetime.abort();
   pasteHelper.shutdown();
-  for (const controller of oneShotPastes) controller.abort();
+}
+
+export function resumeClipboardPaste(): void {
+  if (!pasteLifetime.signal.aborted) return;
+  pasteLifetime = new AbortController();
+  pasteHelper.resume();
 }
 
 export async function simulatePaste(
   method: 'sendinput' | 'vbscript',
   targetWindowHandle: number,
+  clipboardSequence: number | null,
   perfTraceId?: string,
   authorize: AuthorizePaste = async dispatch => dispatch()
 ): Promise<void> {
-  if (pasteShuttingDown) return;
+  const { signal } = pasteLifetime;
+  if (signal.aborted) return;
   if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
     throw new Error('Invalid paste target window handle');
   }
   try {
     if (method === 'vbscript') {
-      await authorize(() => runOneShotPaste('cscript', ['//NoLogo', '//B', ensurePasteScript()], perfTraceId));
+      await authorize(() => runOneShotPaste('cscript', ['//NoLogo', '//B', ensurePasteScript()], signal, perfTraceId));
     } else {
+      if (!isClipboardSequence(clipboardSequence)) return;
       try {
-        await pasteHelper.paste(targetWindowHandle, perfTraceId, authorize);
+        await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, authorize);
       } catch (error) {
         if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
-        if (pasteShuttingDown) return;
+        if (signal.aborted) return;
         const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureSendInputScript(),
-          '-TargetWindowHandle', String(targetWindowHandle)];
-        await authorize(() => runOneShotPaste('powershell', args, perfTraceId));
+          '-TargetWindowHandle', String(targetWindowHandle), '-ClipboardSequence', String(clipboardSequence)];
+        await authorize(() => runOneShotPaste('powershell', args, signal, perfTraceId));
       }
     }
   } catch (error) {
-    if (pasteShuttingDown) return;
+    if (signal.aborted) return;
+    if (error instanceof NativePasteAbortedError) throw error;
     log.error('Paste dispatch failed', { error: error as Error });
     throw error;
   }
 }
 
-async function runOneShotPaste(command: string, args: string[], perfTraceId?: string): Promise<void> {
-  if (pasteShuttingDown) return;
-  const controller = new AbortController();
-  oneShotPastes.add(controller);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
-      execFile(command, args, {
-        windowsHide: true,
-        timeout: PASTE_PROCESS_TIMEOUT_MS,
-        signal: controller.signal,
-      }, (error) => {
-        if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
-        if (error) reject(error);
-        else resolve();
-      });
+async function runOneShotPaste(command: string, args: string[], signal: AbortSignal, perfTraceId?: string): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve, reject) => {
+    if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
+    execFile(command, args, {
+      windowsHide: true,
+      timeout: PASTE_PROCESS_TIMEOUT_MS,
+      signal,
+    }, (error) => {
+      if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
+      if (command === 'powershell' && isPasteAbortCode(error?.code)) reject(new NativePasteAbortedError(error.code));
+      else if (error) reject(error);
+      else resolve();
     });
-  } finally {
-    oneShotPastes.delete(controller);
-  }
+  });
 }
 
 export interface PasteTextOptions {
@@ -324,6 +327,8 @@ function enqueuePasteCriticalSection(operation: () => Promise<void>): Promise<vo
 }
 
 export async function pasteText(text: string, options: PasteTextOptions): Promise<void> {
+  const { signal } = pasteLifetime;
+  if (signal.aborted) return;
   const pasteGeneration = ++latestPasteGeneration;
   let sequence: PasteSequence | null = null;
   let baselineSnapshot: ClipboardSnapshot | null = null;
@@ -331,10 +336,10 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
   return enqueuePasteCriticalSection(async () => {
     let clipboardOwnershipSignature: string | null = null;
     try {
-      if (pasteShuttingDown || pasteGeneration !== latestPasteGeneration) return;
+      if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
       if (options.restoreClipboard) {
         const operation = await beginPasteOperation();
-        if (pasteGeneration !== latestPasteGeneration) return;
+        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
         sequence = operation.sequence;
         baselineSnapshot = operation.baselineSnapshot;
       } else if (activePasteSequence) {
@@ -343,6 +348,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
+      const sequenceRequest = options.method === 'sendinput' && !signal.aborted
+        ? pasteHelper.clipboardSequence().catch(() => null)
+        : null;
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
@@ -362,7 +370,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         sequence.ownedSignature = clipboardOwnershipSignature;
       }
 
-      if (pasteGeneration !== latestPasteGeneration) return;
+      const clipboardSequence = await sequenceRequest;
+      if (options.method === 'sendinput' && clipboardSequence === null) return;
+      if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
       await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
       if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteSettleCompletedAt');
       if (pasteGeneration !== latestPasteGeneration) return;
@@ -378,16 +388,20 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       }
       if (pasteGeneration !== latestPasteGeneration) return;
       const authorize: AuthorizePaste = async dispatch => {
-        if (pasteShuttingDown || pasteGeneration !== latestPasteGeneration) return;
+        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
         const snapshot = await readClipboardSnapshot().catch(() => null);
-        if (pasteShuttingDown || pasteGeneration !== latestPasteGeneration) return;
+        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
         if (snapshot?.signature !== clipboardOwnershipSignature) {
           if (sequence) discardPasteSequence(sequence);
           return;
         }
         return dispatch();
       };
-      await simulatePaste(options.method, options.targetWindowHandle, options.perfTraceId, authorize);
+      if (signal.aborted) return;
+      await simulatePaste(options.method, options.targetWindowHandle, clipboardSequence, options.perfTraceId, authorize);
+    } catch (error) {
+      if (!(error instanceof NativePasteAbortedError)) throw error;
+      if (error.code === PasteAbortCode.ClipboardChanged && sequence) discardPasteSequence(sequence);
     } finally {
       if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
         sequence = activePasteSequence;

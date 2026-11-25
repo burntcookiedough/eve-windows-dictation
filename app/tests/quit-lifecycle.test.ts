@@ -17,6 +17,7 @@ function probe() {
   let quitCount = 0;
   let shown = 0;
   let attempts = 0;
+  let pasteSuspended = false;
   const timers = new Map<number, { callback: () => void; delay: number }>();
   let nextTimer = 0;
   let acknowledge: () => Promise<void> = () => new Promise(() => {});
@@ -28,6 +29,8 @@ function probe() {
   const context = {
     exports: {} as { setWindow: (window: unknown) => void; pending: () => boolean }, console: { error: () => {} },
     app: { on: (_: string, callback: typeof listener) => { listener = callback; }, quit: () => { quitCount++; } },
+    suspendClipboardPaste: () => { pasteSuspended = true; },
+    resumeClipboardPaste: () => { pasteSuspended = false; },
     setTimeout: (callback: () => void, delay: number) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimeout: (id: number) => timers.delete(id),
   };
@@ -37,6 +40,7 @@ function probe() {
     fire: () => { let prevented = false; listener({ preventDefault: () => { prevented = true; } }); return prevented; },
     setAck: (callback: () => Promise<void>) => { acknowledge = callback; },
     pending: context.exports.pending,
+    pasteSuspended: () => pasteSuspended,
     noWindow: () => context.exports.setWindow(null),
     timers, window,
     counts: () => ({ quitCount, shown, attempts }),
@@ -50,6 +54,7 @@ test('quit timeout keeps deletion owner open; retry ignores the expired acknowle
   let late!: () => void;
   p.setAck(() => new Promise(resolve => { late = resolve; }));
   expect(p.fire()).toBeTrue();
+  expect(p.pasteSuspended()).toBeTrue();
   p.fire();
   await settle();
   expect(p.counts().attempts).toBe(1);
@@ -58,6 +63,7 @@ test('quit timeout keeps deletion owner open; retry ignores the expired acknowle
   p.expire();
   await settle();
   expect(p.pending()).toBeFalse();
+  expect(p.pasteSuspended()).toBeFalse();
   expect(p.counts()).toEqual({ quitCount: 0, shown: 1, attempts: 1 });
   let retry!: () => void;
   p.setAck(() => new Promise(resolve => { retry = resolve; }));
@@ -70,6 +76,7 @@ test('quit timeout keeps deletion owner open; retry ignores the expired acknowle
   retry();
   await settle();
   expect(p.counts().quitCount).toBe(1);
+  expect(p.pasteSuspended()).toBeTrue();
   expect(p.timers.size).toBe(0);
 });
 
@@ -79,6 +86,7 @@ test('rejected quit flush permits retry; success clears its deadline', async () 
   p.fire();
   await settle();
   expect(p.pending()).toBeFalse();
+  expect(p.pasteSuspended()).toBeFalse();
   expect(p.counts().quitCount).toBe(0);
   expect(p.counts().shown).toBe(1);
   expect(p.timers.size).toBe(0);
@@ -108,7 +116,7 @@ test('main shuts down clipboard paste processes before server cleanup and app ex
   let quit!: (event: { preventDefault: () => void }) => Promise<void>;
   runInNewContext(script, {
     app: { on: (_: string, handler: typeof quit) => { quit = handler; }, exit: () => events.push('exit') },
-    shutdownClipboardPaste: () => events.push('helper'),
+    suspendClipboardPaste: () => events.push('helper'),
     transcriptionService: null, historyService: null,
     serverManager: { cleanup: async () => events.push('server') },
   });
