@@ -188,6 +188,7 @@ class Settings(BaseSettings):
     long_dictation_threshold_s: float = Field(default=30.0, gt=0.0, le=120.0)
     long_dictation_chunk_s: float = Field(default=25.0, gt=1.0, le=60.0)
     long_dictation_overlap_s: float = Field(default=0.75, ge=0.0, le=5.0)
+    incremental_commit: bool = True
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -446,6 +447,13 @@ SETTINGS_METADATA: dict[str, dict[str, Any]] = {
         "description": "Seconds of overlap between long dictation chunks for safer stitching.",
         "type": "number",
         "range": [0, 5],
+        "requires_reload": False,
+        "category": "transcription",
+    },
+    "incremental_commit": {
+        "label": "Incremental Commit",
+        "description": "Transcribe finished stretches of speech while recording so stopping only decodes the remaining tail.",
+        "type": "bool",
         "requires_reload": False,
         "category": "transcription",
     },

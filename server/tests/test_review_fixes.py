@@ -9,15 +9,15 @@ import pytest
 from fastapi import HTTPException
 
 import app as server_app
+from audio.buffer import AudioBuffer
 from transcription.types import TranscribeResult
 import transcription.processor as processor_module
 
 
-class _FakeAudioBuffer:
-    duration_seconds = 3.2
-
-    def get_audio_float32(self) -> np.ndarray:
-        return np.array([0.1, 0.2, 0.3], dtype=np.float32)
+def _audio_buffer(seconds: float, amplitude: int) -> AudioBuffer:
+    buffer = AudioBuffer()
+    buffer.append(0, np.full(int(seconds * 16000), amplitude, dtype=np.int16))
+    return buffer
 
 
 class _TimedSession:
@@ -71,7 +71,7 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     audio_start = 1000.0
     context = SimpleNamespace(
         session_id="test-session",
-        audio_buffer=_FakeAudioBuffer(),
+        audio_buffer=_audio_buffer(3.2, 300),
         hotwords=None,
         last_partial_text="",
         audio_start_time=audio_start,
@@ -83,10 +83,13 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     assert first is not None
     assert first.text == "hello world"
 
+    # New, louder audio arrives; an unchanged buffer would be skipped.
+    context.audio_buffer.append(1, np.full(8000, 16000, dtype=np.int16))
     second = await processor.transcribe_partial()
     assert second is None
     assert context.last_speech_time == audio_start + 2.0
     processor.close()
+    context.audio_buffer.close()
 
 
 @pytest.mark.asyncio
