@@ -5,16 +5,16 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from audio.buffer import AudioBuffer
 from transcription.errors import VramExhaustedError
 from transcription.types import TranscribeResult
 import transcription.processor as processor_module
 
 
-class _FakeAudioBuffer:
-    duration_seconds = 3.2
-
-    def get_audio_float32(self) -> np.ndarray:
-        return np.array([0.1, 0.2, 0.3], dtype=np.float32)
+def _audio_buffer() -> AudioBuffer:
+    buffer = AudioBuffer()
+    buffer.append(0, np.full(int(3.2 * 16000), 3000, dtype=np.int16))
+    return buffer
 
 
 class _FakeSession:
@@ -56,7 +56,7 @@ async def test_transcribe_final_preserves_incomplete_result_after_vram_oom(
 
     context = SimpleNamespace(
         session_id="test-session",
-        audio_buffer=_FakeAudioBuffer(),
+        audio_buffer=_audio_buffer(),
         hotwords=None,
         last_partial_text="",
     )
