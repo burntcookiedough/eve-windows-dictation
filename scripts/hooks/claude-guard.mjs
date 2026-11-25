@@ -88,6 +88,16 @@ function blockedOperation(words, cwd, context) {
   }
   if (operation !== 'push' && operation !== 'reset') return;
 
+  const readRef = (...args) => {
+    const result = spawnSync(program, [...globalArgs, ...args], {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 1000,
+    });
+    return result.status === 0 ? result.stdout.trim() : '';
+  };
+
   if (operation === 'push') {
     if (operands.some((arg) => /^--force(-|$)/.test(arg) || /^-[^-]*f/.test(arg) || arg.startsWith('+'))) {
       return 'Force pushes are blocked.';
@@ -107,30 +117,39 @@ function blockedOperation(words, cwd, context) {
       }
     }
     const refs = hasRemoteOption ? positional : positional.slice(1);
-    const branchRefs = refs.filter((ref, index) => ref !== 'tag' && refs[index - 1] !== 'tag');
-    if (branchRefs.some((ref) => ref === ':' || ref.includes('*'))) {
+    if (operands.includes('--tags') || operands.includes('--follow-tags') || refs.includes('tag')
+      || refs.some((ref) => ref.split(':').some((part) => part.startsWith('refs/tags/') || /^v[^/]*$/.test(part)))) {
+      return 'Publishing Git tags is reserved for the release owner.';
+    }
+    if (refs.some((ref) => ref === ':' || ref.includes('*'))) {
       return 'Matching or wildcard refspecs can update trunk. Push a specific topic branch.';
     }
-    if (branchRefs.some((ref) => isTrunk(ref.split(':').at(-1)))) {
+    const implicit = refs.length === 0;
+    const destinations = refs.map((ref) => ref.split(':')[1]);
+    if (contextChangedBeforeCommand && (implicit || destinations.some((ref) => !ref))) {
+      return 'Run git push as its own command after changing branches or directories.';
+    }
+    if (refs.some((ref) => isTrunk(ref.split(':').at(-1)))) {
       return 'Pushes to trunk are blocked. Open a pull request from a topic branch.';
     }
-    if (refs.length && !branchRefs.includes('HEAD')) return;
+    if (!implicit && !refs.some((ref) => ref === 'HEAD' || ref === '@')) return;
+
+    if (isTrunk(readRef('symbolic-ref', '--quiet', '--short', 'HEAD'))) {
+      return 'Pushes to trunk are blocked. Open a pull request from a topic branch.';
+    }
+    if (implicit) {
+      const revParse = ['rev-parse', '--abbrev-ref', '--symbolic-full-name'];
+      const destination = readRef(...revParse, '@{push}') || readRef(...revParse, '@{upstream}');
+      if (destination.endsWith('/trunk')) {
+        return 'This push resolves to trunk. Push a specific topic branch.';
+      }
+    }
   } else if (!operands.includes('--hard')) {
     return;
   } else if (contextChangedBeforeCommand) {
     return 'Run git reset --hard as its own command after changing branches or directories.';
-  }
-
-  const branch = spawnSync(program, [...globalArgs, 'symbolic-ref', '--quiet', '--short', 'HEAD'], {
-    cwd,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 1000,
-  });
-  if (branch.status === 0 && isTrunk(branch.stdout.trim())) {
-    return operation === 'push'
-      ? 'Pushes to trunk are blocked. Open a pull request from a topic branch.'
-      : 'Hard resets on trunk are blocked.';
+  } else if (isTrunk(readRef('symbolic-ref', '--quiet', '--short', 'HEAD'))) {
+    return 'Hard resets on trunk are blocked.';
   }
 }
 

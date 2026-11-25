@@ -19,9 +19,11 @@ handoffs out of public diffs and free of private data.
 - Merge only with all required checks green on the exact PR head, a clean review,
   and all conversations resolved. The required checks are `Trunk Integration Target`,
   `Version Consistency`, `App Test And Build`, and `Server Tests`.
-- Agents never tag or publish.
+- Agents leave tag creation, tag pushes, and release publication to the release owner.
 - The Claude Code guard is a speed bump for accidental commands. Repository
-  permissions and branch protection enforce access.
+  permissions and branch protection enforce access. The guard checks the configured
+  destination for implicit pushes and allows them if both push and upstream
+  resolution fail, subject to its other checks.
 
 ## Final integration
 

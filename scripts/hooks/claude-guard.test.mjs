@@ -42,6 +42,7 @@ test('blocks protected operations and allows topic-branch work', () => {
       'git push origin --mirror',
       'git push',
       'git push origin HEAD',
+      'git push origin @',
       'git.exe reset --hard HEAD',
       'git status && git tag v0.1',
       'git -c core.quotePath=false tag v0.1',
@@ -91,7 +92,39 @@ test('blocks protected operations and allows topic-branch work', () => {
       assert.match(result.stderr, /as its own command/);
     }
     for (const command of [
+      'git switch trunk && git push origin HEAD',
+      'git checkout trunk && git push origin @',
+      'cd other && git push',
+      'sl other; git push origin',
+      'chdir other; git push origin topic/check',
+      'Set-Location other; git push origin refs/heads/topic/check',
+      'pushd other; git push origin HEAD',
+      'Push-Location other; git push origin HEAD',
+      'git -C other status && git push origin HEAD',
+    ]) {
+      const result = runGuard(cwd, command);
+      assert.equal(result.status, 2, command);
+      assert.match(result.stderr, /Run git push as its own command/);
+    }
+    for (const command of [
+      'git push origin --tags',
+      'git push --follow-tags',
+      'git push origin tag custom-release',
+      'git push origin refs/tags/custom-release',
+      'git push origin HEAD:refs/tags/custom-release',
+      'git push origin v1.2.3',
+      'git push origin HEAD:v1.2.3',
+    ]) {
+      const result = runGuard(cwd, command);
+      assert.equal(result.status, 2, command);
+      assert.match(result.stderr, /Publishing Git tags/);
+    }
+    for (const command of [
+      'git push',
+      'git push origin',
       'git push -u origin HEAD',
+      'git switch trunk && git push origin HEAD:refs/heads/topic/check',
+      'git push origin HEAD:refs/heads/v1.2.3',
       'git push origin trunk:review/trunk',
       'git push origin HEAD:feature/trunk',
       'git reset --hard HEAD',
@@ -112,6 +145,36 @@ test('blocks protected operations and allows topic-branch work', () => {
     ]) {
       assert.equal(runGuard(cwd, command).status, 0, command);
     }
+
+    const git = (...args) => {
+      const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git('-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid',
+      '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Guard fixture');
+    git('remote', 'add', 'origin', '.');
+    git('update-ref', 'refs/remotes/origin/trunk', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/topic/check', 'HEAD');
+    git('branch', '--set-upstream-to=origin/trunk');
+    const revParse = ['rev-parse', '--abbrev-ref', '--symbolic-full-name'];
+
+    git('config', 'push.default', 'upstream');
+    assert.equal(git(...revParse, '@{push}'), 'origin/trunk');
+    for (const command of ['git push', 'git push origin']) {
+      const result = runGuard(cwd, command);
+      assert.equal(result.status, 2, command);
+      assert.match(result.stderr, /push resolves to trunk/);
+    }
+
+    git('config', 'push.default', 'simple');
+    assert.equal(git(...revParse, '@{upstream}'), 'origin/trunk');
+    assert.notEqual(spawnSync('git', [...revParse, '@{push}'], { cwd }).status, 0);
+    assert.match(runGuard(cwd, 'git push origin').stderr, /push resolves to trunk/);
+
+    git('config', 'push.default', 'current');
+    assert.equal(git(...revParse, '@{push}'), 'origin/topic/check');
+    assert.equal(runGuard(cwd, 'git push origin').status, 0);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
