@@ -136,6 +136,8 @@ function blockedOperation(words, cwd, context) {
     for (const refspec of refs) {
       // Check the source side of `src:dst` too: an unqualified tag source publishes the tag.
       const ref = (refspec || '').replace(/^\+/, '').split(':')[0];
+      // Git resolves `tags/<name>` like `refs/tags/<name>`.
+      if (ref.startsWith('tags/')) return 'Publishing Git tags is reserved for the release owner.';
       if (!ref || ref.startsWith('refs/') || ref === 'HEAD' || ref === '@') continue;
       if (runGit('show-ref', '--verify', '--quiet', `refs/tags/${ref}`).status !== 0) continue;
       if (runGit('show-ref', '--verify', '--quiet', `refs/heads/${ref}`).status === 0) {
