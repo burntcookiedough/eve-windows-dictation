@@ -243,7 +243,7 @@ Non-terminal progress/status update. Clients that do not understand a status val
 | Status | Meaning |
 |--------|---------|
 | `long_dictation_started` | Buffered audio crossed the server's long-dictation threshold and final transcription will use long mode |
-| `long_dictation_processing` | Final long-dictation transcription is processing a specific chunk |
+| `long_dictation_processing` | Final long-dictation transcription is processing a specific chunk. With incremental commit (default), audio is transcribed while recording and the final decodes only the remaining tail, so this status appears only when that tail itself needs several chunks |
 
 **Client behavior:** Surface mode/progress without treating it as terminal text.
 
