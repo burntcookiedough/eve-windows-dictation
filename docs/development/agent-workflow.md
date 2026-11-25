@@ -20,10 +20,12 @@ handoffs out of public diffs and free of private data.
   and all conversations resolved. The required checks are `Trunk Integration Target`,
   `Version Consistency`, `App Test And Build`, and `Server Tests`.
 - Agents leave tag creation, tag pushes, and release publication to the release owner.
-- The Claude Code guard is a speed bump for accidental commands. Repository
-  permissions and branch protection enforce access. The guard checks the configured
-  destination for implicit pushes and allows them if both push and upstream
-  resolution fail, subject to its other checks.
+- The Claude Code guard is a speed bump for accidental commands. It can miss
+  commands after shell reserved words such as `then`. Repository permissions
+  and branch protection enforce access, and protected operations require owner
+  approval. The guard checks the configured destination for implicit pushes
+  and allows them if both push and upstream resolution fail, subject to its
+  other checks.
 
 ## Final integration
 

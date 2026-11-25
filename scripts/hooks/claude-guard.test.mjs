@@ -53,6 +53,7 @@ test('blocks protected operations and allows topic-branch work', () => {
       'gh release create v0.1',
       'gh release upload v0.1 asset',
       'gh release delete v0.1',
+      'gh release delete-asset v0.1 installer.exe --yes',
       'gh release edit v0.1',
     ]) {
       const result = runGuard(cwd, command);
@@ -141,6 +142,8 @@ test('blocks protected operations and allows topic-branch work', () => {
       'git tag --list --sort=refname "v0.*"',
       'powershell -Command "git tag --list"',
       'gh release view',
+      'gh release list',
+      'gh release download v0.1',
       'echo "git push origin trunk"',
     ]) {
       assert.equal(runGuard(cwd, command).status, 0, command);
@@ -153,6 +156,17 @@ test('blocks protected operations and allows topic-branch work', () => {
     };
     git('-c', 'user.name=Guard Test', '-c', 'user.email=guard@example.invalid',
       '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Guard fixture');
+    git('update-ref', 'refs/tags/custom-release', 'HEAD');
+    const tagPush = runGuard(cwd, 'git push origin custom-release');
+    assert.equal(tagPush.status, 2);
+    assert.match(tagPush.stderr, /Publishing Git tags/);
+    git('update-ref', 'refs/heads/custom-release', 'HEAD');
+    const ambiguousPush = runGuard(cwd, 'git push origin custom-release');
+    assert.equal(ambiguousPush.status, 2);
+    assert.match(ambiguousPush.stderr, /matches a branch and a tag/);
+    assert.equal(runGuard(cwd, 'git push origin refs/heads/custom-release').status, 0);
+    assert.equal(runGuard(cwd, 'git push origin topic/check').status, 0);
+
     git('remote', 'add', 'origin', '.');
     git('update-ref', 'refs/remotes/origin/trunk', 'HEAD');
     git('update-ref', 'refs/remotes/origin/topic/check', 'HEAD');

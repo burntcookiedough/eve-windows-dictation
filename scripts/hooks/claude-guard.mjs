@@ -62,7 +62,7 @@ function blockedOperation(words, cwd, context) {
   }
   if (executable === 'gh') {
     const release = args.indexOf('release');
-    if (release !== -1 && ['create', 'upload', 'delete', 'edit'].includes(args[release + 1])) {
+    if (release !== -1 && ['create', 'upload', 'delete', 'delete-asset', 'edit'].includes(args[release + 1])) {
       return 'GitHub release changes are reserved for the release owner.';
     }
     return;
@@ -88,13 +88,14 @@ function blockedOperation(words, cwd, context) {
   }
   if (operation !== 'push' && operation !== 'reset') return;
 
+  const runGit = (...args) => spawnSync(program, [...globalArgs, ...args], {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 1000,
+  });
   const readRef = (...args) => {
-    const result = spawnSync(program, [...globalArgs, ...args], {
-      cwd,
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 1000,
-    });
+    const result = runGit(...args);
     return result.status === 0 ? result.stdout.trim() : '';
   };
 
@@ -131,6 +132,14 @@ function blockedOperation(words, cwd, context) {
     }
     if (refs.some((ref) => isTrunk(ref.split(':').at(-1)))) {
       return 'Pushes to trunk are blocked. Open a pull request from a topic branch.';
+    }
+    for (const ref of refs) {
+      if (!ref || ref.includes(':') || ref.startsWith('refs/')) continue;
+      if (runGit('show-ref', '--verify', '--quiet', `refs/tags/${ref}`).status !== 0) continue;
+      if (runGit('show-ref', '--verify', '--quiet', `refs/heads/${ref}`).status === 0) {
+        return 'This name matches a branch and a tag. Push the branch by its full refs/heads/ name.';
+      }
+      return 'Publishing Git tags is reserved for the release owner.';
     }
     if (!implicit && !refs.some((ref) => ref === 'HEAD' || ref === '@')) return;
 
