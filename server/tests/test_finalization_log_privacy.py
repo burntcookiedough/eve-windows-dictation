@@ -91,7 +91,7 @@ async def test_partial_inference_exception_logs_omit_transcript(length):
             SimpleNamespace(), context, SimpleNamespace(transcribe_partial=fail_partial), 0,
         )
         sink.flush()
-        assert "Error in partial emission" in stream.getvalue()
+        assert "Error in recording inference" in stream.getvalue()
         assert "SYNTHETIC_PRIVATE_TRANSCRIPT_" not in stream.getvalue()
         assert context.partial_in_flight is False
     finally:

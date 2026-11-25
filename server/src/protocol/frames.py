@@ -26,6 +26,9 @@ class StartFrame(ControlFrameBase):
     silence_timeout: Annotated[
         float, Field(gt=0, description="Seconds of silence before auto-stop")
     ]
+    speculative_partials: Annotated[
+        bool, Field(strict=True, description="Enable speculative live text for the developer Lab")
+    ] = False
     partial_emission_interval: Annotated[
         float | None,
         Field(

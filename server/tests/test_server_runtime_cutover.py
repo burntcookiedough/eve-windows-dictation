@@ -240,13 +240,17 @@ async def test_lifespan_awaits_runtime_shutdown(monkeypatch: pytest.MonkeyPatch,
     async def shutdown() -> None:
         events.append("shutdown")
 
+    async def warm() -> None:
+        events.append("warm Silero")
+
+    monkeypatch.setattr(app_module, "warm_silero", warm)
     monkeypatch.setattr(app_module, "shutdown_model_runtime", shutdown)
     monkeypatch.setattr(app_module, "shutdown_executor", lambda: events.append("executor"))
 
     async with app_module.lifespan(SimpleNamespace()):
         events.append("yield")
 
-    assert events == ["scheduled", "yield", "shutdown", "executor"]
+    assert events == ["scheduled", "warm Silero", "yield", "shutdown", "executor"]
     assert "Starting Eve..." in caplog.messages
     assert "Eve ready" in caplog.messages
     assert "Shutting down Eve..." in caplog.messages

@@ -6,6 +6,7 @@ export interface ControlFrameStart {
   type: 'start';
   silence_timeout: number;
   partial_emission_interval?: number;
+  speculative_partials?: true;
   hotwords?: string;
   trace_id?: string;
 }

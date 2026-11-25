@@ -53,10 +53,10 @@ class _TimedRuntime:
 
 
 @pytest.mark.asyncio
-async def test_partial_updates_speech_time_on_duplicate_text(
+async def test_duplicate_lab_draft_leaves_the_vad_clock_intact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Even when text is unchanged, the runtime session updates speech time."""
+    """The audio handler owns activity timing even when recognition changes."""
 
     session = _TimedSession()
     runtime = _TimedRuntime(session)
@@ -64,7 +64,7 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     monkeypatch.setattr(
         processor_module,
         "get_settings",
-        lambda: SimpleNamespace(min_audio_for_transcription=0.1),
+        lambda: SimpleNamespace(min_audio_for_transcription=0.1, incremental_commit=False),
     )
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
@@ -72,10 +72,11 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     context = SimpleNamespace(
         session_id="test-session",
         audio_buffer=_audio_buffer(3.2, 300),
+        speculative_partials=True,
         hotwords=None,
         last_partial_text="",
         audio_start_time=audio_start,
-        last_speech_time=None,
+        last_speech_time=audio_start + 3.0,
     )
     processor = processor_module.TranscriptionProcessor(context)
 
@@ -87,7 +88,7 @@ async def test_partial_updates_speech_time_on_duplicate_text(
     context.audio_buffer.append(1, np.full(8000, 16000, dtype=np.int16))
     second = await processor.transcribe_partial()
     assert second is None
-    assert context.last_speech_time == audio_start + 2.0
+    assert context.last_speech_time == audio_start + 3.0
     processor.close()
     context.audio_buffer.close()
 

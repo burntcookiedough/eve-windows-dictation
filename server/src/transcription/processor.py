@@ -43,11 +43,8 @@ _RETRY_OPTIONS: Final = TranscribeOptions(
     beam_size=3,
     mode="long_chunk",
 )
-# Speech-timing window for long recordings without a reusable tail decode.
-_LONG_PARTIAL_OPTIONS: Final = TranscribeOptions(
-    condition_on_previous_text=False,
-    mode="long_chunk",
-)
+_OVERLAP_CHUNK_OPTIONS: Final = replace(_LONG_CHUNK_OPTIONS, word_timestamps=True)
+_OVERLAP_RETRY_OPTIONS: Final = replace(_RETRY_OPTIONS, word_timestamps=True)
 
 # Shared thread pool for transcription
 _executor: ThreadPoolExecutor | None = None
@@ -121,7 +118,6 @@ class TranscriptionProcessor:
         self._tail: Decode | None = None  # latest decode of the uncommitted tail
         self._last_job_committed = False
         self._commit_disabled = False
-        self._reported_speech_end: float | None = None  # absolute, for monotonic timing
 
     @property
     def _allow_overlapping_inference(self) -> bool:
@@ -164,78 +160,58 @@ class TranscriptionProcessor:
                 return None
             start_time = time.perf_counter()
             total = audio_buffer.sample_count
+            live_partials = (
+                self._context.speculative_partials
+                and total / AUDIO_SAMPLE_RATE < self._long_dictation_threshold_s
+            )
             if self._incremental:
-                # Alternate with partials so speech timing never starves.
-                seal = None if self._last_job_committed else self._plan_seal(total)
+                # Give the Lab time to emit a draft even when several seals are due.
+                seal = None if live_partials and self._last_job_committed else self._plan_seal(total)
                 if seal is not None:
                     self._last_job_committed = True
                     await self._commit(*seal)
-                    return self._commit_speech_timing(total, start_time)
-                self._last_job_committed = False
-                if self._tail is not None and is_settled(audio_buffer, self._tail, total):
-                    # Only silence since the last decode: nothing new to hear.
+                    logger.debug(
+                        "[%s] Incremental commit cycle: %.0fms",
+                        self._session_id,
+                        (time.perf_counter() - start_time) * 1000,
+                    )
                     return None
+                self._last_job_committed = False
+            if not live_partials:
+                return None
+            if self._tail is not None and is_settled(audio_buffer, self._tail, total):
+                return None  # Only silence since the last Lab draft.
             return await self._transcribe_tail_partial(total, start_time)
 
     async def _transcribe_tail_partial(
         self, total: int, start_time: float,
     ) -> TranscriptionResult | None:
         audio_duration = total / AUDIO_SAMPLE_RATE
-        long_mode = audio_duration >= self._long_dictation_threshold_s
         tail = self._committed.tail_chunk(total)
-        window, options = tail, self._tail_options(tail)
-        max_samples = max(1, int(self._long_dictation_chunk_s * AUDIO_SAMPLE_RATE))
-        capped = long_mode and tail.end_sample - tail.start_sample > max_samples
-        if capped:
-            begin = total - max_samples
-            window = AudioChunk(1, 1, begin, total, begin, total)
-        if long_mode and (capped or not self._incremental):
-            options = _LONG_PARTIAL_OPTIONS
-        if window.end_sample <= window.start_sample:
-            return None
         audio = self._context.audio_buffer.get_audio_range_float32(
-            window.start_sample, window.end_sample,
+            tail.start_sample, tail.end_sample,
         )
         if len(audio) == 0:
             return None
 
-        result = await self._run_transcribe(audio, loop=asyncio.get_running_loop(), options=options)
+        result = await self._run_transcribe(
+            audio, loop=asyncio.get_running_loop(), options=self._tail_options(tail),
+        )
         transcription_time = time.perf_counter() - start_time
-        decode = Decode(window, result)
-        if self._incremental and not capped:
+        decode = Decode(tail, result)
+        if self._incremental:
             self._tail = decode
         last_speech_end = (
-            window.start_s + result.last_speech_end
+            tail.start_s + result.last_speech_end
             if result.last_speech_end is not None
             else None
         )
-        if last_speech_end is not None:
-            # A window that hears speech only in its overlap must not rewind
-            # the silence monitor's speech time.
-            last_speech_end = max(self._reported_speech_end or 0.0, last_speech_end)
-            self._reported_speech_end = last_speech_end
-
-        if long_mode:
-            # Live text stays suppressed in long mode; whole-recording partial
-            # text is not shown. The bounded decode still drives speech timing.
-            return TranscriptionResult(
-                text="",
-                confidence=result.confidence,
-                is_empty=True,
-                transcription_time=transcription_time,
-                audio_duration=audio_duration,
-                last_speech_end=last_speech_end,
-            )
-
         text = (
             stitch_text([self._committed.text, self._committed.text_for(decode)])
             if self._committed.texts
             else result.text
         )
         if text == self._context.last_partial_text:
-            # Still update speech timing so silence monitor doesn't use stale data
-            if last_speech_end is not None and self._context.audio_start_time is not None:
-                self._context.last_speech_time = self._context.audio_start_time + last_speech_end
             return None
 
         self._context.last_partial_text = text
@@ -248,29 +224,11 @@ class TranscriptionProcessor:
             last_speech_end=last_speech_end,
         )
 
-    def _commit_speech_timing(self, total: int, start_time: float) -> TranscriptionResult | None:
-        """Let a commit advance speech timing, never move it backwards.
-
-        Continuous speech on a slow CPU can run several commits between
-        partials; without this the silence monitor would see stale speech.
-        """
-        speech_end = self._committed.last_speech_end
-        if speech_end is None or speech_end <= (self._reported_speech_end or 0.0):
-            return None
-        self._reported_speech_end = speech_end
-        return TranscriptionResult(
-            text="",
-            confidence=0.0,
-            is_empty=True,
-            transcription_time=time.perf_counter() - start_time,
-            audio_duration=total / AUDIO_SAMPLE_RATE,
-            last_speech_end=speech_end,
-        )
-
     def _plan_seal(self, total: int) -> tuple[AudioChunk, int] | None:
         chunk_s = self._long_dictation_chunk_s
         return plan_seal(
             self._context.audio_buffer,
+            self._context.speech_activity,
             committed_end=self._committed.end_sample,
             overlap_samples=self._committed.overlap_samples,
             total_samples=total,
@@ -287,6 +245,7 @@ class TranscriptionProcessor:
         try:
             result, failure = await self._decode_long_chunk(
                 audio, loop=asyncio.get_running_loop(), for_commit=True,
+                align_words=next_overlap > 0 or chunk.start_sample < chunk.logical_start_sample,
             )
             if failure is not None:
                 raise failure
@@ -304,8 +263,7 @@ class TranscriptionProcessor:
 
     @staticmethod
     def _tail_options(tail: AudioChunk) -> TranscribeOptions | None:
-        # Overlap dedupe needs segment timestamps; otherwise keep engine defaults.
-        return _LONG_CHUNK_OPTIONS if tail.start_sample < tail.logical_start_sample else None
+        return _OVERLAP_CHUNK_OPTIONS if tail.start_sample < tail.logical_start_sample else None
 
     async def transcribe_final(
         self,
@@ -396,56 +354,63 @@ class TranscriptionProcessor:
         if tail.end_sample <= tail.logical_start_sample:
             return state.to_result()
 
-        cached = self._tail
-        if (
-            self._incremental
-            and cached is not None
-            # A decode that heard no uncommitted speech (none at all, or only
-            # in a forced-seal overlap) proves nothing about quiet speech
-            # after it; decoding the tail on stop is cheap in that case.
-            and cached.result.last_speech_end is not None
-            and cached.chunk.start_sample
-            + int(cached.result.last_speech_end * AUDIO_SAMPLE_RATE)
-            > tail.logical_start_sample
-            and cached.chunk.start_sample == tail.start_sample
-            and is_settled(audio_buffer, cached, total)
-        ):
-            # The latest decode already heard everything but trailing silence.
-            state.append(cached)
-            return state.to_result()
-
-        if tail.duration_s >= self._long_dictation_threshold_s:
-            chunks = plan_chunks(
-                audio_buffer,
-                chunk_s=self._long_dictation_chunk_s,
-                overlap_s=self._long_dictation_overlap_s,
-                start_sample=tail.logical_start_sample,
-                end_sample=total,
-            )
-            if len(chunks) > 1:
-                chunks[0] = replace(chunks[0], start_sample=tail.start_sample)
-                return await self._transcribe_chunks(
-                    state, chunks, progress_callback=progress_callback, perf_collector=perf_collector,
-                )
-
-        audio = audio_buffer.get_audio_range_float32(tail.start_sample, total)
-        if len(audio) == 0:
-            return state.to_result()
+        chunks: list[AudioChunk] = []
         try:
-            result = await self._run_transcribe(
-                audio,
-                loop=asyncio.get_running_loop(),
-                options=self._tail_options(tail),
-                perf_collector=perf_collector,
-            )
+            cached = self._tail
+            if (
+                self._incremental
+                and cached is not None
+                # A decode that heard only silence or overlap cannot rule out
+                # quiet speech in the uncommitted audio.
+                and cached.result.last_speech_end is not None
+                and cached.chunk.start_sample
+                + int(cached.result.last_speech_end * AUDIO_SAMPLE_RATE)
+                > tail.logical_start_sample
+                and cached.chunk.start_sample == tail.start_sample
+                and is_settled(audio_buffer, cached, total)
+            ):
+                state.append(cached)
+                return state.to_result()
+
+            if tail.duration_s >= self._long_dictation_threshold_s:
+                chunks = plan_chunks(
+                    audio_buffer,
+                    chunk_s=self._long_dictation_chunk_s,
+                    overlap_s=self._long_dictation_overlap_s,
+                    start_sample=tail.logical_start_sample,
+                    end_sample=total,
+                )
+            if len(chunks) <= 1:
+                audio = audio_buffer.get_audio_range_float32(tail.start_sample, total)
+                if len(audio) == 0:
+                    return state.to_result()
+                result = await self._run_transcribe(
+                    audio,
+                    loop=asyncio.get_running_loop(),
+                    options=self._tail_options(tail),
+                    perf_collector=perf_collector,
+                )
+                state.append(Decode(tail, result))
+                return state.to_result()
         except IncompleteTranscriptionError as error:
             if state.texts:
                 recovered = error.last_result or TranscribeResult(text="", confidence=0.0, last_speech_end=None)
                 state.append(Decode(tail, recovered))
                 error.last_result = state.to_result()
             raise
-        state.append(Decode(tail, result))
-        return state.to_result()
+        except Exception as error:
+            recovered = state.to_result()
+            if not recovered.text:
+                raise
+            raise IncompleteTranscriptionError(
+                "Final transcription failed; committed chunks are incomplete output.",
+                last_result=recovered,
+            ) from error
+
+        chunks[0] = replace(chunks[0], start_sample=tail.start_sample)
+        return await self._transcribe_chunks(
+            state, chunks, progress_callback=progress_callback, perf_collector=perf_collector,
+        )
 
     async def _transcribe_chunks(
         self,
@@ -457,15 +422,20 @@ class TranscriptionProcessor:
     ) -> TranscribeResult:
         loop = asyncio.get_running_loop()
         audio_buffer = self._context.audio_buffer
-        for chunk in chunks:
+        for index, chunk in enumerate(chunks):
             if progress_callback is not None:
                 await progress_callback(chunk.index, chunk.total)
-            chunk_audio = audio_buffer.get_audio_range_float32(
-                chunk.start_sample, chunk.end_sample
-            )
             try:
+                chunk_audio = audio_buffer.get_audio_range_float32(
+                    chunk.start_sample, chunk.end_sample
+                )
+                next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
                 result, failure = await self._decode_long_chunk(
                     chunk_audio, loop=loop, perf_collector=perf_collector,
+                    align_words=(
+                        chunk.start_sample < chunk.logical_start_sample
+                        or (next_chunk is not None and next_chunk.start_sample < next_chunk.logical_start_sample)
+                    ),
                 )
             except Exception as error:
                 raise IncompleteTranscriptionError(
@@ -488,6 +458,7 @@ class TranscriptionProcessor:
         loop: asyncio.AbstractEventLoop,
         perf_collector: dict[str, float] | None = None,
         for_commit: bool = False,
+        align_words: bool = False,
     ) -> tuple[TranscribeResult | None, IncompleteTranscriptionError | None]:
         """Decode one long chunk, retrying a suspicious result with safer options.
 
@@ -500,7 +471,9 @@ class TranscriptionProcessor:
         failure: IncompleteTranscriptionError | None = None
         try:
             result = await self._run_transcribe(
-                chunk_audio, loop=loop, options=_LONG_CHUNK_OPTIONS, perf_collector=perf_collector,
+                chunk_audio, loop=loop,
+                options=_OVERLAP_CHUNK_OPTIONS if align_words else _LONG_CHUNK_OPTIONS,
+                perf_collector=perf_collector,
             )
         except IncompleteTranscriptionError as error:
             failure = error
@@ -516,7 +489,7 @@ class TranscriptionProcessor:
                 retry_result = await self._run_transcribe(
                     chunk_audio,
                     loop=loop,
-                    options=_RETRY_OPTIONS,
+                    options=_OVERLAP_RETRY_OPTIONS if align_words else _RETRY_OPTIONS,
                     perf_collector=perf_collector,
                 )
             except VramExhaustedError as error:

@@ -25,7 +25,7 @@ from transcription.model_download import (
     track_huggingface_download_progress,
     update_model_download_state,
 )
-from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, resolve_option
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord, resolve_option
 from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 
 logger = logging.getLogger(__name__)
@@ -453,6 +453,7 @@ class WhisperSession:
                 temperature=temperature,
                 condition_on_previous_text=condition_on_previous_text,
                 without_timestamps=without_timestamps,
+                word_timestamps=options.word_timestamps,
                 vad_filter=vad_filter,
                 vad_parameters=self._options.vad_parameters,
             )
@@ -463,7 +464,13 @@ class WhisperSession:
                 segment_count += 1
                 last_speech_end = segment.end
                 if options.mode == "long_chunk" and hasattr(segment, "start"):
-                    timed_segments.append(TranscribeSegment(segment.text.strip(), segment.start, segment.end))
+                    words = tuple(
+                        TranscribeWord(word.word, word.start, word.end)
+                        for word in getattr(segment, "words", None) or ()
+                    )
+                    timed_segments.append(
+                        TranscribeSegment(segment.text.strip(), segment.start, segment.end, words)
+                    )
         except Exception as exc:
             failure = exc
         self._report_latency(time.perf_counter() - start)

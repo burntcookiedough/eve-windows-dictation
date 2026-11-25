@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { once } from 'node:events';
 import type { BrowserWindow } from 'electron';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { CaptureSession } from '../src/main/services/capture-session';
+import { perfTraceManager } from '../src/main/services/perf-trace';
 import {
   TranscriptionConnectionCancelledError,
   TranscriptionService,
@@ -16,6 +18,97 @@ function deferred<T>() {
 }
 
 describe('TranscriptionService protocol readiness', () => {
+  const sources = [
+    { name: 'hold-to-talk Quick', source: 'normal', mode: 'quick', timeout: 300 },
+    { name: 'toggle Quick', source: 'normal', mode: 'quick', timeout: 5 },
+    { name: 'Long', source: 'normal', mode: 'long', timeout: 5 },
+    { name: 'Lab', source: 'lab', mode: 'quick', timeout: 5 },
+  ] as const;
+
+  for (const { name, source, mode, timeout } of sources) {
+    test(`${name} starts with the expected draft policy and drains PCM before stop`, async () => {
+      const server = new WebSocketServer({ port: 0 });
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('No test address');
+      const received: (string | number)[] = [];
+      const draftReceived = deferred<void>();
+      const closed = deferred<void>();
+      const traceId = `mode-${source}-${mode}-${timeout}`;
+      const oldPerf = process.env.MURMUR_PERF_TRACE;
+      process.env.MURMUR_PERF_TRACE = '1';
+      perfTraceManager.startTrace(traceId);
+      const overlay = { isDestroyed: () => false, webContents: { send: () => {} } } as unknown as BrowserWindow;
+      const service = new TranscriptionService(
+        `ws://127.0.0.1:${address.port}`, timeout, overlay, undefined, mode, traceId, source,
+      );
+      const states: string[] = [];
+      const finals: string[] = [];
+      let start: { silence_timeout: number; speculative_partials?: boolean } | undefined;
+      service.onRecordingState(payload => states.push(payload.state));
+      service.onTranscription(payload => {
+        if (payload.type === 'partial') draftReceived.resolve();
+      });
+      service.onFinal(frame => finals.push(frame.text));
+      service.onClose(() => closed.resolve());
+
+      server.on('connection', socket => {
+        const send = (frame: Record<string, unknown>) => socket.send(JSON.stringify(frame));
+        const text = { frame: 'text', text: 'fixture words', confidence: 0.9, transcription_time: 0.1, audio_duration: 1 };
+        socket.on('message', (data, isBinary) => {
+          if (isBinary) {
+            const value = (data as Buffer)[0]!;
+            received.push(value);
+            if (value === 1 && start?.speculative_partials) send({ ...text, type: 'partial' });
+            return;
+          }
+          const frame = JSON.parse(data.toString());
+          received.push(frame.type);
+          if (frame.type === 'start') {
+            start = frame;
+            send({ frame: 'control', type: 'ready' });
+          } else if (frame.type === 'stop') {
+            send({ frame: 'control', type: 'status', status: 'long_dictation_processing' });
+            send({ ...text, type: 'final' });
+            send({ frame: 'control', type: 'closing', reason: 'stop_received' });
+          }
+        });
+      });
+
+      try {
+        await service.connect();
+        expect(start?.silence_timeout).toBe(timeout);
+        expect(start?.speculative_partials).toBe(source === 'lab' ? true : undefined);
+        expect(states).toEqual(['listening']);
+        const capture = new CaptureSession(1, audio => service.sendAudioBuffer(audio), () => {});
+        capture.forward(1, Uint8Array.of(1).buffer);
+        if (source === 'lab') await draftReceived.promise;
+        const drained = capture.stop();
+        capture.forward(1, Uint8Array.of(2).buffer);
+        capture.acknowledge(1, true);
+        expect(await drained).toBe(true);
+        service.stop();
+        await closed.promise;
+
+        expect(received).toEqual(['start', 1, 2, 'stop']);
+        expect(states).toEqual(source === 'lab'
+          ? ['listening', 'transcribing', 'processing', 'success']
+          : ['listening', 'processing', 'success']);
+        expect(finals).toEqual(['fixture words']);
+        const trace = perfTraceManager.getRecentTraces().find(item => item.correlationId === traceId);
+        expect(trace).toBeDefined();
+        if (source === 'lab') expect(trace?.main.firstPartialReceivedAt).toBeNumber();
+        else expect(trace?.main.firstPartialReceivedAt).toBeNull();
+      } finally {
+        perfTraceManager.completeTrace(traceId);
+        if (oldPerf === undefined) delete process.env.MURMUR_PERF_TRACE;
+        else process.env.MURMUR_PERF_TRACE = oldPerf;
+        for (const client of server.clients) client.terminate();
+        server.close();
+      }
+    });
+  }
+
   test('unexpected closure before readiness remains an error, not user cancellation', async () => {
     const server = new WebSocketServer({ port: 0 });
     await once(server, 'listening');

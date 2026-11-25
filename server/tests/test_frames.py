@@ -30,6 +30,13 @@ class TestStartFrame:
         assert frame.frame == "control"
         assert frame.type == "start"
         assert frame.silence_timeout == 5.0
+        assert frame.speculative_partials is False
+
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_speculative_partials_requires_explicit_boolean(self, enabled) -> None:
+        assert StartFrame(silence_timeout=5.0, speculative_partials=enabled).speculative_partials is enabled
+        with pytest.raises(ValidationError):
+            StartFrame.model_validate({"silence_timeout": 5.0, "speculative_partials": str(enabled)})
 
     def test_start_frame_from_dict(self) -> None:
         """Parse start frame from dict."""
@@ -92,6 +99,7 @@ class TestStartFrame:
             "frame": "control",
             "type": "start",
             "silence_timeout": 5.0,
+            "speculative_partials": False,
             "partial_emission_interval": None,
             "hotwords": None,
         }
