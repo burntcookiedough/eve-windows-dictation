@@ -57,11 +57,17 @@ Later snapshots may include output/DOM stages absent from an earlier snapshot.
 Select the latest observed fields by correlation ID within their clock domain.
 
 The persistent Windows helper prepares each paste before Eve authorizes keyboard
-input. A failed transport can fall back to the one-shot helper while the request
-is still in preparation. Once Eve hands off the commit, an absent or invalid
-reply leaves the result ambiguous, so Eve reports the failure and skips retrying
-the paste. The helper reply measures dispatch and leaves actual editor insertion
-to the isolated observer.
+input. Eve verifies clipboard ownership and the operation generation at dispatch,
+including immediately before a one-shot fallback. A failed transport can fall
+back while the request is still in preparation. Once Eve hands off the commit,
+an absent or invalid reply leaves the result ambiguous, so Eve reports the
+failure and skips retrying the paste. The helper reply measures dispatch and
+leaves actual editor insertion to the isolated observer.
+
+Eve captures the recording target only from a ready, idle helper with a 100 ms
+reply deadline. A cold helper warms for the next recording. When no valid handle
+was captured at recording start, Eve follows the session's copy and History
+settings.
 
 For the explicit editor, from `app/` run `bun run dev:vite` and open
 `http://127.0.0.1:5173/app/fixtures/isolated-editor-observer.html` (use the configured

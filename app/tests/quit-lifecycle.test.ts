@@ -98,7 +98,7 @@ test('no renderer or a destroyed window does not block ordinary quit', () => {
   expect(destroyed.fire()).toBeFalse();
 });
 
-test('main shuts down the paste helper before server cleanup and app exit', async () => {
+test('main shuts down clipboard paste processes before server cleanup and app exit', async () => {
   const source = ts.createSourceFile('index.ts', readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
   const listener = source.statements.find(node => node.getText(source).startsWith("app.on('will-quit'"));
   const script = ts.transpileModule(listener!.getText(source), {
@@ -108,7 +108,7 @@ test('main shuts down the paste helper before server cleanup and app exit', asyn
   let quit!: (event: { preventDefault: () => void }) => Promise<void>;
   runInNewContext(script, {
     app: { on: (_: string, handler: typeof quit) => { quit = handler; }, exit: () => events.push('exit') },
-    pasteHelper: { shutdown: () => events.push('helper') },
+    shutdownClipboardPaste: () => events.push('helper'),
     transcriptionService: null, historyService: null,
     serverManager: { cleanup: async () => events.push('server') },
   });

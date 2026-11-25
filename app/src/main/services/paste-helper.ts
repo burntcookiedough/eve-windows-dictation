@@ -4,16 +4,20 @@ import type { Readable, Writable } from 'node:stream';
 import { buildPersistentPasteScript } from './paste-helper-script.js';
 import { perfTraceManager } from './perf-trace.js';
 
-const FOREGROUND_TIMEOUT_MS = 2000;
+const FOREGROUND_TIMEOUT_MS = 100;
 const PASTE_TIMEOUT_MS = 5000;
 const MAX_REPLY_LENGTH = 4096;
 
-type RequestType = 'ready' | 'foreground' | 'paste' | 'commit';
+type RequestType = 'ready' | 'foreground' | 'paste' | 'commit' | 'discard';
+
+export type AuthorizePaste = (dispatch: () => void | Promise<void>) => Promise<void>;
 
 interface PendingRequest {
-  type: RequestType;
+  type: Exclude<RequestType, 'discard'> | 'authorizing';
   timeout: ReturnType<typeof setTimeout>;
+  expiresAt: number;
   perfTraceId?: string;
+  authorize?: AuthorizePaste;
   resolve: (handle: number | null) => void;
   reject: (error: Error) => void;
 }
@@ -22,6 +26,7 @@ interface HelperConnection {
   child: ChildProcessByStdio<Writable, Readable, null>;
   requests: Map<number, PendingRequest>;
   output: string;
+  ready: boolean;
 }
 
 export class PasteHelperUnavailableError extends Error {
@@ -40,13 +45,21 @@ export class PersistentPasteHelper {
   }
 
   async foreground(): Promise<number | null> {
+    // A request queued behind compilation or another operation could sample a
+    // window focused after recording began. Warm a cold helper for next time.
+    if (!this.connection) {
+      if (!this.stopped) void this.warmUp().catch(() => {});
+      return null;
+    }
+    if (!this.connection.ready || this.connection.requests.size > 0) return null;
     return this.request('foreground', FOREGROUND_TIMEOUT_MS);
   }
 
-  async paste(targetWindowHandle: number, perfTraceId?: string): Promise<void> {
-    // JSON serializes non-finite numbers as null, which would become an untargeted paste.
-    if (!Number.isSafeInteger(targetWindowHandle)) throw new Error('Invalid paste target window handle');
-    await this.request('paste', PASTE_TIMEOUT_MS, targetWindowHandle, perfTraceId);
+  async paste(targetWindowHandle: number, perfTraceId?: string, authorize?: AuthorizePaste): Promise<void> {
+    if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
+      throw new Error('Invalid paste target window handle');
+    }
+    await this.request('paste', PASTE_TIMEOUT_MS, targetWindowHandle, perfTraceId, authorize);
   }
 
   shutdown(): void {
@@ -57,10 +70,11 @@ export class PersistentPasteHelper {
   }
 
   private request(
-    type: Exclude<RequestType, 'commit'>,
+    type: 'ready' | 'foreground' | 'paste',
     timeoutMs: number,
     targetWindowHandle?: number,
-    perfTraceId?: string
+    perfTraceId?: string,
+    authorize?: AuthorizePaste
   ): Promise<number | null> {
     if (this.stopped) {
       return Promise.reject(new PasteHelperUnavailableError('Paste helper shut down', false));
@@ -73,8 +87,9 @@ export class PersistentPasteHelper {
     }
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
+      const expiresAt = performance.now() + timeoutMs;
       const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out'), timeoutMs);
-      connection.requests.set(id, { type, timeout, perfTraceId, resolve, reject });
+      connection.requests.set(id, { type, timeout, expiresAt, perfTraceId, authorize, resolve, reject });
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
       this.send(connection, { id, type, targetWindowHandle });
     });
@@ -86,7 +101,7 @@ export class PersistentPasteHelper {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
-    const connection: HelperConnection = { child, requests: new Map(), output: '' };
+    const connection: HelperConnection = { child, requests: new Map(), output: '', ready: false };
     this.connection = connection;
     child.on('error', () => this.disconnect(connection, 'Paste helper process failed'));
     child.on('close', () => this.disconnect(connection, 'Paste helper exited'));
@@ -137,11 +152,14 @@ export class PersistentPasteHelper {
     const pending = connection.requests.get(id);
     if (!pending) return false;
 
+    if (performance.now() >= pending.expiresAt) {
+      this.disconnect(connection, 'Paste helper request timed out');
+      return true;
+    }
     if (pending.type === 'paste' && type === 'prepared') {
-      // The prepare message cannot send keys. From the instant we hand off
-      // commit, a lost reply cannot tell us whether SendInput already ran.
-      pending.type = 'commit';
-      this.send(connection, { id, type: 'commit' });
+      connection.ready = true;
+      pending.type = 'authorizing';
+      void this.authorizeCommit(connection, id, pending);
       return true;
     }
 
@@ -150,6 +168,7 @@ export class PersistentPasteHelper {
     switch (pending.type) {
       case 'ready':
         if (type !== 'ready') return false;
+        connection.ready = true;
         break;
       case 'foreground':
         if (type !== 'foreground' || typeof handle !== 'number' || !Number.isSafeInteger(handle)) return false;
@@ -169,6 +188,33 @@ export class PersistentPasteHelper {
     if (failure) pending.reject(failure);
     else pending.resolve(foreground);
     return true;
+  }
+
+  private async authorizeCommit(connection: HelperConnection, id: number, pending: PendingRequest): Promise<void> {
+    const commit = () => {
+      if (this.connection !== connection || connection.requests.get(id) !== pending
+        || pending.type !== 'authorizing') return;
+      if (performance.now() >= pending.expiresAt) {
+        this.disconnect(connection, 'Paste helper request timed out');
+        return;
+      }
+      // From the instant we hand off commit, a lost reply cannot tell us whether SendInput ran.
+      pending.type = 'commit';
+      this.send(connection, { id, type: 'commit' });
+    };
+    try {
+      if (pending.authorize) await pending.authorize(commit);
+      else commit();
+    } catch {
+      // Failed authorization provides no basis to send input.
+    } finally {
+      if (this.connection === connection && pending.type === 'authorizing') {
+        connection.requests.delete(id);
+        clearTimeout(pending.timeout);
+        this.send(connection, { id, type: 'discard' });
+        pending.resolve(null);
+      }
+    }
   }
 
   private disconnect(connection: HelperConnection, reason: string): void {

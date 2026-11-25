@@ -14,7 +14,7 @@ import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
-import { getForegroundWindowHandle } from './services/clipboard.js';
+import { getForegroundWindowHandle, shutdownClipboardPaste } from './services/clipboard.js';
 import { pasteHelper } from './services/paste-helper.js';
 import { getSettings, getSetting } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
@@ -748,7 +748,7 @@ app.on('will-quit', async (event) => {
   event.preventDefault();
 
   // Cleanup
-  pasteHelper.shutdown();
+  shutdownClipboardPaste();
   transcriptionService?.stop();
   historyService?.close();
   await serverManager?.cleanup();

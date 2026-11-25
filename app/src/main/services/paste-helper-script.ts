@@ -133,9 +133,10 @@ public class NativePaste {
 
 export function buildSendInputScriptContent(): string {
   return `
-param([long]$TargetWindowHandle = 0)
+param([Parameter(Mandatory=$true)][long]$TargetWindowHandle)
 
 ${ADD_NATIVE_PASTE_TYPE}
+if ($TargetWindowHandle -le 0) { throw 'Invalid paste target window handle.' }
 [NativePaste]::Paste($TargetWindowHandle)
 `.trimStart();
 }
@@ -151,6 +152,10 @@ $prepared = @{}
 while ($null -ne ($line = [Console]::ReadLine())) {
   $request = ConvertFrom-Json -InputObject $line
   $id = [long]$request.id
+  if ($request.type -eq 'discard') {
+    $prepared.Remove($id)
+    continue
+  }
   $reply = @{ id = $id; type = $request.type }
   switch ($request.type) {
     'ready' {}
@@ -158,7 +163,9 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       $reply.handle = [NativePaste]::GetForegroundWindow().ToInt64()
     }
     'paste' {
-      $prepared[$id] = [long]$request.targetWindowHandle
+      $target = [long]$request.targetWindowHandle
+      if ($target -le 0) { throw 'Invalid paste target window handle.' }
+      $prepared[$id] = $target
       $reply.type = 'prepared'
     }
     'commit' {
