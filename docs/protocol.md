@@ -4,7 +4,7 @@
 
 This document defines a WebSocket-based protocol for live voice transcription. A client sends audio data and receives transcribed text in near real-time.
 
-Each WebSocket connection represents a single transcription session. The session begins with a `start` control frame, accepts audio frames, emits partial and final text results, and ends with connection close.
+Each WebSocket connection represents a single transcription session. The session begins with a `start` control frame, accepts audio frames, delivers one final result on success, and ends with connection close. Partial frames carry Lab drafts or incomplete output after an inference failure.
 
 ## Transport
 
@@ -93,13 +93,22 @@ Initiates a transcription session.
 | `frame` | string | yes | `"control"` |
 | `type` | string | yes | `"start"` |
 | `silence_timeout` | number | yes | Seconds of silence before auto-stop |
-| `partial_emission_interval` | number | no | Minimum seconds between partial emissions (default: 0.2) |
+| `partial_emission_interval` | number | no | Minimum seconds between background inference cycles (default server setting: 0.25) |
+| `speculative_partials` | boolean | no | Defaults to false. The developer Lab sends true to receive live drafts below the long dictation threshold. |
 | `hotwords` | string | no | Comma-separated hint phrases to bias recognition toward custom terms |
 
 **Server behavior:**
 - Valid: respond with `ready`, begin accepting audio frames
 - Already received `start` this session: ignore silently
 - Missing/invalid fields: respond with `error` (code `invalid_start`), close connection
+
+Omitting `speculative_partials` now selects final-only dictation, including
+hold-to-talk Quick, toggle Quick, and Long. The server processes incoming PCM
+with a streaming voice detector to time auto-stop and find recording-time pauses
+for incremental commits. If Silero fails, the session uses a fixed 0.01 RMS
+threshold over 32 ms windows for the activity clock. With that fallback, commits
+use forced boundaries with overlap. The regular dictation final decodes any
+nonempty uncommitted tail.
 
 ### stop (Client → Server)
 
@@ -292,7 +301,8 @@ All text frames have:
 
 ### partial (Server → Client)
 
-Interim transcription result. Speculative — may change.
+Interim Lab draft that may change, or an incomplete recovery result before a
+terminal error.
 
 ```json
 {
@@ -354,12 +364,12 @@ Committed transcription result. Will not change.
 
 1. A `final` frame is emitted on normal session termination (client `stop`, silence timeout).
 2. Once a `final` is sent, no further `partial` frames are sent for that session.
-3. Successful finalization follows: zero or more `partial` → one terminal `final` → `closing` → connection close.
+3. Successful finalization follows: one terminal `final` → `closing` → connection close. Lab can receive draft `partial` frames before the final.
 
 #### Incomplete inference recovery
 
-When native inference fails, completed segments from that call and completed
-long-dictation chunks remain available as **incomplete** text. A failed primary
+When inference fails, completed segments from that call, sealed commits, and
+completed long-dictation chunks remain available as **incomplete** text. A failed primary
 chunk stops further chunk inference; it is not silently skipped. An optional
 low-confidence retry that runs out of GPU memory retains its completed first
 pass. Other retry failures retain that first pass and report incomplete output.
@@ -445,9 +455,7 @@ Client                                   Server
    │                                        │
    │──── [audio frame seq=0] ──────────────►│
    │──── [audio frame seq=1] ──────────────►│
-   │◄────────────────────── text:partial ───│
    │──── [audio frame seq=2] ──────────────►│
-   │◄────────────────────── text:partial ───│
    │                                        │
    │──── control:stop ─────────────────────►│
    │◄──────────────────────── text:final ───│

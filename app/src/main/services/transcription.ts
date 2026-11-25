@@ -58,7 +58,8 @@ export class TranscriptionService {
     overlayWindow: BrowserWindow,
     hotwords?: string,
     sessionMode: DictationSessionMode = 'quick',
-    private readonly perfTraceId?: string
+    private readonly perfTraceId?: string,
+    private readonly source: 'lab' | 'normal' = 'normal'
   ) {
     this.serverUrl = serverUrl;
     this.silenceTimeout = silenceTimeout;
@@ -135,6 +136,7 @@ export class TranscriptionService {
     if (this.hotwords) {
       frame.hotwords = this.hotwords;
     }
+    if (this.source === 'lab') frame.speculative_partials = true;
     if (isPerfTraceEnabled() && this.perfTraceId) frame.trace_id = this.perfTraceId;
 
     this.ws?.send(JSON.stringify(frame));

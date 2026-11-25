@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 
 from audio.buffer import AudioBuffer
+import audio.speech_activity as activity_module
+from session.context import SessionContext
 import transcription.processor as processor_module
 from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
 from transcription.incremental import CommittedTranscript, Decode, is_settled, plan_seal
@@ -160,15 +162,26 @@ def engine(monkeypatch: pytest.MonkeyPatch):
     return session
 
 
-def _context(hotwords: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(
+@pytest.fixture(autouse=True)
+def fake_silero(monkeypatch):
+    class FakeSilero:
+        def probabilities(self, frames):
+            return np.where(np.max(np.abs(frames), axis=1) >= ACTIVE_RMS, 0.9, 0.05)
+
+    monkeypatch.setattr(activity_module, "_SileroStream", FakeSilero)
+
+
+def _context(hotwords: str | None = None, *, lab: bool = False) -> SessionContext:
+    return SessionContext(
         session_id="incremental",
-        audio_buffer=AudioBuffer(),
         hotwords=hotwords,
-        last_partial_text="",
-        audio_start_time=1000.0,
-        last_speech_time=None,
+        speculative_partials=lab,
     )
+
+
+def _append(context, sequence, samples):
+    context.audio_buffer.append(sequence, samples)
+    context.speech_activity.append(samples)
 
 
 async def _record(processor, context, audio: np.ndarray, *, step_s: float = 0.5) -> list:
@@ -176,12 +189,10 @@ async def _record(processor, context, audio: np.ndarray, *, step_s: float = 0.5)
     results = []
     step = int(step_s * RATE)
     for sequence, offset in enumerate(range(0, len(audio), step)):
-        context.audio_buffer.append(sequence, audio[offset: offset + step])
+        _append(context, sequence, audio[offset: offset + step])
         result = await processor.transcribe_partial()
         if result is not None:
             results.append(result)
-            if result.last_speech_end is not None:
-                context.last_speech_time = context.audio_start_time + result.last_speech_end
     return results
 
 
@@ -232,9 +243,89 @@ async def test_forced_seals_without_pauses_stitch_overlap_exactly(engine) -> Non
         context.audio_buffer.close()
 
 
+@pytest.mark.parametrize("seconds,seal_calls", [(3, 0), (10, 0), (60, 2)])
+async def test_normal_recording_never_decodes_a_speculative_tail(engine, seconds, seal_calls) -> None:
+    audio, _ = _speech([200], word_gap_s=0.0)
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        assert await _record(processor, context, audio[:seconds * RATE], step_s=0.25) == []
+        assert len(engine.calls) == seal_calls
+        assert processor._tail is None
+        assert await processor.transcribe_final()
+        assert len(engine.calls) == seal_calls + 1
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+@pytest.mark.parametrize("kind", ["whisper", "click", "breath", "zeros", "long_quiet", "empty"])
+async def test_normal_final_decodes_every_nonempty_tail(monkeypatch, kind) -> None:
+    tails = {
+        "whisper": np.concatenate([_noise(0.5), _burst(18, 0.4)]),
+        "click": np.pad(_burst(6000, 0.001), (0, RATE)),
+        "breath": np.concatenate([_noise(0.5), _burst(100, 0.1)]),
+        "zeros": np.zeros(RATE, dtype=np.int16),
+        "long_quiet": np.zeros(4 * RATE, dtype=np.int16),
+        "empty": np.zeros(0, dtype=np.int16),
+    }
+    expected_tail = "quiet words" if kind == "whisper" else ""
+    session = _scripted(monkeypatch, [TranscribeResult(expected_tail, 0.7, None)])
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        _append(context, 0, _burst(3000, 1))
+        processor._committed = CommittedTranscript(end_sample=RATE, texts=["earlier words"])
+        _append(context, 1, tails[kind])
+        assert await processor.transcribe_partial() is None
+        assert session.calls == 0
+
+        result = await processor.transcribe_final()
+
+        assert session.calls == (0 if kind == "empty" else 1)
+        assert result.text == ("earlier words " + expected_tail).rstrip()
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+async def test_stop_waits_for_inflight_seal_and_decodes_only_the_remaining_tail(monkeypatch, engine) -> None:
+    from perf_trace import is_perf_trace_enabled
+
+    monkeypatch.setenv("MURMUR_PERF_TRACE", "1")
+    assert is_perf_trace_enabled()
+    audio, expected = _speech([5, 6, 4, 7, 5, 6], trailing_s=0.6)
+    context = _context()
+    processor = processor_module.TranscriptionProcessor(context)
+    try:
+        _append(context, 0, audio)
+        engine.block = threading.Event()
+        commit = asyncio.create_task(processor.transcribe_partial())
+        assert await asyncio.to_thread(engine.started.wait, 2)
+        final = asyncio.create_task(processor.transcribe_final())
+        await asyncio.sleep(0.03)
+        assert not final.done()
+        assert await processor.transcribe_partial() is None
+        engine.block.set()
+
+        assert await commit is None
+        result = await final
+
+        assert len(engine.calls) == 2
+        assert engine.calls[1][0] == len(audio) - processor._committed.end_sample
+        assert result.text == expected
+        assert result.perf.outstanding_partial_wait_ms >= 20
+    finally:
+        if engine.block is not None:
+            engine.block.set()
+        engine.block = None
+        processor.close()
+        context.audio_buffer.close()
+
+
 async def test_silent_tail_reuses_last_decode_without_new_inference(engine) -> None:
     audio, expected = _speech([4, 5], trailing_s=1.0)
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         partials = await _record(processor, context, audio, step_s=0.25)
@@ -256,7 +347,7 @@ async def test_empty_first_decode_is_never_reused_once_speech_arrives(engine) ->
     # at under twice the click's level must still be decoded, not skipped.
     start = np.concatenate([_noise(0.1), _burst(1500, 0.04), _noise(0.36, seed=5)])
     words, expected = _speech([5])  # amplitudes 2000..3000
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         context.audio_buffer.append(0, start)
@@ -309,7 +400,7 @@ async def test_stop_after_an_empty_decode_always_decodes_the_tail(monkeypatch) -
         TranscribeResult("", 0.0, None),
         TranscribeResult("quiet words", 0.6, 2.4),
     ])
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         context.audio_buffer.append(0, _noise(0.5))
@@ -332,7 +423,7 @@ async def test_whispered_continuation_beyond_reuse_cap_is_redecoded(monkeypatch)
         TranscribeResult("loud words", 0.9, 0.5),
         TranscribeResult("loud words quiet words", 0.8, 4.5),
     ])
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         context.audio_buffer.append(0, np.concatenate([_noise(0.1), _burst(4000), _noise(0.5, seed=4)]))
@@ -349,44 +440,13 @@ async def test_whispered_continuation_beyond_reuse_cap_is_redecoded(monkeypatch)
         context.audio_buffer.close()
 
 
-async def test_partial_speech_timing_never_moves_backwards(monkeypatch) -> None:
-    # Later windows can hear less (say only their overlap); timing must hold.
-    _scripted(monkeypatch, [
-        TranscribeResult("a b", 0.9, 3.0),
-        TranscribeResult("a b", 0.9, 1.0),  # unchanged text branch
-        TranscribeResult("a b c", 0.9, 2.0),  # emitted branch
-    ])
-    context = _context()
-    processor = processor_module.TranscriptionProcessor(context)
-
-    async def step(sequence: int, seconds: float):
-        # Each step is louder than the last, so none is skipped as settled.
-        context.audio_buffer.append(sequence, _burst(3000 * 3 ** sequence, seconds))
-        return await processor.transcribe_partial()
-
-    try:
-        first = await step(0, 3.5)  # long enough for its 3.0 s speech end
-        assert first.text == "a b" and first.last_speech_end == 3.0
-        context.last_speech_time = context.audio_start_time + first.last_speech_end
-
-        assert await step(1, 1.0) is None  # unchanged text writes timing directly
-        assert context.last_speech_time == context.audio_start_time + 3.0
-
-        third = await step(2, 1.0)
-        assert third.text == "a b c"
-        assert third.last_speech_end == 3.0
-    finally:
-        processor.close()
-        context.audio_buffer.close()
-
-
 @pytest.mark.parametrize("overlap_speech_end_s", [0.5, 0.75])  # inside, and exactly at the end
 async def test_reuse_requires_speech_after_the_committed_end(monkeypatch, overlap_speech_end_s) -> None:
     # After a forced seal, a tail decode whose only speech was in the overlap
     # (ending at the committed end at the latest) heard nothing uncommitted;
     # quiet speech after it must still be decoded.
     session = _scripted(monkeypatch, [TranscribeResult("quiet words", 0.6, 1.4)])
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     end, overlap = 5 * RATE, int(0.75 * RATE)
     try:
@@ -411,7 +471,7 @@ async def test_reuse_requires_speech_after_the_committed_end(monkeypatch, overla
 
 
 async def test_commit_retry_out_of_vram_is_a_failed_commit(monkeypatch) -> None:
-    audio, _ = _speech([5, 6, 4, 7, 5, 6])
+    audio, _ = _speech([5, 6, 4, 7, 5, 6], trailing_s=0.6)
     session = _scripted(monkeypatch, [
         TranscribeResult("w0 maybe", 0.2, 3.0),  # suspicious first pass
         VramExhaustedError(last_result=None),  # its retry runs out of VRAM
@@ -420,7 +480,7 @@ async def test_commit_retry_out_of_vram_is_a_failed_commit(monkeypatch) -> None:
     context = _context()
     processor = processor_module.TranscriptionProcessor(context)
     try:
-        context.audio_buffer.append(0, audio)
+        _append(context, 0, audio)
         assert processor._plan_seal(len(audio)) is not None
         with pytest.raises(VramExhaustedError):
             await processor.transcribe_partial()
@@ -440,7 +500,7 @@ async def test_commit_retry_out_of_vram_is_a_failed_commit(monkeypatch) -> None:
 async def test_speech_after_last_decode_is_decoded_on_stop(engine) -> None:
     audio, expected = _speech([4, 5], trailing_s=1.0)
     more = _more_speech(3)
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         await _record(processor, context, audio)
@@ -459,7 +519,7 @@ async def test_speech_after_last_decode_is_decoded_on_stop(engine) -> None:
 
 async def test_stop_during_inflight_partial_waits_for_one_bounded_job(engine) -> None:
     audio, expected = _speech([6, 6])
-    context = _context()
+    context = _context(lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         context.audio_buffer.append(0, audio)
@@ -496,7 +556,7 @@ async def test_failed_commit_is_never_committed_and_final_recovers_the_audio(eng
         offset = 0
         # Record until a seal is ready, then fail exactly that commit decode.
         while offset < len(audio):
-            context.audio_buffer.append(offset, audio[offset: offset + step])
+            _append(context, offset, audio[offset: offset + step])
             offset += step
             if processor._plan_seal(context.audio_buffer.sample_count) is not None:
                 break
@@ -547,7 +607,7 @@ async def test_tail_failure_reports_committed_plus_recovered_text_as_incomplete(
 
 
 async def test_cancelled_commit_changes_nothing_and_lease_waits_for_native_work(monkeypatch, engine) -> None:
-    audio, expected = _speech([5, 6, 4, 7, 5, 6])
+    audio, _ = _speech([5, 6, 4, 7, 5, 6], trailing_s=0.6)
     context = _context()
     closed = threading.Event()
     runtime = SimpleNamespace(
@@ -556,7 +616,7 @@ async def test_cancelled_commit_changes_nothing_and_lease_waits_for_native_work(
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
     processor = processor_module.TranscriptionProcessor(context)
     try:
-        context.audio_buffer.append(0, audio)
+        _append(context, 0, audio)
         assert processor._plan_seal(len(audio)) is not None
         engine.block = threading.Event()
         commit = asyncio.create_task(processor.transcribe_partial())
@@ -588,7 +648,7 @@ async def test_long_dictation_seals_eagerly_and_finalizes_with_one_decode(engine
     processor = processor_module.TranscriptionProcessor(context)
     try:
         partials = await _record(processor, context, audio)
-        assert all(result.text == "" for result in partials if result.audio_duration >= 30.0)
+        assert partials == []
         assert len(audio) - processor._committed.end_sample < 26 * RATE
         before = len(engine.calls)
 
@@ -624,7 +684,7 @@ async def test_disabled_setting_keeps_legacy_whole_buffer_final(engine) -> None:
 
 async def test_hotwords_reach_commit_partial_and_final_decodes(engine) -> None:
     audio, _ = _speech([5, 6, 4, 7, 5, 6])
-    context = _context(hotwords="Eve, Murmur")
+    context = _context(hotwords="Eve, Murmur", lab=True)
     processor = processor_module.TranscriptionProcessor(context)
     try:
         await _record(processor, context, audio)
@@ -637,45 +697,6 @@ async def test_hotwords_reach_commit_partial_and_final_decodes(engine) -> None:
         context.audio_buffer.close()
 
 
-async def test_commit_advances_speech_timing_but_never_rewinds_it(engine) -> None:
-    audio, _ = _speech([5, 6, 4, 7, 5, 6])
-    context = _context()
-    processor = processor_module.TranscriptionProcessor(context)
-    try:
-        # A backlog: the first job is a commit, before any partial reported.
-        context.audio_buffer.append(0, audio)
-        committed = await processor.transcribe_partial()
-        assert processor._committed.texts
-        assert committed is not None and committed.is_empty
-        assert committed.last_speech_end == processor._committed.last_speech_end
-        partial = await processor.transcribe_partial()
-        assert partial.last_speech_end > committed.last_speech_end
-        # A later commit whose speech ends before the reported time stays silent.
-        assert processor._commit_speech_timing(len(audio), 0.0) is None
-    finally:
-        processor.close()
-        context.audio_buffer.close()
-
-
-async def test_partial_speech_timing_is_absolute_after_a_commit(engine) -> None:
-    audio, _ = _speech([5, 6, 4, 7, 5, 6])
-    context = _context()
-    processor = processor_module.TranscriptionProcessor(context)
-    try:
-        partials = await _record(processor, context, audio)
-        assert processor._committed.end_sample > 0
-        # The last word ends at the end of the audio, past the committed end.
-        speech_end = context.last_speech_time - context.audio_start_time
-        assert speech_end == pytest.approx(len(audio) / RATE, abs=0.02)
-        assert all(
-            later.last_speech_end >= earlier.last_speech_end
-            for earlier, later in zip(partials, partials[1:])
-        )
-    finally:
-        processor.close()
-        context.audio_buffer.close()
-
-
 def _buffer(samples: np.ndarray) -> AudioBuffer:
     buffer = AudioBuffer()
     buffer.append(0, samples)
@@ -683,12 +704,14 @@ def _buffer(samples: np.ndarray) -> AudioBuffer:
 
 
 def test_plan_seal_cuts_inside_a_pause_without_overlap() -> None:
-    audio, _ = _speech([20, 20])  # pause near 8.5 s
+    audio, _ = _speech([20], trailing_s=PAUSE_S)
     buffer = _buffer(audio)
+    activity = activity_module.SpeechActivity()
+    activity.append(audio)
     try:
-        assert plan_seal(buffer, committed_end=0, total_samples=len(audio),
+        assert plan_seal(buffer, activity, committed_end=0, total_samples=len(audio),
                          seal_after_s=10.0, chunk_s=25.0, overlap_s=0.75) is None
-        chunk, overlap = plan_seal(buffer, committed_end=0, total_samples=len(audio),
+        chunk, overlap = plan_seal(buffer, activity, committed_end=0, total_samples=len(audio),
                                    seal_after_s=5.0, chunk_s=25.0, overlap_s=0.75)
         pause_start = int((20 * WORD_S + 19 * WORD_GAP_S) * RATE)
         assert pause_start < chunk.end_sample < pause_start + int(PAUSE_S * RATE)
@@ -700,8 +723,10 @@ def test_plan_seal_cuts_inside_a_pause_without_overlap() -> None:
 def test_plan_seal_never_cuts_at_short_gaps_inside_a_phrase() -> None:
     audio, _ = _speech([60])  # ~25 s with only 0.12 s gaps
     buffer = _buffer(audio)
+    activity = activity_module.SpeechActivity()
+    activity.append(audio)
     try:
-        assert plan_seal(buffer, committed_end=0, total_samples=len(audio),
+        assert plan_seal(buffer, activity, committed_end=0, total_samples=len(audio),
                          seal_after_s=10.0, chunk_s=25.0, overlap_s=0.75) is None
     finally:
         buffer.close()
@@ -766,7 +791,7 @@ def test_forced_seal_overlap_never_reaches_before_its_own_decode() -> None:
     try:
         committed_end = RATE
         chunk, overlap = plan_seal(
-            buffer, committed_end=committed_end, total_samples=len(audio),
+            buffer, activity_module.SpeechActivity(), committed_end=committed_end, total_samples=len(audio),
             seal_after_s=0.5, chunk_s=2.0, overlap_s=5.0,
         )
         assert chunk.start_sample == committed_end

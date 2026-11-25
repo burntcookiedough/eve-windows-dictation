@@ -196,6 +196,62 @@ def lifecycle_env(monkeypatch: pytest.MonkeyPatch):
     return SimpleNamespace(manager=manager, settings=settings, tracked_buffers=tracked_buffers)
 
 
+@pytest.mark.parametrize("flag", [None, False, True])
+async def test_handler_only_emits_live_drafts_on_opt_in_and_final_hears_ordered_pcm(
+    lifecycle_env, monkeypatch, flag,
+):
+    import transcription.processor as processor_module
+
+    lease_closed = MagicMock()
+    native_audio = []
+    tick_done = asyncio.Event()
+
+    def transcribe(audio, **kwargs):
+        native_audio.append(audio.copy())
+        return TranscribeResult("synthetic speech", 0.9, len(audio) / 16000)
+
+    session = SimpleNamespace(transcribe=transcribe)
+    runtime = SimpleNamespace(open_session=lambda _: SimpleNamespace(session=session, close=lease_closed))
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: lifecycle_env.settings)
+
+    async def observed_tick(self):
+        result = await original_tick(self)
+        if self._context.audio_buffer.sample_count:
+            tick_done.set()
+        return result
+
+    original_tick = processor_module.TranscriptionProcessor.transcribe_partial
+    monkeypatch.setattr(processor_module.TranscriptionProcessor, "transcribe_partial", observed_tick)
+
+    start_options = {} if flag is None else {"speculative_partials": flag}
+    first = np.full(3200, 1000, dtype=np.int16)
+    drain = np.full(1600, 1500, dtype=np.int16)
+    socket = _LifecycleWebSocket([
+        _make_control_frame("start", silence_timeout=5.0, **start_options),
+        _make_audio_frame(0, first),
+    ])
+    task = asyncio.create_task(handler_module.websocket_handler(socket))
+    try:
+        await asyncio.wait_for(tick_done.wait(), timeout=2)
+        assert len(native_audio) == int(flag is True)
+        socket.queue_message(_make_audio_frame(1, drain))
+        socket.queue_message(_make_control_frame("stop"))
+        await asyncio.wait_for(task, timeout=2)
+
+        frames = [json.loads(message) for message in socket.sent_messages]
+        drafts = ["partial"] if flag is True else []
+        assert [frame["type"] for frame in frames] == ["ready", *drafts, "final", "closing"]
+        assert frames[-1]["reason"] == "stop_received"
+        assert len(native_audio) == int(flag is True) + 1
+        np.testing.assert_array_equal(native_audio[-1], np.concatenate((first, drain)) / 32768)
+        lease_closed.assert_called_once()
+        assert lifecycle_env.manager.active_count == 0
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.asyncio
 async def test_handler_client_disconnect_cleans_backing_storage_and_leases(
     lifecycle_env, monkeypatch: pytest.MonkeyPatch
@@ -726,7 +782,7 @@ async def test_inflight_partial_processor_await_probe_with_concurrent_buffer_clo
     )
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: mock_runtime)
 
-    context = SessionContext()
+    context = SessionContext(speculative_partials=True)
     context.state_machine.transition_to(SessionState.STARTED)
     context.audio_buffer.append(0, np.ones(16000, dtype=np.int16))
 
@@ -803,7 +859,7 @@ async def test_handler_blocked_partial_emits_no_frames_after_terminal(
     monkeypatch.setattr(handler_module.FrameSender, "send_final", hooked_send_final)
 
     ws = _LifecycleWebSocket([
-        _make_control_frame("start", silence_timeout=30.0),
+        _make_control_frame("start", silence_timeout=30.0, speculative_partials=True),
         _make_audio_frame(0, np.ones(500, dtype=np.int16)),
     ])
 

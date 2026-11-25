@@ -259,7 +259,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     overlayWindow,
     hotwords,
     sessionMode,
-    serviceTraceId
+    serviceTraceId,
+    source
   );
   transcriptionService = service;
   let serviceCapture: CaptureSession | null = null;

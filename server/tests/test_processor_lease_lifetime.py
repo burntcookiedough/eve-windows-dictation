@@ -38,7 +38,7 @@ async def test_cancelled_inference_keeps_lease_until_worker_finishes(
         allow_overlapping_inference=overlap, transcription_max_workers=2,
         min_audio_for_transcription=0.01,
     ))
-    context = SessionContext()
+    context = SessionContext(speculative_partials=partial)
     context.audio_buffer.append(0, np.zeros(1600, dtype=np.int16))
     processor = module.TranscriptionProcessor(context)
     task = asyncio.create_task(processor.transcribe_partial() if partial else processor._run_transcribe(

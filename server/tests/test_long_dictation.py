@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from audio.buffer import AudioBuffer
+from session.context import SessionContext
 import transcription.processor as processor_module
 from transcription.errors import VramExhaustedError
 from transcription.long_dictation import AudioChunk, plan_chunks, stitch_text, text_for_chunk
@@ -215,50 +216,32 @@ async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_long_partial_uses_tail_window_for_speech_timing_only(
+async def test_lab_does_not_decode_timing_only_partials_after_long_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _RecordingSession()
     runtime = _RecordingRuntime(session)
-    first_chunk = np.full(3 * 16000, 100, dtype=np.int16)
-    last_chunk = np.linspace(-1000, 1000, 16000, dtype=np.int16)
     audio_buffer = AudioBuffer()
-    audio_buffer.append(0, first_chunk)
-    audio_buffer.append(1, last_chunk)
-
-    def _fail_full_conversion() -> np.ndarray:
-        raise AssertionError("long partials must not convert the full audio buffer")
-
-    monkeypatch.setattr(audio_buffer, "get_audio_float32", _fail_full_conversion)
-    context = SimpleNamespace(
+    audio_buffer.append(0, np.ones(4 * 16000, dtype=np.int16))
+    context = SessionContext(
         session_id="long-partial",
         audio_buffer=audio_buffer,
-        hotwords=None,
-        last_partial_text="previous visible text",
+        speculative_partials=True,
     )
 
     monkeypatch.setattr(
         processor_module,
         "get_settings",
-        lambda: _settings(long_dictation_threshold_s=3.0, long_dictation_chunk_s=2.0),
+        lambda: _settings(long_dictation_threshold_s=3.0, incremental_commit=False),
     )
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_partial()
 
-    assert result is not None
-    assert result.text == ""
-    assert result.is_empty is True
-    assert len(session.calls) == 1
-    assert session.calls[0][0] == 2 * 16000
-    assert session.calls[0][1] is not None
-    assert session.calls[0][1].condition_on_previous_text is False
-    expected_tail = (
-        np.concatenate((first_chunk[-16000:], last_chunk)).astype(np.float32) / 32768.0
-    )
-    np.testing.assert_array_equal(session.audio_inputs[0], expected_tail)
-    assert result.last_speech_end == pytest.approx(4.0)
+    assert result is None
+    assert session.calls == []
+    processor.close()
     audio_buffer.close()
 
 

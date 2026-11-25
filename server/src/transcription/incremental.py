@@ -1,8 +1,7 @@
 """Incremental commit: seal recorded audio while the user is still talking.
 
-Sealed audio is decoded once and its text becomes committed. The final then
-decodes only the uncommitted tail, or nothing at all when the latest decode of
-that tail is followed only by silence.
+Sealed audio is decoded once and its text becomes committed. The final
+decodes only the uncommitted tail. The Lab can reuse a settled draft.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from audio.buffer import AudioBuffer
+from audio.speech_activity import SpeechActivity
 from protocol.constants import AUDIO_SAMPLE_RATE
 from transcription.long_dictation import AudioChunk, find_quiet_boundary, stitch_text, text_for_chunk
 from transcription.types import TranscribeResult
@@ -20,9 +20,6 @@ FRAME_SAMPLES = AUDIO_SAMPLE_RATE // 50  # 20 ms energy frames
 # A pause must last this long before it may hold a seal; stop closures and
 # inter-word gaps inside one phrase are much shorter.
 MIN_SEAL_SILENCE_S = 0.4
-# Speech must exceed the noise floor by 12 dB before energy can find pauses.
-MIN_SEAL_SNR = 4.0
-QUIET_NOISE_RATIO = 3.0
 # Reusing a decode needs this much model-confirmed non-speech at its end.
 SETTLED_GUARD_S = 0.3
 # That stretch must be steady noise (p95 within 6 dB of its median), and new
@@ -99,9 +96,7 @@ def frame_rms(
 ) -> np.ndarray:
     """RMS of consecutive 20 ms frames in ``[start_sample, end_sample)``.
 
-    Pause detection uses complete frames only, so a frame count is a duration.
-    ``include_partial`` appends the leftover samples as one more frame, for
-    checks that must hear every sample.
+    ``include_partial`` includes any leftover samples as one more frame.
     """
     audio = buffer.get_audio_range_float32(start_sample, end_sample)
     frames = len(audio) // FRAME_SAMPLES
@@ -119,6 +114,7 @@ def frame_rms(
 
 def plan_seal(
     buffer: AudioBuffer,
+    speech_activity: SpeechActivity,
     *,
     committed_end: int,
     overlap_samples: int = 0,
@@ -129,7 +125,7 @@ def plan_seal(
 ) -> tuple[AudioChunk, int] | None:
     """Return the next sealable chunk and the overlap the following tail needs.
 
-    Seals at the latest pause whose midpoint lies ``seal_after_s``..``chunk_s``
+    Seals during a confirmed pause between ``seal_after_s`` and ``chunk_s``
     past the committed end, cutting inside silence with no overlap. Without
     such a pause, force-seals near ``chunk_s`` at the quietest point and keeps
     ``overlap_s`` so the next decode can be stitched with ``text_for_chunk``.
@@ -142,9 +138,16 @@ def plan_seal(
     if total_samples <= earliest:
         return None
 
-    search_end = min(total_samples, latest)
-    rms = frame_rms(buffer, committed_end, search_end)
-    boundary = _latest_pause_midpoint(rms, committed_end, earliest, search_end)
+    pause_start = speech_activity.silero_pause_start
+    pause_end = min(speech_activity.processed_samples, total_samples)
+    silence_samples = int(MIN_SEAL_SILENCE_S * rate)
+    boundary = None
+    if pause_start is not None and pause_start > committed_end:
+        if pause_end - pause_start >= silence_samples:
+            midpoint = min(latest, (pause_start + pause_end) // 2)
+            if midpoint >= max(earliest, pause_start + silence_samples // 2):
+                boundary = midpoint
+
     overlap = 0
     if boundary is None:
         if total_samples < latest + int(FORCE_SEAL_SEARCH_S * rate):
@@ -160,34 +163,6 @@ def plan_seal(
     overlap = min(overlap, boundary - start)
     chunk = AudioChunk(1, 1, start, boundary, committed_end, boundary)
     return chunk, overlap
-
-
-def _latest_pause_midpoint(
-    rms: np.ndarray, base: int, earliest: int, search_end: int,
-) -> int | None:
-    if len(rms) == 0:
-        return None
-    noise = float(np.percentile(rms, 10))
-    speech = float(np.percentile(rms, 95))
-    if speech < MIN_SEAL_SNR * max(noise, SETTLED_ABS_FLOOR):
-        return None
-    # Soft words can sit 20 dB under loud ones; only near-noise-floor frames
-    # count as pause, so a seal never lands inside quiet speech.
-    threshold = min(QUIET_NOISE_RATIO * noise, noise + 0.1 * (speech - noise))
-    quiet = rms <= threshold
-    min_frames = int(MIN_SEAL_SILENCE_S * AUDIO_SAMPLE_RATE / FRAME_SAMPLES)
-    best: int | None = None
-    run_start: int | None = None
-    for index, is_quiet in enumerate(np.append(quiet, False)):
-        if is_quiet and run_start is None:
-            run_start = index
-        elif not is_quiet and run_start is not None:
-            if index - run_start >= min_frames:
-                midpoint = base + (run_start + index) * FRAME_SAMPLES // 2
-                if earliest <= midpoint <= search_end:
-                    best = midpoint
-            run_start = None
-    return best
 
 
 def is_settled(buffer: AudioBuffer, decode: Decode, total_samples: int) -> bool:

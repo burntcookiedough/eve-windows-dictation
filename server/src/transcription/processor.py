@@ -43,11 +43,6 @@ _RETRY_OPTIONS: Final = TranscribeOptions(
     beam_size=3,
     mode="long_chunk",
 )
-# Speech-timing window for long recordings without a reusable tail decode.
-_LONG_PARTIAL_OPTIONS: Final = TranscribeOptions(
-    condition_on_previous_text=False,
-    mode="long_chunk",
-)
 
 # Shared thread pool for transcription
 _executor: ThreadPoolExecutor | None = None
@@ -121,7 +116,6 @@ class TranscriptionProcessor:
         self._tail: Decode | None = None  # latest decode of the uncommitted tail
         self._last_job_committed = False
         self._commit_disabled = False
-        self._reported_speech_end: float | None = None  # absolute, for monotonic timing
 
     @property
     def _allow_overlapping_inference(self) -> bool:
@@ -164,78 +158,58 @@ class TranscriptionProcessor:
                 return None
             start_time = time.perf_counter()
             total = audio_buffer.sample_count
+            live_partials = (
+                self._context.speculative_partials
+                and total / AUDIO_SAMPLE_RATE < self._long_dictation_threshold_s
+            )
             if self._incremental:
-                # Alternate with partials so speech timing never starves.
-                seal = None if self._last_job_committed else self._plan_seal(total)
+                # Give the Lab time to emit a draft even when several seals are due.
+                seal = None if live_partials and self._last_job_committed else self._plan_seal(total)
                 if seal is not None:
                     self._last_job_committed = True
                     await self._commit(*seal)
-                    return self._commit_speech_timing(total, start_time)
-                self._last_job_committed = False
-                if self._tail is not None and is_settled(audio_buffer, self._tail, total):
-                    # Only silence since the last decode: nothing new to hear.
+                    logger.debug(
+                        "[%s] Incremental commit cycle: %.0fms",
+                        self._session_id,
+                        (time.perf_counter() - start_time) * 1000,
+                    )
                     return None
+                self._last_job_committed = False
+            if not live_partials:
+                return None
+            if self._tail is not None and is_settled(audio_buffer, self._tail, total):
+                return None  # Only silence since the last Lab draft.
             return await self._transcribe_tail_partial(total, start_time)
 
     async def _transcribe_tail_partial(
         self, total: int, start_time: float,
     ) -> TranscriptionResult | None:
         audio_duration = total / AUDIO_SAMPLE_RATE
-        long_mode = audio_duration >= self._long_dictation_threshold_s
         tail = self._committed.tail_chunk(total)
-        window, options = tail, self._tail_options(tail)
-        max_samples = max(1, int(self._long_dictation_chunk_s * AUDIO_SAMPLE_RATE))
-        capped = long_mode and tail.end_sample - tail.start_sample > max_samples
-        if capped:
-            begin = total - max_samples
-            window = AudioChunk(1, 1, begin, total, begin, total)
-        if long_mode and (capped or not self._incremental):
-            options = _LONG_PARTIAL_OPTIONS
-        if window.end_sample <= window.start_sample:
-            return None
         audio = self._context.audio_buffer.get_audio_range_float32(
-            window.start_sample, window.end_sample,
+            tail.start_sample, tail.end_sample,
         )
         if len(audio) == 0:
             return None
 
-        result = await self._run_transcribe(audio, loop=asyncio.get_running_loop(), options=options)
+        result = await self._run_transcribe(
+            audio, loop=asyncio.get_running_loop(), options=self._tail_options(tail),
+        )
         transcription_time = time.perf_counter() - start_time
-        decode = Decode(window, result)
-        if self._incremental and not capped:
+        decode = Decode(tail, result)
+        if self._incremental:
             self._tail = decode
         last_speech_end = (
-            window.start_s + result.last_speech_end
+            tail.start_s + result.last_speech_end
             if result.last_speech_end is not None
             else None
         )
-        if last_speech_end is not None:
-            # A window that hears speech only in its overlap must not rewind
-            # the silence monitor's speech time.
-            last_speech_end = max(self._reported_speech_end or 0.0, last_speech_end)
-            self._reported_speech_end = last_speech_end
-
-        if long_mode:
-            # Live text stays suppressed in long mode; whole-recording partial
-            # text is not shown. The bounded decode still drives speech timing.
-            return TranscriptionResult(
-                text="",
-                confidence=result.confidence,
-                is_empty=True,
-                transcription_time=transcription_time,
-                audio_duration=audio_duration,
-                last_speech_end=last_speech_end,
-            )
-
         text = (
             stitch_text([self._committed.text, self._committed.text_for(decode)])
             if self._committed.texts
             else result.text
         )
         if text == self._context.last_partial_text:
-            # Still update speech timing so silence monitor doesn't use stale data
-            if last_speech_end is not None and self._context.audio_start_time is not None:
-                self._context.last_speech_time = self._context.audio_start_time + last_speech_end
             return None
 
         self._context.last_partial_text = text
@@ -248,29 +222,11 @@ class TranscriptionProcessor:
             last_speech_end=last_speech_end,
         )
 
-    def _commit_speech_timing(self, total: int, start_time: float) -> TranscriptionResult | None:
-        """Let a commit advance speech timing, never move it backwards.
-
-        Continuous speech on a slow CPU can run several commits between
-        partials; without this the silence monitor would see stale speech.
-        """
-        speech_end = self._committed.last_speech_end
-        if speech_end is None or speech_end <= (self._reported_speech_end or 0.0):
-            return None
-        self._reported_speech_end = speech_end
-        return TranscriptionResult(
-            text="",
-            confidence=0.0,
-            is_empty=True,
-            transcription_time=time.perf_counter() - start_time,
-            audio_duration=total / AUDIO_SAMPLE_RATE,
-            last_speech_end=speech_end,
-        )
-
     def _plan_seal(self, total: int) -> tuple[AudioChunk, int] | None:
         chunk_s = self._long_dictation_chunk_s
         return plan_seal(
             self._context.audio_buffer,
+            self._context.speech_activity,
             committed_end=self._committed.end_sample,
             overlap_samples=self._committed.overlap_samples,
             total_samples=total,
@@ -444,6 +400,14 @@ class TranscriptionProcessor:
                 state.append(Decode(tail, recovered))
                 error.last_result = state.to_result()
             raise
+        except Exception as error:
+            recovered = state.to_result()
+            if not recovered.text:
+                raise
+            raise IncompleteTranscriptionError(
+                "Final transcription failed; committed chunks are incomplete output.",
+                last_result=recovered,
+            ) from error
         state.append(Decode(tail, result))
         return state.to_result()
 
