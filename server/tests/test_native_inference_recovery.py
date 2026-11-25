@@ -10,7 +10,7 @@ from session.context import SessionContext
 from session.state import SessionState
 from transcription.engines.whisper import WhisperSession, WhisperTranscribeOptions
 from transcription.errors import IncompleteTranscriptionError, VramExhaustedError
-from transcription.types import TranscribeOptions
+from transcription.types import TranscribeOptions, TranscribeResult
 import transcription.processor as processor_module
 from websocket.handler import _finalize_session
 from websocket.sender import FrameSender
@@ -61,7 +61,7 @@ def test_unrelated_native_failure_is_not_cuda_oom(message):
 
 
 async def test_actual_finalization_failure_is_not_success_and_retains_partial():
-    context = SessionContext()
+    context = SessionContext(speculative_partials=True)
     context.state_machine.transition_to(SessionState.STARTED)
     context.state_machine.transition_to(SessionState.STREAMING)
     context.last_partial_text = "available incomplete words"
@@ -85,6 +85,123 @@ async def test_actual_finalization_failure_is_not_success_and_retains_partial():
     assert "incomplete" in socket.frames[1]["message"].lower()
     assert context.state_machine.state == SessionState.CLOSED
     assert context.audio_buffer.sample_count == 0
+
+
+@pytest.mark.parametrize("failure", ["generic", "lazy", "oom"])
+async def test_failure_after_a_normal_recording_seal_emits_only_incomplete_recovery(
+    monkeypatch, failure,
+):
+    class Model:
+        def transcribe(self, audio, **kwargs):
+            def segments():
+                yield SimpleNamespace(text="recovered tail", start=0.1, end=0.3, avg_logprob=-0.2)
+                raise RuntimeError("CUDA out of memory" if failure == "oom" else "native failure")
+
+            return segments(), None
+
+    actual_adapter = WhisperSession(
+        Model(), WhisperTranscribeOptions("en", 1, 0.0, False, False, False, {}), lambda _: None,
+    )
+    native_calls = []
+
+    def transcribe(audio, **kwargs):
+        native_calls.append(len(audio))
+        if len(native_calls) == 1:
+            return TranscribeResult("sealed words", 0.9, 0.5)
+        if failure == "generic":
+            raise RuntimeError("runtime boundary failure")
+        return actual_adapter.transcribe(audio, **kwargs)
+
+    lease = SimpleNamespace(session=SimpleNamespace(transcribe=transcribe), close=actual_adapter.close)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: SimpleNamespace(
+        min_audio_for_transcription=0.15, long_dictation_chunk_s=2.0,
+    ))
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: SimpleNamespace(
+        open_session=lambda _: lease,
+    ))
+    context = SessionContext()
+    context.state_machine.transition_to(SessionState.STARTED)
+    context.audio_buffer.append(0, np.zeros(4 * 16000, dtype=np.int16))
+    processor = processor_module.TranscriptionProcessor(context)
+
+    class Socket:
+        def __init__(self):
+            self.frames = []
+
+        async def send_json(self, frame):
+            self.frames.append(frame)
+
+    socket = Socket()
+    try:
+        assert await processor.transcribe_partial() is None
+        assert processor._committed.text == "sealed words"
+
+        await _finalize_session(FrameSender(socket, context.session_id), context, processor, ClosingReason.STOP_RECEIVED)
+
+        assert len(native_calls) == 2
+        assert [frame["type"] for frame in socket.frames] == ["partial", "error", "closing"]
+        expected = "sealed words" if failure == "generic" else "sealed words recovered tail"
+        assert socket.frames[0]["text"] == expected
+        assert context.state_machine.state == SessionState.CLOSED
+    finally:
+        processor.close()
+        context.audio_buffer.close()
+
+
+@pytest.mark.parametrize("stage", ["tail", "planning", "chunk"])
+async def test_spooled_read_failure_sends_accumulated_text_as_incomplete(monkeypatch, stage):
+    from audio.buffer import AudioBuffer
+
+    texts = iter(("sealed words", "completed chunk"))
+    calls = 0
+
+    def transcribe(audio, **kwargs):
+        nonlocal calls
+        calls += 1
+        return TranscribeResult(next(texts), 0.9, 0.5)
+
+    lease = SimpleNamespace(session=SimpleNamespace(transcribe=transcribe), close=lambda: None)
+    monkeypatch.setattr(processor_module, "get_settings", lambda: SimpleNamespace(
+        min_audio_for_transcription=0.15, long_dictation_threshold_s=4.0, long_dictation_chunk_s=2.0,
+    ))
+    monkeypatch.setattr(processor_module, "get_model_runtime", lambda: SimpleNamespace(
+        open_session=lambda _: lease,
+    ))
+    context = SessionContext(audio_buffer=AudioBuffer(_max_resident_bytes=64))
+    context.state_machine.transition_to(SessionState.STARTED)
+    context.audio_buffer.append(0, np.zeros(4 * 16000, dtype=np.int16))
+    processor = processor_module.TranscriptionProcessor(context)
+
+    try:
+        await processor.transcribe_partial()
+        assert processor._committed.text == "sealed words"
+        if stage != "tail":
+            context.audio_buffer.append(1, np.zeros(4 * 16000, dtype=np.int16))
+        read = context.audio_buffer.get_audio_range_float32
+
+        def short_read(start, end):
+            if stage != "chunk" or calls == 2:
+                raise OSError("short read from spool")
+            return read(start, end)
+
+        monkeypatch.setattr(context.audio_buffer, "get_audio_range_float32", short_read)
+        frames = []
+
+        async def send_json(frame):
+            frames.append(frame)
+
+        socket = SimpleNamespace(send_json=send_json)
+        await _finalize_session(FrameSender(socket, context.session_id), context, processor, ClosingReason.STOP_RECEIVED)
+
+        terminal = [frame for frame in frames if frame["type"] != "status"]
+        assert [frame["type"] for frame in terminal] == ["partial", "error", "closing"]
+        expected = "sealed words completed chunk" if stage == "chunk" else "sealed words"
+        assert terminal[0]["text"] == expected
+        assert "incomplete" in terminal[1]["message"].lower()
+        assert calls == (2 if stage == "chunk" else 1)
+    finally:
+        processor.close()
+        context.audio_buffer.close()
 
 
 @pytest.mark.parametrize("oom", [False, True])

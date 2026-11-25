@@ -13,10 +13,18 @@ def resolve_option(default: T, override: T | None) -> T:
 
 
 @dataclass(frozen=True, slots=True)
+class TranscribeWord:
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
 class TranscribeSegment:
     text: str
     start: float
     end: float
+    words: tuple[TranscribeWord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,3 +43,4 @@ class TranscribeOptions:
     temperature: float | None = None
     beam_size: int | None = None
     mode: Literal["default", "long_chunk"] = "default"
+    word_timestamps: bool = False

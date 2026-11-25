@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from audio.buffer import AudioBuffer
+from audio.speech_activity import SpeechActivity
 from session.state import SessionStateMachine
 
 
@@ -25,6 +26,7 @@ class SessionContext:
     # Configuration from start frame
     silence_timeout: float = 5.0
     partial_emission_interval: float | None = None  # None = use server default
+    speculative_partials: bool = False
     hotwords: str | None = None
 
     # Timestamps
@@ -39,6 +41,7 @@ class SessionContext:
     trace_id: str | None = None
 
     # Speech timing for silence detection
+    speech_activity: SpeechActivity = field(default_factory=SpeechActivity, repr=False)
     audio_start_time: float | None = None  # Monotonic time when first audio arrived
     last_speech_time: float | None = (
         None  # Monotonic time when speech was last detected
@@ -46,9 +49,6 @@ class SessionContext:
 
     # Last transcription result (for partial emissions)
     last_partial_text: str = ""
-
-    # Flag to track if we've sent any speech
-    has_speech: bool = False
 
     # Flag to avoid repeating the long-dictation mode transition notice.
     long_dictation_announced: bool = False

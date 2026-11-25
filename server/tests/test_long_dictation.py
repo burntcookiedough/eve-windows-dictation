@@ -9,10 +9,11 @@ import numpy as np
 import pytest
 
 from audio.buffer import AudioBuffer
+from session.context import SessionContext
 import transcription.processor as processor_module
 from transcription.errors import VramExhaustedError
 from transcription.long_dictation import AudioChunk, plan_chunks, stitch_text, text_for_chunk
-from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment
+from transcription.types import TranscribeOptions, TranscribeResult, TranscribeSegment, TranscribeWord
 
 
 def _settings(**overrides: object) -> SimpleNamespace:
@@ -171,10 +172,12 @@ def test_stitch_text_preserves_repetition_without_timing_evidence() -> None:
     )
 
 
-def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
+@pytest.mark.parametrize("previous_has_word_timings", [False, True])
+def test_segment_dedup_requires_matching_text_and_audio_time(previous_has_word_timings) -> None:
     previous_chunk = AudioChunk(1, 2, 0, 400000, 0, 400000)
     current_chunk = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
-    old = TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9),))
+    words = (TranscribeWord(" That.", 24.3, 24.9),) if previous_has_word_timings else ()
+    old = TranscribeResult("That.", 0.9, 24.9, (TranscribeSegment("That.", 24.3, 24.9, words),))
     current = TranscribeResult("That. That was incredible.", 0.9, 2.0, (
         TranscribeSegment("That.", 0.05, 0.65),  # Same speech at absolute 24.30..24.90.
         TranscribeSegment("That was incredible.", 0.8, 2.0),  # New speech after 25.0.
@@ -188,6 +191,55 @@ def test_segment_dedup_requires_matching_text_and_audio_time() -> None:
     # Ambiguous crossing segments are kept in full; word equality cannot delete them.
     crossing = TranscribeResult("That was that.", 0.9, 1.1, (TranscribeSegment("That was that.", 0.1, 1.1),))
     assert text_for_chunk(crossing, current_chunk, (previous_chunk, old)) == crossing.text
+
+
+@pytest.mark.parametrize("first_has_word_timings", [False, True])
+def test_segment_fallback_and_word_matching_share_prior_occurrences(first_has_word_timings) -> None:
+    previous = AudioChunk(1, 2, 0, 400000, 0, 400000)
+    current = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
+    old = TranscribeResult("very", 0.9, 24.75, (
+        TranscribeSegment("very", 24.25, 24.75, (TranscribeWord(" very", 24.25, 24.75),)),
+    ))
+    first_words = (TranscribeWord(" very", 0.0, 0.25),) if first_has_word_timings else ()
+    second_words = () if first_has_word_timings else (TranscribeWord(" very", 0.25, 0.5),)
+    result = TranscribeResult("very very useful", 0.9, 1.25, (
+        TranscribeSegment("very", 0.0, 0.25, first_words),
+        TranscribeSegment("very", 0.25, 0.5, second_words),
+        TranscribeSegment("useful", 0.8, 1.25),
+    ))
+    assert text_for_chunk(result, current, (previous, old)) == "very useful"
+
+
+@pytest.mark.parametrize("previous_count", [1, 2])
+@pytest.mark.parametrize("split_current", [False, True])
+def test_overlapping_words_use_each_prior_occurrence_once(previous_count, split_current) -> None:
+    previous = AudioChunk(1, 2, 0, 400000, 0, 400000)
+    current = AudioChunk(2, 2, 388000, 800000, 400000, 800000)
+    previous_words = (
+        (TranscribeWord(" very", 24.25, 24.75),)
+        if previous_count == 1
+        else (TranscribeWord(" very", 24.25, 24.5), TranscribeWord(" very", 24.5, 24.75))
+    )
+    old_text = " ".join(["very"] * previous_count)
+    old_segment = TranscribeSegment(old_text, 24.25, 24.75, previous_words)
+    words = (
+        TranscribeWord(" very", 0.0, 0.25),
+        TranscribeWord(" very", 0.25, 0.5),
+        TranscribeWord(" useful", 0.8, 1.25),
+    )
+    segments = (
+        (TranscribeSegment("very", 0.0, 0.25, words[:1]),
+         TranscribeSegment("very useful", 0.25, 1.25, words[1:]))
+        if split_current
+        else (TranscribeSegment("very very useful", 0.0, 1.25, words),)
+    )
+    result = text_for_chunk(
+        TranscribeResult("very very useful", 0.9, 1.25, segments),
+        current,
+        (previous, TranscribeResult(old_text, 0.9, 24.75, (old_segment,))),
+    )
+    assert result == ("very useful" if previous_count == 1 else "useful")
+
 
 @pytest.mark.asyncio
 async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -215,50 +267,32 @@ async def test_final_uses_single_pass_below_threshold(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_long_partial_uses_tail_window_for_speech_timing_only(
+async def test_lab_does_not_decode_timing_only_partials_after_long_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _RecordingSession()
     runtime = _RecordingRuntime(session)
-    first_chunk = np.full(3 * 16000, 100, dtype=np.int16)
-    last_chunk = np.linspace(-1000, 1000, 16000, dtype=np.int16)
     audio_buffer = AudioBuffer()
-    audio_buffer.append(0, first_chunk)
-    audio_buffer.append(1, last_chunk)
-
-    def _fail_full_conversion() -> np.ndarray:
-        raise AssertionError("long partials must not convert the full audio buffer")
-
-    monkeypatch.setattr(audio_buffer, "get_audio_float32", _fail_full_conversion)
-    context = SimpleNamespace(
+    audio_buffer.append(0, np.ones(4 * 16000, dtype=np.int16))
+    context = SessionContext(
         session_id="long-partial",
         audio_buffer=audio_buffer,
-        hotwords=None,
-        last_partial_text="previous visible text",
+        speculative_partials=True,
     )
 
     monkeypatch.setattr(
         processor_module,
         "get_settings",
-        lambda: _settings(long_dictation_threshold_s=3.0, long_dictation_chunk_s=2.0),
+        lambda: _settings(long_dictation_threshold_s=3.0, incremental_commit=False),
     )
     monkeypatch.setattr(processor_module, "get_model_runtime", lambda: runtime)
 
     processor = processor_module.TranscriptionProcessor(context)
     result = await processor.transcribe_partial()
 
-    assert result is not None
-    assert result.text == ""
-    assert result.is_empty is True
-    assert len(session.calls) == 1
-    assert session.calls[0][0] == 2 * 16000
-    assert session.calls[0][1] is not None
-    assert session.calls[0][1].condition_on_previous_text is False
-    expected_tail = (
-        np.concatenate((first_chunk[-16000:], last_chunk)).astype(np.float32) / 32768.0
-    )
-    np.testing.assert_array_equal(session.audio_inputs[0], expected_tail)
-    assert result.last_speech_end == pytest.approx(4.0)
+    assert result is None
+    assert session.calls == []
+    processor.close()
     audio_buffer.close()
 
 

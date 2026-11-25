@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from audio.buffer import AudioBuffer
 from protocol.constants import AUDIO_SAMPLE_RATE
-from transcription.types import TranscribeResult
+from transcription.types import TranscribeResult, TranscribeSegment, TranscribeWord
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,31 +110,79 @@ def text_for_chunk(
     chunk: AudioChunk,
     previous: tuple[AudioChunk, TranscribeResult] | None = None,
 ) -> str:
-    """Remove only matching segments at demonstrated overlapping audio times.
-
-    A segment crossing the overlap boundary is ambiguous: retain it rather
-    than deleting potentially intentional words. No decoder defaults change.
-    """
+    """Remove matching text at demonstrated overlapping audio times."""
     overlap_end = (chunk.logical_start_sample - chunk.start_sample) / AUDIO_SAMPLE_RATE
     if overlap_end <= 0 or not result.segments or previous is None:
         return result.text
     previous_chunk, previous_result = previous
+    previous_words = [
+        (index, _word_key(word.text), previous_chunk.start_s + word.start, previous_chunk.start_s + word.end)
+        for index, segment in enumerate(previous_result.segments)
+        for word in segment.words
+        if 0 <= word.start < word.end and previous_chunk.start_s + word.end > chunk.start_s
+    ]
 
-    def already_transcribed(segment) -> bool:
+    def matching_segment_index(segment: TranscribeSegment, first_index: int = 0) -> int | None:
         if not (0 <= segment.start <= segment.end <= overlap_end):
-            return False
+            return None
+        text = _normalize_space(segment.text).casefold()
         start, end = chunk.start_s + segment.start, chunk.start_s + segment.end
-        return any(
-            _normalize_space(segment.text).casefold() == _normalize_space(old.text).casefold()
-            and start < previous_chunk.start_s + old.end
-            and end > previous_chunk.start_s + old.start
-            for old in previous_result.segments
-        )
+        for index in range(first_index, len(previous_result.segments)):
+            old = previous_result.segments[index]
+            if (
+                text == _normalize_space(old.text).casefold()
+                and start < previous_chunk.start_s + old.end
+                and end > previous_chunk.start_s + old.start
+            ):
+                return index
+        return None
 
-    return stitch_text([
-        segment.text for segment in result.segments
-        if not already_transcribed(segment)
-    ])
+    if not previous_words:
+        return stitch_text([
+            segment.text for segment in result.segments if matching_segment_index(segment) is None
+        ])
+
+    next_previous_word = 0
+    next_previous_segment = 0
+
+    def matching_word_index(word: TranscribeWord) -> int | None:
+        if not 0 <= word.start < word.end <= overlap_end:
+            return None
+        text = _word_key(word.text)
+        if not text:
+            return None
+        start, end = chunk.start_s + word.start, chunk.start_s + word.end
+        # Nearly adjacent timings can be different occurrences of the same word.
+        for index in range(next_previous_word, len(previous_words)):
+            _, old_text, old_start, old_end = previous_words[index]
+            shared_duration = min(end, old_end) - max(start, old_start)
+            if text == old_text and shared_duration >= 0.5 * max(end - start, old_end - old_start):
+                return index
+        return None
+
+    def without_duplicate_prefix(segment: TranscribeSegment) -> str:
+        nonlocal next_previous_word, next_previous_segment
+        if not segment.words:
+            match = matching_segment_index(segment, next_previous_segment)
+            if match is None:
+                return segment.text
+            # A whole-segment match also consumes its words.
+            next_previous_segment = match + 1
+            while next_previous_word < len(previous_words) and previous_words[next_previous_word][0] <= match:
+                next_previous_word += 1
+            return ""
+        # Keep the recognizer's original text if the alignment has gaps.
+        if _normalize_space("".join(word.text for word in segment.words)) != _normalize_space(segment.text):
+            return segment.text
+        for index, word in enumerate(segment.words):
+            match = matching_word_index(word)
+            if match is None:
+                return "".join(remaining.text for remaining in segment.words[index:]) if index else segment.text
+            next_previous_word = match + 1
+            next_previous_segment = previous_words[match][0] + 1
+        return ""
+
+    return stitch_text([without_duplicate_prefix(segment) for segment in result.segments])
 
 
 def find_quiet_boundary(
@@ -180,3 +228,7 @@ def find_quiet_boundary(
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _word_key(text: str) -> str:
+    return re.sub(r"^[^\w]+|[^\w]+$", "", text.strip().casefold())

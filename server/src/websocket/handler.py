@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from audio.parser import ParseError, parse_audio_frame
 from config import get_settings
+from protocol.constants import AUDIO_SAMPLE_RATE
 from protocol.errors import ErrorCode
 from perf_trace import ServerPerfTiming, is_perf_trace_enabled, sanitize_correlation_id
 from protocol.frames import ClosingReason, StartFrame, StatusKind, WarningCode
@@ -202,6 +203,7 @@ async def _wait_for_start(
         context.trace_id = sanitize_correlation_id(start_frame.trace_id)
     context.silence_timeout = start_frame.silence_timeout
     context.partial_emission_interval = start_frame.partial_emission_interval
+    context.speculative_partials = start_frame.speculative_partials
     context.hotwords = (
         start_frame.hotwords.strip()
         if start_frame.hotwords is not None and start_frame.hotwords.strip()
@@ -310,8 +312,19 @@ async def _handle_audio_frame(
         if is_perf_trace_enabled():
             context.last_audio_received_at = time.perf_counter()
         context.audio_buffer.append(frame.sequence, frame.samples)
-        audio_duration = context.audio_buffer.duration_seconds
 
+        # Transition to streaming if first audio and record audio start time
+        if context.state_machine.state == SessionState.STARTED:
+            context.audio_start_time = time.monotonic()
+            context.state_machine.transition_to(SessionState.STREAMING)
+            logger.info("[%s] Audio streaming started", context.session_id)
+
+        context.speech_activity.append(frame.samples)
+        speech_end = context.speech_activity.last_speech_sample
+        if speech_end is not None and context.audio_start_time is not None:
+            context.last_speech_time = context.audio_start_time + speech_end / AUDIO_SAMPLE_RATE
+
+        audio_duration = context.audio_buffer.duration_seconds
         if (
             not context.long_dictation_announced
             and audio_duration >= get_settings().long_dictation_threshold_s
@@ -322,12 +335,6 @@ async def _handle_audio_frame(
                 message="Long dictation mode",
                 audio_duration=audio_duration,
             )
-
-        # Transition to streaming if first audio and record audio start time
-        if context.state_machine.state == SessionState.STARTED:
-            context.audio_start_time = time.monotonic()
-            context.state_machine.transition_to(SessionState.STREAMING)
-            logger.info("[%s] Audio streaming started", context.session_id)
 
         return False
 
@@ -389,7 +396,7 @@ async def _partial_emission_loop(
     processor: TranscriptionProcessor,
     min_interval: float,
 ) -> None:
-    """Background task for emitting partial transcription results.
+    """Run incremental commits and developer Lab partials while recording.
 
     Uses adaptive timing: sleeps only for the remaining time after transcription
     completes, ensuring cycle time = max(min_interval, transcription_time).
@@ -423,15 +430,6 @@ async def _partial_emission_loop(
                     return
 
                 if result is not None:
-                    # Update last speech time if speech was detected
-                    if (
-                        result.last_speech_end is not None
-                        and context.audio_start_time is not None
-                    ):
-                        context.last_speech_time = (
-                            context.audio_start_time + result.last_speech_end
-                        )
-
                     if not result.is_empty:
                         await sender.send_partial(
                             result.text,
@@ -439,12 +437,11 @@ async def _partial_emission_loop(
                             result.transcription_time,
                             result.audio_duration,
                         )
-                        context.has_speech = True
 
                     # Log cycle timing at debug level
                     cycle_time = time.monotonic() - cycle_start
                     logger.debug(
-                        "[%s] Partial emission: transcribe=%.0fms, cycle=%.0fms, audio=%.1fs",
+                        "[%s] Recording inference: transcribe=%.0fms, cycle=%.0fms, audio=%.1fs",
                         context.session_id,
                         result.transcription_time * 1000,
                         cycle_time * 1000,
@@ -452,7 +449,7 @@ async def _partial_emission_loop(
                     )
         except VramExhaustedError as e:
             logger.warning(
-                "[%s] VRAM exhausted during partial transcription: %s",
+                "[%s] VRAM exhausted during recording inference: %s",
                 context.session_id,
                 e.message,
             )
@@ -466,7 +463,7 @@ async def _partial_emission_loop(
                 else:
                     return
         except Exception:
-            logger.error("[%s] Error in partial emission", context.session_id)
+            logger.error("[%s] Error in recording inference", context.session_id)
 
         # Adaptive sleep: yield even when transcription took longer than the interval.
         elapsed = time.monotonic() - cycle_start

@@ -19,8 +19,8 @@ subtracting a sum of internal spans. Missing observations are null, not zero.
 | Stage | Boundary and evidence |
 | --- | --- |
 | Stop / last audio | Main stop entry and last dispatched frame; separately overlay stop/capture/last-frame markers. A dispatched frame is not proof the server accepted it. |
-| First partial | First partial receipt minus capture/stream start, within that observer. Never use a renderer start with a main receipt. |
-| Outstanding work | State of outstanding partial at stop plus measured global lock and executor queue waits. Global lock wait cannot be assigned wholly to one session's partial. Unknown attribution stays unavailable. |
+| First partial | First partial receipt minus capture/stream start, within that observer. A successful regular dictation leaves this null. Incomplete recovery can populate it on failed sessions. |
+| Outstanding work | State of the recording inference task at stop plus measured global lock and executor queue waits. Global lock wait can include jobs from other sessions. |
 | Final inference | Worker entry through completed transcription, including lazy segment iteration and any instrumented retry. Long chunk totals are sums of observed spans, not a single contiguous inference interval. |
 | Final WebSocket send | Server ASGI send start through awaited send completion. This measures transport handoff, not client receipt. Send completion cannot be included in the frame being sent; use the server-side trace. |
 | Receipt / display | Main final receipt; separately overlay final receipt through Svelte DOM commit after tick. DOM commit does not establish paint. |
@@ -33,10 +33,11 @@ The wired runtime is covered by default-wire, correlated-session, lock/executor,
 lifecycle, privacy, and editor tests. `final_inference_start_offset_ms` and
 `final_inference_end_offset_ms` are worker boundaries relative to the server final
 processing entry; the inference duration sums observed completed calls.
-`partial_task_active_at_stop` observes the asynchronous partial task, not proof
-that cancelled native work stopped. `outstanding_partial_wait_ms` is the final's
+`partial_task_active_at_stop` observes the asynchronous recording inference
+task. Native inference can continue after that task is cancelled.
+`outstanding_partial_wait_ms` is the final's
 wait on its own session's work lock, behind at most one bounded background job
-(a partial or an incremental commit) of that session. That job holds the session
+(an incremental commit or a Lab draft) of that session. That job holds the session
 lock while it waits for the global inference lock, so this value can include
 global inference-lock contention from other work; it is not pure model time of
 this session's job. `lock_wait_ms` is that wait plus the final's own

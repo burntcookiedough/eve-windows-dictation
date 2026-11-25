@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator
 from fastapi import FastAPI, HTTPException, WebSocket
 from pydantic import ValidationError
 
+from audio.speech_activity import warm_silero
 from config import (
     API_KEYS,
     RELOAD_KEYS,
@@ -217,8 +218,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     runtime = init_model_runtime(settings)
     _schedule_runtime_start(runtime)
 
-    logger.info("Eve ready")
     try:
+        await warm_silero()
+        logger.info("Eve ready")
         yield
     finally:
         logger.info("Shutting down Eve...")
