@@ -1100,6 +1100,27 @@ describe('persistent paste helper', () => {
     });
   }
 
+  for (const replaced of [false, true]) {
+    test(`a failed authorization read keeps restoration guarded (clipboard replaced: ${replaced})`, async () => {
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Previous synthetic copy' })], 'Previous synthetic copy');
+      const child = nextHelper((request, helper) => {
+        if (request.type !== 'paste') return;
+        clipboardReadText.mockImplementationOnce(async () => { throw new Error('Synthetic authorization read failure'); });
+        helper.reply(request, 'prepared');
+      });
+      await pasteText('Synthetic dictation', {
+        method: 'sendinput', targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
+      });
+      expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'discard']);
+      expect(execFile).not.toHaveBeenCalled();
+      if (replaced) {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'New synthetic copy' })], 'New synthetic copy');
+      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+      expect(clipboardText).toBe(replaced ? 'New synthetic copy' : 'Previous synthetic copy');
+    });
+  }
+
   for (const failure of ['exit', 'malformed JSON', 'timeout'] as const) {
     test(`does not retry after commit on ${failure}`, async () => {
       const child = nextHelper((request, helper) => {
@@ -1154,8 +1175,9 @@ describe('persistent paste helper', () => {
         main.finalReceivedAt, main.clipboardCompletedAt, main.pasteSettleCompletedAt,
         main.pasteOwnershipCheckedAt, main.pasteHelperRequestSentAt, main.pasteHelperResponseAt,
       ];
-      expect(times.every(time => time !== null)).toBe(true);
-      expect(times).toEqual([...times].sort((a, b) => a! - b!));
+      const finiteTimes = times.filter((time): time is number => typeof time === 'number' && Number.isFinite(time));
+      expect(finiteTimes).toHaveLength(times.length);
+      expect(finiteTimes).toEqual(finiteTimes.toSorted((a, b) => a - b));
       expect(execFile).not.toHaveBeenCalled();
     } finally {
       perfTraceManager.clear();

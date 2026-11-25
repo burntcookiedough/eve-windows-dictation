@@ -106,6 +106,9 @@ public class NativePaste {
         // foreground. Do not reactivate an already-active top-level window: some
         // Chromium editors lose their focused child control when that happens.
         if (GetForegroundWindow() != target) {
+          if (expectedClipboardSequence == 0 || GetClipboardSequenceNumber() != expectedClipboardSequence) {
+            return ${PasteAbortCode.ClipboardChanged};
+          }
           AllowForegroundSwitch();
           if (IsIconic(target)) {
             ShowWindow(target, SW_RESTORE);

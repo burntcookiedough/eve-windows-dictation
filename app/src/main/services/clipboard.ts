@@ -390,8 +390,8 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       const authorize: AuthorizePaste = async dispatch => {
         if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
         const snapshot = await readClipboardSnapshot().catch(() => null);
-        if (signal.aborted || pasteGeneration !== latestPasteGeneration) return;
-        if (snapshot?.signature !== clipboardOwnershipSignature) {
+        if (!snapshot || signal.aborted || pasteGeneration !== latestPasteGeneration) return;
+        if (snapshot.signature !== clipboardOwnershipSignature) {
           if (sequence) discardPasteSequence(sequence);
           return;
         }
