@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://burntcookiedough.github.io/eve-windows-dictation/sitemap.xml
