@@ -15,6 +15,7 @@ import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
 import { getForegroundWindowHandle } from './services/clipboard.js';
+import { pasteHelper } from './services/paste-helper.js';
 import { getSettings, getSetting } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
@@ -145,7 +146,6 @@ function showTransientOverlayError(
   sendOverlayRecordingState({ state: 'error', isRecording: false, mode });
   scheduleOverlayDismiss(generation, mode, 'error');
 }
-let currentPasteTargetWindowHandlePromise: Promise<number | null> | null = null;
 
 function broadcastRecordingState<T>(channel: string, payload: T): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -227,7 +227,8 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   recordingTerminalOverride = null;
   recordingSource = source;
   recordingSessionMode = sessionMode;
-  currentPasteTargetWindowHandlePromise = source === 'normal'
+  const { autoPaste, hotwordsEnabled, hotwordsCsl } = getSettings();
+  const pasteTargetWindowHandlePromise = source === 'normal' && autoPaste
     ? getForegroundWindowHandle()
     : null;
   latestTranscription = null;
@@ -247,8 +248,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   const silenceTimeout = sessionMode === 'quick' && isHoldMode
     ? 300
     : getSetting('silenceTimeout');
-  const settings = getSettings();
-  const hotwords = settings.hotwordsEnabled ? buildHotwordsPrompt(settings.hotwordsCsl) : undefined;
+  const hotwords = hotwordsEnabled ? buildHotwordsPrompt(hotwordsCsl) : undefined;
 
   // Development can connect to a separately started localhost server.
   const serverUrl = discoveredServerUrl ?? LOCAL_SERVER_URL;
@@ -264,7 +264,6 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   transcriptionService = service;
   let serviceCapture: CaptureSession | null = null;
   const serviceSessionMode = sessionMode;
-  const servicePasteTargetWindowHandlePromise = currentPasteTargetWindowHandlePromise;
 
   service.onRecordingState((payload) => {
     if (transcriptionService !== service) return;
@@ -310,13 +309,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     }
 
     if (frame.text) {
-      const pasteTargetWindowHandle = await servicePasteTargetWindowHandlePromise
+      const pasteTargetWindowHandle = await pasteTargetWindowHandlePromise
         ?.catch(() => null) ?? null;
 
       // Process through pipeline (post-processing, clipboard, paste, history)
       const result = await processFinalTranscription(
         frame,
-        getSettings(),
+        { ...getSettings(), autoPaste },
         historyService,
         serviceSessionMode,
         pasteTargetWindowHandle,
@@ -356,7 +355,6 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     recordingSource = null;
     recordingSessionMode = 'quick';
     recordingTerminalOverride = null;
-    currentPasteTargetWindowHandlePromise = null;
 
     scheduleOverlayDismiss(sessionGeneration, closedSessionMode, terminalState);
 
@@ -712,6 +710,11 @@ async function startApplication(): Promise<void> {
     }
   }
 
+  if (getSetting('autoPaste') && serverManager.getState().status === 'running') {
+    void pasteHelper.warmUp().catch(() => {
+      log.debug('Paste helper prewarm failed');
+    });
+  }
   log.info('Eve ready');
 
   // Handle app lifecycle
@@ -745,6 +748,7 @@ app.on('will-quit', async (event) => {
   event.preventDefault();
 
   // Cleanup
+  pasteHelper.shutdown();
   transcriptionService?.stop();
   historyService?.close();
   await serverManager?.cleanup();

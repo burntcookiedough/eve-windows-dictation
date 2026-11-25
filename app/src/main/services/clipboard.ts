@@ -5,6 +5,10 @@ import { writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createLogger } from '../lib/logger.js';
 import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
+import { PasteHelperUnavailableError, pasteHelper } from './paste-helper.js';
+import { buildSendInputScriptContent } from './paste-helper-script.js';
+
+export { buildSendInputScriptContent } from './paste-helper-script.js';
 
 const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
@@ -41,143 +45,6 @@ function ensurePasteScript(): string {
     log.debug('Created paste helper script', { path: pasteScriptPath });
   }
   return pasteScriptPath;
-}
-
-export function buildSendInputScriptContent(): string {
-  return `
-param([long]$TargetWindowHandle = 0)
-
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-
-public class NativePaste {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct INPUT {
-    public uint type;
-    public InputUnion U;
-  }
-
-  [StructLayout(LayoutKind.Explicit)]
-  public struct InputUnion {
-    [FieldOffset(0)] public MOUSEINPUT mi;
-    [FieldOffset(0)] public KEYBDINPUT ki;
-    [FieldOffset(0)] public HARDWAREINPUT hi;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct MOUSEINPUT {
-    public int dx;
-    public int dy;
-    public uint mouseData;
-    public uint dwFlags;
-    public uint time;
-    public IntPtr dwExtraInfo;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct KEYBDINPUT {
-    public ushort wVk;
-    public ushort wScan;
-    public uint dwFlags;
-    public uint time;
-    public IntPtr dwExtraInfo;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  public struct HARDWAREINPUT {
-    public uint uMsg;
-    public ushort wParamL;
-    public ushort wParamH;
-  }
-
-  [DllImport("user32.dll", SetLastError=true)]
-  public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-  [DllImport("user32.dll")]
-  public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")]
-  public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")]
-  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")]
-  public static extern bool IsIconic(IntPtr hWnd);
-
-  public const uint INPUT_KEYBOARD = 1;
-  public const uint KEYEVENTF_KEYUP = 0x0002;
-  public const ushort VK_CONTROL = 0x11;
-  public const ushort VK_MENU = 0x12;
-  public const ushort VK_V = 0x56;
-  public const int SW_RESTORE = 9;
-  private const int FOREGROUND_WAIT_MS = 750;
-  private const int FOREGROUND_POLL_MS = 25;
-
-  private static void SendKey(ushort virtualKey, bool keyUp) {
-    INPUT[] inputs = new INPUT[1];
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].U.ki.wVk = virtualKey;
-    inputs[0].U.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
-    uint sent = SendInput(1, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != 1) {
-      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-    }
-  }
-
-  private static void AllowForegroundSwitch() {
-    SendKey(VK_MENU, false);
-    SendKey(VK_MENU, true);
-  }
-
-  private static bool WaitForForeground(IntPtr target) {
-    int waitedMs = 0;
-    while (GetForegroundWindow() != target && waitedMs < FOREGROUND_WAIT_MS) {
-      System.Threading.Thread.Sleep(FOREGROUND_POLL_MS);
-      waitedMs += FOREGROUND_POLL_MS;
-    }
-    return GetForegroundWindow() == target;
-  }
-
-  public static void Paste(long targetWindowHandle) {
-    if (targetWindowHandle != 0) {
-      IntPtr target = new IntPtr(targetWindowHandle);
-      if (IsWindow(target)) {
-        // The overlay is non-focusable, so the original editor normally remains
-        // foreground. Do not reactivate an already-active top-level window: some
-        // Chromium editors lose their focused child control when that happens.
-        if (GetForegroundWindow() != target) {
-          AllowForegroundSwitch();
-          if (IsIconic(target)) {
-            ShowWindow(target, SW_RESTORE);
-            System.Threading.Thread.Sleep(80);
-          }
-          bool activationRequested = SetForegroundWindow(target);
-          if (!activationRequested && GetForegroundWindow() != target) {
-            throw new InvalidOperationException("Could not focus target window before paste.");
-          }
-          if (!WaitForForeground(target)) {
-            throw new InvalidOperationException("Target window is not foreground before paste.");
-          }
-        }
-      } else {
-        throw new InvalidOperationException("Target window no longer exists before paste.");
-      }
-    }
-
-    INPUT[] inputs = new INPUT[4];
-    inputs[0].type = INPUT_KEYBOARD; inputs[0].U.ki.wVk = VK_CONTROL;
-    inputs[1].type = INPUT_KEYBOARD; inputs[1].U.ki.wVk = VK_V;
-    inputs[2].type = INPUT_KEYBOARD; inputs[2].U.ki.wVk = VK_V; inputs[2].U.ki.dwFlags = KEYEVENTF_KEYUP;
-    inputs[3].type = INPUT_KEYBOARD; inputs[3].U.ki.wVk = VK_CONTROL; inputs[3].U.ki.dwFlags = KEYEVENTF_KEYUP;
-    uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != inputs.Length) {
-      throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-    }
-  }
-}
-"@
-[NativePaste]::Paste($TargetWindowHandle)
-`.trimStart();
 }
 
 function ensureSendInputScript(): string {
@@ -263,7 +130,16 @@ async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<vo
   }
 }
 
-export function getForegroundWindowHandle(): Promise<number | null> {
+export async function getForegroundWindowHandle(): Promise<number | null> {
+  try {
+    return await pasteHelper.foreground();
+  } catch (error) {
+    if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) return null;
+    return getForegroundWindowHandleOnce();
+  }
+}
+
+function getForegroundWindowHandleOnce(): Promise<number | null> {
   return new Promise((resolve) => {
     execFile(
       'powershell',
@@ -303,38 +179,20 @@ public class NativeWindow {
 
 export async function simulatePaste(
   method: 'sendinput' | 'vbscript' = 'sendinput',
-  targetWindowHandle?: number | null
+  targetWindowHandle?: number | null,
+  perfTraceId?: string
 ): Promise<void> {
   const hasTargetWindow = Number.isFinite(targetWindowHandle) && Number(targetWindowHandle) > 0;
+  const target = targetWindowHandle ?? 0;
 
   if (method === 'sendinput') {
-    const script = ensureSendInputScript();
     try {
-      await new Promise<void>((resolve, reject) => {
-        execFile(
-          'powershell',
-          [
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            script,
-            '-TargetWindowHandle',
-            String(targetWindowHandle ?? 0),
-          ],
-          {
-            windowsHide: true,
-            timeout: PASTE_PROCESS_TIMEOUT_MS,
-          },
-          (error) => {
-            if (error) {
-              reject(error);
-            } else {
-              resolve();
-            }
-          }
-        );
-      });
+      try {
+        await pasteHelper.paste(target, perfTraceId);
+      } catch (error) {
+        if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
+        await sendInputOnce(target, perfTraceId);
+      }
       return;
     } catch (error) {
       if (hasTargetWindow) {
@@ -348,7 +206,9 @@ export async function simulatePaste(
 
   const script = ensurePasteScript();
   return new Promise<void>((resolve, reject) => {
+    if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
     execFile('cscript', ['//NoLogo', '//B', script], (error) => {
+      if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
       if (error) {
         log.error('Failed to simulate paste', { error });
         reject(error);
@@ -356,6 +216,34 @@ export async function simulatePaste(
         resolve();
       }
     });
+  });
+}
+
+function sendInputOnce(targetWindowHandle: number, perfTraceId?: string): Promise<void> {
+  const script = ensureSendInputScript();
+  return new Promise<void>((resolve, reject) => {
+    if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
+    execFile(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        script,
+        '-TargetWindowHandle',
+        String(targetWindowHandle),
+      ],
+      {
+        windowsHide: true,
+        timeout: PASTE_PROCESS_TIMEOUT_MS,
+      },
+      (error) => {
+        if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
+        if (error) reject(error);
+        else resolve();
+      }
+    );
   });
 }
 
@@ -524,17 +412,20 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       if (pasteGeneration !== latestPasteGeneration) return;
       await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
+      if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteSettleCompletedAt');
       if (pasteGeneration !== latestPasteGeneration) return;
       const currentSnapshot = await readClipboardSnapshot();
       if (pasteGeneration !== latestPasteGeneration) return;
-      if (currentSnapshot.signature !== clipboardOwnershipSignature) {
+      const stillOwnsClipboard = currentSnapshot.signature === clipboardOwnershipSignature;
+      if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteOwnershipCheckedAt');
+      if (!stillOwnsClipboard) {
         if (sequence && activePasteSequence === sequence) {
           discardPasteSequence(sequence);
         }
         return;
       }
       if (pasteGeneration !== latestPasteGeneration) return;
-      await simulatePaste(options.method, options.targetWindowHandle);
+      await simulatePaste(options.method, options.targetWindowHandle, options.perfTraceId);
     } finally {
       if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
         sequence = activePasteSequence;

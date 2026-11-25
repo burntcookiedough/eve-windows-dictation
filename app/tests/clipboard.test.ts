@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { perfTraceManager } from '../src/main/services/perf-trace.js';
 
 class MockClipboardItem {
   readonly types: string[];
@@ -86,8 +89,8 @@ const execFile = mock((
   done?.(null, '12345');
   return { kill: mock(() => {}) };
 });
-const spawn = mock(() => {
-  throw new Error('spawn is not used by clipboard tests');
+const spawn = mock((_command?: string, _args?: string[], _options?: unknown): FakePasteHelper => {
+  throw new Error('Simulated paste helper unavailable');
 });
 
 mock.module('electron', () => ({
@@ -125,6 +128,43 @@ const {
   readFromClipboard,
   simulatePaste,
 } = await import('../src/main/services/clipboard.js');
+const { PersistentPasteHelper } = await import('../src/main/services/paste-helper.js');
+
+interface HelperRequest {
+  id: number;
+  type: 'ready' | 'foreground' | 'paste' | 'commit';
+  targetWindowHandle?: number;
+}
+
+class FakePasteHelper extends EventEmitter {
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly kill = mock(() => {});
+  readonly requests: HelperRequest[] = [];
+
+  constructor(handleRequest?: (request: HelperRequest, helper: FakePasteHelper) => void) {
+    super();
+    this.stdin.on('data', (data: Buffer) => {
+      const request = JSON.parse(data.toString()) as HelperRequest;
+      this.requests.push(request);
+      if (handleRequest) handleRequest(request, this);
+      else {
+        const type = { ready: 'ready', foreground: 'foreground', paste: 'prepared', commit: 'pasted' }[request.type];
+        this.reply(request, type, request.type === 'foreground' ? { handle: 12345 } : {});
+      }
+    });
+  }
+
+  reply(request: HelperRequest, type: string, extra = {}) {
+    const line = JSON.stringify({ id: request.id, type, ...extra });
+    this.stdout.write(line.slice(0, 5));
+    this.stdout.write(line.slice(5) + '\r\n');
+  }
+
+  crash() {
+    this.emit('close', 1);
+  }
+}
 
 describe('pasteText', () => {
   beforeEach(() => {
@@ -785,6 +825,160 @@ describe('getForegroundWindowHandle', () => {
     });
 
     await expect(getForegroundWindowHandle()).resolves.toBeNull();
+  });
+});
+
+describe('persistent paste helper', () => {
+  const children: FakePasteHelper[] = [];
+
+  function nextHelper(handleRequest?: ConstructorParameters<typeof FakePasteHelper>[0]) {
+    const child = new FakePasteHelper(handleRequest);
+    children.push(child);
+    spawn.mockImplementationOnce(() => child);
+    return child;
+  }
+
+  beforeEach(() => {
+    spawn.mockClear();
+    execFile.mockClear();
+  });
+
+  afterEach(() => {
+    for (const child of children.splice(0)) child.crash();
+  });
+
+  test('uses one hidden PowerShell process for foreground and several pastes', async () => {
+    const child = nextHelper();
+    expect(await getForegroundWindowHandle()).toBe(12345);
+    for (const target of [12345, 23456, 34567]) await simulatePaste('sendinput', target);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith('powershell',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', expect.any(String)],
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    expect(child.requests.map(({ type }) => type)).toEqual([
+      'foreground', 'paste', 'commit', 'paste', 'commit', 'paste', 'commit',
+    ]);
+    const preparations = child.requests.filter(({ type }) => type === 'paste');
+    expect(preparations.map(({ targetWindowHandle }) => targetWindowHandle)).toEqual([12345, 23456, 34567]);
+    expect(child.requests.filter(({ type }) => type === 'commit').map(({ id }) => id))
+      .toEqual(preparations.map(({ id }) => id));
+    expect(new Set(preparations.map(({ id }) => id)).size).toBe(3);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('prewarms without capturing a window or sending keys', async () => {
+    const child = nextHelper();
+    const helper = new PersistentPasteHelper();
+    expect(spawn).not.toHaveBeenCalled();
+    try {
+      await helper.warmUp();
+      expect(child.requests.map(({ type }) => type)).toEqual(['ready']);
+      expect(await helper.foreground()).toBe(12345);
+      expect(spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('an invalid target never becomes an untargeted paste', async () => {
+    await expect(simulatePaste('sendinput', NaN)).rejects.toThrow('Invalid paste target');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('falls back exactly once if the helper crashes during preparation and restarts on demand', async () => {
+    const crashed = nextHelper((_request, child) => child.crash());
+    await simulatePaste('sendinput', 12345);
+    expect(crashed.requests.map(({ type }) => type)).toEqual(['paste']);
+    expect(crashed.kill).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile.mock.calls[0]?.[1]).toContain('12345');
+    expect(spawn).toHaveBeenCalledTimes(1);
+
+    const restarted = nextHelper();
+    await simulatePaste('sendinput', 23456);
+    expect(restarted.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
+  test('kills a helper that replies with the wrong id and falls back before commit', async () => {
+    const child = nextHelper((request, helper) => helper.reply({ ...request, id: request.id + 1 }, 'prepared'));
+    await simulatePaste('sendinput');
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
+  test('kills a timed-out foreground request and falls back to one-shot capture', async () => {
+    const child = nextHelper(() => {});
+    expect(await getForegroundWindowHandle()).toBe(12345);
+    expect(child.requests.map(({ type }) => type)).toEqual(['foreground']);
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
+  for (const failure of ['exit', 'malformed JSON', 'timeout'] as const) {
+    test(`does not retry after commit on ${failure}`, async () => {
+      const child = nextHelper((request, helper) => {
+        if (request.type === 'paste') helper.reply(request, 'prepared');
+        else if (failure === 'exit') helper.crash();
+        else if (failure === 'malformed JSON') helper.stdout.write('broken\n');
+      });
+      const error = { exit: 'exited', 'malformed JSON': 'Malformed', timeout: 'timed out' }[failure];
+      await expect(simulatePaste('sendinput', 12345)).rejects.toThrow(error);
+      expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
+      expect(child.kill).toHaveBeenCalledTimes(1);
+      expect(execFile).not.toHaveBeenCalled();
+    }, 10_000);
+  }
+
+  test('preserves native rejection without retrying or restarting a healthy helper', async () => {
+    const child = nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      else helper.reply(request, 'failed', { error: 'Target window no longer exists before paste.' });
+    });
+    await expect(simulatePaste('sendinput', 12345)).rejects.toThrow('Target window no longer exists');
+    await expect(simulatePaste('sendinput', 23456)).rejects.toThrow('Target window no longer exists');
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('shutdown kills the helper, disallows fallback, and prevents a restart', async () => {
+    const child = nextHelper(() => {});
+    const helper = new PersistentPasteHelper();
+    const pending = helper.paste(12345);
+    helper.shutdown();
+    await expect(pending).rejects.toMatchObject({ allowFallback: false });
+    await expect(helper.foreground()).rejects.toMatchObject({ allowFallback: false });
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  test('records clipboard, settle, ownership and helper timings in order', async () => {
+    const saved = process.env.MURMUR_PERF_TRACE;
+    process.env.MURMUR_PERF_TRACE = '1';
+    try {
+      nextHelper();
+      const traceId = perfTraceManager.startTrace()!.correlationId;
+      perfTraceManager.mark(traceId, 'finalReceivedAt');
+      await pasteText('Synthetic timing sample', {
+        method: 'sendinput', targetWindowHandle: 12345,
+        restoreClipboard: false, restoreDelayMs: 750, perfTraceId: traceId,
+      });
+      const { main } = perfTraceManager.getRecentTraces().find(trace => trace.correlationId === traceId)!;
+      const times = [
+        main.finalReceivedAt, main.clipboardCompletedAt, main.pasteSettleCompletedAt,
+        main.pasteOwnershipCheckedAt, main.pasteHelperRequestSentAt, main.pasteHelperResponseAt,
+      ];
+      expect(times.every(time => time !== null)).toBe(true);
+      expect(times).toEqual([...times].sort((a, b) => a! - b!));
+      expect(execFile).not.toHaveBeenCalled();
+    } finally {
+      perfTraceManager.clear();
+      if (saved === undefined) delete process.env.MURMUR_PERF_TRACE;
+      else process.env.MURMUR_PERF_TRACE = saved;
+    }
   });
 });
 
