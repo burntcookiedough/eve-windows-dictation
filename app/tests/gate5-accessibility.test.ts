@@ -80,6 +80,10 @@ describe('Gate 5 accessibility contracts', () => {
     expect(overlayPill).toContain('@media (prefers-reduced-motion: reduce)');
   });
 
+  test('exposes Busy and delivery status outside the decorative pill to assistive technology', () => {
+    expect(overlayView).toMatch(/aria-hidden="true"[\s\S]*<Pill [^>]*\/>\s*<\/div>\s*<div role="status" aria-live="polite" aria-atomic="true" class="sr-only">\{spokenStatus\}<\/div>/);
+  });
+
   test('keeps the overlay at the top of the window stack while it shows', () => {
     expect(overlayWindow).toContain("overlay.setAlwaysOnTop(true, 'screen-saver');");
     expect(overlayWindow).toContain('topmostGuard = setInterval(');

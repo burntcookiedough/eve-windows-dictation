@@ -41,7 +41,7 @@
   ];
   const PASTE_METHOD_OPTIONS: EveDropdownOption[] = [
     { value: 'sendinput', label: 'SendInput' },
-    { value: 'vbscript', label: 'VBScript' },
+    { value: 'vbscript', label: 'VBScript (legacy setting)' },
   ];
   const WHISPER_LANGUAGE_AUTO_VALUE = '__whisper_language_auto__';
   const whisperLanguageNames = new Intl.DisplayNames(undefined, { type: 'language' });
@@ -929,7 +929,7 @@
             <button type="button" class="settings-segment" class:selected={settings.appendSpace} aria-pressed={settings.appendSpace} onclick={() => updateSetting('appendSpace', !settings.appendSpace)}>space</button>
           </div>
         </SettingsRow>
-        <SettingsRow label="Afterwards" description="Choose which output actions Eve performs after dictation.">
+        <SettingsRow label="Afterwards" description="Restore applies after a paste only when auto-copy is off.">
           <div class="settings-segments" role="group" aria-label="After dictation actions">
             <button type="button" class="settings-segment" class:selected={settings.autoCopy} aria-pressed={settings.autoCopy} onclick={() => updateSetting('autoCopy', !settings.autoCopy)}>copy</button>
             <button type="button" class="settings-segment" class:selected={settings.autoPaste} aria-pressed={settings.autoPaste} onclick={() => updateSetting('autoPaste', !settings.autoPaste)}>paste</button>
@@ -1058,7 +1058,7 @@
               {/if}
             {/if}
 
-            <SettingsRow label="Paste method" description="Choose how Eve sends the transcription to the active app.">
+            <SettingsRow label="Paste method" description="Both options use guarded SendInput to verify clipboard ownership and the target window.">
               <EveDropdown
                 label="Paste method"
                 value={settings.pasteMethod}

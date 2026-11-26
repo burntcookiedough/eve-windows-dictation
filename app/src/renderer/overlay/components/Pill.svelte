@@ -39,6 +39,7 @@
   data-phase={view.phase}
   data-open={view.isOpen}
   data-alert={view.isAlert}
+  data-busy={view.busy}
   style:--left={left}
   style:--right={right}
   style:--middle={middle}
@@ -90,6 +91,10 @@
 
   .eve-pill[data-alert='true'] {
     border-color: rgb(248 113 113 / 0.55);
+  }
+
+  .eve-pill[data-busy='true'] {
+    border-color: rgb(251 191 36 / 0.9);
   }
 
   .mercury {

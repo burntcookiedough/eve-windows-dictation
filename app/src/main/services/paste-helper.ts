@@ -33,6 +33,7 @@ interface HelperConnection {
 interface PasteRequest {
   targetWindowHandle: number;
   clipboardSequence: number;
+  deadlineUnixMs: number;
   perfTraceId?: string;
   authorize?: AuthorizePaste;
 }
@@ -42,12 +43,16 @@ export function isClipboardSequence(value: unknown): value is number {
 }
 
 export function isPasteAbortCode(value: unknown): value is NativePasteAbortCode {
-  return value === PasteAbortCode.ClipboardChanged || value === PasteAbortCode.ForegroundChanged;
+  return value === PasteAbortCode.ClipboardChanged || value === PasteAbortCode.ForegroundChanged || value === PasteAbortCode.Expired;
 }
 
 export class NativePasteAbortedError extends Error {
   constructor(readonly code: NativePasteAbortCode) {
-    super(code === PasteAbortCode.ClipboardChanged ? 'Clipboard changed before paste' : 'Foreground changed before paste');
+    super({
+      [PasteAbortCode.ClipboardChanged]: 'Clipboard changed before paste',
+      [PasteAbortCode.ForegroundChanged]: 'Foreground changed before paste',
+      [PasteAbortCode.Expired]: 'Deadline expired before paste',
+    }[code]);
   }
 }
 
@@ -82,12 +87,18 @@ export class PersistentPasteHelper {
     return this.request('sequence', SNAPSHOT_TIMEOUT_MS);
   }
 
-  async paste(targetWindowHandle: number, clipboardSequence: number, perfTraceId?: string, authorize?: AuthorizePaste): Promise<void> {
+  async paste(
+    targetWindowHandle: number,
+    clipboardSequence: number,
+    perfTraceId?: string,
+    authorize?: AuthorizePaste,
+    deadlineUnixMs = Date.now() + PASTE_TIMEOUT_MS,
+  ): Promise<void> {
     if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
       throw new Error('Invalid paste target window handle');
     }
     if (!isClipboardSequence(clipboardSequence)) throw new Error('Invalid paste clipboard sequence');
-    await this.request('paste', PASTE_TIMEOUT_MS, { targetWindowHandle, clipboardSequence, perfTraceId, authorize });
+    await this.request('paste', PASTE_TIMEOUT_MS, { targetWindowHandle, clipboardSequence, deadlineUnixMs, perfTraceId, authorize });
   }
 
   shutdown(): void {
@@ -119,10 +130,10 @@ export class PersistentPasteHelper {
     return new Promise((resolve, reject) => {
       const expiresAt = performance.now() + timeoutMs;
       const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out'), timeoutMs);
-      const { perfTraceId, authorize, targetWindowHandle, clipboardSequence } = paste ?? {};
+      const { perfTraceId, authorize, targetWindowHandle, clipboardSequence, deadlineUnixMs } = paste ?? {};
       connection.requests.set(id, { type, timeout, expiresAt, perfTraceId, authorize, resolve, reject });
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
-      this.send(connection, { id, type, targetWindowHandle, clipboardSequence });
+      this.send(connection, { id, type, targetWindowHandle, clipboardSequence, deadlineUnixMs });
     });
   }
 
@@ -161,7 +172,7 @@ export class PersistentPasteHelper {
 
   private send(
     connection: HelperConnection,
-    request: { id: number; type: RequestType; targetWindowHandle?: number; clipboardSequence?: number }
+    request: { id: number; type: RequestType; targetWindowHandle?: number; clipboardSequence?: number; deadlineUnixMs?: number }
   ): void {
     try {
       connection.child.stdin.write(JSON.stringify(request) + '\n');

@@ -8,11 +8,12 @@ import type {
 } from '../../shared/types.js';
 import type { TextFrameFinal } from '../../shared/protocol.js';
 import { countWords } from '../../shared/insights.js';
-import { copyToClipboard, pasteText } from './clipboard.js';
+import { copyToClipboard, pasteText, type ClipboardCopyOutcome, type ClipboardPasteOutcome } from './clipboard.js';
 import type { HistoryService } from './history.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Pipeline');
+const CLIPBOARD_FINALIZATION_TIMEOUT_MS = 5000;
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -119,9 +120,47 @@ export function applyPostProcessing(entry: TranscriptionEntry, settings: Setting
   };
 }
 
+export type DeliveryOutcome = ClipboardCopyOutcome | ClipboardPasteOutcome | { kind: 'saved' };
+
 export interface DispatchResult {
   entry: TranscriptionEntry;
-  entryWithGroup: HistoryEntryWithGroup;
+  entryWithGroup: HistoryEntryWithGroup | null;
+  delivery: DeliveryOutcome;
+  historyFailed: boolean;
+}
+
+interface DispatchOptions {
+  clipboardTimeoutMs?: number;
+  onHistorySaved?: (entry: HistoryEntryWithGroup) => void;
+}
+
+type PasteTarget = number | null | Promise<number | null>;
+
+async function deliverToClipboard(
+  entry: TranscriptionEntry,
+  settings: Settings,
+  pasteTarget: PasteTarget | undefined,
+  perfTraceId: string | undefined,
+  signal: AbortSignal,
+  deadlineUnixMs: number,
+): Promise<ClipboardCopyOutcome | ClipboardPasteOutcome> {
+  if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
+
+  const targetWindowHandle = await pasteTarget ?? null;
+  const delivery = await pasteText(entry.text, {
+    restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
+    restoreDelayMs: settings.clipboardRestoreDelayMs,
+    targetWindowHandle,
+    signal,
+    deadlineUnixMs,
+    ...(perfTraceId ? { perfTraceId } : {}),
+  });
+  // A paste that reached the target check may already have written or sent input.
+  if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+    const copy = await copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
+    return copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
+  }
+  return delivery;
 }
 
 /**
@@ -130,62 +169,68 @@ export interface DispatchResult {
 export async function dispatchToOutputs(
   entry: TranscriptionEntry,
   settings: Settings,
-  historyService: HistoryService | null,
-  pasteTargetWindowHandle?: number | null,
-  perfTraceId?: string
+  historyService: Pick<HistoryService, 'save'> | null,
+  pasteTargetWindowHandle?: PasteTarget,
+  perfTraceId?: string,
+  options: DispatchOptions = {},
 ): Promise<DispatchResult> {
-  // A failed start-window capture leaves copy and History as the available outputs.
-  if (
-    settings.autoPaste && entry.text && typeof pasteTargetWindowHandle === 'number'
-    && Number.isSafeInteger(pasteTargetWindowHandle) && pasteTargetWindowHandle > 0
-  ) {
-    try {
-      await pasteText(entry.text, {
-        restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
-        restoreDelayMs: settings.clipboardRestoreDelayMs,
-        method: settings.pasteMethod,
-        targetWindowHandle: pasteTargetWindowHandle,
-        ...(perfTraceId ? { perfTraceId } : {}),
-      });
-    } catch {
-      log.error('Auto-paste failed');
-      if (settings.autoCopy) {
-        try {
-          await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
-        } catch {
-          log.error('Automatic clipboard fallback failed');
-        }
-      }
-    }
-  } else if (settings.autoCopy && entry.text) {
-    try {
-      await (perfTraceId ? copyToClipboard(entry.text, perfTraceId) : copyToClipboard(entry.text));
-    } catch {
-      log.error('Automatic clipboard copy failed');
-    }
-  }
-
-  // Save to history
+  let entryWithGroup: HistoryEntryWithGroup | null = null;
+  let historyFailed = false;
   if (historyService) {
     try {
       const histStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       historyService.save(entry);
+      entryWithGroup = { ...entry, dateGroup: computeDateGroup(entry.timestamp) };
       if (histStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(perfTraceId, 'history', completedAt - histStart, completedAt);
       }
     } catch (err) {
       log.error('Failed to save to history', { error: err as Error });
+      historyFailed = true;
     }
   }
 
-  // Build entry with date group for push notifications
-  const entryWithGroup: HistoryEntryWithGroup = {
-    ...entry,
-    dateGroup: computeDateGroup(entry.timestamp),
-  };
+  if (entryWithGroup) {
+    try {
+      options.onHistorySaved?.(entryWithGroup);
+    } catch {
+      log.error('Could not notify the renderer of a saved History entry');
+    }
+  }
 
-  return { entry, entryWithGroup };
+  let delivery: DeliveryOutcome = entryWithGroup ? { kind: 'saved' } : { kind: 'failed' };
+  if (entry.text && (settings.autoCopy || settings.autoPaste)) {
+    const controller = new AbortController();
+    const timeoutMs = options.clipboardTimeoutMs ?? CLIPBOARD_FINALIZATION_TIMEOUT_MS;
+    const deadlineUnixMs = Date.now() + timeoutMs;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const expiration = new Promise<DeliveryOutcome>(resolve => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        log.warn('Clipboard finalization timed out');
+        resolve({ kind: 'failed' });
+      }, timeoutMs);
+    });
+    try {
+      delivery = await Promise.race([
+        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal, deadlineUnixMs),
+        expiration,
+      ]);
+    } catch {
+      log.error('Clipboard delivery did not complete');
+      delivery = { kind: 'failed' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return {
+    entry,
+    entryWithGroup,
+    delivery,
+    historyFailed,
+  };
 }
 
 /**
@@ -194,10 +239,11 @@ export async function dispatchToOutputs(
 export async function processFinalTranscription(
   frame: TextFrameFinal,
   settings: Settings,
-  historyService: HistoryService | null,
+  historyService: Pick<HistoryService, 'save'> | null,
   sessionMode: DictationSessionMode = 'quick',
-  pasteTargetWindowHandle?: number | null,
-  perfTraceId?: string
+  pasteTargetWindowHandle?: PasteTarget,
+  perfTraceId?: string,
+  options?: DispatchOptions,
 ): Promise<DispatchResult> {
   const rawEntry = buildEntry(frame, sessionMode);
   const processedEntry = applyPostProcessing(rawEntry, settings);
@@ -209,6 +255,7 @@ export async function processFinalTranscription(
     settings,
     historyService,
     pasteTargetWindowHandle,
-    perfTraceId
+    perfTraceId,
+    options,
   );
 }

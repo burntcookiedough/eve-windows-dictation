@@ -28,7 +28,7 @@ subtracting a sum of internal spans. Missing observations are null, not zero.
 | Final inference | Worker entry through completed transcription, including lazy segment iteration and any instrumented retry. Long chunk totals are sums of observed spans, not a single contiguous inference interval. |
 | Final WebSocket send | Server ASGI send start through awaited send completion. This measures transport handoff, not client receipt. Send completion cannot be included in the frame being sent; use the server-side trace. |
 | Receipt / display | Main final receipt; separately overlay final receipt through Svelte DOM commit after tick. DOM commit does not establish paint. |
-| History | Final receipt through save completion within main, plus save call duration separately. History follows clipboard/paste in the existing pipeline. |
+| History | Final receipt through save completion within main, plus save call duration separately. History is saved before clipboard and paste delivery. |
 | Clipboard | Native write start through return, plus final receipt through `clipboardCompletedAt` within main where observed. |
 | Paste dispatch | `pasteSettleCompletedAt` follows the focus delay. `pasteOwnershipCheckedAt` records the clipboard signature check. The helper span goes from `pasteHelperRequestSentAt` (prepare or one-shot launch) to `pasteHelperResponseAt` (terminal reply or callback). If Eve launches a one-shot fallback, its launch and callback replace the persistent attempt's markers. The final span measures the one-shot attempt. |
 | Actual insertion | Verified insertion into the explicitly isolated editor after a trusted input event and value change. Beforeinput, delete, unchanged value, key request, or paste promise are insufficient. Editor timestamps cannot be subtracted from main stop. |
@@ -83,7 +83,8 @@ including immediately before a one-shot fallback. Both SendInput paths verify
 the Win32 clipboard sequence sampled after Eve's write before changing focus.
 After any focus restoration, they verify the sequence and captured window
 handle again just before sending Ctrl+V. A mismatch cancels the paste. An
-unavailable clipboard sequence skips SendInput dispatch.
+unavailable clipboard sequence skips SendInput dispatch. Both saved paste method
+values, `sendinput` and legacy `vbscript`, use this guarded SendInput path.
 A failed transport can fall back while the request is still in preparation.
 Once Eve hands off the commit, an absent or invalid reply leaves the result
 ambiguous, so Eve reports the failure and skips retrying the paste. The helper

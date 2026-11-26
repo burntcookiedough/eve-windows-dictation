@@ -30,7 +30,7 @@ interface ActivePress {
   modifierOnly: boolean;
   requiredModifiers: ModifierState;
   startedAtMs: number;
-  kind: 'hold' | 'double-tap';
+  kind: 'hold' | 'double-tap' | 'rejected';
 }
 
 export class HotkeyGestureRecognizer {
@@ -75,7 +75,7 @@ export class HotkeyGestureRecognizer {
 
     this.activePress = null;
 
-    if (activePress.kind === 'double-tap') {
+    if (activePress.kind !== 'hold') {
       this.lastTapAtMs = 0;
       return null;
     }
@@ -83,6 +83,12 @@ export class HotkeyGestureRecognizer {
     const pressDurationMs = event.nowMs - activePress.startedAtMs;
     this.lastTapAtMs = pressDurationMs <= TAP_MAX_MS ? event.nowMs : 0;
     return 'hold-end';
+  }
+
+  rejectActivePress(): void {
+    // Keep the press tracked until release so auto-repeat cannot restart it.
+    if (this.activePress) this.activePress.kind = 'rejected';
+    this.lastTapAtMs = 0;
   }
 
   reset(): void {

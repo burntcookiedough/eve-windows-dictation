@@ -1,6 +1,7 @@
 export const PasteAbortCode = {
   ClipboardChanged: 20,
   ForegroundChanged: 21,
+  Expired: 22,
 } as const;
 
 // Both launch paths use the same native window checks and SendInput sequence.
@@ -98,7 +99,7 @@ public class NativePaste {
     return GetForegroundWindow() == target;
   }
 
-  public static int Paste(long targetWindowHandle, uint expectedClipboardSequence) {
+  public static int Paste(long targetWindowHandle, uint expectedClipboardSequence, long deadlineUnixMs) {
     if (targetWindowHandle != 0) {
       IntPtr target = new IntPtr(targetWindowHandle);
       if (IsWindow(target)) {
@@ -139,6 +140,9 @@ public class NativePaste {
     if (GetForegroundWindow() != new IntPtr(targetWindowHandle)) {
       return ${PasteAbortCode.ForegroundChanged};
     }
+    if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= deadlineUnixMs) {
+      return ${PasteAbortCode.Expired};
+    }
     uint sent = SendInput((uint)inputs.Length, inputs, inputSize);
     if (sent != inputs.Length) {
       throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
@@ -153,13 +157,14 @@ export function buildSendInputScriptContent(): string {
   return `
 param(
   [Parameter(Mandatory=$true)][long]$TargetWindowHandle,
-  [Parameter(Mandatory=$true)][uint32]$ClipboardSequence
+  [Parameter(Mandatory=$true)][uint32]$ClipboardSequence,
+  [Parameter(Mandatory=$true)][long]$DeadlineUnixMs
 )
 
 $ErrorActionPreference = 'Stop'
 ${ADD_NATIVE_PASTE_TYPE}
 if ($TargetWindowHandle -le 0) { throw 'Invalid paste target window handle.' }
-exit ([NativePaste]::Paste($TargetWindowHandle, $ClipboardSequence))
+exit ([NativePaste]::Paste($TargetWindowHandle, $ClipboardSequence, $DeadlineUnixMs))
 `.trimStart();
 }
 
@@ -190,7 +195,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     'paste' {
       $target = [long]$request.targetWindowHandle
       if ($target -le 0) { throw 'Invalid paste target window handle.' }
-      $prepared[$id] = @{ target = $target; sequence = [uint32]$request.clipboardSequence }
+      $prepared[$id] = @{ target = $target; sequence = [uint32]$request.clipboardSequence; deadline = [long]$request.deadlineUnixMs }
       $reply.type = 'prepared'
     }
     'commit' {
@@ -198,7 +203,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       $paste = $prepared[$id]
       $prepared.Remove($id)
       try {
-        $code = [NativePaste]::Paste($paste.target, $paste.sequence)
+        $code = [NativePaste]::Paste($paste.target, $paste.sequence, $paste.deadline)
         if ($code -eq 0) {
           $reply.type = 'pasted'
         } else {
