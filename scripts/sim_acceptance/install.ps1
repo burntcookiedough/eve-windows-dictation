@@ -9,9 +9,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
-    $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or
+    $env:GITHUB_ACTIONS -ne 'true' -or $env:GITHUB_EVENT_NAME -notin @('workflow_dispatch', 'pull_request') -or
     $env:GITHUB_REPOSITORY -cne 'burntcookiedough/eve-windows-dictation' -or !$env:RUNNER_TEMP) {
     throw 'Simulated acceptance requires the repository''s disposable GitHub-hosted Windows runner.'
+}
+if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+    $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+    if ($event.pull_request.head.repo.full_name -cne $env:GITHUB_REPOSITORY -or $event.pull_request.base.ref -cne 'trunk') {
+        throw 'Only pull requests from the same repository to trunk may run packaged trials.'
+    }
 }
 if ($env:GITHUB_RUN_ID -notmatch '^[1-9][0-9]*$' -or $env:GITHUB_RUN_ATTEMPT -notmatch '^[1-9][0-9]*$') {
     throw 'A unique hosted run and attempt are required.'

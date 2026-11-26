@@ -5,14 +5,15 @@ run 45784796424, artifact 15101085356. It expires on 2026-12-03 at 08:50 UTC.
 The candidate commit, artifact ID, run ID and release manifest SHA-256 are pinned
 in the verifier. The workflow downloads the original zip, verifies provenance,
 phase status, expected manifest and each staged file, then verifies the installed
-payload. The job runs manually with a read-only token on GitHub-hosted Windows.
+payload. The job uses a read-only token on GitHub-hosted Windows.
 
 ## Hosted CPU
 
 `simulated-acceptance.yml` offers a one-clip disposable desktop smoke and a
-four-job matrix. Run the smoke first. The final workflow is manual-only.
-GitHub requires the workflow to exist on the default branch for manual
-dispatch. The pre-merge filename can therefore be unavailable for dispatch.
+four-job matrix. Same-repository pull requests targeting trunk run the smoke
+when this workflow or its harness changes. Apply the sim-full label once the
+smoke passes to run the full matrix. Keep the lane off the required checks.
+Manual dispatch is also available once the workflow exists on the default branch.
 
 Run ID `45784796424`, artifact ID `15101085356`, commit
 `22aa01d70a10fc8b52668866ff1c0bd5ac02c751` and manifest SHA-256

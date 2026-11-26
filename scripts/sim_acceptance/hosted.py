@@ -675,7 +675,7 @@ async def run(args):
 def main():
     if (os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
-            or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or os.environ.get("GITHUB_EVENT_NAME") not in {"workflow_dispatch", "pull_request"}
             or os.environ.get("GITHUB_REPOSITORY") != "burntcookiedough/eve-windows-dictation"):
         raise SystemExit("Packaged acceptance requires the repository's disposable hosted Windows runner")
     parser = argparse.ArgumentParser(description=__doc__)
