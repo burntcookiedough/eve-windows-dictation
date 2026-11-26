@@ -202,6 +202,7 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
         str(install / "Eve.exe"), "--eve-qa-isolation", f"--eve-qa-user-data-root={profile}",
         f"--remote-debugging-port={cdp_port}", "--remote-debugging-address=127.0.0.1",
         "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+        "--autoplay-policy=no-user-gesture-required",
         f"--use-file-for-fake-audio-capture={clip['audio']}%noloop",
     ], install, env, stdout, stderr)
     browser = None
@@ -321,7 +322,8 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
         state = await main.eval("window.eveQaState")
         if state["recording"] is None:
             raise FixtureUnavailable("global-hotkey-unobserved") from error
-        raise FixtureUnavailable("fake-capture-no-first-audio") from error
+        phase = state["recording"]["state"]
+        raise FixtureUnavailable(f"fake-capture-no-first-audio-{phase}") from error
     start = time.perf_counter()
     sampler = ProcessSamples(process.pid)
     collection = asyncio.create_task(sampler.collect()) if mode == "long" else None
@@ -699,21 +701,29 @@ async def hosted_replay(root, install, clips, evidence, output):
     env = runtime_environment(root)
     pid_file = root / "replay.pid"
     env.update({
+        "PYTHONPATH": str(server / ".venv/Lib/site-packages"), "PYTHONUTF8": "1",
+        "MURMUR_APP_BUILD_ID": "0.9.0-beta.1",
         "MURMUR_HOST": "127.0.0.1", "MURMUR_PORT": "0",
         "MURMUR_PID_FILE": str(pid_file), "MURMUR_SETTINGS_FILE": str(root / "replay-settings.json"),
         "MURMUR_WHISPER_MODEL": MODEL,
     })
+    evidence["method"] = "retained-cpu-replay"
+    write_evidence(output, evidence)
     process = start_process([str(server / ".runtime/python.exe"), str(server / "src/main.py")],
                             server, env, root / "replay.out.log", root / "replay.err.log")
     try:
-        owner = await poll(lambda: asyncio.sleep(0, result=(
-            json.loads(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
-        )), bool, 30)
+        async def replay_owner():
+            exit_code = process.poll()
+            if exit_code is not None:
+                evidence["replay_startup_exit_code"] = exit_code
+                write_evidence(output, evidence)
+                raise FixtureUnavailable("bundled-replay-server-exited")
+            return json.loads(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
+
+        owner = await poll(replay_owner, bool, 30)
         if owner["pid"] != process.pid:
             raise FixtureUnavailable("replay-server-pid-mismatch")
         await wait_health(owner["port"], "cpu", MODEL, 720)
-        evidence["method"] = "retained-cpu-replay"
-        write_evidence(output, evidence)
         await run_replay(owner["port"], owner["pid"], clips, evidence, output)
     finally:
         stop_owned_tree(process)

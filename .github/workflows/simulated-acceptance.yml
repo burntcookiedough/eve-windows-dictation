@@ -33,7 +33,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: eve-simulated-acceptance
+  group: eve-simulated-acceptance-${{ github.sha }}
   cancel-in-progress: false
 
 env:
