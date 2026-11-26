@@ -114,7 +114,7 @@ async def wait_health(port, device, model, timeout):
     raise RuntimeError("Candidate did not reach the required ready model and device")
 
 
-async def run_replay(port, pid, clips, result, result_file):
+async def run_replay(port, pid, clips, result, result_file, audit=None):
     url = f"ws://127.0.0.1:{port}/transcribe"
     # A separate, excluded warm-up. One measurement is retained per declared clip.
     warmup = await replay_trial(url, clips[0], timeout=120)
@@ -153,6 +153,8 @@ async def run_replay(port, pid, clips, result, result_file):
             failed=observation["outcome"] != "success",
             elapsed_s=elapsed, stop_to_final_ms=latency,
         )
+        if audit is not None:
+            audit.observe(clip, observation["text"] or "", scored)
         result["trials"].append(scored)
         write_evidence(result_file, result)
         print(f"{clip['id']}: replay finalized={latency is not None}", flush=True)
@@ -188,7 +190,12 @@ async def run_gpu(args):
         "resources": {}, "trials": [],
     }
     write_evidence(args.output, result)
-    await run_replay(owner["port"], owner["pid"], clips, result, args.output)
+    audit = None
+    if args.entity_audit:
+        from scripts.sim_acceptance.entity_audit import EntityAudit
+
+        audit = EntityAudit(args.entity_audit, "gpu-close-quiet", CANDIDATE)
+    await run_replay(owner["port"], owner["pid"], clips, result, args.output, audit)
 
 
 def main():
@@ -197,6 +204,7 @@ def main():
     parser.add_argument("--pid-file", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--entity-audit", type=Path)
     asyncio.run(run_gpu(parser.parse_args()))
 
 

@@ -187,6 +187,14 @@ class Desktop:
             return True
         if action == "key":
             return self.send_key(command["mode"])
+        if action == "probe-paste":
+            sequence = (Input * 4)(
+                Input(1, InputData(key=KeyInput(0x11, 0, 0, 0, 0))),
+                Input(1, InputData(key=KeyInput(0x56, 0, 0, 0, 0))),
+                Input(1, InputData(key=KeyInput(0x56, 0, 2, 0, 0))),
+                Input(1, InputData(key=KeyInput(0x11, 0, 2, 0, 0))),
+            )
+            return self.user32.SendInput(4, sequence, ctypes.sizeof(Input)) == 4
         if action == "replace-editor":
             self.window.destroy()
             self.new_window()

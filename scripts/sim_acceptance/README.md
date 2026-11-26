@@ -26,6 +26,9 @@ media processing enabled. The noise mix SNR applies at the WAV input.
 The desktop fixture observes two delivered F9 or F10 key-downs and actual
 text editing in the same editor and monotonic clock. The second key is the
 stop. The fixture observes the clipboard after the paste restore window.
+Scored trials enable paste and restoration with auto-copy disabled, because
+the candidate retains the dictated text on the clipboard when auto-copy is
+enabled. An isolated native Ctrl+V control checks the runner/editor path.
 Evidence retains counts, timings, hashes and scores. Performance marks use
 Eve's main clock for stop-to-final and for paste helper diagnostics. For the
 GPU latency estimate the scorer adds the largest observed close/quiet
@@ -72,9 +75,19 @@ RTX 3060 Laptop and absence of a managed GPU pack.
 
 Use `score.py --output <report.md> <cpu/gpu evidence files>` to
 render the frozen gate table. Exit codes are 0 for all rows passed, 1 for at
-least one failure and 2 for open rows with no observed failure. A hosted
-artifact contains only the sanitized evidence JSON. Keep audio, references,
-editor text, History databases, model caches and raw diagnostics in scratch.
+least one failure and 2 for open rows with no observed failure. The main
+evidence JSON contains sanitized observations. Keep audio, full references
+and hypotheses, History databases, model caches and raw diagnostics in scratch.
+
+## Supplemental entity audit
+
+The opt-in `--entity-audit` replay output applies Whisper's English
+normalizer to both reference and output for WER and exact entity alignment.
+The full hosted matrix also collects this audit. Its separate sidecar holds
+scores, hashes and short public-corpus entity spans for the misses. Keep
+ordinary acceptance evidence under the frozen method. Review rare-name
+spelling variants separately before calculating the supplementary
+genuine-error-only score.
 
 ## Coverage limits
 

@@ -104,7 +104,7 @@ jobs:
           $arguments = @(
             'scripts/sim_acceptance/hosted.py', '--root', $env:QA_ROOT, '--install', $env:INSTALL,
             '--manifest', "$env:QA_ROOT/corpus/manifest.json", '--config', $env:CONFIG,
-            '--output', "$env:QA_ROOT/evidence.json"
+            '--output', "$env:QA_ROOT/evidence.json", '--entity-audit', "$env:QA_ROOT/entity-audit.json"
           )
           if ($env:SMOKE_ONLY -eq 'true') { $arguments += '--smoke' }
           python @arguments
@@ -114,6 +114,8 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: eve-sim-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.config }}
-          path: ${{ steps.candidate.outputs.root }}/evidence.json
+          path: |
+            ${{ steps.candidate.outputs.root }}/evidence.json
+            ${{ steps.candidate.outputs.root }}/entity-audit.json
           retention-days: 7
           if-no-files-found: warn

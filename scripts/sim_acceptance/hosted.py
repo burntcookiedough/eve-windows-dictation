@@ -177,10 +177,15 @@ def candidate_settings(profile):
             "hotkey": {**hotkey, "keycode": 0x43},
             "longHotkey": {**hotkey, "keycode": 0x44},
             "holdToTalk": False, "startMinimized": False, "serverAutoStart": True,
-            "autoCopy": True, "autoPaste": True, "restoreClipboardAfterPaste": True,
+            "autoCopy": False, "autoPaste": True, "restoreClipboardAfterPaste": True,
             "dictationMode": "raw", "silenceTimeout": 15,
         })
         write_evidence(profile / "server-settings.json", {"whisper_model": MODEL})
+    else:
+        settings = json.loads(defaults.read_text(encoding="utf-8"))
+        if settings.get("autoCopy") is not False:
+            settings["autoCopy"] = False
+            write_evidence(defaults, settings)
 
 
 @asynccontextmanager
@@ -262,6 +267,18 @@ def read_perf(path):
     return observations
 
 
+def detect_paste_diagnostics(*logs):
+    signatures = {
+        "dispatch_error": "Paste dispatch failed",
+        "finalization_timeout": "Clipboard finalization timed out",
+        "target_focus_refused": "Could not focus target window before paste",
+        "target_invalid": "Target window no longer exists before paste",
+        "target_not_foreground": "Target window is not foreground before paste",
+    }
+    text = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in logs)
+    return {name: text.count(marker) for name, marker in signatures.items() if marker in text}
+
+
 async def history(main):
     rows = await main.eval("window.murmurMain.getHistoryEntries(0, 100)")
     if rows["hasMore"]:
@@ -298,7 +315,7 @@ async def idle_resources(process):
     return sampler.idle()
 
 
-async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_trace=True):
+async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_trace=True, audit=None):
     before = await history(main)
     if time_idle:
         idle = await idle_resources(process)
@@ -380,7 +397,12 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             editor_stop_key_observed=observed_stop is not None,
             paste_helper_request_observed=marks.get("pasteHelperRequestSentAt") is not None,
             paste_helper_response_observed=marks.get("pasteHelperResponseAt") is not None,
+            paste_diagnostics=detect_paste_diagnostics(
+                stdout, stdout.with_name(stdout.name.replace(".out.log", ".err.log"))
+            ),
         )
+        if audit is not None:
+            audit.observe(clip, hypothesis, record)
     finally:
         if collection is not None:
             collection.cancel()
@@ -485,6 +507,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
     async def paste_safety(label):
         async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
             before = await history(main)
+            if label == "focus-safety":
+                await main.eval("window.murmurMain.updateSetting('autoCopy',true)")
             await desktop.send("reset")
             await desktop.send("key", mode="long" if label == "busy" else "quick")
             await poll(lambda: recording(main), lambda state: state["state"] in LISTENING, 5)
@@ -508,6 +532,7 @@ async def robustness(root, install, desktop, quick, evidence, output):
             if label == "focus-safety":
                 delivery_ok = (not attempt["insertions"] and attempt["clipboard_matches_final"]
                                and state["delivery"] == "copied_not_pasted")
+                await main.eval("window.murmurMain.updateSetting('autoCopy',false)")
             else:
                 delivery_ok = (len(attempt["insertions"]) == 1 and attempt["text"] == final
                                and attempt["clipboard_restored"])
@@ -696,7 +721,7 @@ async def robustness(root, install, desktop, quick, evidence, output):
             save(label, "OPEN", observation=type(error).__name__)
 
 
-async def hosted_replay(root, install, clips, evidence, output):
+async def hosted_replay(root, install, clips, evidence, output, audit):
     server = install / "resources/server"
     env = runtime_environment(root)
     pid_file = root / "replay.pid"
@@ -724,7 +749,7 @@ async def hosted_replay(root, install, clips, evidence, output):
         if owner["pid"] != process.pid:
             raise FixtureUnavailable("replay-server-pid-mismatch")
         await wait_health(owner["port"], "cpu", MODEL, 720)
-        await run_replay(owner["port"], owner["pid"], clips, evidence, output)
+        await run_replay(owner["port"], owner["pid"], clips, evidence, output, audit)
     finally:
         stop_owned_tree(process)
 
@@ -737,6 +762,11 @@ async def run(args):
         raise FixtureUnavailable("invalid-hosted-scratch")
     (root / "runtime-temp").mkdir()
     clips = load_clips(args.manifest, args.config, smoke=args.smoke)
+    audit = None
+    if args.entity_audit and not args.smoke:
+        from scripts.sim_acceptance.entity_audit import EntityAudit
+
+        audit = EntityAudit(args.entity_audit, args.config, CANDIDATE)
     evidence = {
         "candidate": CANDIDATE, "config": args.config, "method": "packaged-editor",
         "model": MODEL, "device": "cpu", "trials": [], "resources": {},
@@ -762,6 +792,15 @@ async def run(args):
                 write_evidence(args.output, evidence)
         try:
             async with app_session(root, install, clips[0], label="warmup") as (main, process, _, log, _):
+                await desktop.send("reset")
+                probe = await desktop.send("probe-paste")
+                await asyncio.sleep(.3)
+                control = await desktop.send("read")
+                evidence["runner_editor_control_paste_observed"] = (
+                    probe and len(control["insertions"]) == 1 and control["clipboard_restored"]
+                    and text_hash(control["text"]) == text_hash("EVE QA CLIPBOARD SEED")
+                )
+                write_evidence(args.output, evidence)
                 warmup, _ = await capture(main, process, desktop, log, clips[0])
                 evidence["warmup"] = warmup
                 write_evidence(args.output, evidence)
@@ -785,7 +824,7 @@ async def run(args):
             write_evidence(args.output, evidence)
             if args.smoke:
                 raise FixtureUnavailable("hosted-smoke-incomplete") from error
-            await hosted_replay(root, install, clips, evidence, args.output)
+            await hosted_replay(root, install, clips, evidence, args.output, audit)
             return
         if args.smoke:
             return
@@ -793,7 +832,7 @@ async def run(args):
             try:
                 async with app_session(root, install, clip) as (main, process, _, log, _):
                     trial, resources = await capture(main, process, desktop, log, clip,
-                                                     time_idle=clip["mode"] == "long")
+                                                     time_idle=clip["mode"] == "long", audit=audit)
                     evidence["resources"].update(resources)
             except (FixtureUnavailable, TimeoutError):
                 trial = trial_record(clip, None, output_observed=False, failed=True)
@@ -831,6 +870,7 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--entity-audit", type=Path)
     try:
         asyncio.run(run(parser.parse_args()))
     except Exception as error:  # noqa: BLE001 - raw exceptions may disclose speech or machine paths
