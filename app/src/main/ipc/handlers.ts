@@ -90,7 +90,7 @@ export function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_TO_CLIPBOARD, async (_event, text: unknown) => {
     if (typeof text !== 'string') throw new TypeError('Clipboard text must be a string.');
-    await copyToClipboard(text);
+    if ((await copyToClipboard(text)).kind === 'failed') throw new Error('Could not write to clipboard.');
   });
 
   ipcMain.handle(IPC_CHANNELS.COMMAND_COPY_DIAGNOSTICS, async () => {
@@ -100,7 +100,7 @@ export function setupIpcHandlers(
       architecture: arch(),
       serverState: serverManagerRef?.getState(),
     });
-    await copyToClipboard(report);
+    if ((await copyToClipboard(report)).kind === 'failed') throw new Error('Could not write to clipboard.');
   });
 
   // Handle settings requests

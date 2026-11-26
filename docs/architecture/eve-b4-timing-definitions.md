@@ -18,13 +18,17 @@ subtracting a sum of internal spans. Missing observations are null, not zero.
 
 | Stage | Boundary and evidence |
 | --- | --- |
+| Hotkey and dispatch | Main `hotkeyAt` is entry to Eve's keyboard hook callback for the initiating keydown. `recordingStartDispatchedAt` is start entry after the overlap and overlay guards. Queued Long retains the keydown that requested it and includes the queue wait. Report queued Long separately from idle starts. Lab has no hotkey timestamp. |
+| WebSocket startup | Main `wsOpenedAt` is entry to the socket's open callback. `wsReadyAt` is acceptance of the first protocol `ready` frame. `captureCommandAt` is immediately before sending the start-capture IPC. |
+| Capture setup | Overlay `captureStartedAt` is start-command handling. `mediaResolvedAt`, `contextCreatedAt`, and `workletModuleLoadedAt` mark successful completion of microphone acquisition, AudioContext construction, and worklet registration in the active generation. `captureReadyAt` follows graph wiring. Main `captureReadyObservedAt` records the first validated overlay report with graph readiness. |
+| First audio | Overlay `firstAudioPostedAt` follows posting the first nonempty PCM frame to main. Main `firstAudioSentAt` follows the first nonempty audio frame's WebSocket send call returning. The timestamps observe local handoffs. A frame can contain silence and the server's receipt is unobserved at these boundaries. |
 | Stop / last audio | Main stop entry and last dispatched frame; separately overlay stop/capture/last-frame markers. A dispatched frame is not proof the server accepted it. |
 | First partial | First partial receipt minus capture/stream start, within that observer. A successful regular dictation leaves this null. Incomplete recovery can populate it on failed sessions. |
 | Outstanding work | State of the recording inference task at stop plus measured global lock and executor queue waits. Global lock wait can include jobs from other sessions. |
 | Final inference | Worker entry through completed transcription, including lazy segment iteration and any instrumented retry. Long chunk totals are sums of observed spans, not a single contiguous inference interval. |
 | Final WebSocket send | Server ASGI send start through awaited send completion. This measures transport handoff, not client receipt. Send completion cannot be included in the frame being sent; use the server-side trace. |
 | Receipt / display | Main final receipt; separately overlay final receipt through Svelte DOM commit after tick. DOM commit does not establish paint. |
-| History | Final receipt through save completion within main, plus save call duration separately. History follows clipboard/paste in the existing pipeline. |
+| History | Final receipt through save completion within main, plus save call duration separately. History is saved before clipboard and paste delivery. |
 | Clipboard | Native write start through return, plus final receipt through `clipboardCompletedAt` within main where observed. |
 | Paste dispatch | `pasteSettleCompletedAt` follows the focus delay. `pasteOwnershipCheckedAt` records the clipboard signature check. The helper span goes from `pasteHelperRequestSentAt` (prepare or one-shot launch) to `pasteHelperResponseAt` (terminal reply or callback). If Eve launches a one-shot fallback, its launch and callback replace the persistent attempt's markers. The final span measures the one-shot attempt. |
 | Actual insertion | Verified insertion into the explicitly isolated editor after a trusted input event and value change. Beforeinput, delete, unchanged value, key request, or paste promise are insufficient. Editor timestamps cannot be subtracted from main stop. |
@@ -63,13 +67,24 @@ Renderer IPC is accepted only from the overlay and only with the fixed schema.
 Later snapshots may include output/DOM stages absent from an earlier snapshot.
 Select the latest observed fields by correlation ID within their clock domain.
 
+Main trace snapshots include `startupSpansMs`. `hotkeyToReady` ends at
+`wsReadyAt`, `readyToCaptureReadyObserved` runs from `wsReadyAt` to
+`captureReadyObservedAt`, and `hotkeyToFirstAudioSent` ends at
+`firstAudioSentAt`. These are main-clock spans in milliseconds. The graph-ready
+span is an upper bound that includes IPC dispatch, delivery, and handling. Use
+the overlay timestamps for capture setup and graph-to-first-PCM spans. Missing
+endpoints produce null. Hook delivery measures Eve's receipt of the keydown.
+Physical switch closure and whether the first syllable survived require
+independent observations.
+
 The persistent Windows helper prepares each paste before Eve authorizes keyboard
 input. Eve verifies clipboard ownership and the operation generation at dispatch,
 including immediately before a one-shot fallback. Both SendInput paths verify
 the Win32 clipboard sequence sampled after Eve's write before changing focus.
 After any focus restoration, they verify the sequence and captured window
 handle again just before sending Ctrl+V. A mismatch cancels the paste. An
-unavailable clipboard sequence skips SendInput dispatch.
+unavailable clipboard sequence skips SendInput dispatch. Both saved paste method
+values, `sendinput` and legacy `vbscript`, use this guarded SendInput path.
 A failed transport can fall back while the request is still in preparation.
 Once Eve hands off the commit, an absent or invalid reply leaves the result
 ambiguous, so Eve reports the failure and skips retrying the paste. The helper

@@ -1,5 +1,13 @@
 // Recording/Session states
-export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'error';
+export type RecordingState = 'idle' | 'listening' | 'transcribing' | 'processing' | 'success' | 'notice' | 'error';
+export type RecordingDelivery =
+  | 'pasted'
+  | 'copied'
+  | 'saved'
+  | 'copied_not_pasted'
+  | 'paste_skipped'
+  | 'failed'
+  | 'history_failed';
 export type DictationSessionMode = 'quick' | 'long';
 export type InsightsRange = 'today' | '7d' | '30d' | '90d' | '1y' | 'all';
 
@@ -138,6 +146,7 @@ export interface ModelDownloadState {
 // IPC State payloads
 export interface RecordingStatePayload {
   state: RecordingState;
+  delivery?: RecordingDelivery;
   isRecording: boolean;
   mode?: DictationSessionMode;
 }
@@ -182,7 +191,11 @@ export interface OverlayPerfObservation {
   traceId: string;
   clockDomain: 'overlay_performance_now';
   captureStartedAt: number | null;
+  mediaResolvedAt: number | null;
+  contextCreatedAt: number | null;
+  workletModuleLoadedAt: number | null;
   captureReadyAt: number | null;
+  firstAudioPostedAt: number | null;
   lastAudioAt: number | null;
   stopRequestedAt: number | null;
   firstPartialReceivedAt: number | null;

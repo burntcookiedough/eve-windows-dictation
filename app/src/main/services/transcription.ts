@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 import { WebSocket } from 'ws';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import {
+  AUDIO_HEADER_SIZE,
   parseServerFrame,
   type ControlFrameStart,
   type ControlFrameStop,
@@ -11,6 +12,7 @@ import {
 import type {
   TranscriptionPayload,
   ConnectionStatePayload,
+  RecordingDelivery,
   RecordingStatePayload,
   RecordingWarningPayload,
   RecordingStatusPayload,
@@ -20,6 +22,7 @@ import { createLogger } from '../lib/logger.js';
 import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
 
 const log = createLogger('Transcription');
+type FinalCallback = (frame: TextFrameFinal, receivedAt?: number) => RecordingDelivery | void | Promise<RecordingDelivery | void>;
 
 export class TranscriptionConnectionCancelledError extends Error {
   constructor() {
@@ -38,7 +41,7 @@ export class TranscriptionService {
   private sequenceNumber = 0;
   private isReady = false;
   private serverClosing = false; // Server initiated close, don't send stop
-  private onFinalCallback: ((frame: TextFrameFinal, receivedAt?: number) => void) | null = null;
+  private onFinalCallback: FinalCallback | null = null;
   private onCloseCallback: (() => void) | null = null;
   private onRecordingStateCallback: ((payload: RecordingStatePayload) => void) | null = null;
   private onConnectionStateCallback: ((payload: ConnectionStatePayload) => void) | null = null;
@@ -97,6 +100,7 @@ export class TranscriptionService {
       this.ws = new WebSocket(this.serverUrl);
 
       this.ws.on('open', () => {
+        perfTraceManager.mark(this.perfTraceId, 'wsOpenedAt');
         this.sendStartFrame();
         this.sendConnectionState('connected');
       });
@@ -109,6 +113,7 @@ export class TranscriptionService {
       });
 
       this.ws.on('error', (error) => {
+        if (this.closed || this.didReceiveFinal) return;
         if (this.stopRequested && !this.didReceiveReady) return;
         log.error('WebSocket error', { error });
         this.fail(error.message);
@@ -116,11 +121,11 @@ export class TranscriptionService {
       });
 
       this.ws.on('close', () => {
-        if (!this.didReceiveFinal && !(this.stopRequested && !this.didReceiveReady)) {
+        settleConnect(new Error('WebSocket closed before connection was ready'));
+        if (this.closed || this.didReceiveFinal) return;
+        if (!(this.stopRequested && !this.didReceiveReady)) {
           this.fail('Connection closed before a final result; available text is incomplete.');
         }
-        this.sendConnectionState('disconnected');
-        settleConnect(new Error('WebSocket closed before connection was ready'));
         this.finishClose();
       });
     });
@@ -148,6 +153,9 @@ export class TranscriptionService {
       return;
     }
     this.ws.send(Buffer.from(buffer));
+    if (this.perfTraceId && buffer.byteLength > AUDIO_HEADER_SIZE) {
+      perfTraceManager.mark(this.perfTraceId, 'firstAudioSentAt');
+    }
   }
 
   stop(): void {
@@ -200,10 +208,11 @@ export class TranscriptionService {
     if (this.closed) return;
     this.closed = true;
     this.isReady = false;
+    this.sendConnectionState('disconnected');
     this.onCloseCallback?.();
   }
 
-  onFinal(callback: (frame: TextFrameFinal, receivedAt?: number) => void): void {
+  onFinal(callback: FinalCallback): void {
     this.onFinalCallback = callback;
   }
 
@@ -238,18 +247,18 @@ export class TranscriptionService {
   }
 
   private handleMessage(data: string): void {
-    if (this.closed || this.failed) return;
+    if (this.closed || this.failed || this.didReceiveFinal) return;
     const frame = parseServerFrame(data);
     if (!frame) {
       log.warn('Failed to parse server frame', { dataLength: data.length });
       return;
     }
-    if (this.didReceiveFinal && !(frame.frame === 'control' && frame.type === 'closing')) return;
 
     if (frame.frame === 'control') {
       switch (frame.type) {
         case 'ready':
           if (this.stopRequested || this.didReceiveReady) break;
+          perfTraceManager.mark(this.perfTraceId, 'wsReadyAt');
           this.didReceiveReady = true;
           this.isReady = true;
           this.sendRecordingState('listening');
@@ -331,11 +340,26 @@ export class TranscriptionService {
       perfTraceManager.mark(this.perfTraceId, 'firstPartialReceivedAt', receivedAt);
       this.sendRecordingState('transcribing');
     } else if (frame.type === 'final') {
-      this.sendRecordingState('success');
-      this.onFinalCallback?.(frame, receivedAt);
-      this.finishClose();
+      // Release the socket promptly while the app keeps this session busy through delivery.
       this.ws?.close();
+      void this.finishFinal(frame, receivedAt);
     }
+  }
+
+  private async finishFinal(frame: TextFrameFinal, receivedAt?: number): Promise<void> {
+    let delivery: RecordingDelivery | void;
+    try {
+      delivery = await this.onFinalCallback?.(frame, receivedAt);
+    } catch {
+      log.error('Final transcription delivery failed');
+      delivery = 'failed';
+    }
+
+    const state = delivery === 'failed' || delivery === 'history_failed' ? 'error'
+      : delivery === 'copied_not_pasted' || delivery === 'paste_skipped' ? 'notice'
+      : 'success';
+    this.sendRecordingState(state, delivery || undefined);
+    this.finishClose();
   }
 
   private sendConnectionState(status: ConnectionStatePayload['status'], error?: string): void {
@@ -344,11 +368,12 @@ export class TranscriptionService {
     this.onConnectionStateCallback?.(payload);
   }
 
-  private sendRecordingState(state: RecordingStatePayload['state']): void {
+  private sendRecordingState(state: RecordingStatePayload['state'], delivery?: RecordingDelivery): void {
     const payload: RecordingStatePayload = {
       state,
-      isRecording: state !== 'idle',
+      isRecording: state === 'listening' || state === 'transcribing' || state === 'processing',
       mode: this.sessionMode,
+      ...(delivery ? { delivery } : {}),
     };
     this.broadcastToOverlay(IPC_CHANNELS.STATE_RECORDING, payload);
     this.onRecordingStateCallback?.(payload);

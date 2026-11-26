@@ -11,9 +11,10 @@ type KeyboardEvent = {
 type KeyboardListener = (event: KeyboardEvent) => void;
 
 const listeners = new Set<KeyboardListener>();
+const keyUpListeners = new Set<KeyboardListener>();
 const uIOhook = {
-  on: mock((_event: string, listener: KeyboardListener) => {
-    listeners.add(listener);
+  on: mock((event: string, listener: KeyboardListener) => {
+    (event === 'keyup' ? keyUpListeners : listeners).add(listener);
   }),
   off: mock((_event: string, listener: KeyboardListener) => {
     listeners.delete(listener);
@@ -44,16 +45,16 @@ mock.module('uiohook-napi', () => ({
 }));
 
 mock.module('../src/main/services/settings.js', () => ({
-  getSetting: () => ({
+  getSetting: (key: string) => ({
     keycode: 3675,
     ctrlKey: true,
     altKey: false,
-    shiftKey: false,
+    shiftKey: key === 'longHotkey',
     metaKey: false,
   }),
 }));
 
-const { cancelHotkeyCapture, startHotkeyCapture } = await import('../src/main/services/hotkey.js');
+const { cancelHotkeyCapture, setupHotkeyService, startHotkeyCapture, unregisterHotkey } = await import('../src/main/services/hotkey.js');
 
 const keyEvent = (keycode: number): KeyboardEvent => ({
   keycode,
@@ -61,6 +62,39 @@ const keyEvent = (keycode: number): KeyboardEvent => ({
   altKey: false,
   shiftKey: false,
   metaKey: false,
+});
+
+test('a tap rejected during delivery cannot seed Long or release Quick', () => {
+  let finalizing = true;
+  const events: string[] = [];
+  setupHotkeyService({
+    onHoldStart: () => {
+      events.push(finalizing ? 'busy' : 'quick');
+      return !finalizing;
+    },
+    onHoldEnd: () => { events.push('release'); },
+    onDoubleTap: () => { events.push('long'); return true; },
+    onLongShortcut: () => { events.push('long shortcut'); return true; },
+  });
+  const down = (code: number) => listeners.forEach(listener => listener(keyEvent(code)));
+  const up = (code: number) => keyUpListeners.forEach(listener => listener(keyEvent(code)));
+  try {
+    down(29);
+    down(3675);
+    finalizing = false;
+    down(3675); // Auto-repeat while the rejected press is still held.
+    up(3675);
+    up(29);
+    down(29);
+    down(3675);
+    expect(events).toEqual(['busy', 'quick']);
+  } finally {
+    up(3675);
+    up(29);
+    unregisterHotkey();
+    listeners.clear();
+    keyUpListeners.clear();
+  }
 });
 
 describe('hotkey capture lifecycle', () => {

@@ -4,6 +4,9 @@ import type { BrowserWindow } from 'electron';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { CaptureSession } from '../src/main/services/capture-session';
 import { perfTraceManager } from '../src/main/services/perf-trace';
+import { IPC_CHANNELS } from '../src/shared/constants';
+import { createAudioFrame } from '../src/shared/protocol';
+import type { RecordingDelivery, RecordingStatePayload } from '../src/shared/types';
 import {
   TranscriptionConnectionCancelledError,
   TranscriptionService,
@@ -49,7 +52,7 @@ describe('TranscriptionService protocol readiness', () => {
       service.onTranscription(payload => {
         if (payload.type === 'partial') draftReceived.resolve();
       });
-      service.onFinal(frame => finals.push(frame.text));
+      service.onFinal(frame => { finals.push(frame.text); });
       service.onClose(() => closed.resolve());
 
       server.on('connection', socket => {
@@ -145,7 +148,7 @@ describe('TranscriptionService protocol readiness', () => {
       const states: string[] = [];
       const closed = deferred<void>();
       let closes = 0;
-      service.onFinal(frame => finals.push(frame.text));
+      service.onFinal(frame => { finals.push(frame.text); });
       service.onRecordingState(payload => states.push(payload.state));
       service.onClose(() => { closes++; closed.resolve(); });
       try {
@@ -176,7 +179,73 @@ describe('TranscriptionService protocol readiness', () => {
     });
   }
 
-  test('does not connect or send audio until the server emits ready', async () => {
+  test.each([
+    ['pasted', 'success'],
+    ['copied_not_pasted', 'notice'],
+    ['failed', 'error'],
+    ['rejected', 'error'],
+  ] as const)('publishes the %s pill outcome and closes the session only after delivery settles', async (outcome, state) => {
+    const server = new WebSocketServer({ port: 0 });
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('No test address');
+    const socketClosed = deferred<void>();
+    const delivery = Promise.withResolvers<RecordingDelivery>();
+    const finalReceived = deferred<void>();
+    const sessionClosed = deferred<void>();
+    const states: RecordingStatePayload[] = [];
+    const overlay = {
+      isDestroyed: () => false,
+      webContents: { send: (channel: string, payload: RecordingStatePayload) => {
+        if (channel === IPC_CHANNELS.STATE_RECORDING) states.push(payload);
+      } },
+    } as unknown as BrowserWindow;
+    const service = new TranscriptionService(`ws://127.0.0.1:${address.port}`, 10, overlay);
+    let closes = 0;
+    service.onFinal(() => {
+      finalReceived.resolve();
+      return delivery.promise;
+    });
+    service.onClose(() => { closes++; sessionClosed.resolve(); });
+
+    server.on('connection', socket => {
+      socket.once('close', () => socketClosed.resolve());
+      socket.on('message', data => {
+        const send = (frame: Record<string, unknown>) => socket.send(JSON.stringify(frame));
+        if (JSON.parse(data.toString()).type === 'start') {
+          send({ frame: 'control', type: 'ready' });
+        } else {
+          send({ frame: 'control', type: 'status', status: 'long_dictation_processing' });
+          send({ frame: 'text', type: 'final', text: 'synthetic fixture', confidence: 1, audio_duration: 1, transcription_time: 0.5 });
+          send({ frame: 'control', type: 'closing', reason: 'stop_received' });
+          socket.close();
+        }
+      });
+    });
+
+    try {
+      await service.connect();
+      service.stop();
+      await finalReceived.promise;
+      await socketClosed.promise;
+      expect(states.map(payload => payload.state)).toEqual(['listening', 'processing']);
+      expect(closes).toBe(0);
+
+      if (outcome === 'rejected') delivery.reject(new Error('Synthetic delivery failure'));
+      else delivery.resolve(outcome);
+      await sessionClosed.promise;
+
+      expect(states.map(payload => payload.state)).toEqual(['listening', 'processing', state]);
+      expect(states.at(-1)).toMatchObject({ state, isRecording: false, delivery: outcome === 'rejected' ? 'failed' : outcome });
+      expect(closes).toBe(1);
+    } finally {
+      delivery.resolve('failed');
+      for (const client of server.clients) client.terminate();
+      server.close();
+    }
+  });
+
+  test.each([false, true])('gates connection and first audio on ready (trace enabled: %s)', async (enabled) => {
     const server = new WebSocketServer({ port: 0 });
     await once(server, 'listening');
     const address = server.address();
@@ -205,10 +274,16 @@ describe('TranscriptionService protocol readiness', () => {
       isDestroyed: () => false,
       webContents: { send: () => undefined },
     } as unknown as BrowserWindow;
+    const previousTraceSetting = process.env.MURMUR_PERF_TRACE;
+    if (enabled) process.env.MURMUR_PERF_TRACE = '1';
+    else delete process.env.MURMUR_PERF_TRACE;
+    const traceId = 'fake-websocket-startup';
+    perfTraceManager.startTrace(traceId);
+    const trace = () => perfTraceManager.getRecentTraces().find(entry => entry.correlationId === traceId);
     const service = new TranscriptionService(
       `ws://127.0.0.1:${address.port}`,
       10,
-      overlay
+      overlay, undefined, 'quick', traceId
     );
     let connected = false;
 
@@ -222,16 +297,32 @@ describe('TranscriptionService protocol readiness', () => {
       expect(connected).toBeFalse();
       service.sendAudioBuffer(new ArrayBuffer(8));
       expect(binaryFrames).toBe(0);
+      if (enabled) {
+        expect(trace()!.main.wsOpenedAt).toBeNumber();
+        expect(trace()!.main.wsReadyAt).toBeNull();
+        expect(trace()!.main.firstAudioSentAt).toBeNull();
+      }
 
       socket.send(JSON.stringify({ frame: 'control', type: 'ready' }));
       await connectPromise;
       expect(connected).toBeTrue();
 
-      service.sendAudioBuffer(new ArrayBuffer(8));
+      service.sendAudioBuffer(createAudioFrame(0, new Int16Array([12345, -23456])));
       await audioReceived.promise;
       expect(binaryFrames).toBe(1);
+      if (enabled) {
+        const { wsOpenedAt, wsReadyAt, firstAudioSentAt } = trace()!.main;
+        expect(wsReadyAt).toBeGreaterThanOrEqual(wsOpenedAt!);
+        expect(firstAudioSentAt).toBeGreaterThanOrEqual(wsReadyAt!);
+        expect(JSON.stringify(trace())).not.toContain('-23456');
+      } else {
+        expect(trace()).toBeUndefined();
+      }
 
     } finally {
+      perfTraceManager.clear();
+      if (previousTraceSetting === undefined) delete process.env.MURMUR_PERF_TRACE;
+      else process.env.MURMUR_PERF_TRACE = previousTraceSetting;
       for (const client of server.clients) {
         client.terminate();
       }

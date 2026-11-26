@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { TextFrameFinal } from '../src/shared/protocol.js';
 import type { Settings, TranscriptionEntry } from '../src/shared/types.js';
+import type { ClipboardCopyOutcome, ClipboardPasteOutcome } from '../src/main/services/clipboard.js';
 
-const pasteText = mock(async () => {});
-const copyToClipboard = mock(async () => {});
+const pasteText = mock(async (): Promise<ClipboardPasteOutcome> => ({ kind: 'pasted' }));
+const copyToClipboard = mock(async (): Promise<ClipboardCopyOutcome> => ({ kind: 'copied' }));
 
 mock.module('../src/main/services/clipboard.js', () => ({
   pasteText,
@@ -63,30 +64,35 @@ describe('processFinalTranscription', () => {
     expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: false,
       restoreDelayMs: 250,
-      method: 'sendinput',
       targetWindowHandle: 12345,
+      signal: expect.any(AbortSignal),
+      deadlineUnixMs: expect.any(Number),
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
     expect(saved[0]?.text).toBe('Hello from eve.');
     expect(saved[0]?.wordCount).toBe(3);
-    expect(result.entryWithGroup.dateGroup).toBe('Today');
+    expect(result.entryWithGroup?.dateGroup).toBe('Today');
+    expect(result.delivery).toEqual({ kind: 'pasted' });
   });
 
   test('falls back to auto-copy when auto-paste is disabled', async () => {
-    await processFinalTranscription(
+    const saved: TranscriptionEntry[] = [];
+    const result = await processFinalTranscription(
       frame,
       { ...settings, autoPaste: false, autoCopy: true },
-      null,
+      { save: entry => saved.push(entry) },
       'quick'
     );
 
     expect(pasteText).not.toHaveBeenCalled();
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.');
+    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined, expect.any(AbortSignal), expect.any(Number));
+    expect(result.delivery).toEqual({ kind: 'copied' });
+    expect(saved).toHaveLength(1);
   });
 
   test('keeps auto-copy dispatch pending until the clipboard write resolves', async () => {
-    let finishCopy: (() => void) | undefined;
+    let finishCopy: ((outcome: ClipboardCopyOutcome) => void) | undefined;
     copyToClipboard.mockImplementationOnce(() => new Promise((resolve) => {
       finishCopy = resolve;
     }));
@@ -101,26 +107,28 @@ describe('processFinalTranscription', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(completed).toBe(false);
-    finishCopy?.();
+    finishCopy?.({ kind: 'copied' });
     await dispatch;
     expect(completed).toBe(true);
   });
 
-  test('copies text when auto-paste fails and auto-copy is enabled', async () => {
-    pasteText.mockImplementationOnce(async () => {
-      throw new Error('paste failed');
-    });
+  test('preserves the paste failure without a second clipboard write', async () => {
+    const failure = { kind: 'failed', clipboardWrite: 'written', dispatch: 'uncertain' } as const;
+    pasteText.mockResolvedValueOnce(failure);
 
-    await processFinalTranscription(
+    const saved: TranscriptionEntry[] = [];
+    const result = await processFinalTranscription(
       frame,
       { ...settings, autoPaste: true, autoCopy: true },
-      null,
+      { save: entry => saved.push(entry) },
       'quick',
       12345
     );
 
     expect(pasteText).toHaveBeenCalledTimes(1);
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.');
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(result.delivery).toEqual(failure);
+    expect(saved).toHaveLength(1);
   });
 
   test('honors clipboard restore only when auto-copy is disabled', async () => {
@@ -135,14 +143,16 @@ describe('processFinalTranscription', () => {
     expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: true,
       restoreDelayMs: 250,
-      method: 'sendinput',
       targetWindowHandle: 12345,
+      signal: expect.any(AbortSignal),
+      deadlineUnixMs: expect.any(Number),
     });
   });
 
   test('retains dictated text in History when baseline protection aborts paste without auto-copy', async () => {
     const saved: TranscriptionEntry[] = [];
-    pasteText.mockImplementationOnce(async () => { throw new Error('Unreadable clipboard baseline'); });
+    const failure = { kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' } as const;
+    pasteText.mockResolvedValueOnce(failure);
     const result = await processFinalTranscription(
       frame,
       { ...settings, autoPaste: true, autoCopy: false, restoreClipboardAfterPaste: true },
@@ -153,6 +163,62 @@ describe('processFinalTranscription', () => {
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
     expect(saved[0].text).toBe('Hello from eve.');
-    expect(result.entryWithGroup.text).toBe(saved[0].text);
+    expect(result.entryWithGroup?.text).toBe(saved[0]?.text);
+    expect(result.delivery).toEqual(failure);
+  });
+
+  test.each([false, true])('saves History after skipping a missing target (auto-copy: %s)', async (autoCopy) => {
+    const save = mock(() => {});
+    pasteText.mockResolvedValueOnce({ kind: 'skipped_unsafe', reason: 'no_target', copied: false });
+
+    const result = await processFinalTranscription(frame, { ...settings, autoCopy }, { save }, 'quick', null);
+
+    expect(result.delivery).toEqual({ kind: 'skipped_unsafe', reason: 'no_target', copied: autoCopy });
+    expect(copyToClipboard).toHaveBeenCalledTimes(autoCopy ? 1 : 0);
+    expect(save).toHaveBeenCalledWith(result.entry);
+  });
+
+  test.each([
+    { kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: false },
+    { kind: 'skipped_unsafe', reason: 'foreground_changed', copied: true },
+    { kind: 'skipped_unsafe', reason: 'superseded', copied: false },
+  ] as const)('saves History without rewriting the clipboard after %j', async (delivery) => {
+    const save = mock(() => {});
+    pasteText.mockResolvedValueOnce(delivery);
+
+    const result = await processFinalTranscription(frame, settings, { save }, 'quick', 12345);
+
+    expect(result.delivery).toEqual(delivery);
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(result.entry);
+  });
+
+  test('reports a copy failure and still saves History', async () => {
+    copyToClipboard.mockResolvedValueOnce({ kind: 'failed' });
+    const save = mock(() => {});
+
+    const result = await processFinalTranscription(frame, { ...settings, autoPaste: false }, { save });
+
+    expect(result.delivery).toEqual({ kind: 'failed' });
+    expect(save).toHaveBeenCalledWith(result.entry);
+  });
+
+  test('reports when History is the only successful output requested', async () => {
+    const save = mock(() => {});
+    const result = await processFinalTranscription(frame, { ...settings, autoPaste: false, autoCopy: false }, { save });
+
+    expect(result.delivery).toEqual({ kind: 'saved' });
+    expect(save).toHaveBeenCalledWith(result.entry);
+    expect(result.entryWithGroup?.id).toBe(result.entry.id);
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(pasteText).not.toHaveBeenCalled();
+  });
+
+  test('reports a History failure separately from a paste that was sent', async () => {
+    const result = await processFinalTranscription(frame, settings, { save: () => { throw new Error('Synthetic disk failure'); } }, 'quick', 12345);
+
+    expect(result.delivery).toEqual({ kind: 'pasted' });
+    expect(result.entryWithGroup).toBeNull();
+    expect(result.historyFailed).toBe(true);
   });
 });
