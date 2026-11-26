@@ -22,6 +22,11 @@ FastAPI/WebSocket service in `server/`. Read the relevant docs before changes.
 - Preserve frozen Eve identity and Murmur compatibility: appId, NSIS GUID,
   profiles, protocols, environment names, install chain, runtime, and cache
   behavior. Do not rename internal Murmur identifiers without an approved migration.
+- Until Eve has external users (owner decision, 2026-11-25), the internal
+  app↔server protocol may change without backward compatibility, because both
+  ship in one installer. Update `docs/protocol.md` instead of adding shims for
+  older builds. Upgrades from published builds must still keep settings,
+  History, profiles, and the GPU pack.
 
 ## Release boundaries
 
