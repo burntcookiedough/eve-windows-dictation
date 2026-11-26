@@ -13,6 +13,7 @@ import type { HistoryService } from './history.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Pipeline');
+const CLIPBOARD_FINALIZATION_TIMEOUT_MS = 5000;
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -128,6 +129,38 @@ export interface DispatchResult {
   historyFailed: boolean;
 }
 
+interface DispatchOptions {
+  clipboardTimeoutMs?: number;
+  onHistorySaved?: (entry: HistoryEntryWithGroup) => void;
+}
+
+type PasteTarget = number | null | Promise<number | null>;
+
+async function deliverToClipboard(
+  entry: TranscriptionEntry,
+  settings: Settings,
+  pasteTarget: PasteTarget | undefined,
+  perfTraceId: string | undefined,
+  signal: AbortSignal,
+): Promise<ClipboardCopyOutcome | ClipboardPasteOutcome> {
+  if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal);
+
+  const targetWindowHandle = await pasteTarget ?? null;
+  const delivery = await pasteText(entry.text, {
+    restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
+    restoreDelayMs: settings.clipboardRestoreDelayMs,
+    targetWindowHandle,
+    signal,
+    ...(perfTraceId ? { perfTraceId } : {}),
+  });
+  // A paste that reached the target check may already have written or sent input.
+  if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+    const copy = await copyToClipboard(entry.text, perfTraceId, signal);
+    return copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
+  }
+  return delivery;
+}
+
 /**
  * Dispatch the entry to all outputs (clipboard, paste, history)
  */
@@ -135,31 +168,10 @@ export async function dispatchToOutputs(
   entry: TranscriptionEntry,
   settings: Settings,
   historyService: Pick<HistoryService, 'save'> | null,
-  pasteTargetWindowHandle?: number | null,
-  perfTraceId?: string
+  pasteTargetWindowHandle?: PasteTarget,
+  perfTraceId?: string,
+  options: DispatchOptions = {},
 ): Promise<DispatchResult> {
-  let delivery: DeliveryOutcome | undefined;
-  try {
-    if (settings.autoPaste && entry.text) {
-      delivery = await pasteText(entry.text, {
-        restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
-        restoreDelayMs: settings.clipboardRestoreDelayMs,
-        targetWindowHandle: pasteTargetWindowHandle ?? null,
-        ...(perfTraceId ? { perfTraceId } : {}),
-      });
-      // A paste may already have changed the clipboard or sent input before reporting failure.
-      if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
-        const copy = await copyToClipboard(entry.text, perfTraceId);
-        delivery = copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
-      }
-    } else if (settings.autoCopy && entry.text) {
-      delivery = await copyToClipboard(entry.text, perfTraceId);
-    }
-  } catch {
-    log.error('Clipboard delivery did not complete');
-    delivery = { kind: 'failed' };
-  }
-
   let entryWithGroup: HistoryEntryWithGroup | null = null;
   let historyFailed = false;
   if (historyService) {
@@ -177,10 +189,42 @@ export async function dispatchToOutputs(
     }
   }
 
+  if (entryWithGroup) {
+    try {
+      options.onHistorySaved?.(entryWithGroup);
+    } catch {
+      log.error('Could not notify the renderer of a saved History entry');
+    }
+  }
+
+  let delivery: DeliveryOutcome = entryWithGroup ? { kind: 'saved' } : { kind: 'failed' };
+  if (entry.text && (settings.autoCopy || settings.autoPaste)) {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const expiration = new Promise<DeliveryOutcome>(resolve => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        log.warn('Clipboard finalization timed out');
+        resolve({ kind: 'failed' });
+      }, options.clipboardTimeoutMs ?? CLIPBOARD_FINALIZATION_TIMEOUT_MS);
+    });
+    try {
+      delivery = await Promise.race([
+        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal),
+        expiration,
+      ]);
+    } catch {
+      log.error('Clipboard delivery did not complete');
+      delivery = { kind: 'failed' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   return {
     entry,
     entryWithGroup,
-    delivery: delivery ?? (entryWithGroup ? { kind: 'saved' } : { kind: 'failed' }),
+    delivery,
     historyFailed,
   };
 }
@@ -193,8 +237,9 @@ export async function processFinalTranscription(
   settings: Settings,
   historyService: Pick<HistoryService, 'save'> | null,
   sessionMode: DictationSessionMode = 'quick',
-  pasteTargetWindowHandle?: number | null,
-  perfTraceId?: string
+  pasteTargetWindowHandle?: PasteTarget,
+  perfTraceId?: string,
+  options?: DispatchOptions,
 ): Promise<DispatchResult> {
   const rawEntry = buildEntry(frame, sessionMode);
   const processedEntry = applyPostProcessing(rawEntry, settings);
@@ -206,6 +251,7 @@ export async function processFinalTranscription(
     settings,
     historyService,
     pasteTargetWindowHandle,
-    perfTraceId
+    perfTraceId,
+    options,
   );
 }

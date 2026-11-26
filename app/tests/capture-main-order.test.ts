@@ -12,21 +12,24 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
 
-  for (const [source, initial, updated, autoCopy] of [
+  for (const [source, initial, updated, autoCopy, historyFailed] of [
     ['normal', false, true, true], // Copy-only at start.
     ['normal', false, false, false], // History-only.
     ['normal', true, false, false], // Auto-paste at start.
     ['lab', true, true, false],
+    ['normal', true, true, false, true], // No target, copy disabled, and History unavailable.
   ] as const) {
     let autoPaste: boolean = initial;
     let captures = 0;
     const events: string[] = [];
     let output: { autoPaste: boolean; autoCopy: boolean; target: number | null } | undefined;
-    let onFinal!: (frame: { text: string }) => Promise<void>;
+    let onFinal!: (frame: { text: string }) => Promise<string | undefined>;
+    let onClose!: () => void;
+    let onTranscription!: (payload: { type: 'final'; text: string }) => void;
     const context = {
       IPC_CHANNELS, app: { isPackaged: false }, serverManager: null, mainWindow: null,
       overlayWindow: { webContents: { send: () => {} } },
-      isRecording: false, isStopping: false, recordingPerfTraceId: undefined,
+      isRecording: false, isStopping: false, startLongAfterStop: null, recordingPerfTraceId: undefined,
       currentRecordingState: { state: 'processing' },
       recordingTerminalOverride: null, recordingSource: null, recordingSessionMode: 'quick',
       transcriptionService: null, captureSession: null, latestTranscription: null, latestStatus: null,
@@ -40,23 +43,27 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
         return { autoPaste, autoCopy, hotwordsEnabled: false };
       },
       getSetting: () => false,
-      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return 12345; },
+      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return historyFailed ? null : 12345; },
       updateConnectionState: () => {}, sendOverlayRecordingState: () => {},
+      updateRecordingState: () => {}, scheduleOverlayDismiss: () => {},
+      updateTranscription: (payload: typeof context.latestTranscription) => { context.latestTranscription = payload; },
       positionOverlayOnActiveDisplay: () => {}, showOverlay: () => events.push('overlay'),
       TranscriptionService: class {
         onRecordingState() {}
         onConnectionState() {}
-        onTranscription() {}
+        onTranscription(callback: typeof onTranscription) { onTranscription = callback; }
         onStatus() {}
-        onClose() {}
+        onClose(callback: typeof onClose) { onClose = callback; }
         onFinal(callback: typeof onFinal) { onFinal = callback; }
         async connect() {}
       },
       CaptureSession: class { canCommit = true; close() {} },
       processFinalTranscription: async (_frame: unknown, settings: { autoPaste: boolean; autoCopy: boolean },
-        _history: unknown, _mode: unknown, target: number | null) => {
-        output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target };
-        return { delivery: { kind: 'pasted' } };
+        _history: unknown, _mode: unknown, target: number | null | Promise<number | null>) => {
+        output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target: await target };
+        return historyFailed
+          ? { delivery: { kind: 'skipped_unsafe', reason: 'no_target', copied: false }, entryWithGroup: null, historyFailed }
+          : { delivery: { kind: 'pasted' } };
       },
     };
     await runInNewContext(script + `\nstartRecording('${source}');`, context);
@@ -64,11 +71,23 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       ? ['foreground', 'settings', 'overlay']
       : ['settings', 'overlay']);
     autoPaste = updated;
-    await onFinal({ text: 'Synthetic final text' });
+    const payload = { type: 'final', text: 'Synthetic final text' } as const;
+    onTranscription(payload);
+    const terminal = await onFinal({ text: 'Synthetic final text' });
     expect(captures).toBe(source === 'normal' && initial ? 1 : 0);
     expect(output).toEqual(source === 'lab' ? undefined : {
-      autoPaste: initial, autoCopy, target: initial ? 12345 : null,
+      autoPaste: initial, autoCopy, target: initial && !historyFailed ? 12345 : null,
     });
+    if (historyFailed) {
+      expect(terminal).toBe('failed');
+      context.currentRecordingState.state = 'error';
+      onClose();
+      expect(context.isStopping).toBe(false);
+      expect(context.latestTranscription).toEqual(payload);
+      await runInNewContext(script + '\nstartRecording("normal");', context);
+      expect(context.isRecording).toBe(true);
+      expect(context.latestTranscription).toBeNull();
+    }
   }
 });
 

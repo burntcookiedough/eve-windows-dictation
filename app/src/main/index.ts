@@ -320,22 +320,29 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
       return;
     }
 
-    const pasteTargetWindowHandle = await pasteTargetWindowHandlePromise?.catch(() => null) ?? null;
     const result = await processFinalTranscription(
       frame,
       { ...getSettings(), autoPaste },
       historyService,
       serviceSessionMode,
-      pasteTargetWindowHandle,
-      serviceTraceId
+      pasteTargetWindowHandlePromise,
+      serviceTraceId,
+      {
+        onHistorySaved: entry => {
+          if (transcriptionService === service && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, entry);
+          }
+        },
+      },
     );
 
-    if (result.entryWithGroup && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(IPC_CHANNELS.HISTORY_NEW_ENTRY, result.entryWithGroup);
-    }
     perfTraceManager.completeTrace(serviceTraceId);
     const { delivery } = result;
-    if (delivery.kind === 'skipped_unsafe') return delivery.copied ? 'copied_not_pasted' : 'paste_skipped';
+    if (delivery.kind === 'skipped_unsafe') {
+      if (delivery.copied) return 'copied_not_pasted';
+      if (!result.entryWithGroup) return 'failed';
+      return delivery.reason === 'foreground_changed' ? 'saved' : 'paste_skipped';
+    }
     if (delivery.kind !== 'failed' && result.historyFailed) return 'history_failed';
     return delivery.kind;
   });
@@ -360,6 +367,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     isRecording = false;
     isStopping = false;
     transcriptionService = null;
+    // The Lab can explicitly copy the last final transcript after a failed delivery.
     if (terminalState !== 'error') latestTranscription = null;
     latestStatus = null;
     recordingSource = null;

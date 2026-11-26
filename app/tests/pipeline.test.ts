@@ -65,6 +65,7 @@ describe('processFinalTranscription', () => {
       restoreClipboard: false,
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
+      signal: expect.any(AbortSignal),
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
@@ -84,7 +85,7 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).not.toHaveBeenCalled();
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined);
+    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined, expect.any(AbortSignal));
     expect(result.delivery).toEqual({ kind: 'copied' });
     expect(saved).toHaveLength(1);
   });
@@ -142,6 +143,7 @@ describe('processFinalTranscription', () => {
       restoreClipboard: true,
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
+      signal: expect.any(AbortSignal),
     });
   });
 

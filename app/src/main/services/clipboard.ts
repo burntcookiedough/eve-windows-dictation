@@ -54,16 +54,21 @@ export type ClipboardPasteOutcome =
   | { kind: 'skipped_unsafe'; reason: PasteSkipReason; copied: boolean }
   | { kind: 'failed'; clipboardWrite: 'not_attempted' | 'uncertain' | 'written'; dispatch: 'not_attempted' | 'uncertain' };
 
-export async function copyToClipboard(text: string, perfTraceId?: string): Promise<ClipboardCopyOutcome> {
+export async function copyToClipboard(text: string, perfTraceId?: string, signal?: AbortSignal): Promise<ClipboardCopyOutcome> {
+  if (signal?.aborted) return { kind: 'failed' };
   log.debug('Writing text', { length: text.length });
   latestPasteGeneration += 1;
   return enqueuePasteCriticalSection(async () => {
+    if (signal?.aborted) return { kind: 'failed' };
     if (activePasteSequence) {
       discardPasteSequence(activePasteSequence);
     }
     try {
       const writeStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
+      // Electron provides no cancellation for a submitted write. Keep it ordered
+      // with later Eve writes and ignore its completion after the session expires.
       await clipboard.writeText(text);
+      if (signal?.aborted) return { kind: 'failed' };
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
@@ -112,6 +117,15 @@ async function readClipboardSnapshot(): Promise<ClipboardSnapshot> {
   return { text, items, signature: JSON.stringify({ text, items: signatures }) };
 }
 
+function readClipboardSnapshotWhileActive(signal: AbortSignal): Promise<ClipboardSnapshot> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    void readClipboardSnapshot().then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 async function restoreClipboardSnapshot(snapshot: ClipboardSnapshot): Promise<void> {
   const [firstItem] = snapshot.items;
   if (snapshot.items.length === 0) {
@@ -149,9 +163,9 @@ export async function simulatePaste(
   targetWindowHandle: number,
   clipboardSequence: number | null,
   perfTraceId?: string,
-  authorize: AuthorizePaste = async dispatch => dispatch()
+  authorize: AuthorizePaste = async dispatch => dispatch(),
+  signal = pasteLifetime.signal
 ): Promise<boolean> {
-  const { signal } = pasteLifetime;
   if (signal.aborted) return false;
   if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
     throw new Error('Invalid paste target window handle');
@@ -164,8 +178,18 @@ export async function simulatePaste(
   });
   try {
     if (!isClipboardSequence(clipboardSequence)) return false;
+    const cancelHelper = () => {
+      if (pasteLifetime.signal.aborted) return;
+      pasteHelper.shutdown();
+      pasteHelper.resume();
+    };
+    signal.addEventListener('abort', cancelHelper, { once: true });
     try {
-      await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, dispatchIfAuthorized);
+      try {
+        await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, dispatchIfAuthorized);
+      } finally {
+        signal.removeEventListener('abort', cancelHelper);
+      }
     } catch (error) {
       if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
       if (signal.aborted) return false;
@@ -205,6 +229,7 @@ export interface PasteTextOptions {
   restoreClipboard: boolean;
   restoreDelayMs: number;
   targetWindowHandle: number | null;
+  signal?: AbortSignal;
 }
 
 function delay(ms: number): Promise<void> {
@@ -221,8 +246,9 @@ function discardPasteSequence(sequence: PasteSequence): void {
   }
 }
 
-async function beginPasteOperation(): Promise<{ sequence: PasteSequence | null; baselineSnapshot: ClipboardSnapshot }> {
-  const snapshot = await readClipboardSnapshot();
+async function beginPasteOperation(signal: AbortSignal): Promise<{ sequence: PasteSequence | null; baselineSnapshot: ClipboardSnapshot }> {
+  const snapshot = await readClipboardSnapshotWhileActive(signal);
+  signal.throwIfAborted();
   const currentSequence = activePasteSequence;
 
   if (currentSequence) {
@@ -324,7 +350,7 @@ function enqueuePasteCriticalSection<T>(operation: () => Promise<T>): Promise<T>
 }
 
 export async function pasteText(text: string, options: PasteTextOptions): Promise<ClipboardPasteOutcome> {
-  const { signal } = pasteLifetime;
+  const signal = options.signal ? AbortSignal.any([pasteLifetime.signal, options.signal]) : pasteLifetime.signal;
   const skip = (reason: PasteSkipReason, copied = false): ClipboardPasteOutcome =>
     ({ kind: 'skipped_unsafe', reason, copied });
   if (signal.aborted) return skip('superseded');
@@ -343,7 +369,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
     try {
       if (isSuperseded()) return skip('superseded');
       if (options.restoreClipboard) {
-        const operation = await beginPasteOperation();
+        const operation = await beginPasteOperation(signal);
         if (isSuperseded()) return skip('superseded');
         sequence = operation.sequence;
         baselineSnapshot = operation.baselineSnapshot;
@@ -355,14 +381,14 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       clipboardWrite = 'uncertain';
       await clipboard.writeText(text);
       clipboardWrite = 'written';
-      const sequenceRequest = !signal.aborted
-        ? pasteHelper.clipboardSequence().catch(() => null)
-        : null;
+      if (isSuperseded()) return skip('superseded');
+      const sequenceRequest = pasteHelper.clipboardSequence().catch(() => null);
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
       }
-      const writtenSnapshot = await readClipboardSnapshot();
+      const writtenSnapshot = await readClipboardSnapshotWhileActive(signal);
+      if (isSuperseded()) return skip('superseded');
       if (writtenSnapshot.text !== text) {
         if (sequence && activePasteSequence === sequence) {
           discardPasteSequence(sequence);
@@ -385,7 +411,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteSettleCompletedAt');
         if (isSuperseded()) return skip('superseded');
       }
-      const currentSnapshot = await readClipboardSnapshot();
+      const currentSnapshot = await readClipboardSnapshotWhileActive(signal);
       if (isSuperseded()) return skip('superseded');
       const stillOwnsClipboard = currentSnapshot.signature === clipboardOwnershipSignature;
       if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteOwnershipCheckedAt');
@@ -401,7 +427,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       const authorize: AuthorizePaste = async dispatch => {
         if (isSuperseded()) return;
-        const snapshot = await readClipboardSnapshot().catch(() => null);
+        const snapshot = await readClipboardSnapshotWhileActive(signal).catch(() => null);
         if (!snapshot || isSuperseded()) return;
         if (snapshot.signature !== clipboardOwnershipSignature) {
           if (sequence) discardPasteSequence(sequence);
@@ -410,7 +436,8 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         dispatchAttempted = true;
         return dispatch();
       };
-      const dispatched = await simulatePaste(target, clipboardSequence, options.perfTraceId, authorize);
+      const dispatched = await simulatePaste(target, clipboardSequence, options.perfTraceId, authorize, signal);
+      if (signal.aborted) return skip('superseded');
       if (dispatched) return { kind: 'pasted' };
       return skip(isSuperseded() ? 'superseded' : 'clipboard_changed');
     } catch (error) {
@@ -418,17 +445,19 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       if (error instanceof NativePasteAbortedError) {
         if (sequence) discardPasteSequence(sequence);
         if (error.code === PasteAbortCode.ClipboardChanged) return skip('clipboard_changed');
-        const currentSnapshot = await readClipboardSnapshot().catch(() => null);
+        const currentSnapshot = await readClipboardSnapshotWhileActive(signal).catch(() => null);
         if (isSuperseded()) return skip('superseded');
         return skip('foreground_changed', currentSnapshot?.signature === clipboardOwnershipSignature);
       }
       log.error('Could not complete clipboard paste');
       return { kind: 'failed', clipboardWrite, dispatch: dispatchAttempted ? 'uncertain' : 'not_attempted' };
     } finally {
-      if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
+      if (signal.aborted) {
+        if (sequence && activePasteSequence === sequence) discardPasteSequence(sequence);
+      } else if (!sequence && options.restoreClipboard && pasteGeneration === latestPasteGeneration) {
         sequence = activePasteSequence;
       }
-      if (sequence && activePasteSequence === sequence) {
+      if (!signal.aborted && sequence && activePasteSequence === sequence) {
         if (
           options.restoreClipboard &&
           pasteGeneration === latestPasteGeneration
