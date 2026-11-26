@@ -49,11 +49,17 @@ def source_file(root, pin):
         result = subprocess.run(
             ["curl.exe", "--disable", "--fail", "--silent", "--show-error", "--location",
              "--continue-at", "-", "--connect-timeout", "30", "--max-time", "700",
+             "--write-out", "%{http_code}",
              "--output", str(part), pin["url"]],
-            check=False,
+            check=False, stdout=subprocess.PIPE, text=True,
         )
-        if result.returncode == 0:
-            break
+        if result.returncode == 0 and part.is_file():
+            if digest(part) == pin["sha256"]:
+                break
+            part.unlink()
+        elif result.returncode in {33, 36} or result.stdout.strip() == "416":
+            # The server rejected the existing resume offset.
+            part.unlink(missing_ok=True)
     if not part.is_file() or digest(part) != pin["sha256"]:
         raise ValueError(f"Download incomplete or SHA-256 mismatch for {path.name}")
     part.replace(path)

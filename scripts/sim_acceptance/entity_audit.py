@@ -1,7 +1,7 @@
 """Audit the public entity fixture with Whisper English normalization.
 
-Gate scoring retains its original normalization. This audit stores only the
-short, public-corpus entity comparisons needed to explain differences.
+Gate scoring retains its original normalization. The uploaded audit stores
+only public-corpus entity IDs, hashes, and matching outcomes.
 """
 
 from __future__ import annotations
@@ -128,8 +128,12 @@ class EntityAudit:
     def observe(self, clip, hypothesis, scored):
         if hypothesis is None:
             return
+        comparison = analyze(clip, hypothesis, self.normalizer)
+        safe_fields = ("entity_index", "kind", "legacy_exact", "strict_exact", "classification")
+        comparison["cases"] = [{key: case[key] for key in safe_fields}
+                               for case in comparison["cases"]]
         self.snapshot["trials"].append({
             "id": clip["id"], "mode": clip["mode"], "output_sha256": scored["output_sha256"],
-            **analyze(clip, hypothesis, self.normalizer),
+            **comparison,
         })
         write_evidence(self.path, self.snapshot)

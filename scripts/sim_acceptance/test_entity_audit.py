@@ -1,10 +1,14 @@
 """Audit regressions for exact reference positions and English equivalences."""
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from whisper_normalization import EnglishTextNormalizer
 
-from scripts.sim_acceptance.entity_audit import analyze
+from scripts.sim_acceptance.entity_audit import EntityAudit, analyze
+from scripts.sim_acceptance.score import CANDIDATE, text_hash
 
 
 class EntityAuditTests(unittest.TestCase):
@@ -26,3 +30,19 @@ class EntityAuditTests(unittest.TestCase):
         self.assertEqual(result["entities_exact"], 0)
         self.assertEqual(result["cases"][0]["hypothesis_span"], "mary")
         self.assertEqual(result["cases"][0]["classification"], "c")
+
+    def test_uploaded_sidecar_uses_reference_ids_and_scores_without_hypothesis_text(self):
+        clip = {"id": "Q01", "mode": "quick", "reference": "Alice Jones arrived",
+                "entities": [[0, 2, "name-or-term"]]}
+        hypothesis = "Alice " + "uniquehypothesisspan " * 500 + "Jones arrived"
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit.json"
+            EntityAudit(path, "close-quiet", CANDIDATE).observe(
+                clip, hypothesis, {"output_sha256": text_hash(hypothesis)}
+            )
+            raw = path.read_text(encoding="utf-8")
+        self.assertNotIn("uniquehypothesisspan", raw)
+        trial, = json.loads(raw)["trials"]
+        self.assertEqual(trial["id"], "Q01")
+        self.assertEqual(trial["cases"][0]["entity_index"], 0)
+        self.assertEqual(trial["output_sha256"], text_hash(hypothesis))

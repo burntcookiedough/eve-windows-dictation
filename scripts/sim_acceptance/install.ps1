@@ -39,6 +39,7 @@ $pins = @{
     ExpectedManifestSha256 = $ManifestSha256
 }
 $candidate = Save-RetainedHistoryCandidate @pins
+$env:GH_TOKEN = $null
 if ($candidate.RunId -cne $RunId) { throw 'The retained artifact does not belong to the requested run.' }
 
 $install = Join-Path $root 'install'

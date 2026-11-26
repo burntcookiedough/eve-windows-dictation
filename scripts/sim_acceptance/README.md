@@ -43,12 +43,18 @@ server at real-time speed. This yields replay-only stop-to-final, accuracy and
 server resource observations. Editor insertion, clipboard, app-side timing
 and resources remain open on the fallback.
 
-The first final in a settled session is scored. Attempts that actually return
-empty or fail without text count as all deletions. Attempts whose output could
-not be observed remain unscored and are visible in the denominator. Percentiles
-use nearest rank with the sample count beside each estimate. RSS samples are
-working set of the owned app tree including its verified managed server PID.
-Idle CPU uses same-process-set interval deltas across two minutes.
+The first observed final is scored. Insertion, clipboard restoration and
+History are checked independently. Confirmed empty output counts as all
+deletions. The table reports scored and attempted totals and keeps a limit open
+when missing observations could change the verdict. Percentiles use nearest
+rank with the sample count beside each estimate. GPU timing proxies and Long
+transcript heuristics appear below the frozen gate table.
+
+RSS uses the owned app tree's working set, including the verified managed
+server PID. Sampling targets one second, permits at most 2.5 seconds between
+samples and validates each window boundary within two seconds. Sampler errors
+leave coverage unverified. Idle CPU uses same-process-set interval deltas
+across two minutes. Cancellation records the quit request and app exit path.
 
 ## Local headless CUDA
 
@@ -75,17 +81,20 @@ RTX 3060 Laptop and absence of a managed GPU pack.
 
 Use `score.py --output <report.md> <cpu/gpu evidence files>` to
 render the frozen gate table. Exit codes are 0 for all rows passed, 1 for at
-least one failure and 2 for open rows with no observed failure. The main
-evidence JSON contains sanitized observations. Keep audio, full references
+least one failure and 2 for open rows with no observed failure. To verify G2,
+supply `--lifecycle-run`, `--history-run`, `--history-evidence` pointing to
+the original History artifact ZIP, and `--history-metadata` pointing to the
+GitHub artifact API response. The scorer checks the ZIP digest and run linkage.
+The main evidence JSON contains sanitized observations. Keep audio, full references
 and hypotheses, History databases, model caches and raw diagnostics in scratch.
 
 ## Supplemental entity audit
 
 The opt-in `--entity-audit` replay output applies Whisper's English
 normalizer to both reference and output for WER and exact entity alignment.
-The full hosted matrix also collects this audit. Its separate sidecar holds
-scores, hashes and short public-corpus entity spans for the misses. Keep
-ordinary acceptance evidence under the frozen method. Review rare-name
+The full hosted matrix also collects this audit. Its uploaded sidecar holds
+scores, hashes, clip IDs and reference entity indexes. Compare any raw model
+spans in scratch. Ordinary acceptance uses the frozen normalization. Review rare-name
 spelling variants separately before calculating the supplementary
 genuine-error-only score.
 

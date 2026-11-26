@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import wave
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from itertools import pairwise
 from pathlib import Path
 
@@ -25,10 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.sim_acceptance.replay import (
     ProcessSamples,
     get_json,
+    idle_resources,
     run_replay,
     wait_health,
 )
 from scripts.sim_acceptance.score import (
+    CANCELLATION_FAILURE_PATHS,
     CANDIDATE,
     load_clips,
     text_hash,
@@ -54,8 +56,10 @@ CDP_SCRIPT = """(() => {
   return true;
 })()"""
 LISTENING = {"listening", "transcribing"}
+FIXTURE_ERRORS = (OSError, TimeoutError, RuntimeError, WebSocketException)
 FIXTURE_REASONS = {
-    "bundled-replay-server-exited", "cdp-command-error", "cdp-http-unreachable",
+    "bundled-replay-server-exited", "cancellation-force-stop-unverified",
+    "cdp-command-error", "cdp-http-unreachable",
     "cdp-websocket-unavailable", "desktop-command-timeout", "desktop-editor-exited",
     "desktop-editor-unavailable", "editor-foreground-unavailable", "editor-no-longer-foreground",
     "fake-track-did-not-end", "global-hotkey-unobserved", "installed-version-mismatch",
@@ -229,9 +233,45 @@ def candidate_settings(profile):
             write_evidence(defaults, settings)
 
 
+async def close_app(process, browser):
+    already_exited = process.poll() is not None
+    request_sent = False
+    try:
+        if browser is not None and not already_exited:
+            try:
+                await asyncio.wait_for(
+                    browser.send(json.dumps({"id": 1, "method": "Browser.close"})), timeout=3,
+                )
+                request_sent = True
+            except FIXTURE_ERRORS:
+                pass
+        try:
+            exit_code = await asyncio.to_thread(process.wait, 12)
+        except subprocess.TimeoutExpired:
+            path = "forced-after-timeout"
+            try:
+                await asyncio.to_thread(stop_owned_tree, process)
+            except (psutil.Error, OSError, subprocess.TimeoutExpired):
+                path = "force-stop-unverified"
+        else:
+            if already_exited:
+                path = "already-exited"
+            elif not request_sent:
+                path = "close-request-unobserved"
+            else:
+                path = "graceful" if exit_code == 0 else "nonzero-exit"
+        return {"exit_path": path, "close_request_sent": request_sent}
+    finally:
+        if browser is not None:
+            try:
+                await browser.close()
+            except FIXTURE_ERRORS:
+                pass
+
+
 @asynccontextmanager
 async def app_session(root, install, clip, *, trace=True, label=None, wait_for_model=True,
-                      offline_cache=None):
+                      offline_cache=None, exit_observation=None):
     profile = root / "profile" / "Eve"
     candidate_settings(profile)
     env = runtime_environment(root)
@@ -303,17 +343,9 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
                 )
             yield main, process, owner, stdout, stderr
     finally:
-        if browser is not None:
-            try:
-                await Cdp(browser).send("Browser.close")
-            except (OSError, TimeoutError, RuntimeError, ConnectionClosed):
-                pass
-            finally:
-                await browser.close()
-        try:
-            await asyncio.to_thread(process.wait, 12)
-        except subprocess.TimeoutExpired:
-            stop_owned_tree(process)
+        facts = await close_app(process, browser)
+        if exit_observation is not None:
+            exit_observation.update(facts)
 
 
 def read_perf(path):
@@ -362,21 +394,11 @@ async def overlay_observer(main, install):
         yield Cdp(ws)
 
 
-async def idle_resources(process):
-    sampler = ProcessSamples(process.pid)
-    collect = asyncio.create_task(sampler.collect())
-    try:
-        await asyncio.sleep(122)
-    finally:
-        collect.cancel()
-        await asyncio.gather(collect, return_exceptions=True)
-    return sampler.idle()
-
-
-async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_trace=True, audit=None):
+async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_trace=True, audit=None,
+                  server_pid=None):
     before = await history(main)
     if time_idle:
-        idle = await idle_resources(process)
+        idle = await idle_resources(process.pid, server_pid)
     else:
         idle = {}
     await desktop.send("reset")
@@ -400,10 +422,9 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
         phase = state["recording"]["state"]
         raise FixtureUnavailable(f"fake-capture-no-first-audio-{phase}") from error
     start = time.perf_counter()
-    sampler = ProcessSamples(process.pid)
-    collection = asyncio.create_task(sampler.collect()) if mode == "long" else None
+    sampler = ProcessSamples(process.pid, required_child=server_pid) if mode == "long" else None
     observed_stop = None
-    try:
+    async with sampler.watch() if sampler else nullcontext():
         await asyncio.sleep(clip["duration_s"])
         stop = await desktop.send("key", mode=mode)
 
@@ -418,36 +439,61 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             timed_out = True
         await asyncio.sleep(1)
         state = await main.eval("window.eveQaState")
-        final = state["finals"][0] if len(state["finals"]) == 1 else None
-        editor = await desktop.send("read", final=final)
-        after = await history(main)
-        keys = [stamp for key, stamp in editor["keys"] if key == mode]
+        finals = state["finals"]
+        final = finals[0] if finals else None
+        hypothesis = final if finals else None if timed_out else ""
+        gaps = {}
+        try:
+            editor = await desktop.send("read", final=final)
+        except FIXTURE_ERRORS as error:
+            editor = None
+            gaps["editor_fixture_gap"] = fixture_reason(error)
+        try:
+            after = await history(main)
+        except FIXTURE_ERRORS as error:
+            after = None
+            gaps["history_fixture_gap"] = fixture_reason(error)
+        keys = [stamp for key, stamp in editor["keys"] if key == mode] if editor else []
         if len(keys) == 2 and keys[0] >= trigger and keys[1] >= stop:
             observed_stop = keys[1]
         insertion_times = [
             stamp for stamp in editor["insertions"] if observed_stop is not None and stamp >= observed_stop
-        ]
-        insertion_ms = (insertion_times[0] - observed_stop) * 1000 if len(insertion_times) == 1 else None
-        history_restored = all(after.get(key) == value for key, value in before.items())
-        delta = {key: value for key, value in after.items() if key not in before}
-        history_correct = history_restored and list(delta.values()) == ([text_hash(final)] if final else [])
-        marks = next((row["main"] for row in reversed(read_perf(stdout))
-                      if ready and row["correlationId"] == ready["correlationId"]
-                      and row["status"] == "complete"), {})
+        ] if editor else []
+        insertion_matches = bool(editor and final and final == editor["text"])
+        insertion_ms = ((insertion_times[0] - observed_stop) * 1000
+                        if len(insertion_times) == 1 and insertion_matches else None)
+        history_facts = {"history_correct": None, "history_before_sha256": history_digest(before),
+                         "history_after_sha256": None}
+        if after is not None:
+            history_restored = all(after.get(key) == value for key, value in before.items())
+            delta = {key: value for key, value in after.items() if key not in before}
+            history_facts = {
+                "history_correct": history_restored and list(delta.values()) == ([text_hash(final)] if final else []),
+                "history_delta": len(delta), "history_count": len(after),
+                "history_before_sha256": history_digest(before), "history_after_sha256": history_digest(after),
+            }
+        delivery_facts = {
+            "insertion_count": len(editor["insertions"]), "insert_matches_final": insertion_matches,
+            "clipboard_restored": editor["clipboard_restored"],
+            "clipboard_matches_final": editor["clipboard_matches_final"],
+        } if editor else {"insertion_count": None}
+        marks, paste_diagnostics = {}, {}
+        try:
+            marks = next((row["main"] for row in reversed(read_perf(stdout))
+                          if ready and row["correlationId"] == ready["correlationId"]
+                          and row["status"] == "complete"), {})
+            paste_diagnostics = detect_paste_diagnostics(
+                stdout, stdout.with_name(stdout.name.replace(".out.log", ".err.log"))
+            )
+        except OSError as error:
+            gaps["paste_diagnostics_gap"] = fixture_reason(error)
         stop_mark, final_mark = marks.get("stopRequestedAt"), marks.get("finalReceivedAt")
         internal = final_mark - stop_mark if stop_mark is not None and final_mark is not None else None
         difference = insertion_ms - internal if insertion_ms is not None and internal is not None else None
-        hypothesis = editor["text"] or final or ""
         record = trial_record(
-            clip, hypothesis, output_observed=True,
-            failed=(timed_out or len(state["finals"]) != 1 or not history_correct
-                    or state["editorDuringSpeech"] > 0 or len(editor["insertions"]) != 1),
-            accuracy_source="editor" if editor["text"] else "packaged-final",
-            insertion_count=len(editor["insertions"]), insert_matches_final=final == editor["text"],
-            clipboard_restored=editor["clipboard_restored"], history_correct=history_correct,
-            clipboard_matches_final=editor["clipboard_matches_final"], delivery=state["delivery"],
-            history_delta=len(delta), history_count=len(after), final_count=len(state["finals"]),
-            history_before_sha256=history_digest(before), history_after_sha256=history_digest(after),
+            clip, hypothesis, output_observed=hypothesis is not None,
+            failed=timed_out or len(finals) != 1, accuracy_source="packaged-final",
+            delivery=state["delivery"], final_count=len(finals),
             live_partial_count=state["editorDuringSpeech"], stop_to_insert_ms=insertion_ms,
             main_stop_to_final_ms=internal, capture_elapsed_s=stop - trigger,
             observed_insert_overhead_ms=difference if difference is not None and difference >= 0 else None,
@@ -455,19 +501,14 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             editor_stop_key_observed=observed_stop is not None,
             paste_helper_request_observed=marks.get("pasteHelperRequestSentAt") is not None,
             paste_helper_response_observed=marks.get("pasteHelperResponseAt") is not None,
-            paste_diagnostics=detect_paste_diagnostics(
-                stdout, stdout.with_name(stdout.name.replace(".out.log", ".err.log"))
-            ),
+            paste_diagnostics=paste_diagnostics,
+            **gaps, **history_facts, **delivery_facts,
         )
         if audit is not None:
             audit.observe(clip, hypothesis, record)
-    finally:
-        if collection is not None:
-            collection.cancel()
-            await asyncio.gather(collection, return_exceptions=True)
-            sampler.sample()
-    if collection is not None and observed_stop is not None:
-        idle.update(sampler.long(start, observed_stop))
+        ended = time.perf_counter()
+    if sampler:
+        idle.update(sampler.long(start, observed_stop, ended))
     return record, idle
 
 
@@ -535,7 +576,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
 
     def delivered(record):
         return (not record["failed"] and record["insertion_count"] == record["final_count"] == 1
-                and record["insert_matches_final"] and record["clipboard_restored"])
+                and record["insert_matches_final"] and record["clipboard_restored"]
+                and record["history_correct"] and not record["live_partial_count"])
 
     async def microphone_scenario(label, clip, missing=False):
         async with app_session(root, install, clip, label=label) as (main, _, _, _, _):
@@ -544,10 +586,10 @@ async def robustness(root, install, desktop, quick, evidence, output):
                 await main.eval("window.murmurMain.updateSetting('selectedDeviceId','qa-unavailable-device')")
             try:
                 await desktop.send("reset")
-                await desktop.send("key", mode="quick")
+                started = await desktop.send("key", mode="quick")
                 await asyncio.sleep(5 if label == "silence" else .25)
-                if (await recording(main))["state"] in LISTENING:
-                    await desktop.send("key", mode="quick")
+                was_listening = (await recording(main))["state"] in LISTENING
+                stopped = await desktop.send("key", mode="quick") if was_listening else None
                 await poll(lambda: recording(main), lambda state: state["state"] == "idle", 25)
                 after = await history(main)
                 attempt = await desktop.send("read")
@@ -559,8 +601,12 @@ async def robustness(root, install, desktop, quick, evidence, output):
         ok = (before == after and not attempt["insertions"] and delivered(recovery)
               and recovery["history_before_sha256"] == history_digest(before)
               and state["recording"] is not None)
+        stop_seen = stopped is not None and any(key == "quick" and stamp >= stopped
+                                                for key, stamp in attempt["keys"])
         save(label, "PASS" if ok else "FAIL", fault_insertions=len(attempt["insertions"]),
-             recovery_insertions=recovery["insertion_count"], history_unchanged=before == after)
+             recovery_insertions=recovery["insertion_count"], history_unchanged=before == after,
+             listening_at_check=was_listening, stop_sent=stopped is not None, stop_key_observed=stop_seen,
+             stop_elapsed_ms=round((stopped - started) * 1000, 3) if stopped is not None else None)
 
     async def paste_safety(label):
         async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
@@ -597,7 +643,10 @@ async def robustness(root, install, desktop, quick, evidence, output):
         recovery = await recover(label)
         ok = history_ok and delivery_ok and delivered(recovery)
         save(label, "PASS" if ok else "FAIL", fault_insertions=len(attempt["insertions"]),
-             recovery_insertions=recovery["insertion_count"], old_history_preserved=kept)
+             recovery_insertions=recovery["insertion_count"], old_history_preserved=kept,
+             final_count=len(state["finals"]), history_delta_matches_final=bool(history_ok),
+             clipboard_matches_final=attempt["clipboard_matches_final"], delivery=state["delivery"],
+             recovery_delivered=bool(delivered(recovery)))
 
     async def end_fake_track():
         label = "mic-lost"
@@ -671,21 +720,27 @@ async def robustness(root, install, desktop, quick, evidence, output):
             async with app_session(root, install, quick, trace=trace, label=label) as session:
                 main, process, _, stdout, stderr = session
                 record, _ = await capture(main, process, desktop, stdout, quick, use_trace=trace)
-                editor = await desktop.send("read")
+                state = await main.eval("window.eveQaState")
                 health_logs = await main.eval("window.murmurMain.getServerLogs()")
                 logs = [stdout.read_text(encoding="utf-8", errors="replace"),
                         stderr.read_text(encoding="utf-8", errors="replace"),
                         json.dumps(health_logs, ensure_ascii=False)]
-                words = normalize_text(editor["text"]).split()
+                words = normalize_text(state["finals"][0] if state["finals"] else "").split()
                 anchors = {" ".join(words[index:index + 5]) for index in range(len(words) - 4)}
                 anchors.add(normalize_text(quick["reference"]))
                 hits = sum(anchor in normalize_text(log) for anchor in anchors for log in logs)
                 traced = any("B4_PERF" in log for log in logs)
                 observed = delivered(record) and len(words) >= 5
-                save(label, "OPEN" if not observed else "PASS" if hits == 0 and traced == trace else "FAIL",
+                status = "OPEN"
+                if hits:
+                    status = "FAIL"
+                elif observed:
+                    status = "PASS" if traced == trace else "FAIL"
+                save(label, status,
                      matches=hits, trace_observed=traced, canary_inserted=observed)
         except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
-            save(label, "OPEN", observation=type(error).__name__)
+            if not scenarios.get(label, {}).get("matches"):
+                save(label, "OPEN", observation=type(error).__name__)
 
     for mode, phase in ((mode, phase) for mode in ("quick", "long") for phase in ("capture", "final")):
         label = f"crash-{mode}-{phase}"
@@ -718,8 +773,11 @@ async def robustness(root, install, desktop, quick, evidence, output):
 
     for phase in ("capture", "final"):
         label = f"cancel-{phase}"
+        exit_facts = {}
+        injected = False
         try:
-            async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
+            async with app_session(root, install, quick, label=label,
+                                   exit_observation=exit_facts) as (main, _, _, _, _):
                 before = await history(main)
                 await desktop.send("reset")
                 await desktop.send("key", mode="quick")
@@ -730,14 +788,24 @@ async def robustness(root, install, desktop, quick, evidence, output):
                     await poll(lambda: recording(main), lambda state: state["state"] == "processing", 3)
                 # Leaving the context requests graceful Browser.close, exercising
                 # Eve's cancellation/quit disposition through relaunch.
+                injected = True
+            if exit_facts["exit_path"] == "force-stop-unverified":
+                raise FixtureUnavailable("cancellation-force-stop-unverified")
             fault = await desktop.send("read")
             recovery = await recover(label)
             kept = recovery["history_before_sha256"] == history_digest(before)
-            save(label, "PASS" if kept and not fault["insertions"] and delivered(recovery) else "FAIL",
+            ok = kept and not fault["insertions"] and delivered(recovery)
+            status = "OPEN"
+            if exit_facts.get("close_request_sent"):
+                status = "PASS" if ok and exit_facts.get("exit_path") == "graceful" else "FAIL"
+            save(label, status,
                  history_before=len(before), fault_insertions=len(fault["insertions"]),
-                 recovery_insertions=recovery["insertion_count"], settled_history_preserved=kept)
-        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
-            save(label, "OPEN", observation=type(error).__name__)
+                 recovery_insertions=recovery["insertion_count"], settled_history_preserved=kept,
+                 cancellation_phase_reached=injected, **exit_facts)
+        except FIXTURE_ERRORS as error:
+            failed_exit = exit_facts.get("exit_path") in CANCELLATION_FAILURE_PATHS
+            status = "FAIL" if injected and exit_facts.get("close_request_sent") and failed_exit else "OPEN"
+            save(label, status, observation=fixture_reason(error), cancellation_phase_reached=injected, **exit_facts)
 
     for label in ("socket-abort", "health-reload", "model-unavailable"):
         try:
@@ -792,24 +860,31 @@ async def hosted_replay(root, install, clips, evidence, output, audit):
     })
     evidence["method"] = "retained-cpu-replay"
     write_evidence(output, evidence)
-    process = start_process([str(server / ".runtime/python.exe"), str(server / "src/main.py")],
-                            server, env, root / "replay.out.log", root / "replay.err.log")
+    process = None
     try:
-        async def replay_owner():
-            exit_code = process.poll()
-            if exit_code is not None:
-                evidence["replay_startup_exit_code"] = exit_code
-                write_evidence(output, evidence)
-                raise FixtureUnavailable("bundled-replay-server-exited")
-            return json.loads(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
+        try:
+            process = start_process([str(server / ".runtime/python.exe"), str(server / "src/main.py")],
+                                    server, env, root / "replay.out.log", root / "replay.err.log")
 
-        owner = await poll(replay_owner, bool, 30)
-        if owner["pid"] != process.pid:
-            raise FixtureUnavailable("replay-server-pid-mismatch")
-        await wait_health(owner["port"], "cpu", MODEL, 720)
+            async def replay_owner():
+                exit_code = process.poll()
+                if exit_code is not None:
+                    evidence["replay_startup_exit_code"] = exit_code
+                    raise FixtureUnavailable("bundled-replay-server-exited")
+                return json.loads(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
+
+            owner = await poll(replay_owner, bool, 30)
+            if owner["pid"] != process.pid:
+                raise FixtureUnavailable("replay-server-pid-mismatch")
+            await wait_health(owner["port"], "cpu", MODEL, 720)
+        except FIXTURE_ERRORS as error:
+            evidence["replay_startup_gap"] = fixture_reason(error)
+            write_evidence(output, evidence)
+            return
         await run_replay(owner["port"], owner["pid"], clips, evidence, output, audit)
     finally:
-        stop_owned_tree(process)
+        if process is not None:
+            stop_owned_tree(process)
 
 
 async def observe_warmup(root, install, desktop, clip, evidence, output, label, control_key):
@@ -828,12 +903,12 @@ async def observe_warmup(root, install, desktop, clip, evidence, output, label, 
 
 
 def validate_warmup_capture(record):
-    if record["final_count"] != 1 or record["empty"] or not record["history_correct"]:
+    if record["final_count"] != 1 or record.get("empty") is not False or not record["history_correct"]:
         raise FixtureUnavailable("warmup-packaged-capture-unavailable")
 
 
 def smoke_delivery_issue(record, native_control):
-    if record["failed"] or not record["insert_matches_final"]:
+    if record["failed"] or record.get("insertion_count") != 1 or not record.get("insert_matches_final"):
         if not native_control:
             return "warmup-native-editor-control-unobserved"
         if record["delivery"] == "paste_skipped" and not record["paste_helper_request_observed"]:
@@ -904,7 +979,7 @@ async def run(args):
                     issue = smoke_delivery_issue(retry, evidence[retry_control])
                 if issue is not None:
                     raise FixtureUnavailable(issue)
-            if interrupted_bytes and not warmup["failed"]:
+            if interrupted_bytes and not warmup["failed"] and smoke_delivery_issue(warmup, True) is None:
                 evidence["robustness"]["tls-retry"] = {
                     "status": "PASS",
                     "method": "process interrupted during HTTPS model preparation",
@@ -912,7 +987,7 @@ async def run(args):
                     "recovery_insertions": warmup["insertion_count"],
                 }
                 write_evidence(args.output, evidence)
-        except (FixtureUnavailable, TimeoutError, ConnectionClosed) as error:
+        except FIXTURE_ERRORS as error:
             reason = fixture_reason(error)
             evidence["app_fixture_gap"] = reason
             write_evidence(args.output, evidence)
@@ -925,20 +1000,22 @@ async def run(args):
             return
         for clip in clips:
             try:
-                async with app_session(root, install, clip) as (main, process, _, log, _):
+                async with app_session(root, install, clip) as (main, process, owner, log, _):
                     trial, resources = await capture(main, process, desktop, log, clip,
-                                                     time_idle=clip["mode"] == "long", audit=audit)
+                                                     time_idle=clip["mode"] == "long", audit=audit,
+                                                     server_pid=owner["pid"])
                     evidence["resources"].update(resources)
-            except (FixtureUnavailable, TimeoutError, ConnectionClosed) as error:
+            except FIXTURE_ERRORS as error:
                 reason = fixture_reason(error)
                 print(f"{args.config} {clip['id']}: fixture unavailable [{reason}]", flush=True)
-                trial = trial_record(clip, None, output_observed=False, failed=True, fixture_gap=reason)
+                trial = trial_record(clip, None, output_observed=False, fixture_gap=reason)
             evidence["trials"].append(trial)
             write_evidence(args.output, evidence)
             print(f"{args.config} {clip['id']}: observed={trial['output_observed']}", flush=True)
         if args.config == "close-quiet":
             observed = [evidence["warmup"], *evidence["trials"]]
-            complete = all("history_before_sha256" in row for row in observed)
+            complete = all(row.get("history_before_sha256") and row.get("history_after_sha256")
+                           for row in observed)
             if complete:
                 contiguous = all(before["history_after_sha256"] == after["history_before_sha256"]
                                  for before, after in pairwise(observed))
