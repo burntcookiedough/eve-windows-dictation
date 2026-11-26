@@ -44,6 +44,7 @@ class Desktop:
         self.user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
         self.user32.GetAncestor.restype = wintypes.HWND
         self.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        self.user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
         self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.root = tk.Tk()
         self.root.withdraw()
@@ -86,6 +87,17 @@ class Desktop:
         self.editor.focus_force()
         self.user32.SetForegroundWindow(window)
         self.root.update()
+        if self.user32.GetForegroundWindow() != window and window:
+            # The desktop may refuse a programmatic foreground change. Click
+            # inside the topmost owned editor and verify the resulting HWND.
+            x, y = self.editor.winfo_rootx() + 24, self.editor.winfo_rooty() + 24
+            click = (Input * 2)(
+                Input(0, InputData(mouse=MouseInput(0, 0, 0, 2, 0, 0))),
+                Input(0, InputData(mouse=MouseInput(0, 0, 0, 4, 0, 0))),
+            )
+            if self.user32.SetCursorPos(x, y):
+                self.user32.SendInput(2, click, ctypes.sizeof(Input))
+                self.root.update()
         self.window.attributes("-topmost", False)
         if self.user32.GetForegroundWindow() != window:
             raise RuntimeError("editor-foreground-unavailable")

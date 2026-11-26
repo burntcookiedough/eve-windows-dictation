@@ -215,6 +215,7 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
         async with connect(cdp_socket(target, cdp_port, "page"), close_timeout=2) as ws:
             main = Cdp(ws)
             main.port = cdp_port
+            await poll(lambda: main.eval("typeof window.murmurMain?.getAppVersion === 'function'"), bool, 15)
             version = await main.eval("window.murmurMain.getAppVersion()")
             if version != "0.9.0-beta.1":
                 raise FixtureUnavailable("installed-version-mismatch")
