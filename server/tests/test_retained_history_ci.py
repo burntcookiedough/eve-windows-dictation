@@ -93,6 +93,7 @@ def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (scripts / 'retained-history-probe.mjs').write_text(
+        'if (!process.argv.includes("--expected-version=0.9.0-beta.1")) process.exit(1);\n'
         'console.error("benign warning");\n'
         'console.log(JSON.stringify({status:"passed",closeRequested:true}));\n',
         encoding='utf-8',
@@ -102,7 +103,7 @@ $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 $script:RepoRoot = {ps_literal(tmp_path.as_posix())}
 function Write-Step {{ param($Message) }}
-$result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture
+$result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture -ExpectedVersion '0.9.0-beta.1'
 if ($result.status -ne 'passed') {{ throw 'Probe result lost' }}
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
@@ -641,6 +642,7 @@ def test_real_observer_checks_history_and_appearance_persistence(phase, appearan
     settings = {'serverAutoStart': False, 'startMinimized': False}
     if appearance is not None:
         settings['appearance'] = appearance
+    version = '0.9.0-beta.1' if phase.startswith('candidate-') else '0.8.2-alpha.5'
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
 import assert from 'node:assert/strict';
@@ -659,10 +661,10 @@ const document={{
    if(s!=={json.dumps('[data-history-entry] .entry-text' if phase.startswith('candidate-') else 'button[aria-expanded] > p:first-of-type')})return [];
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
-const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.9" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
+const window={{murmurMain:{{getAppVersion:()=> '{version}',
  getSettings:()=>({json.dumps(settings)}),getServerStatus:()=>({{status:'idle'}}),
  getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
-const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected,'{version}');
 if ({json.dumps(rejection)}) {{
  await assert.rejects(observe,new RegExp({json.dumps(rejection)}));
 }} else {{
@@ -675,7 +677,8 @@ if ({json.dumps(rejection)}) {{
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_upgrade_observer_uses_search_control_and_requires_seeded_appearance():
+@pytest.mark.parametrize('version', ['0.9.0-beta.1', '0.8.2-alpha.9'])
+def test_upgrade_observer_uses_search_control_and_requires_seeded_appearance(version):
     """Exercise the actual observer against DOM input events and IPC mutations."""
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
@@ -686,7 +689,7 @@ const initial=[{{id:'fixture-hist-003',timestamp:3,text:'gamma baseline'}},
  {{id:'fixture-hist-002-delete',timestamp:2,text:'beta temporary'}},
  {{id:'fixture-hist-001',timestamp:1,text:'alpha baseline'}}];
 const expected=initial.map(r=>({{id:r.id,timestamp:r.timestamp,textHash:sha256(r.text)}}));
-async function exercise(appearance, filterRows=true) {{
+async function exercise(appearance, filterRows=true, installedVersion='{version}') {{
  let rows=[...initial], navigated=false, searched=false;
  const settings={{serverAutoStart:false,startMinimized:false,appearance}};
  const input={{value:'',dispatchEvent(event){{assert.equal(event.type,'input');assert.ok(event.bubbles);searched=true;}}}};
@@ -695,19 +698,23 @@ async function exercise(appearance, filterRows=true) {{
    querySelectorAll(s){{if(s!=='[data-history-entry] .entry-text')return [];
     return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
- const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.9',getSettings:()=>({{...settings}}),
+ const window={{murmurMain:{{getAppVersion:()=> installedVersion,getSettings:()=>({{...settings}}),
   getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
    const selected=rows.filter(r=>!filters?.text||r.text.includes(filters.text));
    return {{entries:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length}};}},
   updateSetting:(key,value)=>{{settings[key]=value;}},deleteHistoryEntry:id=>{{rows=rows.filter(r=>r.id!==id);}}}}}};
  const session={{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document,Event}}))}};
- const result=await observeHistory(session,'candidate-upgrade-read-mutate',expected);
+ const result=await observeHistory(session,'candidate-upgrade-read-mutate',expected,'{version}');
  assert.ok(searched);assert.equal(input.value,'baseline');assert.ok(result.searchControlVerified);
+ assert.equal(result.version,'{version}');
  assert.equal(settings.appearance,'light');assert.equal(rows.length,2);
 }}
 await exercise('dark');
 await assert.rejects(exercise('light'),/Seeded appearance was not read/);
-await assert.rejects(exercise('dark',false),/Packaged app observation timed out/);
+await assert.rejects(exercise('dark',true,'0.8.2-alpha.5'),/Installed app version did not match the verified release/);
+if ('{version}' === '0.9.0-beta.1') {{
+ await assert.rejects(exercise('dark',false),/Packaged app observation timed out/);
+}}
 """
     result = subprocess.run(['node', '--input-type=module', '-e', code],
                             capture_output=True, text=True, timeout=30)
@@ -743,7 +750,7 @@ const document={{
 const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
  getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'dark'}}),
  getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
-const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[]);
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[],'0.8.2-alpha.5');
 if({json.dumps(unexpected_transcript)}){{await assert.rejects(observe,/Packaged app observation timed out/);}}
 else{{const result=await observe();assert.equal(result.renderedCount,0);assert.equal(result.settingsMounted,false);}}
 assert.ok(navigated);

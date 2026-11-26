@@ -656,7 +656,8 @@ function Invoke-RetainedHistoryProbe {
         [Parameter(Mandatory)][int]$CdpPort,
         [Parameter(Mandatory)][string]$Phase,
         [Parameter(Mandatory)][string]$InstallDir,
-        [Parameter(Mandatory)][string]$ExpectationsPath
+        [Parameter(Mandatory)][string]$ExpectationsPath,
+        [Parameter(Mandatory)][string]$ExpectedVersion
     )
 
     $probeScript = Join-Path $script:RepoRoot 'scripts/retained-history-probe.mjs'
@@ -669,7 +670,8 @@ function Invoke-RetainedHistoryProbe {
         "--port=$CdpPort",
         "--phase=$Phase",
         "--install-dir=$InstallDir",
-        "--expectations=$ExpectationsPath"
+        "--expectations=$ExpectationsPath",
+        "--expected-version=$ExpectedVersion"
     )
 
     $output = & node @arguments
@@ -699,10 +701,12 @@ function Observe-RetainedHistoryLaunch {
         $CdpPort = Get-EphemeralLoopbackPort
     }
 
+    $expectedVersion = if ($Phase.StartsWith('candidate-')) { $script:CandidateVersion } else { $script:BaselineVersion }
     $procInfo = Launch-AppWithCdp -InstallDir $InstallDir -UserDataDir $UserDataDir -CdpPort $CdpPort
     $evidence = $null
     try {
-        $evidence = Invoke-RetainedHistoryProbe -CdpPort $CdpPort -Phase $Phase -InstallDir $InstallDir -ExpectationsPath $ExpectationsPath
+        $evidence = Invoke-RetainedHistoryProbe -CdpPort $CdpPort -Phase $Phase -InstallDir $InstallDir `
+            -ExpectationsPath $ExpectationsPath -ExpectedVersion $expectedVersion
         Wait-ForOwnedProcessExit -ProcInfo $procInfo -TimeoutSeconds 30
     } catch {
         Stop-OwnedHistoryProcess
