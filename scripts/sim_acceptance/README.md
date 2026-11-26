@@ -100,9 +100,22 @@ RTX 3060 Laptop and absence of a managed GPU pack.
 
 `python scripts/sim_acceptance/replay.py --source <candidate-worktree> --pid-file <scratch-pid-file> --manifest <corpus-manifest> --output <gpu-evidence.json>`
 
+## Offline scoring
+
 Use `score.py --output <report.md> <cpu/gpu evidence files>` to
-render the frozen gate table. Exit codes are 0 for all rows passed, 1 for at
-least one failure and 2 for open rows with no observed failure. To verify G2,
+render the frozen gate table for the original candidate. For a new candidate,
+pass the same four pins you supplied to the hosted dispatch. Every evidence
+file must match the full tuple.
+
+```powershell
+python scripts/sim_acceptance/score.py --output acceptance.md `
+  --candidate '<lifecycle run ID>' '<artifact ID>' '<commit SHA>' '<manifest SHA-256>' `
+  .\far-quiet\evidence.json .\far-moderate\evidence.json `
+  .\close-moderate\evidence.json .\close-quiet\evidence.json
+```
+
+Exit codes are 0 for all rows passed, 1 for at least one failure and 2 for
+open rows with no observed failure. To verify G2,
 supply `--lifecycle-run`, `--history-run`, `--history-evidence` pointing to
 the original History artifact ZIP, and `--history-metadata` pointing to the
 GitHub artifact API response. The scorer checks the ZIP digest and run linkage.
