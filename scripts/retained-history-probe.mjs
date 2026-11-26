@@ -104,8 +104,11 @@ export async function observeHistory(session, phase, expected, expectedVersion) 
   const settings = await session.evaluate('window.murmurMain.getSettings()');
   assert.equal(settings.serverAutoStart, false, 'Server auto-start must stay disabled');
   assert.equal(settings.startMinimized, false);
-  const server = await session.evaluate('window.murmurMain.getServerStatus()');
-  assert.ok(!server.pid && !server.port && ['idle','stopped'].includes(server.status), 'Unexpected backend process');
+  // Backend detection runs after the overlay loads. Quitting during idle can abort startup.
+  await waitFor(() => session.evaluate('window.murmurMain.getServerStatus()'), server => {
+    assert.ok(!server.pid && !server.port && ['idle', 'stopped'].includes(server.status), 'Unexpected backend process');
+    return server.status === 'stopped';
+  });
   const remaining = expected.filter(row => row.id !== 'fixture-hist-002-delete');
   const rows = phase === 'candidate-relaunch-verify' || phase === 'baseline-rollback-read' ? remaining : expected;
   const actual = assertHistoryResponse(await session.evaluate('window.murmurMain.getHistoryEntries(0,50)'), rows);

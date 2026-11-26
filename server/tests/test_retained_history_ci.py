@@ -615,6 +615,68 @@ assert.throws(()=>assertHistoryResponse({{entries:[row],hasMore:true}},expected)
     assert res.returncode == 0, res.stdout + res.stderr
 
 
+def test_rollback_probe_waits_for_app_startup_before_browser_close(tmp_path):
+    probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
+    target = (tmp_path / 'resources/app.asar/dist/renderer/app/index.html').as_uri()
+    code = f"""
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {{runProbePhase, sha256}} from '{probe}';
+
+const rows = [
+  {{id:'fixture-hist-003',timestamp:3,text:'fictional third'}},
+  {{id:'fixture-hist-002-delete',timestamp:2,text:'fictional deleted'}},
+  {{id:'fixture-hist-001',timestamp:1,text:'fictional first'}},
+];
+const records = rows.map(row => ({{id:row.id,timestamp:row.timestamp,textHash:sha256(row.text)}}));
+const remaining = [rows[0], rows[2]];
+let statusReads = 0;
+let closeRequests = 0;
+const window = {{murmurMain:{{
+  getAppVersion: () => '0.8.2-alpha.5',
+  getSettings: () => ({{serverAutoStart:false,startMinimized:false}}),
+  getServerStatus: () => ({{status: ++statusReads === 1 ? 'idle' : 'stopped'}}),
+  getHistoryEntries: (offset,limit) => ({{entries:remaining.slice(offset,offset+limit),hasMore:false}}),
+}}}};
+let navigated = false;
+const document = {{
+  querySelector: selector => selector === 'button[data-view="history"]' ? {{click() {{navigated = true;}}}} :
+    selector === 'input[type="text"][aria-label="Search transcriptions"]' && navigated ? {{}} : null,
+  querySelectorAll: () => remaining.map(row => ({{textContent:row.text, closest:()=>null,
+    getBoundingClientRect:()=>({{width:20,height:10}})}})),
+}};
+
+const base = 'ws://127.0.0.1:9222/devtools/';
+globalThis.fetch = async url => ({{ok:true, json:async () => url.endsWith('/version') ?
+  {{webSocketDebuggerUrl:base+'browser/fixture'}} :
+  [{{type:'page',url:{json.dumps(target)},webSocketDebuggerUrl:base+'page/fixture'}}]}});
+globalThis.WebSocket = class extends EventTarget {{
+  constructor() {{super(); queueMicrotask(() => this.dispatchEvent(new Event('open')));}}
+  send(data) {{
+    const {{id,method,params}} = JSON.parse(data);
+    let reply;
+    if (method === 'Browser.close') {{
+      closeRequests++;
+      reply = statusReads >= 2 ? {{result:{{}}}} : {{error:{{message:'Browser.close raced app startup'}}}};
+    }} else {{
+      assert.equal(method, 'Runtime.evaluate');
+      reply = {{result:{{result:{{value:vm.runInNewContext(params.expression, {{window,document}})}}}}}};
+    }}
+    queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', {{data:JSON.stringify({{id,...reply}})}})));
+  }}
+  close() {{this.dispatchEvent(new Event('close'));}}
+}};
+
+const result = await runProbePhase({{port:9222,phase:'baseline-rollback-read',
+  installDir:{json.dumps(str(tmp_path))},expectations:{{records}},expectedVersion:'0.8.2-alpha.5'}});
+assert.equal(closeRequests,1);
+assert.equal(result.closeRequested,true);
+assert.deepEqual(result.observations.records,[records[0],records[2]]);
+"""
+    res = subprocess.run(['node', '--input-type=module', '-e', code], capture_output=True, text=True, timeout=20)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
 @pytest.mark.parametrize('mode', ['success', 'verification-failure', 'settings-failure', 'sentinels-failure', 'baseline-initialize', 'baseline-read',
     'candidate-upgrade-read-mutate', 'candidate-relaunch-verify', 'baseline-rollback-read', 'cleanup-failure'])
 def test_real_history_sequence_never_passes_failed_observation(tmp_path, mode):
@@ -662,7 +724,7 @@ const document={{
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
 const window={{murmurMain:{{getAppVersion:()=> '{version}',
- getSettings:()=>({json.dumps(settings)}),getServerStatus:()=>({{status:'idle'}}),
+ getSettings:()=>({json.dumps(settings)}),getServerStatus:()=>({{status:'stopped'}}),
  getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
 const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected,'{version}');
 if ({json.dumps(rejection)}) {{
@@ -699,7 +761,7 @@ async function exercise(appearance, filterRows=true, installedVersion='{version}
     return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
  const window={{murmurMain:{{getAppVersion:()=> installedVersion,getSettings:()=>({{...settings}}),
-  getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
+  getServerStatus:()=>({{status:'stopped'}}),getHistoryEntries:(offset,limit,filters)=>{{
    const selected=rows.filter(r=>!filters?.text||r.text.includes(filters.text));
    return {{entries:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length}};}},
   updateSetting:(key,value)=>{{settings[key]=value;}},deleteHistoryEntry:id=>{{rows=rows.filter(r=>r.id!==id);}}}}}};
@@ -749,7 +811,7 @@ const document={{
 }};
 const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
  getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'dark'}}),
- getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
+ getServerStatus:()=>({{status:'stopped'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
 const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[],'0.8.2-alpha.5');
 if({json.dumps(unexpected_transcript)}){{await assert.rejects(observe,/Packaged app observation timed out/);}}
 else{{const result=await observe();assert.equal(result.renderedCount,0);assert.equal(result.settingsMounted,false);}}
