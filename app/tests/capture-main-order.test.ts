@@ -5,6 +5,69 @@ import ts from 'typescript';
 import { CaptureSession } from '../src/main/services/capture-session';
 import { IPC_CHANNELS } from '../src/shared/constants';
 
+for (const [testName, startupAutoPaste, warmupFails] of [
+  ['cold startup warms before registering the first hotkey', true, false],
+  ['startup registers hotkeys when helper warm-up fails', true, true],
+  ['enabling auto-paste after startup warms the helper', false, false],
+] as const) {
+  test(testName, async () => {
+    const source = ts.createSourceFile('index.ts', readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const start = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'startApplication');
+    const script = ts.transpileModule(start!.getText(source), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const warm = Promise.withResolvers<void>();
+    const server = Promise.withResolvers<void>();
+    const serverStarted = Promise.withResolvers<void>();
+    const events: string[] = [];
+    let autoPaste = startupAutoPaste;
+    let changeAutoPaste: ((value: boolean) => void) | undefined;
+    const context = {
+      log: { info: (message: string) => events.push(message), debug: () => {} },
+      get autoPasteEnabled() { return autoPaste; },
+      getSetting: (key: string) => key === 'autoPaste' && autoPaste,
+      onAutoPasteChange: (callback: typeof changeAutoPaste) => { changeAutoPaste = callback; },
+      pasteHelper: { warmUp: () => { events.push('warmup'); return warm.promise; } },
+      historyService: null, gpuPackManager: null, serverManager: null, mainWindow: null, overlayWindow: null,
+      HistoryService: class { initialize() {} },
+      createGpuPackManager: () => ({}), resolveGpuPackStorageRoot: () => '',
+      PINNED_GPU_PACK_DESCRIPTOR: null, GPU_PACK_CTRANSLATE2_BUILD_ID: null,
+      ServerManager: class {
+        setMainWindow() {}
+        detectExisting() { serverStarted.resolve(); return server.promise; }
+        getState() { return { status: 'running' }; }
+      },
+      setupIpcHandlers: () => {}, setupAudioHandler: () => {}, setupMainWindowHandlers: () => {},
+      setupDisplayChangeHandlers: () => {}, setupTray: () => {}, secondInstanceShowRequested: false,
+      createMainWindow: async () => ({}), createOverlayWindow: async () => ({}),
+      setupHotkeyService: () => events.push('hotkeys'),
+      app: { isPackaged: false, on: () => {} },
+      process: { platform: 'win32', arch: 'x64', argv: [], env: {} },
+    };
+    const startup = runInNewContext(script + '\nstartApplication();', context);
+    await serverStarted.promise;
+    if (startupAutoPaste) {
+      expect(events).toContain('warmup');
+      expect(events).not.toContain('hotkeys');
+      server.resolve();
+      await Promise.resolve();
+      expect(events).not.toContain('Eve ready');
+      if (warmupFails) warm.reject(new Error('Simulated helper startup failure'));
+      else warm.resolve();
+      await startup;
+      expect(events.slice(-2)).toEqual(['hotkeys', 'Eve ready']);
+    } else {
+      server.resolve();
+      await startup;
+      expect(events).not.toContain('warmup');
+      autoPaste = true;
+      changeAutoPaste?.(autoPaste);
+      expect(events).toContain('warmup');
+      warm.resolve();
+    }
+  });
+}
+
 test('recording snapshots auto-paste and captures the foreground only when enabled at start', async () => {
   const source = ts.createSourceFile('index.ts', readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
   const start = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'startRecording');
@@ -47,7 +110,11 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
         return { autoPaste, autoCopy, hotwordsEnabled: false };
       },
       getSetting: () => false,
-      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return failure === 'no_outputs' ? null : 12345; },
+      pasteHelper: { foreground: async () => {
+        captures++;
+        events.push('foreground');
+        return failure === 'no_outputs' ? { reason: 'helper_absent' } : { handle: 12345 };
+      } },
       updateConnectionState: () => {}, sendOverlayRecordingState: () => {},
       updateRecordingState: () => {}, scheduleOverlayDismiss: () => {},
       updateTranscription: (payload: typeof context.latestTranscription) => { context.latestTranscription = payload; },
@@ -63,8 +130,8 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       },
       CaptureSession: class { canCommit = true; close() {} },
       processFinalTranscription: async (_frame: unknown, settings: { autoPaste: boolean; autoCopy: boolean },
-        _history: unknown, _mode: unknown, target: number | null | Promise<number | null>) => {
-        output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target: await target };
+        _history: unknown, _mode: unknown, target: Promise<{ handle?: number }> | null) => {
+        output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target: (await target)?.handle ?? null };
         if (failure === 'no_outputs') {
           return { delivery: { kind: 'skipped_unsafe', reason: 'no_target', copied: false }, entryWithGroup: null, historyFailed: true };
         }
@@ -161,6 +228,24 @@ test('hotkeys signal Busy during finalization and retain startup timestamps when
   context.isRecording = true;
   runInNewContext(script + '\ntoggleLongRecording(50);', context);
   expect(events).toEqual([['queued', 50], 'stopped']);
+});
+
+test('a queued Long dictation uses the target sampled at its own hotkey', async () => {
+  const source = ts.createSourceFile('index.ts', readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+  const queue = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'queueLongRecordingAfterStop');
+  const script = ts.transpileModule(queue!.getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  let focused = 12345;
+  const context = {
+    autoPasteEnabled: true,
+    startLongAfterStop: null as { hotkeyAt: number; pasteTarget: Promise<{ handle: number }> } | null,
+    pasteHelper: { foreground: async () => ({ handle: focused }) },
+  };
+  runInNewContext(script + '\nqueueLongRecordingAfterStop(50);', context);
+  focused = 23456;
+  expect(context.startLongAfterStop?.hotkeyAt).toBe(50);
+  expect(await context.startLongAfterStop?.pasteTarget).toEqual({ handle: 12345 });
 });
 
 for (const outcome of ['drained', 'failed', 'superseded'] as const) {

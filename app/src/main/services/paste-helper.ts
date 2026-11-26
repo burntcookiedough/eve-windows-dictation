@@ -1,17 +1,19 @@
 import { spawn } from 'child_process';
 import type { ChildProcessByStdio } from 'child_process';
 import type { Readable, Writable } from 'node:stream';
-import { buildPersistentPasteScript, PasteAbortCode } from './paste-helper-script.js';
-import { perfTraceManager } from './perf-trace.js';
+import { buildForegroundSnapshotScript, buildPersistentPasteScript, PasteAbortCode } from './paste-helper-script.js';
+import { perfTraceManager, type ForegroundSnapshotFailure } from './perf-trace.js';
 
 const SNAPSHOT_TIMEOUT_MS = 100;
 const PASTE_TIMEOUT_MS = 5000;
 const MAX_REPLY_LENGTH = 4096;
 
 type RequestType = 'ready' | 'foreground' | 'sequence' | 'paste' | 'commit' | 'discard';
+type HelperChannel = 'paste' | 'snapshot';
 type NativePasteAbortCode = typeof PasteAbortCode[keyof typeof PasteAbortCode];
 
 export type AuthorizePaste = (dispatch: () => void | Promise<void>) => Promise<void>;
+export type ForegroundSnapshot = { handle: number } | { reason: ForegroundSnapshotFailure };
 
 interface PendingRequest {
   type: Exclude<RequestType, 'discard'> | 'authorizing';
@@ -24,10 +26,12 @@ interface PendingRequest {
 }
 
 interface HelperConnection {
+  channel: HelperChannel;
   child: ChildProcessByStdio<Writable, Readable, null>;
   requests: Map<number, PendingRequest>;
   output: string;
   ready: boolean;
+  warming?: Promise<number | null>;
 }
 
 interface PasteRequest {
@@ -57,34 +61,55 @@ export class NativePasteAbortedError extends Error {
 }
 
 export class PasteHelperUnavailableError extends Error {
-  constructor(message: string, readonly allowFallback: boolean) {
+  constructor(message: string, readonly allowFallback: boolean, readonly timedOut = false) {
     super(message);
   }
 }
 
 export class PersistentPasteHelper {
-  private connection: HelperConnection | null = null;
+  private readonly connections: Partial<Record<HelperChannel, HelperConnection>> = {};
   private nextId = 0;
   private stopped = false;
 
   async warmUp(): Promise<void> {
-    await this.request('ready', PASTE_TIMEOUT_MS);
+    const results = await Promise.allSettled([this.warmChannel('paste'), this.warmChannel('snapshot')]);
+    if (results.some(result => result.status === 'rejected')) throw new Error('Could not warm paste helpers');
   }
 
-  async foreground(): Promise<number | null> {
-    // A request queued behind compilation or another operation could sample a
-    // window focused after recording began. Warm a cold helper for next time.
-    if (!this.connection) {
-      if (!this.stopped) void this.warmUp().catch(() => {});
-      return null;
+  private async warmChannel(channel: HelperChannel): Promise<void> {
+    if (this.stopped) return;
+    const connection = this.connections[channel] ?? this.start(channel);
+    if (!connection.ready) {
+      connection.warming ??= this.request(channel, 'ready', PASTE_TIMEOUT_MS);
+      await connection.warming;
     }
-    if (!this.connection.ready || this.connection.requests.size > 0) return null;
-    return this.request('foreground', SNAPSHOT_TIMEOUT_MS);
+  }
+
+  async foreground(): Promise<ForegroundSnapshot> {
+    // A delayed request could see a later window. Warm missing channels for
+    // the next hotkey and send only to an idle, dedicated snapshot process.
+    const connection = this.connections.snapshot;
+    if (!connection) {
+      if (!this.stopped) void this.warmUp().catch(() => {});
+      return { reason: 'helper_absent' };
+    }
+    if (!connection.ready) return { reason: 'helper_unready' };
+    if (connection.requests.size > 0) return { reason: 'helper_busy' };
+    try {
+      const handle = await this.request('snapshot', 'foreground', SNAPSHOT_TIMEOUT_MS);
+      return handle === null ? { reason: 'no_hwnd' } : { handle };
+    } catch (error) {
+      return { reason: error instanceof PasteHelperUnavailableError && error.timedOut ? 'rpc_timeout' : 'helper_absent' };
+    }
   }
 
   async clipboardSequence(): Promise<number | null> {
-    if (!this.connection?.ready) return null;
-    return this.request('sequence', SNAPSHOT_TIMEOUT_MS);
+    const connection = this.connections.paste;
+    if (!connection?.ready) {
+      if (!connection) void this.warmChannel('paste').catch(() => {});
+      return null;
+    }
+    return this.request('paste', 'sequence', SNAPSHOT_TIMEOUT_MS);
   }
 
   async paste(
@@ -98,14 +123,19 @@ export class PersistentPasteHelper {
       throw new Error('Invalid paste target window handle');
     }
     if (!isClipboardSequence(clipboardSequence)) throw new Error('Invalid paste clipboard sequence');
-    await this.request('paste', PASTE_TIMEOUT_MS, { targetWindowHandle, clipboardSequence, deadlineUnixMs, perfTraceId, authorize });
+    await this.request('paste', 'paste', PASTE_TIMEOUT_MS, { targetWindowHandle, clipboardSequence, deadlineUnixMs, perfTraceId, authorize });
   }
 
   shutdown(): void {
     this.stopped = true;
-    if (this.connection) {
-      this.disconnect(this.connection, 'Paste helper shut down');
+    for (const connection of Object.values(this.connections)) {
+      this.disconnect(connection, 'Paste helper shut down');
     }
+  }
+
+  cancelPaste(): void {
+    const connection = this.connections.paste;
+    if (connection) this.disconnect(connection, 'Paste operation cancelled');
   }
 
   resume(): void {
@@ -113,6 +143,7 @@ export class PersistentPasteHelper {
   }
 
   private request(
+    channel: HelperChannel,
     type: 'ready' | 'foreground' | 'sequence' | 'paste',
     timeoutMs: number,
     paste?: PasteRequest
@@ -122,35 +153,39 @@ export class PersistentPasteHelper {
     }
     let connection: HelperConnection;
     try {
-      connection = this.connection ?? this.start();
+      connection = this.connections[channel] ?? this.start(channel);
     } catch {
       return Promise.reject(new PasteHelperUnavailableError('Could not start paste helper', true));
     }
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       const expiresAt = performance.now() + timeoutMs;
-      const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out'), timeoutMs);
+      const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out', true), timeoutMs);
       const { perfTraceId, authorize, targetWindowHandle, clipboardSequence, deadlineUnixMs } = paste ?? {};
       connection.requests.set(id, { type, timeout, expiresAt, perfTraceId, authorize, resolve, reject });
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
-      this.send(connection, { id, type, targetWindowHandle, clipboardSequence, deadlineUnixMs });
+      this.send(connection, {
+        id, type, targetWindowHandle, clipboardSequence,
+        deadlineUnixMs: type === 'foreground' ? Date.now() + timeoutMs : deadlineUnixMs,
+      });
     });
   }
 
-  private start(): HelperConnection {
-    const script = Buffer.from(buildPersistentPasteScript(), 'utf16le').toString('base64');
+  private start(channel: HelperChannel): HelperConnection {
+    const contents = channel === 'snapshot' ? buildForegroundSnapshotScript() : buildPersistentPasteScript();
+    const script = Buffer.from(contents, 'utf16le').toString('base64');
     const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', script], {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
-    const connection: HelperConnection = { child, requests: new Map(), output: '', ready: false };
-    this.connection = connection;
+    const connection: HelperConnection = { channel, child, requests: new Map(), output: '', ready: false };
+    this.connections[channel] = connection;
     child.on('error', () => this.disconnect(connection, 'Paste helper process failed'));
     child.on('close', () => this.disconnect(connection, 'Paste helper exited'));
     child.stdin.on('error', () => this.disconnect(connection, 'Paste helper input closed'));
     child.stdout.on('error', () => this.disconnect(connection, 'Paste helper output failed'));
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
-      if (this.connection !== connection) return;
+      if (this.connections[channel] !== connection) return;
       connection.output += chunk;
       let newline = connection.output.indexOf('\n');
       while (newline !== -1 && newline <= MAX_REPLY_LENGTH) {
@@ -160,7 +195,7 @@ export class PersistentPasteHelper {
           this.disconnect(connection, 'Malformed paste helper response');
           return;
         }
-        if (this.connection !== connection) return;
+        if (this.connections[channel] !== connection) return;
         newline = connection.output.indexOf('\n');
       }
       if (connection.output.length > MAX_REPLY_LENGTH) {
@@ -195,7 +230,7 @@ export class PersistentPasteHelper {
     if (!pending) return false;
 
     if (performance.now() >= pending.expiresAt) {
-      this.disconnect(connection, 'Paste helper request timed out');
+      this.disconnect(connection, 'Paste helper request timed out', true);
       return true;
     }
     if (pending.type === 'paste' && type === 'prepared') {
@@ -213,8 +248,11 @@ export class PersistentPasteHelper {
         connection.ready = true;
         break;
       case 'foreground':
-        if (type !== 'foreground' || typeof handle !== 'number' || !Number.isSafeInteger(handle)) return false;
-        result = handle > 0 ? handle : null;
+        if (type === 'expired') failure = new PasteHelperUnavailableError('Foreground snapshot expired', false, true);
+        else {
+          if (type !== 'foreground' || typeof handle !== 'number' || !Number.isSafeInteger(handle)) return false;
+          result = handle > 0 ? handle : null;
+        }
         break;
       case 'sequence':
         if (type !== 'sequence' || (sequence !== 0 && !isClipboardSequence(sequence))) return false;
@@ -239,10 +277,10 @@ export class PersistentPasteHelper {
 
   private async authorizeCommit(connection: HelperConnection, id: number, pending: PendingRequest): Promise<void> {
     const commit = () => {
-      if (this.connection !== connection || connection.requests.get(id) !== pending
+      if (this.connections.paste !== connection || connection.requests.get(id) !== pending
         || pending.type !== 'authorizing') return;
       if (performance.now() >= pending.expiresAt) {
-        this.disconnect(connection, 'Paste helper request timed out');
+        this.disconnect(connection, 'Paste helper request timed out', true);
         return;
       }
       // From the instant we hand off commit, a lost reply cannot tell us whether SendInput ran.
@@ -255,7 +293,7 @@ export class PersistentPasteHelper {
     } catch {
       // Failed authorization provides no basis to send input.
     } finally {
-      if (this.connection === connection && pending.type === 'authorizing') {
+      if (this.connections.paste === connection && pending.type === 'authorizing') {
         connection.requests.delete(id);
         clearTimeout(pending.timeout);
         this.send(connection, { id, type: 'discard' });
@@ -264,15 +302,18 @@ export class PersistentPasteHelper {
     }
   }
 
-  private disconnect(connection: HelperConnection, reason: string): void {
-    if (this.connection !== connection) return;
-    this.connection = null;
+  private disconnect(connection: HelperConnection, reason: string, timedOut = false): void {
+    const { channel } = connection;
+    if (this.connections[channel] !== connection) return;
+    delete this.connections[channel];
     connection.child.kill();
     for (const pending of connection.requests.values()) {
       clearTimeout(pending.timeout);
-      pending.reject(new PasteHelperUnavailableError(reason, !this.stopped && pending.type !== 'commit'));
+      pending.reject(new PasteHelperUnavailableError(reason, !this.stopped && pending.type !== 'commit', timedOut));
     }
     connection.requests.clear();
+    // A failed replacement never reached ready, so it cannot start a retry loop.
+    if (connection.ready && !this.stopped) void this.warmChannel(channel).catch(() => {});
   }
 }
 

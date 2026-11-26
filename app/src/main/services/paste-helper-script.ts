@@ -186,9 +186,6 @@ while ($null -ne ($line = [Console]::ReadLine())) {
   $reply = @{ id = $id; type = $request.type }
   switch ($request.type) {
     'ready' {}
-    'foreground' {
-      $reply.handle = [NativePaste]::GetForegroundWindow().ToInt64()
-    }
     'sequence' {
       $reply.sequence = [NativePaste]::GetClipboardSequenceNumber()
     }
@@ -216,6 +213,40 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       }
     }
     default { throw 'Unknown paste helper request.' }
+  }
+  [Console]::WriteLine((ConvertTo-Json -InputObject $reply -Compress))
+}
+`.trim();
+}
+
+export function buildForegroundSnapshotScript(): string {
+  return `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class ForegroundSnapshot {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+}
+"@
+
+while ($null -ne ($line = [Console]::ReadLine())) {
+  $request = ConvertFrom-Json -InputObject $line
+  $reply = @{ id = [long]$request.id; type = $request.type }
+  switch ($request.type) {
+    'ready' {}
+    'foreground' {
+      if ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [long]$request.deadlineUnixMs) {
+        $reply.type = 'expired'
+      } else {
+        $reply.handle = [ForegroundSnapshot]::GetForegroundWindow().ToInt64()
+      }
+    }
+    default { throw 'Unknown foreground snapshot request.' }
   }
   [Console]::WriteLine((ConvertTo-Json -InputObject $reply -Compress))
 }

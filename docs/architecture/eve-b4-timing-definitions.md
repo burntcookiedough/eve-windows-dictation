@@ -91,10 +91,26 @@ ambiguous, so Eve reports the failure and skips retrying the paste. The helper
 reply measures dispatch and leaves actual editor insertion to the isolated
 observer.
 
-Eve requests the recording target before settings-file reads or overlay work,
-using a ready, idle helper with a 100 ms reply deadline. A cold helper warms for
-the next recording. When no valid handle was captured at recording start, Eve
-follows the session's copy and History settings.
+With auto-paste enabled, Eve warms the paste and foreground helpers in parallel
+with server startup. The dictation hotkeys become available after both helper
+readiness checks settle, with a five-second deadline per helper. Enabling
+auto-paste in Settings starts the same warm-up. A ready helper that disconnects
+starts one replacement in the background.
+
+Eve requests the foreground window at hotkey time, before settings-file reads
+or overlay work. A dedicated helper only handles readiness and foreground
+requests, so clipboard sequence queries and paste commits cannot delay the
+snapshot. Eve accepts a reply within 100 ms and retains that result for the
+session, including when a Long dictation waits for a Quick dictation to finish.
+When no valid handle is captured, Eve follows the session's copy and History
+settings.
+
+Completed performance traces include an allowlisted `pastePreDispatchReason`
+when a foreground snapshot or clipboard preflight prevents dispatch. Snapshot
+reasons are `helper_absent`, `helper_unready`, `helper_busy`, `rpc_timeout`, and
+`no_hwnd`. Clipboard reasons identify the failing preflight step, such as
+`clipboard_sequence_unavailable` or `clipboard_ownership_changed`. The field
+contains only a reason code or null.
 
 For the explicit editor, from `app/` run `bun run dev:vite` and open
 `http://127.0.0.1:5173/app/fixtures/isolated-editor-observer.html` (use the configured
