@@ -1,0 +1,17 @@
+{
+  "test-clean": {
+    "filename": "test-clean.tar.gz",
+    "url": "https://openslr.elda.org/resources/12/test-clean.tar.gz",
+    "sha256": "39fde525e59672dc6d1551919b1478f724438a95aa55f874b576be21967e6c23"
+  },
+  "test-other": {
+    "filename": "test-other.tar.gz",
+    "url": "https://openslr.elda.org/resources/12/test-other.tar.gz",
+    "sha256": "d09c181bba5cf717b3dee7d4d592af11a3ee3a09e08ae025c5506f6ebe961c29"
+  },
+  "noise": {
+    "filename": "DKITCHEN_16k.zip",
+    "url": "https://zenodo.org/records/1227121/files/DKITCHEN_16k.zip",
+    "sha256": "9d68e46d2709847c59580770e2f8aa160607ebff7475788174aa1080332cc845"
+  }
+}
