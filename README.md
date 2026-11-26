@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/burntcookiedough/eve-windows-dictation/releases"><img src="https://img.shields.io/badge/v0.8.2-alpha.9-orange?style=flat-square" alt="v0.8.2-alpha.9"></a>
+  <a href="https://github.com/burntcookiedough/eve-windows-dictation/releases"><img src="https://img.shields.io/badge/v0.9.0-beta.1-orange?style=flat-square" alt="v0.9.0-beta.1"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20x64-111111?style=flat-square" alt="Windows x64">
   <img src="https://img.shields.io/badge/engine-Faster--Whisper-111111?style=flat-square" alt="Faster-Whisper">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT License"></a>
@@ -35,7 +35,9 @@
 <br>
 
 > [!NOTE]
-> The latest published build is **v0.8.2-alpha.9**. Expect rough edges, and read the
+> This branch prepares the **v0.9.0-beta.1** candidate. See the
+> [beta candidate notes](docs/releases/eve-v0.9.0-beta.1-release-notes.md) for changes and acceptance status.
+> The latest published build is **v0.8.2-alpha.9**. Read its
 > [release notes](docs/releases/eve-v0.8.2-alpha.9-release-notes.md) before installing.
 
 ## Why Eve

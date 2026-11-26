@@ -1,6 +1,6 @@
 # Eve lean runtime release plan
 
-> **Release controls and gate specification**: This document defines packaging controls, verification gates, and footprint accounting for the lean runtime architecture (CPU base + optional NVIDIA GPU pack), referenced by [building](../development/building.md). The candidate measurements recorded below reflect the initial 2026-09-25 evaluation; Eve v0.8.2-alpha.8 is now published. Controls remain active; this document does not authorize any new release action.
+> **Release controls and gate specification.** This document defines packaging controls, verification gates, and footprint accounting for the lean runtime architecture (CPU base + optional NVIDIA GPU pack), referenced by [building](../development/building.md). The measurements below record the initial 2026-09-25 evaluation. See the [beta.1 release plan](eve-beta1-release-plan.md) for the current candidate procedure and approvals.
 
 Status: packaging controls and historical candidate measurements. This plan governs the CPU default and optional NVIDIA runtime. It does not authorize a tag, upload, publication, or mutation of historical release assets.
 

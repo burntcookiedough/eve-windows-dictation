@@ -43,7 +43,8 @@ $script:CandidateArtifactDir = Join-Path $Root 'candidate'
 $script:BaselineArtifactDir = Join-Path $Root 'baseline'
 $script:RetainedArtifactDir = Join-Path $Root 'retained'
 $script:BaselineVersion = '0.8.2-alpha.5'
-$script:CandidateVersion = '0.8.2-alpha.9'
+$script:CandidateVersion = '0.9.0-beta.1'
+$Candidate = @{ CandidateVersion = $script:CandidateVersion }
 $script:ExpectedCommit = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
 $script:RepoRoot = $Root
 $script:Installed = ''
@@ -107,7 +108,9 @@ foreach ($functionName in @('Set-FunctionalHistoryPhase', 'Write-FunctionalHisto
 }
 
 function Assert-RetainedCandidateStaging {
-    param($RetainedDir, $CandidateArtifactDir)
+    param($RetainedDir, $CandidateArtifactDir, $Candidate, [switch]$Stage)
+    if ($Candidate.CandidateVersion -cne $script:CandidateVersion -or
+        [bool]$Stage -ne ($script:StagingCalls.Count -eq 0)) { throw 'Unexpected candidate binding or staging mode.' }
     $script:StagingCalls += @{ RetainedDir = $RetainedDir; CandidateArtifactDir = $CandidateArtifactDir }
     if ($Mode -eq 'verification-failure') { throw 'Synthetic candidate verification failure.' }
     $script:Events += 'staging'
@@ -205,8 +208,8 @@ $evidence = if (Test-Path -LiteralPath $evidencePath) {
 $expectedEvents = @(
     'staging', 'download-baseline', 'settings', 'sentinels',
     'install:0.8.2-alpha.5', 'observe:baseline-initialize', 'seed', 'observe:baseline-read',
-    'staging', 'install:0.8.2-alpha.9', 'observe:candidate-upgrade-read-mutate',
-    'observe:candidate-relaunch-verify', 'uninstall:0.8.2-alpha.9',
+    'staging', 'install:0.9.0-beta.1', 'observe:candidate-upgrade-read-mutate',
+    'observe:candidate-relaunch-verify', 'uninstall:0.9.0-beta.1',
     'install:0.8.2-alpha.5', 'observe:baseline-rollback-read', 'uninstall:0.8.2-alpha.5', 'staging'
 )
 foreach ($call in $script:StagingCalls) {

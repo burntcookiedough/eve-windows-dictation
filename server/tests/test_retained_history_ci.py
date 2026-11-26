@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+from zipfile import ZipFile
 
 import pytest
 
@@ -123,11 +124,9 @@ def test_staging_stops_before_copy_when_release_verifier_exits_nonzero(tmp_path)
 $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 $script:RepoRoot = {ps_literal(tmp_path.as_posix())}
-function Get-RetainedCandidatePins {{
-    return @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
-}}
+$candidate = @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
 function Copy-Item {{ throw 'COPY_REACHED' }}
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -CandidateArtifactDir {ps_literal(candidate.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -CandidateArtifactDir {ps_literal(candidate.as_posix())} -Candidate $candidate -Stage
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
                             capture_output=True, text=True, timeout=15)
@@ -179,7 +178,9 @@ $ErrorActionPreference = 'Stop'
 $env:RUNNER_TEMP = {ps_literal(runner_temp)}
 function gh {{ $global:LASTEXITCODE = 0; Get-Content -LiteralPath {ps_literal(release_json)} -Raw }}
 function curl.exe {{ throw 'DOWNLOAD_REACHED' }}
-Save-RetainedHistoryCandidate -RetainedDir {ps_literal(target)}
+$pins = Get-PublishedHistoryCandidatePins
+Save-RetainedHistoryCandidate -RetainedDir {ps_literal(target)} -Source published -CandidateId $pins.ReleaseId `
+    -CandidateCommit $pins.CandidateCommit -CandidateTag "v$($pins.CandidateVersion)" -ExpectedManifestSha256 $pins.ManifestSha256
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
                             capture_output=True, text=True, timeout=15)
@@ -204,8 +205,119 @@ def test_scripts_parse_and_ast_intact():
         assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_history_mode_binds_candidate_version_before_installer_paths():
-    """A newer harness release must still consume the pinned alpha.9 candidate."""
+@pytest.mark.parametrize('defect,expected', [
+    (None, 'RETAINED_STAGING_VERIFIED'),
+    ('head', 'artifact identity mismatch'),
+    ('workflow', 'successful trunk installer lifecycle run'),
+    ('digest', 'archive size or SHA-256 mismatch'),
+    ('entry', 'archive file allowlist mismatch'),
+    ('payload', 'provenance does not match'),
+    ('phase', 'lifecycle evidence is incomplete or unsuccessful'),
+])
+def test_retained_download_binds_run_archive_and_staged_files(tmp_path, defect, expected):
+    version, commit = '0.9.0-beta.1', 'a' * 40
+    repository = 'burntcookiedough/eve-windows-dictation'
+    artifact_id, run_id = 123, 456
+    manifest_name = f'eve-v{version}-artifact-manifest.json'
+    payload_name = 'qa/candidate-payload-manifest.json'
+    files = {name: b'fictional' for name in (
+        f'Eve.Web.Setup.{version}.exe', f'murmur-{version}-x64.nsis.7z', manifest_name,
+        'latest.yml', 'THIRD_PARTY_NOTICES.txt', 'SHA256SUMS.txt', 'SHA512SUMS.txt', payload_name,
+    )}
+    manifest_hash = hashlib.sha256(files[manifest_name]).hexdigest()
+    files['qa/candidate-provenance.json'] = json.dumps({
+        'schema': 1, 'tag': f'v{version}', 'version': version, 'commit': commit, 'runId': str(run_id),
+        'manifestSha256': manifest_hash,
+        'payloadManifestSha256': '0' * 64 if defect == 'payload' else hashlib.sha256(files[payload_name]).hexdigest(),
+        'build': {'signed': False, 'allowUnsigned': True, 'publish': 'never', 'target': 'nsis-web'},
+    })
+    phases = {name: {'status': 'passed'} for name in (
+        'candidate_artifacts_prepared', 'candidate_staging', 'build_cache_cleanup',
+        'baseline_download', 'qa_profile_setup', 'baseline_install_launch', 'candidate_upgrade',
+        'candidate_removal', 'baseline_rollback', 'baseline_removal', 'candidate_clean_install',
+        'candidate_clean_removal', 'cleanup', 'overall',
+    )}
+    if defect == 'phase':
+        del phases['baseline_rollback']
+    files['qa/candidate-phase-status.json'] = json.dumps({
+        'schema': 1, 'commit': commit, 'version': version, 'overallStatus': 'passed', 'phases': phases,
+    })
+    if defect == 'entry':
+        files['qa/extra.txt'] = b'unexpected'
+    archive = tmp_path / 'fixture.zip'
+    with ZipFile(archive, 'w') as bundle:
+        for name, data in files.items():
+            bundle.writestr(name, data)
+    archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+    artifact_meta = tmp_path / 'artifact.json'
+    artifact_meta.write_text(json.dumps({
+        'id': artifact_id, 'expired': False, 'name': f'eve-v{version}-unsigned-candidate-qa-{run_id}',
+        'digest': 'sha256:' + ('0' * 64 if defect == 'digest' else archive_hash),
+        'size_in_bytes': archive.stat().st_size,
+        'workflow_run': {'id': run_id, 'head_sha': '0' * 40 if defect == 'head' else commit},
+    }))
+    run_meta = tmp_path / 'run.json'
+    run_meta.write_text(json.dumps({
+        'id': run_id, 'head_sha': commit, 'head_repository': {'full_name': repository}, 'head_branch': 'trunk',
+        'path': '.github/workflows/ci.yml' if defect == 'workflow' else '.github/workflows/installer-lifecycle-ci.yml',
+        'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success',
+    }))
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    (scripts / 'release-artifacts.ps1').write_text('exit 0\n')
+    (tmp_path / 'staged').mkdir()
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$env:RUNNER_TEMP = {ps_literal(tmp_path)}
+$script:RepoRoot = $env:RUNNER_TEMP
+$retained = Join-Path $env:RUNNER_TEMP 'retained'
+$staged = Join-Path $env:RUNNER_TEMP 'staged'
+function Write-Step {{ param($Message) }}
+function gh {{
+    $global:LASTEXITCODE = 0
+    switch ($args[1]) {{
+        'repos/{repository}/actions/artifacts/{artifact_id}' {{ Get-Content {ps_literal(artifact_meta)} -Raw }}
+        'repos/{repository}/actions/runs/{run_id}' {{ Get-Content {ps_literal(run_meta)} -Raw }}
+        default {{ throw 'Unexpected API request' }}
+    }}
+}}
+function curl.exe {{
+    $global:LASTEXITCODE = 0
+    $output = $args[[array]::IndexOf($args, '--output') + 1]
+    Copy-Item -LiteralPath {ps_literal(archive)} -Destination $output
+}}
+$binding = Save-RetainedHistoryCandidate -RetainedDir $retained -Source retained -CandidateId '{artifact_id}' `
+    -CandidateCommit '{commit}' -CandidateTag 'v{version}' -ExpectedManifestSha256 '{manifest_hash}'
+if ($binding.RunId -ne '{run_id}' -or $binding.ArtifactId -ne '{artifact_id}' -or $binding.ZipSha256 -ne '{archive_hash}' -or
+    $binding.ZipBytes -ne {archive.stat().st_size} -or $binding.CandidateCommit -ne '{commit}' -or $binding.CandidateVersion -ne '{version}') {{
+    throw 'Verified identity did not reach the lifecycle'
+}}
+Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding -Stage
+Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding
+Set-Content -LiteralPath (Join-Path $staged 'latest.yml') 'changed'
+try {{
+    Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding
+    throw 'Staged file mutation was accepted'
+}} catch {{
+    if ($_.Exception.Message -notlike 'Staged candidate hash mismatch*') {{ throw }}
+}}
+Write-Output 'RETAINED_STAGING_VERIFIED'
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    if defect:
+        assert result.returncode != 0
+        assert expected in result.stderr, result.stdout + result.stderr
+        assert not list((tmp_path / 'staged').iterdir())
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert expected in result.stdout
+
+
+@pytest.mark.parametrize('version', ['0.9.0-beta.1', '0.8.2-alpha.9'])
+def test_history_mode_binds_candidate_version_before_installer_paths(version):
+    """The selected artifact determines the version, independently of the harness."""
     command = f"""
 $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
@@ -217,9 +329,10 @@ $bindings = @($fn.Body.EndBlock.Statements | Where-Object {{
     $_.Left.VariablePath.UserPath -eq 'script:CandidateVersion'
 }})
 if ($bindings.Count -ne 1) {{ throw 'Expected one retained candidate version binding' }}
-$script:CandidateVersion = '0.8.2-alpha.10'
+$script:CandidateVersion = '0.9.0-beta.2'
+$Candidate = @{{ CandidateVersion = '{version}' }}
 Invoke-Expression $bindings[0].Extent.Text
-if ($script:CandidateVersion -cne '0.8.2-alpha.9') {{ throw 'Retained version inherited harness release' }}
+if ($script:CandidateVersion -cne '{version}') {{ throw 'Retained version inherited harness release' }}
 $installer = $fn.Body.EndBlock.Statements | Where-Object {{
     $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
     $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
@@ -305,7 +418,7 @@ Set-StrictMode -Version Latest
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())} -Candidate (Get-PublishedHistoryCandidatePins)
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -340,7 +453,7 @@ Set-StrictMode -Version Latest
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())} -Candidate (Get-PublishedHistoryCandidatePins)
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)

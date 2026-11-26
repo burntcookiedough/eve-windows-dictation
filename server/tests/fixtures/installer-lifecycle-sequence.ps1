@@ -24,7 +24,7 @@ $script:CacheRoot = Join-Path $Root 'cache'
 $script:InstallDir = Join-Path $Root 'install'
 $script:CurrentInstallDir = $script:InstallDir
 $script:BaselineVersion = 'baseline'
-$script:CandidateVersion = 'candidate'
+$script:CandidateVersion = '0.9.0-beta.1'
 $script:CandidateArtifactDir = Join-Path $Root 'candidate'
 $script:BaselineArtifactDir = Join-Path $Root 'baseline'
 $script:RetainedArtifactDir = Join-Path $Root 'retained'
@@ -57,7 +57,7 @@ function Assert-CandidateBinding {
 function Assert-NoNvidiaDriver {}
 function Move-And-CleanBuildOutput {
     param($CandidateDir)
-    foreach ($name in @('Eve.Web.Setup.0.8.2-alpha.9.exe', 'murmur-0.8.2-alpha.9-x64.nsis.7z')) { Set-Content (Join-Path $CandidateDir $name) 'synthetic' }
+    foreach ($name in @('Eve.Web.Setup.0.9.0-beta.1.exe', 'murmur-0.9.0-beta.1-x64.nsis.7z')) { Set-Content (Join-Path $CandidateDir $name) 'synthetic' }
 }
 function Download-VerifiedBaseline {
     param($Destination)
@@ -72,8 +72,8 @@ function Invoke-Installer {
     $script:clean = $kind -eq 'candidate' -and $script:installed -eq ''
     if ($script:clean -and (Test-Path (Join-Path $script:ProfileRoot 'Eve'))) { throw 'Clean candidate reused an existing profile.' }
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    Set-Content (Join-Path $InstallDir 'Eve.exe') $kind
-    $script:installed = $kind
+    $script:installed = if ($kind -eq 'candidate') { $script:CandidateVersion } else { $script:BaselineVersion }
+    Set-Content (Join-Path $InstallDir 'Eve.exe') $script:installed
 }
 function Assert-Installed {
     param($Version)
@@ -128,8 +128,8 @@ if ($Mode -eq 'success') {
     if ($phaseData.phases.baseline_download.status -ne 'passed') { throw 'Baseline download phase was not recorded as passed.' }
     $candidateInstalls = @(for ($i = 0; $i -lt $script:events.Count; $i++) { if ($script:events[$i] -eq 'install:candidate') { $i } })
     if ($candidateInstalls.Count -ne 2) { throw 'Expected two candidate installs in the lifecycle sequence.' }
-    $expectedInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.9.exe'
-    $expectedPayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.9-x64.nsis.7z'
+    $expectedInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.9.0-beta.1.exe'
+    $expectedPayload = Join-Path $script:CandidateArtifactDir 'murmur-0.9.0-beta.1-x64.nsis.7z'
     $expectedBinding = "binding|$expectedInstaller|$expectedPayload"
     foreach ($i in $candidateInstalls) {
         if ($i -eq 0 -or $script:events[$i - 1] -ne $expectedBinding) { throw 'Candidate installer ran without an immediately preceding binding check for the candidate installer and payload.' }

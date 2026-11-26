@@ -151,6 +151,9 @@ and lifecycle evidence, which still require separate authorization.
 
 ### Hosted lifecycle candidate retention and upload controls
 
+The [beta.1 release plan](../architecture/eve-beta1-release-plan.md) identifies the
+current candidate tag and the approvals for exact-source lifecycle and retention.
+
 Manual `workflow_dispatch` runs of the installer lifecycle gate require an exact
 `expected_commit` 40-character lowercase SHA matching both the workflow event and
 `git rev-parse HEAD` before runner dependencies or packaging proceed. Candidate
@@ -184,19 +187,28 @@ microphone acceptance.
 
 ### Hosted retained-candidate History acceptance
 
-Manual `workflow_dispatch` runs of `.github/workflows/retained-history-ci.yml`
-exercise packaged functional History acceptance on a disposable GitHub-hosted
-Windows runner. Rather than rebuilding a candidate, this lane consumes the
-pinned, digest-verified published `v0.8.2-alpha.9` release assets (release `429752581`)
-and tests packaged baseline schema initialization, fixed fictional row seeding,
-packaged renderer History read/filter/render, designated IPC deletion, exact
-persistence across relaunch, and baseline rollback via loopback CDP. It uploads
-one explicit aggregate JSON evidence file for 7 days with no raw transcription,
-profile, audio, or log uploads. The installed-file manifest is derived from the pinned
-payload archive and must match its pinned hash. The harness commit is guarded separately from
-the pinned candidate source; this lane never rebuilds or modifies that candidate.
-Execution requires its own approved run. Seeded-record persistence does not prove
-new dictation creation, reboot behavior, microphone capture, or editor insertion.
+The manual Retained History Acceptance Gate runs on disposable GitHub-hosted
+Windows. It requires an exact trunk harness SHA (`expected_commit`), a separate
+build SHA and tag (`candidate_commit`, `candidate_tag`), and an independently
+verified manifest digest (`expected_manifest_sha256`). Select the source explicitly
+with `candidate_source` and its numeric `candidate_id`.
+
+- For `retained`, supply the Actions artifact ID from a successful trunk installer
+  lifecycle dispatch. The gate verifies the run identity, artifact ZIP digest and
+  size, required file set, provenance, phase results, manifest hashes, and staged
+  bytes. The [beta.1 release plan](../architecture/eve-beta1-release-plan.md) provides
+  the dispatch inputs.
+- For `published`, the supported release is `v0.8.2-alpha.9` (release ID
+  `429752581`, build SHA `b557f7dd772923d35612bde5d32bf8d9103ef42d`, manifest digest
+  `e180604fd9e59bbbe8ca6adb0929b2762883115ba908e30e74e421aaddab61ab`).
+  The gate verifies the pinned release and derives the installed-file manifest
+  from the pinned payload archive, then checks the derived hash against its pin.
+
+The gate uses the selected bytes for baseline schema initialization, fictional
+History seeding, renderer read/filter/render, designated deletion, relaunch
+persistence, and rollback via loopback CDP. It retains one aggregate evidence
+JSON file for seven days. Execution requires its own approved run. The
+[quality gates](alpha-quality-gates.md) cover physical and new-dictation acceptance.
 
 `installer-smoke.ps1` refuses to run over an active target installation; close
 that session explicitly. It never stops existing Eve/Python processes by name.

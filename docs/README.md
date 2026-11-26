@@ -28,6 +28,7 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [Alpha quality gates](development/alpha-quality-gates.md): Mandatory evidence, provisional limits, and existing release verification procedures.
 - [Microphone validation protocol](development/microphone-validation-protocol.md): Consented physical microphone testing procedure, prompt cards, and offline scoring harness.
 - [GPU lifecycle validation](development/gpu-pack-lifecycle-validation.md): Repeatable Windows source checks and exact-candidate acceptance exercises.
+- [Beta.1 release plan](architecture/eve-beta1-release-plan.md) and [candidate notes](releases/eve-v0.9.0-beta.1-release-notes.md)
 - [v0.8.2-alpha.8 release notes](releases/eve-v0.8.2-alpha.8-release-notes.md): Current published alpha release notes.
 
 ## History and archive
