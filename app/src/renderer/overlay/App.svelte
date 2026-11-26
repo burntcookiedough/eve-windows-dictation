@@ -5,6 +5,7 @@
   import { OverlayPerfObserver } from './perf-observation';
   import { condenseWarning, derivePillView, holdVoice, INTRO_HOLD_MS } from './pill-view';
   import { AUDIO_CONFIG } from '../../shared/constants';
+  import { AUDIO_HEADER_SIZE } from '../../shared/protocol';
   import { countWords } from '../../shared/insights';
   import type {
     RecordingState,
@@ -94,12 +95,18 @@
 
   async function startAudioCapture(deviceId?: string, sessionId?: number) {
     const observer = perfObserver;
+    let firstAudioPosted = false;
     try {
       await audioCapture.start(
         // On audio data - send to main process
         (buffer) => {
           observer?.mark('lastAudioAt');
           window.murmur.sendAudioData(buffer, sessionId);
+          if (observer && !firstAudioPosted && buffer.byteLength > AUDIO_HEADER_SIZE) {
+            firstAudioPosted = true;
+            observer.mark('firstAudioPostedAt');
+            reportPerf(observer);
+          }
         },
         // On levels - drive the pill
         (levels) => {
@@ -109,10 +116,16 @@
           isSpeaking = now < voiceOpenUntil;
         },
         // Options with device ID
-        { deviceId, ...(observer ? { onCaptureReady: (timestamp: number) => {
-          observer.mark('captureReadyAt', timestamp);
-          reportPerf(observer);
-        } } : {}) }
+        {
+          deviceId,
+          ...(observer ? {
+            onCaptureStage: stage => observer.mark(stage),
+            onCaptureReady: timestamp => {
+              observer.mark('captureReadyAt', timestamp);
+              reportPerf(observer);
+            },
+          } : {}),
+        }
       );
     } catch (error) {
       console.error('Failed to start audio capture:', error);

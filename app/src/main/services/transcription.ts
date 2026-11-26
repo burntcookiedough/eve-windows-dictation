@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 import { WebSocket } from 'ws';
 import { IPC_CHANNELS } from '../../shared/constants.js';
 import {
+  AUDIO_HEADER_SIZE,
   parseServerFrame,
   type ControlFrameStart,
   type ControlFrameStop,
@@ -97,6 +98,7 @@ export class TranscriptionService {
       this.ws = new WebSocket(this.serverUrl);
 
       this.ws.on('open', () => {
+        perfTraceManager.mark(this.perfTraceId, 'wsOpenedAt');
         this.sendStartFrame();
         this.sendConnectionState('connected');
       });
@@ -148,6 +150,9 @@ export class TranscriptionService {
       return;
     }
     this.ws.send(Buffer.from(buffer));
+    if (this.perfTraceId && buffer.byteLength > AUDIO_HEADER_SIZE) {
+      perfTraceManager.mark(this.perfTraceId, 'firstAudioSentAt');
+    }
   }
 
   stop(): void {
@@ -250,6 +255,7 @@ export class TranscriptionService {
       switch (frame.type) {
         case 'ready':
           if (this.stopRequested || this.didReceiveReady) break;
+          perfTraceManager.mark(this.perfTraceId, 'wsReadyAt');
           this.didReceiveReady = true;
           this.isReady = true;
           this.sendRecordingState('listening');

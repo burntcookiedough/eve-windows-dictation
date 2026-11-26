@@ -18,6 +18,10 @@ subtracting a sum of internal spans. Missing observations are null, not zero.
 
 | Stage | Boundary and evidence |
 | --- | --- |
+| Hotkey and dispatch | Main `hotkeyAt` is entry to Eve's keyboard hook callback for the initiating keydown. `recordingStartDispatchedAt` is start entry after the overlap and overlay guards. Queued Long retains the keydown that requested it and includes the queue wait. Report queued Long separately from idle starts. Lab has no hotkey timestamp. |
+| WebSocket startup | Main `wsOpenedAt` is entry to the socket's open callback. `wsReadyAt` is acceptance of the first protocol `ready` frame. `captureCommandAt` is immediately before sending the start-capture IPC. |
+| Capture setup | Overlay `captureStartedAt` is start-command handling. `mediaResolvedAt`, `contextCreatedAt`, and `workletModuleLoadedAt` mark successful completion of microphone acquisition, AudioContext construction, and worklet registration in the active generation. `captureReadyAt` follows graph wiring. Main `captureReadyObservedAt` records the first validated overlay report with graph readiness. |
+| First audio | Overlay `firstAudioPostedAt` follows posting the first nonempty PCM frame to main. Main `firstAudioSentAt` follows the first nonempty audio frame's WebSocket send call returning. The timestamps observe local handoffs. A frame can contain silence and the server's receipt is unobserved at these boundaries. |
 | Stop / last audio | Main stop entry and last dispatched frame; separately overlay stop/capture/last-frame markers. A dispatched frame is not proof the server accepted it. |
 | First partial | First partial receipt minus capture/stream start, within that observer. A successful regular dictation leaves this null. Incomplete recovery can populate it on failed sessions. |
 | Outstanding work | State of the recording inference task at stop plus measured global lock and executor queue waits. Global lock wait can include jobs from other sessions. |
@@ -62,6 +66,16 @@ Normal wire frames omit diagnostics.
 Renderer IPC is accepted only from the overlay and only with the fixed schema.
 Later snapshots may include output/DOM stages absent from an earlier snapshot.
 Select the latest observed fields by correlation ID within their clock domain.
+
+Main trace snapshots include `startupSpansMs`. `hotkeyToReady` ends at
+`wsReadyAt`, `readyToCaptureReadyObserved` runs from `wsReadyAt` to
+`captureReadyObservedAt`, and `hotkeyToFirstAudioSent` ends at
+`firstAudioSentAt`. These are main-clock spans in milliseconds. The graph-ready
+span is an upper bound that includes IPC dispatch, delivery, and handling. Use
+the overlay timestamps for capture setup and graph-to-first-PCM spans. Missing
+endpoints produce null. Hook delivery measures Eve's receipt of the keydown.
+Physical switch closure and whether the first syllable survived require
+independent observations.
 
 The persistent Windows helper prepares each paste before Eve authorizes keyboard
 input. Eve verifies clipboard ownership and the operation generation at dispatch,

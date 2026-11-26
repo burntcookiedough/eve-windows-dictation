@@ -4,6 +4,7 @@ import type { BrowserWindow } from 'electron';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { CaptureSession } from '../src/main/services/capture-session';
 import { perfTraceManager } from '../src/main/services/perf-trace';
+import { createAudioFrame } from '../src/shared/protocol';
 import {
   TranscriptionConnectionCancelledError,
   TranscriptionService,
@@ -176,7 +177,7 @@ describe('TranscriptionService protocol readiness', () => {
     });
   }
 
-  test('does not connect or send audio until the server emits ready', async () => {
+  test.each([false, true])('gates connection and first audio on ready (trace enabled: %s)', async (enabled) => {
     const server = new WebSocketServer({ port: 0 });
     await once(server, 'listening');
     const address = server.address();
@@ -205,10 +206,16 @@ describe('TranscriptionService protocol readiness', () => {
       isDestroyed: () => false,
       webContents: { send: () => undefined },
     } as unknown as BrowserWindow;
+    const previousTraceSetting = process.env.MURMUR_PERF_TRACE;
+    if (enabled) process.env.MURMUR_PERF_TRACE = '1';
+    else delete process.env.MURMUR_PERF_TRACE;
+    const traceId = 'fake-websocket-startup';
+    perfTraceManager.startTrace(traceId);
+    const trace = () => perfTraceManager.getRecentTraces().find(entry => entry.correlationId === traceId);
     const service = new TranscriptionService(
       `ws://127.0.0.1:${address.port}`,
       10,
-      overlay
+      overlay, undefined, 'quick', traceId
     );
     let connected = false;
 
@@ -222,16 +229,32 @@ describe('TranscriptionService protocol readiness', () => {
       expect(connected).toBeFalse();
       service.sendAudioBuffer(new ArrayBuffer(8));
       expect(binaryFrames).toBe(0);
+      if (enabled) {
+        expect(trace()!.main.wsOpenedAt).toBeNumber();
+        expect(trace()!.main.wsReadyAt).toBeNull();
+        expect(trace()!.main.firstAudioSentAt).toBeNull();
+      }
 
       socket.send(JSON.stringify({ frame: 'control', type: 'ready' }));
       await connectPromise;
       expect(connected).toBeTrue();
 
-      service.sendAudioBuffer(new ArrayBuffer(8));
+      service.sendAudioBuffer(createAudioFrame(0, new Int16Array([12345, -23456])));
       await audioReceived.promise;
       expect(binaryFrames).toBe(1);
+      if (enabled) {
+        const { wsOpenedAt, wsReadyAt, firstAudioSentAt } = trace()!.main;
+        expect(wsReadyAt).toBeGreaterThanOrEqual(wsOpenedAt!);
+        expect(firstAudioSentAt).toBeGreaterThanOrEqual(wsReadyAt!);
+        expect(JSON.stringify(trace())).not.toContain('-23456');
+      } else {
+        expect(trace()).toBeUndefined();
+      }
 
     } finally {
+      perfTraceManager.clear();
+      if (previousTraceSetting === undefined) delete process.env.MURMUR_PERF_TRACE;
+      else process.env.MURMUR_PERF_TRACE = previousTraceSetting;
       for (const client of server.clients) {
         client.terminate();
       }

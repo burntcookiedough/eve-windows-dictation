@@ -182,7 +182,11 @@ export interface OverlayPerfObservation {
   traceId: string;
   clockDomain: 'overlay_performance_now';
   captureStartedAt: number | null;
+  mediaResolvedAt: number | null;
+  contextCreatedAt: number | null;
+  workletModuleLoadedAt: number | null;
   captureReadyAt: number | null;
+  firstAudioPostedAt: number | null;
   lastAudioAt: number | null;
   stopRequestedAt: number | null;
   firstPartialReceivedAt: number | null;
