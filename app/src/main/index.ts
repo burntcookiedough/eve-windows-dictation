@@ -339,7 +339,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
     perfTraceManager.completeTrace(serviceTraceId);
     const { delivery } = result;
     if (delivery.kind === 'skipped_unsafe') {
-      if (delivery.copied) return 'copied_not_pasted';
+      if (delivery.copied) return result.historyFailed ? 'history_failed' : 'copied_not_pasted';
       if (!result.entryWithGroup) return 'failed';
       return delivery.reason === 'foreground_changed' ? 'saved' : 'paste_skipped';
     }

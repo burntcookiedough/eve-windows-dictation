@@ -18,6 +18,8 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     ['normal', true, false, false], // Auto-paste at start.
     ['lab', true, true, false],
     ['normal', true, true, false, 'no_outputs'],
+    ['normal', true, true, true, 'history_failed'],
+    ['normal', true, true, true, 'copied_not_pasted'],
     ['normal', false, false, true, 'timeout'],
   ] as const) {
     let autoPaste: boolean = initial;
@@ -66,6 +68,12 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
         if (failure === 'no_outputs') {
           return { delivery: { kind: 'skipped_unsafe', reason: 'no_target', copied: false }, entryWithGroup: null, historyFailed: true };
         }
+        if (failure === 'history_failed' || failure === 'copied_not_pasted') {
+          return {
+            delivery: { kind: 'skipped_unsafe', reason: 'foreground_changed', copied: true },
+            historyFailed: failure === 'history_failed',
+          };
+        }
         if (failure === 'timeout') {
           await timedOut.promise;
           return { delivery: { kind: 'failed' } };
@@ -93,7 +101,9 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       autoPaste: initial, autoCopy, target: initial && failure !== 'no_outputs' ? 12345 : null,
     });
     if (failure) {
-      expect(terminal).toBe('failed');
+      expect(terminal).toBe(failure === 'no_outputs' || failure === 'timeout' ? 'failed' : failure);
+    }
+    if (failure === 'no_outputs' || failure === 'timeout') {
       context.currentRecordingState.state = 'error';
       onClose();
       expect(context.isStopping).toBe(false);

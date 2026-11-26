@@ -86,7 +86,7 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).not.toHaveBeenCalled();
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined, expect.any(AbortSignal));
+    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined, expect.any(AbortSignal), expect.any(Number));
     expect(result.delivery).toEqual({ kind: 'copied' });
     expect(saved).toHaveLength(1);
   });

@@ -14,6 +14,7 @@ export { buildSendInputScriptContent } from './paste-helper-script.js';
 const log = createLogger('Clipboard');
 const PASTE_FOCUS_SETTLE_DELAY_MS = 120;
 const MIN_RESTORE_DELAY_MS = 750;
+const COPY_READ_TIMEOUT_MS = 1000;
 const RESTORE_READ_TIMEOUT_MS = 1000;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
 let pasteLifetime = new AbortController();
@@ -55,12 +56,18 @@ export type ClipboardPasteOutcome =
   | { kind: 'skipped_unsafe'; reason: PasteSkipReason; copied: boolean }
   | { kind: 'failed'; clipboardWrite: 'not_attempted' | 'uncertain' | 'written'; dispatch: 'not_attempted' | 'uncertain' };
 
-export async function copyToClipboard(text: string, perfTraceId?: string, signal?: AbortSignal): Promise<ClipboardCopyOutcome> {
-  if (signal?.aborted) return { kind: 'failed' };
+export async function copyToClipboard(
+  text: string,
+  perfTraceId?: string,
+  signal?: AbortSignal,
+  deadlineUnixMs = Infinity,
+): Promise<ClipboardCopyOutcome> {
+  const expired = () => signal?.aborted || Date.now() >= deadlineUnixMs;
+  if (expired()) return { kind: 'failed' };
   log.debug('Writing text', { length: text.length });
-  latestPasteGeneration += 1;
+  const generation = ++latestPasteGeneration;
   return enqueuePasteCriticalSection(async () => {
-    if (signal?.aborted) return { kind: 'failed' };
+    if (expired()) return { kind: 'failed' };
     if (activePasteSequence) {
       discardPasteSequence(activePasteSequence);
     }
@@ -68,14 +75,25 @@ export async function copyToClipboard(text: string, perfTraceId?: string, signal
       const writeStart = perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       // Electron provides no cancellation for a submitted write. Keep it ordered
       // with later Eve writes and ignore its completion after the session expires.
+      if (expired()) return { kind: 'failed' };
       await clipboard.writeText(text);
-      if (signal?.aborted) return { kind: 'failed' };
-      if (writeStart !== null) {
-        const completedAt = performance.now();
-        perfTraceManager.output(perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
+      if (expired()) return { kind: 'failed' };
+      const writtenAt = writeStart !== null ? performance.now() : null;
+      const readTimeout = AbortSignal.timeout(COPY_READ_TIMEOUT_MS);
+      const readSignal = signal ? AbortSignal.any([signal, readTimeout]) : readTimeout;
+      const verified = await readClipboardWhileActive(readSignal, async () => {
+        const sequence = await pasteHelper.clipboardSequence().catch(() => null);
+        readSignal.throwIfAborted();
+        if (await clipboard.readText() !== text) return false;
+        readSignal.throwIfAborted();
+        return sequence === null || await pasteHelper.clipboardSequence() === sequence;
+      });
+      if (!verified || expired() || generation !== latestPasteGeneration) return { kind: 'failed' };
+      if (writeStart !== null && writtenAt !== null) {
+        perfTraceManager.output(perfTraceId, 'clipboard', writtenAt - writeStart, writtenAt);
       }
     } catch {
-      log.error('Failed to write text to clipboard');
+      log.error('Failed to write or verify clipboard text');
       return { kind: 'failed' };
     }
     return { kind: 'copied' };

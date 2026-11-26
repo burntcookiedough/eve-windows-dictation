@@ -276,6 +276,32 @@ describe('pasteText', () => {
     expect(clipboardWrites).toEqual([]);
   });
 
+  test('reports copy failure when a resolved Electron write leaves the old clipboard intact', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Previous copy' })], 'Previous copy');
+    clipboardWriteText.mockResolvedValueOnce(undefined);
+
+    await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+    expect(clipboardText).toBe('Previous copy');
+  });
+
+  test('does not report copied when the native clipboard owner changes during read-back', async () => {
+    sequenceRead.mockResolvedValueOnce(clipboardSequence).mockResolvedValueOnce(clipboardSequence + 1);
+
+    await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+  });
+
+  test('releases the copy queue when verification cannot read the clipboard', async () => {
+    const stalledRead = Promise.withResolvers<string>();
+    clipboardReadText.mockImplementationOnce(() => stalledRead.promise);
+
+    try {
+      await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+      await expect(copyToClipboard('Next copy')).resolves.toEqual({ kind: 'copied' });
+    } finally {
+      stalledRead.resolve('Synthetic dictation');
+    }
+  });
+
   for (const stalled of ['read', 'write'] as const) {
     test(`saves History before a stalled clipboard ${stalled} and ignores its late completion`, async () => {
       const began = Promise.withResolvers<void>();
@@ -352,6 +378,34 @@ describe('pasteText', () => {
     }
     expect(await copyToClipboard('Next write')).toEqual({ kind: 'copied' });
     expect(clipboardWrites).toEqual(['Next write']);
+  });
+
+  test.each([false, true])('checks the queued copy deadline before the timeout callback runs (auto-paste: %s)', async (autoPaste) => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    clipboardWriteText.mockImplementationOnce(async () => {
+      writeStarted.resolve();
+      await finishWrite.promise;
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Previous copy' })], 'Previous copy');
+    });
+    const previous = copyToClipboard('Previous copy');
+    const clock = spyOn(Date, 'now').mockReturnValue(100_000);
+    try {
+      await writeStarted.promise;
+      const expired = processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Expired dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste, autoCopy: true }, null, 'quick', null, undefined, { clipboardTimeoutMs: 2000 });
+      clock.mockReturnValue(102_001);
+      finishWrite.resolve();
+      expect((await expired).delivery).toEqual({ kind: 'failed' });
+      expect(clipboardWrites).toEqual([]);
+      expect(clipboardText).toBe('Previous copy');
+    } finally {
+      finishWrite.resolve();
+      await previous;
+      clock.mockRestore();
+    }
   });
 
   test('returns Electron clipboard text asynchronously', async () => {

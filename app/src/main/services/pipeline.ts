@@ -144,7 +144,7 @@ async function deliverToClipboard(
   signal: AbortSignal,
   deadlineUnixMs: number,
 ): Promise<ClipboardCopyOutcome | ClipboardPasteOutcome> {
-  if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal);
+  if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
 
   const targetWindowHandle = await pasteTarget ?? null;
   const delivery = await pasteText(entry.text, {
@@ -157,7 +157,7 @@ async function deliverToClipboard(
   });
   // A paste that reached the target check may already have written or sent input.
   if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
-    const copy = await copyToClipboard(entry.text, perfTraceId, signal);
+    const copy = await copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
     return copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
   }
   return delivery;
