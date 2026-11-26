@@ -83,7 +83,8 @@ including immediately before a one-shot fallback. Both SendInput paths verify
 the Win32 clipboard sequence sampled after Eve's write before changing focus.
 After any focus restoration, they verify the sequence and captured window
 handle again just before sending Ctrl+V. A mismatch cancels the paste. An
-unavailable clipboard sequence skips SendInput dispatch.
+unavailable clipboard sequence skips SendInput dispatch. Both saved paste method
+values, `sendinput` and legacy `vbscript`, use this guarded SendInput path.
 A failed transport can fall back while the request is still in preparation.
 Once Eve hands off the commit, an absent or invalid reply leaves the result
 ambiguous, so Eve reports the failure and skips retrying the paste. The helper

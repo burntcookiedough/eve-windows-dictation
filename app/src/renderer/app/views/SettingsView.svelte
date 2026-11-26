@@ -41,7 +41,7 @@
   ];
   const PASTE_METHOD_OPTIONS: EveDropdownOption[] = [
     { value: 'sendinput', label: 'SendInput' },
-    { value: 'vbscript', label: 'VBScript' },
+    { value: 'vbscript', label: 'VBScript (legacy setting)' },
   ];
   const WHISPER_LANGUAGE_AUTO_VALUE = '__whisper_language_auto__';
   const whisperLanguageNames = new Intl.DisplayNames(undefined, { type: 'language' });
@@ -1058,7 +1058,7 @@
               {/if}
             {/if}
 
-            <SettingsRow label="Paste method" description="Choose how Eve sends the transcription to the active app.">
+            <SettingsRow label="Paste method" description="Both options use guarded SendInput to verify clipboard ownership and the target window.">
               <EveDropdown
                 label="Paste method"
                 value={settings.pasteMethod}

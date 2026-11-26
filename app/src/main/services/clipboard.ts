@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { app, clipboard, ClipboardItem } from 'electron';
 import { execFile } from 'child_process';
-import { writeFileSync, existsSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { createLogger } from '../lib/logger.js';
 import { isPerfTraceEnabled, perfTraceManager } from './perf-trace.js';
@@ -17,9 +17,6 @@ const MIN_RESTORE_DELAY_MS = 750;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
 let pasteLifetime = new AbortController();
 
-// VBScript for keyboard simulation — much faster startup than PowerShell (~50ms vs ~300ms).
-// Written to userData once and reused via cscript.
-let pasteScriptPath: string | null = null;
 let sendInputScriptPath: string | null = null;
 let latestPasteGeneration = 0;
 let pasteCriticalSection: Promise<void> = Promise.resolve();
@@ -37,16 +34,6 @@ interface PasteSequence {
 }
 
 let activePasteSequence: PasteSequence | null = null;
-
-function ensurePasteScript(): string {
-  if (pasteScriptPath) return pasteScriptPath;
-  pasteScriptPath = join(app.getPath('userData'), 'paste-helper.vbs');
-  if (!existsSync(pasteScriptPath)) {
-    writeFileSync(pasteScriptPath, 'CreateObject("WScript.Shell").SendKeys "^v"\n');
-    log.debug('Created paste helper script', { path: pasteScriptPath });
-  }
-  return pasteScriptPath;
-}
 
 function ensureSendInputScript(): string {
   if (sendInputScriptPath) return sendInputScriptPath;
@@ -159,7 +146,6 @@ export function resumeClipboardPaste(): void {
 }
 
 export async function simulatePaste(
-  method: 'sendinput' | 'vbscript',
   targetWindowHandle: number,
   clipboardSequence: number | null,
   perfTraceId?: string,
@@ -177,24 +163,16 @@ export async function simulatePaste(
     return dispatch();
   });
   try {
-    if (method === 'vbscript') {
-      const foreground = await getForegroundWindowHandle();
-      await dispatchIfAuthorized(() => {
-        if (foreground !== targetWindowHandle) throw new NativePasteAbortedError(PasteAbortCode.ForegroundChanged);
-        return runOneShotPaste('cscript', ['//NoLogo', '//B', ensurePasteScript()], signal, perfTraceId);
-      });
-    } else {
-      if (!isClipboardSequence(clipboardSequence)) return false;
-      try {
-        await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, dispatchIfAuthorized);
-      } catch (error) {
-        if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
-        if (signal.aborted) return false;
-        dispatched = false;
-        const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureSendInputScript(),
-          '-TargetWindowHandle', String(targetWindowHandle), '-ClipboardSequence', String(clipboardSequence)];
-        await dispatchIfAuthorized(() => runOneShotPaste('powershell', args, signal, perfTraceId));
-      }
+    if (!isClipboardSequence(clipboardSequence)) return false;
+    try {
+      await pasteHelper.paste(targetWindowHandle, clipboardSequence, perfTraceId, dispatchIfAuthorized);
+    } catch (error) {
+      if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
+      if (signal.aborted) return false;
+      dispatched = false;
+      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureSendInputScript(),
+        '-TargetWindowHandle', String(targetWindowHandle), '-ClipboardSequence', String(clipboardSequence)];
+      await dispatchIfAuthorized(() => runOneShotPaste(args, signal, perfTraceId));
     }
   } catch (error) {
     if (signal.aborted) return false;
@@ -205,17 +183,17 @@ export async function simulatePaste(
   return dispatched;
 }
 
-async function runOneShotPaste(command: string, args: string[], signal: AbortSignal, perfTraceId?: string): Promise<void> {
+async function runOneShotPaste(args: string[], signal: AbortSignal, perfTraceId?: string): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
     if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
-    execFile(command, args, {
+    execFile('powershell', args, {
       windowsHide: true,
       timeout: PASTE_PROCESS_TIMEOUT_MS,
       signal,
     }, (error) => {
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperResponseAt');
-      if (command === 'powershell' && isPasteAbortCode(error?.code)) reject(new NativePasteAbortedError(error.code));
+      if (isPasteAbortCode(error?.code)) reject(new NativePasteAbortedError(error.code));
       else if (error) reject(error);
       else resolve();
     });
@@ -226,7 +204,6 @@ export interface PasteTextOptions {
   perfTraceId?: string;
   restoreClipboard: boolean;
   restoreDelayMs: number;
-  method: 'sendinput' | 'vbscript';
   targetWindowHandle: number | null;
 }
 
@@ -374,7 +351,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       await clipboard.writeText(text);
-      const sequenceRequest = options.method === 'sendinput' && !signal.aborted
+      const sequenceRequest = !signal.aborted
         ? pasteHelper.clipboardSequence().catch(() => null)
         : null;
       if (writeStart !== null) {
@@ -398,7 +375,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
 
       const clipboardSequence = await sequenceRequest;
       if (isSuperseded()) return skip('superseded');
-      const sequenceUnavailable = options.method === 'sendinput' && clipboardSequence === null;
+      const sequenceUnavailable = clipboardSequence === null;
       if (!sequenceUnavailable) {
         await delay(PASTE_FOCUS_SETTLE_DELAY_MS);
         if (options.perfTraceId) perfTraceManager.mark(options.perfTraceId, 'pasteSettleCompletedAt');
@@ -428,7 +405,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         }
         return dispatch();
       };
-      const dispatched = await simulatePaste(options.method, target, clipboardSequence, options.perfTraceId, authorize);
+      const dispatched = await simulatePaste(target, clipboardSequence, options.perfTraceId, authorize);
       if (dispatched) return { kind: 'pasted' };
       return skip(isSuperseded() ? 'superseded' : 'clipboard_changed');
     } catch (error) {

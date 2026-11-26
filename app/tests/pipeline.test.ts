@@ -64,7 +64,6 @@ describe('processFinalTranscription', () => {
     expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: false,
       restoreDelayMs: 250,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
@@ -141,7 +140,6 @@ describe('processFinalTranscription', () => {
     expect(pasteText).toHaveBeenCalledWith('Hello from eve.', {
       restoreClipboard: true,
       restoreDelayMs: 250,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
   });

@@ -144,7 +144,6 @@ export async function dispatchToOutputs(
       delivery = await pasteText(entry.text, {
         restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
         restoreDelayMs: settings.clipboardRestoreDelayMs,
-        method: settings.pasteMethod,
         targetWindowHandle: pasteTargetWindowHandle ?? null,
         ...(perfTraceId ? { perfTraceId } : {}),
       });
