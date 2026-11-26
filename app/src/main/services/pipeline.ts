@@ -162,8 +162,9 @@ async function deliverToClipboard(
     onDispatch: onPasteDispatch,
     ...(perfTraceId ? { perfTraceId } : {}),
   });
-  // A paste that reached the target check may already have written or sent input.
-  if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+  // Both preflight exits occur before any paste-side clipboard write.
+  if (settings.autoCopy && delivery.kind === 'skipped_unsafe'
+      && (delivery.reason === 'no_target' || delivery.reason === 'paste_unavailable')) {
     const copy = await copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
     return copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
   }

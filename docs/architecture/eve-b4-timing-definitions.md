@@ -95,8 +95,9 @@ With auto-paste enabled, Eve starts the paste and foreground helpers when it
 starts, in parallel with window creation and server startup. The dictation hook
 is registered before the server can report Ready and never waits for the
 helpers. The server state carries `pasteReadiness` (`off`, `warming`, `ready`
-or `degraded`). While it is `warming`, the app shows "Preparing auto-paste"
-instead of Ready. The hosted harness waits for the same state. After
+or `degraded`). While it is `warming`, the app shows "dictation ready · paste
+warming up". The hosted harness waits for paste readiness to settle on
+candidates that report it. After
 10 seconds without both helpers, or as soon as one exits before it is ready,
 Eve reports Ready with auto-paste degraded. Hotkeys work throughout and use the
 copy and History fallback. Enabling auto-paste in Settings starts the same
@@ -132,8 +133,9 @@ A hotkey pressed while the helpers are still starting, after auto-paste is
 enabled or while a crashed helper is replaced, shows "Paste warming up" on the
 overlay. That dictation keeps the copy and History fallback. If a target was
 captured but the paste helper is still starting at stop, Eve waits up to
-2.5 seconds for the helper and keeps 1.5 seconds of the delivery deadline for
-the guarded paste or the copy fallback.
+2.5 seconds for the helper before writing to the clipboard. This keeps the
+sequence sample adjacent to the write and reserves 1.5 seconds of the delivery
+deadline for the guarded paste or configured copy fallback.
 
 Completed performance traces include an allowlisted `pastePreDispatchReason`
 when a foreground capture or clipboard preflight prevents dispatch. Capture
@@ -141,7 +143,8 @@ reasons from Eve are `helper_absent`, `helper_unready`, `helper_busy`,
 `rpc_timeout`, and `no_hwnd`. Reasons from the foreground helper are
 `focus_changed`, `tracker_unready`, `tracker_unavailable`, and
 `keydown_unverified`. Clipboard reasons identify the failing preflight step,
-such as `clipboard_sequence_unavailable` or `clipboard_ownership_changed`. The
+such as `paste_helper_not_ready`, `clipboard_sequence_unavailable`, or
+`clipboard_ownership_changed`. The
 field contains only a reason code or null.
 For the explicit editor, from `app/` run `bun run dev:vite` and open
 `http://127.0.0.1:5173/app/fixtures/isolated-editor-observer.html` (use the configured

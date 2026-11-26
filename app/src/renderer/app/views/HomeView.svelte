@@ -40,7 +40,7 @@
     checking: 'checking speech model files',
     downloading: 'downloading speech model',
     loading: 'loading speech model',
-    preparing: 'preparing auto-paste',
+    preparing: 'dictation ready · paste warming up',
     ready: 'ready',
     error: 'speech setup needs attention',
   };
@@ -62,7 +62,7 @@
         : phaseCopy[serverSnapshot.phase] ?? 'checking readiness';
     }
 
-    return 'ready';
+    return serverSnapshot.state?.pasteReadiness === 'degraded' ? 'ready · paste unavailable' : 'ready';
   });
 
   let statusAction = $derived.by(() => {

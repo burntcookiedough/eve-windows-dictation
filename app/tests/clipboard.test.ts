@@ -1571,11 +1571,14 @@ describe('persistent paste helper', () => {
     });
     nextHelper();
     const warming = pasteHelper.warmUp();
+    setSyntheticClipboard([], 'Synthetic baseline');
+    void warming.catch(() => {});
     const delivery = pasteText('Synthetic dictation', {
       targetWindowHandle: 12345, restoreClipboard: false, restoreDelayMs: 750,
       deadlineUnixMs: Date.now() + 5000,
     });
     await new Promise(resolve => setTimeout(resolve, 50));
+    expect(clipboardText).toBe('Synthetic baseline');
     expect(types(paste)).toEqual(['ready']);
     paste.reply(readyRequest!, 'ready');
     await warming;
@@ -1587,12 +1590,15 @@ describe('persistent paste helper', () => {
   test('a paste helper that stays cold keeps the copy fallback inside the delivery deadline', async () => {
     sequenceRead.mockRestore();
     const paste = nextHelper(() => {});
+    nextHelper();
+    void pasteHelper.warmUp().catch(() => {});
     const startedAt = Date.now();
-    const delivery = await pasteText('Synthetic dictation', {
-      targetWindowHandle: 12345, restoreClipboard: false, restoreDelayMs: 750,
-      deadlineUnixMs: Date.now() + 1700,
-    });
-    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: true });
+    const { delivery } = await processFinalTranscription({
+      frame: 'text', type: 'final', text: 'Synthetic dictation',
+      confidence: 1, audio_duration: 1, transcription_time: 0.5,
+    }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, dictationMode: 'raw' },
+    null, 'quick', 12345, undefined, { clipboardTimeoutMs: 1700 });
+    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'paste_unavailable', copied: true });
     expect(Date.now() - startedAt).toBeLessThan(1000);
     expect(types(paste)).toEqual(['ready']);
     expect(clipboardText).toBe('Synthetic dictation');
@@ -1636,11 +1642,11 @@ describe('persistent paste helper', () => {
     try {
       await helper.warmUp();
       helper.setAutoPaste(false);
-      const sequence = await helper.clipboardSequence(100);
+      const sequence = await helper.clipboardSequence();
       expect(sequence).toBe(clipboardSequence);
 
       paste.crash();
-      expect(await helper.clipboardSequence(100)).toBeNull();
+      expect(await helper.clipboardSequence()).toBeNull();
       await helper.warmUp();
       expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_absent' });
       await expect(helper.paste(12345, sequence!)).rejects.toThrow('Auto-paste disabled');

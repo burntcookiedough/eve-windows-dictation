@@ -61,9 +61,9 @@ export function getServerStatusAnnouncement(phase: ServerStatusPhase, state: Ser
     case 'checking': return 'Checking speech model files.';
     case 'downloading': return 'Downloading the speech model.';
     case 'loading': return 'Loading the speech model.';
-    case 'preparing': return 'Preparing auto-paste.';
+    case 'preparing': return 'Dictation is ready. Paste is warming up.';
     case 'ready': return state?.pasteReadiness === 'degraded'
-      ? 'Speech model is ready. Auto-paste is unavailable, so dictation is saved to History instead.'
+      ? 'Dictation is ready. Auto-paste is unavailable.'
       : 'Speech model is ready.';
     case 'error': return 'Speech model setup needs attention.';
   }

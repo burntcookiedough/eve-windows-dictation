@@ -196,23 +196,13 @@ export class PersistentPasteHelper {
     }
   }
 
-  /**
-   * Reads the clipboard sequence for an accepted paste. When the paste helper
-   * is still starting after auto-paste was enabled or a crash, waits up to
-   * `warmWaitMs` for it rather than giving up on the paste.
-   */
-  async clipboardSequence(warmWaitMs = 0): Promise<number | null> {
-    if (this.stopped) return null;
-    if (!this.connections.paste?.ready) {
-      if (!this.autoPaste || warmWaitMs <= 0) return null;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const warmed = await Promise.race([
-        this.warmChannel('paste').then(() => true, () => false),
-        new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), warmWaitMs); }),
-      ]);
-      clearTimeout(timer);
-      if (!warmed || !this.connections.paste?.ready) return null;
-    }
+  get pasteWarmup(): Promise<number | null> | undefined {
+    const connection = this.connections.paste;
+    return connection?.ready ? undefined : connection?.warming;
+  }
+
+  async clipboardSequence(): Promise<number | null> {
+    if (!this.connections.paste?.ready) return null;
     return this.request('paste', 'sequence', SNAPSHOT_TIMEOUT_MS);
   }
 

@@ -69,7 +69,8 @@ PASTE_PRE_DISPATCH_REASONS = {
     "clipboard_ownership_read_failed", "clipboard_ownership_changed", "clipboard_sequence_unavailable",
     "clipboard_authorization_read_failed", "clipboard_authorization_changed", "paste_expired",
     "native_clipboard_changed", "native_foreground_changed",
-    "paste_prepare_failed", "paste_not_authorized", "clipboard_finalization_timeout", "clipboard_delivery_failed",
+    "paste_helper_not_ready", "paste_prepare_failed", "paste_not_authorized",
+    "clipboard_finalization_timeout", "clipboard_delivery_failed",
 }
 FIXTURE_REASONS = {
     "bundled-replay-server-exited", "cancellation-force-stop-unverified",

@@ -54,7 +54,7 @@ describe('Home and shared server status', () => {
         publish(degraded);
         expect(get(serverStatusState)).toMatchObject({
           phase: 'ready',
-          announcement: 'Speech model is ready. Auto-paste is unavailable, so dictation is saved to History instead.',
+          announcement: 'Dictation is ready. Auto-paste is unavailable.',
         });
         publish({ ...degraded, pasteReadiness: readiness });
         expect(get(serverStatusState)).toMatchObject({ phase: 'ready', announcement: 'Speech model is ready.' });
@@ -212,9 +212,10 @@ describe('Home and shared server status', () => {
     expect(getServerStatusPhase({ ...running, pasteReadiness: 'degraded' })).toBe('ready');
     // The speech model still decides first: a loading model is not "preparing auto-paste".
     expect(getServerStatusPhase({ ...running, engineStatus: { current: 'whisper', status: 'loading' }, pasteReadiness: 'warming' })).toBe('loading');
-    expect(getServerStatusAnnouncement('preparing', { ...running, pasteReadiness: 'warming' })).toBe('Preparing auto-paste.');
+    expect(getServerStatusAnnouncement('preparing', { ...running, pasteReadiness: 'warming' }))
+      .toBe('Dictation is ready. Paste is warming up.');
     expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'degraded' }))
-      .toBe('Speech model is ready. Auto-paste is unavailable, so dictation is saved to History instead.');
+      .toBe('Dictation is ready. Auto-paste is unavailable.');
     expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'ready' })).toBe('Speech model is ready.');
   });
   test('announces only bounded download milestones after 25%', () => {

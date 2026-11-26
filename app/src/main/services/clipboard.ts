@@ -19,8 +19,8 @@ const RESTORE_READ_TIMEOUT_MS = 1000;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
 // A paste helper that is still starting gets this long, leaving the rest of the
 // delivery deadline for the guarded paste or the copy fallback.
-const SEQUENCE_WARM_WAIT_MS = 2500;
-const SEQUENCE_DEADLINE_RESERVE_MS = 1500;
+const PASTE_WARM_WAIT_MS = 2500;
+const PASTE_DEADLINE_RESERVE_MS = 1500;
 let pasteLifetime = new AbortController();
 
 let sendInputScriptPath: string | null = null;
@@ -54,7 +54,7 @@ function ensureSendInputScript(): string {
 }
 
 export type ClipboardCopyOutcome = { kind: 'copied' } | { kind: 'failed' };
-export type PasteSkipReason = 'no_target' | 'clipboard_changed' | 'foreground_changed' | 'superseded' | 'expired';
+export type PasteSkipReason = 'no_target' | 'paste_unavailable' | 'clipboard_changed' | 'foreground_changed' | 'superseded' | 'expired';
 export type ClipboardPasteOutcome =
   | { kind: 'pasted' }
   | { kind: 'skipped_unsafe'; reason: PasteSkipReason; copied: boolean }
@@ -410,6 +410,19 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
     let failureReason: PastePreDispatchReason = 'clipboard_baseline_read_failed';
     try {
       if (isSuperseded()) return skip('superseded');
+      const warming = pasteHelper.pasteWarmup;
+      if (warming) {
+        // Sample the native sequence right after the write. Waiting between
+        // those operations could bind the sequence of a different clipboard owner.
+        const timeLeft = (options.deadlineUnixMs ?? Infinity) - Date.now();
+        if (timeLeft <= 0) return skip('expired', false, 'paste_expired');
+        const waitMs = Math.min(PASTE_WARM_WAIT_MS, timeLeft - PASTE_DEADLINE_RESERVE_MS);
+        if (waitMs <= 0) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+        const waitSignal = AbortSignal.any([signal, AbortSignal.timeout(waitMs)]);
+        const ready = await readClipboardWhileActive(waitSignal, () => warming.then(() => true)).catch(() => false);
+        if (isSuperseded()) return skip('superseded');
+        if (!ready) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+      }
       if (options.restoreClipboard) {
         const operation = await beginPasteOperation(signal);
         if (isSuperseded()) return skip('superseded');
@@ -425,9 +438,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       await clipboard.writeText(text);
       clipboardWrite = 'written';
       if (isSuperseded()) return skip('superseded');
-      const warmWaitMs = Math.min(SEQUENCE_WARM_WAIT_MS,
-        (options.deadlineUnixMs ?? Infinity) - Date.now() - SEQUENCE_DEADLINE_RESERVE_MS);
-      const sequenceRequest = pasteHelper.clipboardSequence(warmWaitMs).catch(() => null);
+      const sequenceRequest = pasteHelper.clipboardSequence().catch(() => null);
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);
