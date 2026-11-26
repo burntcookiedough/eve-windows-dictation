@@ -220,10 +220,12 @@ class Desktop:
             pass
         else:
             stopping = command["action"] == "exit"
+            reply = {"id": command["id"]}
             try:
-                print(json.dumps({"result": self.handle(command)}), flush=True)
+                reply["result"] = self.handle(command)
             except RuntimeError as error:
-                print(json.dumps({"error": str(error)}), flush=True)
+                reply["error"] = str(error)
+            print(json.dumps(reply), flush=True)
         if not stopping:
             self.root.after(5, self.tick)
 

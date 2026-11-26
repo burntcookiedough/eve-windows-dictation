@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.sim_acceptance.replay import (
     ProcessSamples,
     get_json,
+    has_loopback_listener,
     idle_resources,
     run_replay,
     wait_health,
@@ -56,11 +57,13 @@ CDP_SCRIPT = """(() => {
   return true;
 })()"""
 LISTENING = {"listening", "transcribing"}
+DESKTOP_COMMAND_TIMEOUT_S = 10
+IMMEDIATE_STOP_WINDOW_MS = 400
 FIXTURE_ERRORS = (OSError, TimeoutError, RuntimeError, WebSocketException)
 FIXTURE_REASONS = {
     "bundled-replay-server-exited", "cancellation-force-stop-unverified",
     "cdp-command-error", "cdp-http-unreachable",
-    "cdp-websocket-unavailable", "desktop-command-timeout", "desktop-editor-exited",
+    "cdp-websocket-unavailable", "desktop-command-timeout", "desktop-editor-exited", "desktop-reply-invalid",
     "desktop-editor-unavailable", "editor-foreground-unavailable", "editor-no-longer-foreground",
     "fake-track-did-not-end", "global-hotkey-unobserved", "installed-version-mismatch",
     "invalid-hosted-scratch", "main-renderer-unavailable", "managed-model-not-ready-in-app",
@@ -68,6 +71,7 @@ FIXTURE_REASONS = {
     "managed-server-ownership-unverified", "packaged-model-not-ready", "qa-clipboard-allocation-failed",
     "qa-clipboard-lock-failed", "qa-clipboard-seed-failed", "qa-clipboard-unavailable",
     "renderer-command-error", "renderer-preload-unavailable", "replay-server-pid-mismatch",
+    "replay-server-listener-mismatch",
     "sendinput-unavailable", "settings-save-unobserved", "socket-did-not-enter-ready",
     "unexpected-cdp-endpoint", "unknown-desktop-command", "warmup-clipboard-not-restored",
     "warmup-editor-insertion-unobserved", "warmup-editor-insertion-timing-unobserved",
@@ -121,7 +125,7 @@ def cdp_socket(target, port, kind):
 async def open_cdp(target, port, kind):
     url = cdp_socket(target, port, kind)
     try:
-        return await connect(url, close_timeout=2)
+        return await connect(url, close_timeout=2, proxy=None)
     except (OSError, TimeoutError, WebSocketException) as error:
         raise FixtureUnavailable("cdp-websocket-unavailable") from error
 
@@ -154,21 +158,37 @@ class Cdp:
 class Desktop:
     def __init__(self, process):
         self.process = process
+        self.sequence = 0
 
     async def send(self, action, **fields):
         if self.process.returncode is not None:
             raise FixtureUnavailable("desktop-editor-exited")
-        self.process.stdin.write((json.dumps({"action": action, **fields}) + "\n").encode())
-        await self.process.stdin.drain()
+        self.sequence += 1
+        request_id = self.sequence
         try:
-            raw = await asyncio.wait_for(self.process.stdout.readline(), 10)
+            async with asyncio.timeout(DESKTOP_COMMAND_TIMEOUT_S):
+                request = {**fields, "id": request_id, "action": action}
+                self.process.stdin.write((json.dumps(request) + "\n").encode())
+                await self.process.stdin.drain()
+                while True:
+                    raw = await self.process.stdout.readline()
+                    if not raw:
+                        raise FixtureUnavailable("desktop-editor-unavailable")
+                    try:
+                        reply = json.loads(raw)
+                    except (ValueError, UnicodeError):
+                        raise FixtureUnavailable("desktop-reply-invalid") from None
+                    reply_id = reply.get("id") if isinstance(reply, dict) else None
+                    if type(reply_id) is not int or not 0 < reply_id <= request_id:
+                        raise FixtureUnavailable("desktop-reply-invalid")
+                    if reply_id == request_id:
+                        break
         except TimeoutError as error:
             raise FixtureUnavailable("desktop-command-timeout") from error
-        if not raw:
-            raise FixtureUnavailable("desktop-editor-unavailable")
-        reply = json.loads(raw)
-        if "error" in reply:
+        if isinstance(reply.get("error"), str):
             raise FixtureUnavailable(reply["error"])
+        if "result" not in reply:
+            raise FixtureUnavailable("desktop-reply-invalid")
         return reply["result"]
 
 
@@ -390,7 +410,7 @@ async def overlay_observer(main, install):
     pages = await poll(lambda: http(main.port, "/json/list"), lambda pages: bool(pages)
                        and any(page.get("url", "").lower() == url for page in pages), 15)
     target, = [page for page in pages if page.get("url", "").lower() == url]
-    async with connect(cdp_socket(target, main.port, "page"), close_timeout=2) as ws:
+    async with await open_cdp(target, main.port, "page") as ws:
         yield Cdp(ws)
 
 
@@ -517,8 +537,7 @@ def kill_managed_server(process, owner):
                    if child.pid == owner["pid"]), None)
     if server is None:
         raise FixtureUnavailable("managed-server-no-longer-owned")
-    if not any(conn.status == psutil.CONN_LISTEN and conn.laddr.ip == "127.0.0.1"
-               and conn.laddr.port == owner["port"] for conn in server.net_connections("tcp4")):
+    if not has_loopback_listener(server, owner["port"]):
         raise FixtureUnavailable("managed-server-listener-mismatch")
     server.kill()
     server.wait(10)
@@ -529,7 +548,11 @@ async def interrupt_download(root, install, clip):
                            wait_for_model=False) as (_, process, owner, _, _):
         async def downloading():
             health = await http(owner["port"], "/health")
-            return ((health or {}).get("model_download") or {}).get("downloaded_bytes")
+            state = (health or {}).get("model_download") or {}
+            if state.get("phase") != "downloading":
+                return None
+            received, total = state.get("downloaded_bytes"), state.get("total_bytes")
+            return received if received and (total is None or received < total) else None
 
         received = await poll(downloading, lambda count: count and count > 0, 120)
         kill_managed_server(process, owner)
@@ -544,7 +567,7 @@ async def abrupt_socket(port, scratch):
     baseline = (await http(port, "/health"))["active_sessions"]
     observations = []
     for _ in range(2):
-        async with connect(url, close_timeout=2) as client:
+        async with connect(url, close_timeout=2, proxy=None) as client:
             await client.send(json.dumps({"frame": "control", "type": "start", "silence_timeout": 60}))
             first = json.loads(await asyncio.wait_for(client.recv(), 5))
             if first.get("type") != "ready":
@@ -559,6 +582,23 @@ async def abrupt_socket(port, scratch):
     return {
         "sessions_before": baseline, "sessions_during_after": observations,
         "scratch_entries_unchanged": set(scratch.iterdir()) == temp_before,
+    }
+
+
+def observe_immediate_stop(started, stopped, keys, marks):
+    elapsed = (stopped - started) * 1000 if stopped is not None else None
+    key_elapsed = next(((stamp - started) * 1000 for key, stamp in keys
+                        if key == "quick" and stopped is not None and stamp >= stopped), None)
+    app_start, app_stop = marks.get("hotkeyAt"), marks.get("stopRequestedAt")
+    app_elapsed = app_stop - app_start if app_start is not None and app_stop is not None else None
+    in_window = all(value is not None and 0 <= value < IMMEDIATE_STOP_WINDOW_MS
+                    for value in (elapsed, key_elapsed, app_elapsed))
+    return {
+        "stop_sent": stopped is not None,
+        "stop_key_observed": key_elapsed is not None,
+        "stop_elapsed_ms": round(elapsed, 3) if elapsed is not None else None,
+        "app_stop_elapsed_ms": round(app_elapsed, 3) if app_elapsed is not None else None,
+        "stop_in_window": in_window,
     }
 
 
@@ -580,7 +620,7 @@ async def robustness(root, install, desktop, quick, evidence, output):
                 and record["history_correct"] and not record["live_partial_count"])
 
     async def microphone_scenario(label, clip, missing=False):
-        async with app_session(root, install, clip, label=label) as (main, _, _, _, _):
+        async with app_session(root, install, clip, label=label) as (main, _, _, stdout, _):
             before = await history(main)
             if missing:
                 await main.eval("window.murmurMain.updateSetting('selectedDeviceId','qa-unavailable-device')")
@@ -594,6 +634,15 @@ async def robustness(root, install, desktop, quick, evidence, output):
                 after = await history(main)
                 attempt = await desktop.send("read")
                 state = await main.eval("window.eveQaState")
+                timing = {}
+                if label == "immediate-stop":
+                    try:
+                        traces = read_perf(stdout)
+                    except OSError:
+                        traces = []
+                    marks = next((trace["main"] for trace in reversed(traces)
+                                  if trace["status"] in {"complete", "closed"}), {})
+                    timing = observe_immediate_stop(started, stopped, attempt["keys"], marks)
             finally:
                 if missing:
                     await main.eval("window.murmurMain.updateSetting('selectedDeviceId','default')")
@@ -601,12 +650,12 @@ async def robustness(root, install, desktop, quick, evidence, output):
         ok = (before == after and not attempt["insertions"] and delivered(recovery)
               and recovery["history_before_sha256"] == history_digest(before)
               and state["recording"] is not None)
-        stop_seen = stopped is not None and any(key == "quick" and stamp >= stopped
-                                                for key, stamp in attempt["keys"])
-        save(label, "PASS" if ok else "FAIL", fault_insertions=len(attempt["insertions"]),
+        status = "PASS" if ok else "FAIL"
+        if label == "immediate-stop" and not timing["stop_in_window"]:
+            status = "OPEN"
+        save(label, status, fault_insertions=len(attempt["insertions"]),
              recovery_insertions=recovery["insertion_count"], history_unchanged=before == after,
-             listening_at_check=was_listening, stop_sent=stopped is not None, stop_key_observed=stop_seen,
-             stop_elapsed_ms=round((stopped - started) * 1000, 3) if stopped is not None else None)
+             listening_at_check=was_listening, **timing)
 
     async def paste_safety(label):
         async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
@@ -876,12 +925,15 @@ async def hosted_replay(root, install, clips, evidence, output, audit):
             owner = await poll(replay_owner, bool, 30)
             if owner["pid"] != process.pid:
                 raise FixtureUnavailable("replay-server-pid-mismatch")
+            owned = psutil.Process(process.pid)
             await wait_health(owner["port"], "cpu", MODEL, 720)
-        except FIXTURE_ERRORS as error:
+            if not await asyncio.to_thread(has_loopback_listener, owned, owner["port"]):
+                raise FixtureUnavailable("replay-server-listener-mismatch")
+        except (*FIXTURE_ERRORS, psutil.Error) as error:
             evidence["replay_startup_gap"] = fixture_reason(error)
             write_evidence(output, evidence)
             return
-        await run_replay(owner["port"], owner["pid"], clips, evidence, output, audit)
+        await run_replay(owner["port"], owned, clips, evidence, output, audit)
     finally:
         if process is not None:
             stop_owned_tree(process)

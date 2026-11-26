@@ -94,6 +94,7 @@ async def replay_trial(url, clip, *, timeout=300, connect=None):
         from websockets.asyncio.client import connect
     state = {'first_partial_ms': None, 'stop_to_final_text_ms': None,
              'last_audio_ms': None, 'server_perf': None, 'text': None,
+             'stream_started_at': None, 'stop_requested_at': None, 'final_received_at': None,
              'outcome': 'unexpected_failure'}
     trace_id = str(uuid.uuid4())
     async with connect(validate_url(url), max_size=4 * 1024 * 1024) as ws:
@@ -108,6 +109,7 @@ async def replay_trial(url, clip, *, timeout=300, connect=None):
             if frame.get('type') in {'error', 'closing'}:
                 return state
         stream_started = time.perf_counter()
+        state['stream_started_at'] = stream_started
         stop_requested = None
         last_sent = None
         final_ready = asyncio.Event()
@@ -122,6 +124,7 @@ async def replay_trial(url, clip, *, timeout=300, connect=None):
                 elif frame.get('frame') == 'text' and frame.get('type') == 'final':
                     # A final before explicit stop is a failed comparable replay trial.
                     if stop_requested is not None:
+                        state['final_received_at'] = now
                         state['stop_to_final_text_ms'] = (now - stop_requested) * 1000
                         state['text'] = frame.get('text', '')
                         state['outcome'] = 'success'
@@ -149,6 +152,7 @@ async def replay_trial(url, clip, *, timeout=300, connect=None):
                     await asyncio.sleep(max(0, stream_started + samples_sent / 16000 - time.perf_counter()))
             if not final_ready.is_set():
                 stop_requested = time.perf_counter()
+                state['stop_requested_at'] = stop_requested
                 state['last_audio_ms'] = ((stop_requested - last_sent) * 1000 if last_sent is not None else None)
                 await ws.send(json.dumps({'frame': 'control', 'type': 'stop'}))
                 await asyncio.wait_for(final_ready.wait(), timeout)

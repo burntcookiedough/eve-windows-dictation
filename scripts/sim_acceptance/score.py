@@ -354,6 +354,9 @@ def render(all_evidence, lifecycle, history):
                           for name, value in details.items() if name != "status")
         if key.startswith("canary-") and details.get("matches", 0) > 0:
             result = "FAIL"
+        if key == "immediate-stop" and result == "PASS" and not details.get("stop_in_window"):
+            result = "OPEN"
+            facts += (", " if facts else "") + "immediate stop unverified"
         if key in {"cancel-capture", "cancel-final"}:
             path = details.get("exit_path")
             injected = details.get("cancellation_phase_reached") and details.get("close_request_sent")

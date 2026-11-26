@@ -1,5 +1,6 @@
 """Checks for safe hosted console diagnostics and smoke retry selection."""
 
+import asyncio
 import json
 import os
 import subprocess
@@ -68,6 +69,56 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_stub(RuntimeError("private diagnostic"), fallback=fallback)
         fallback.assert_awaited_once()
         self.assertEqual(result["app_fixture_gap"], "RuntimeError")
+
+    async def test_desktop_timeout_ignores_late_reply_before_next_reset(self):
+        responses = asyncio.StreamReader()
+        commands = []
+
+        def write(payload):
+            command = json.loads(payload)
+            commands.append(command)
+            if command["action"] == "reset":
+                responses.feed_data(b'{"id": 1, "result": {"stale": true}}\n')
+                responses.feed_data(b'{"id": 2, "result": true}\n')
+            if command["action"] == "key":
+                responses.feed_data(b'{"id": 3, "result": 123.5}\n')
+
+        process = SimpleNamespace(returncode=None, stdout=responses,
+                                  stdin=SimpleNamespace(write=write, drain=AsyncMock()))
+        desktop = hosted.Desktop(process)
+        with (patch.object(hosted, "DESKTOP_COMMAND_TIMEOUT_S", 0),
+              self.assertRaisesRegex(FixtureUnavailable, "desktop-command-timeout")):
+            await desktop.send("read")
+        self.assertIs(await desktop.send("reset"), True)
+        self.assertEqual(await desktop.send("key", mode="quick"), 123.5)
+        self.assertEqual([command["id"] for command in commands], [1, 2, 3])
+
+    async def test_download_interrupt_requires_partial_download_phase(self):
+        @asynccontextmanager
+        async def app_session(*args, **kwargs):
+            yield (None, None, {"port": 123}, None, None)
+
+        def health(phase, received):
+            return {"model_download": {"phase": phase, "downloaded_bytes": received, "total_bytes": 100}}
+
+        with (patch.object(hosted, "app_session", app_session),
+              patch.object(hosted, "http", AsyncMock(side_effect=[
+                  health("loading", 10), health("downloading", 100), health("downloading", 25),
+              ])),
+              patch.object(hosted, "kill_managed_server") as kill,
+              patch.object(hosted.asyncio, "sleep", AsyncMock())):
+            self.assertEqual(await hosted.interrupt_download(None, None, None), 25)
+        kill.assert_called_once()
+
+    def test_immediate_stop_requires_observed_editor_key_and_app_stop_within_guard(self):
+        marks = {"hotkeyAt": 1000, "stopRequestedAt": 1280}
+        quick_key = [("quick", 10.27)]
+        self.assertTrue(hosted.observe_immediate_stop(10, 10.25, quick_key, marks)["stop_in_window"])
+        self.assertFalse(hosted.observe_immediate_stop(10, None, quick_key, marks)["stop_in_window"])
+        self.assertFalse(hosted.observe_immediate_stop(10, 10.25, [], marks)["stop_in_window"])
+        self.assertFalse(hosted.observe_immediate_stop(10, 10.25, quick_key, {})["stop_in_window"])
+        late = {**marks, "stopRequestedAt": 1401}
+        self.assertFalse(hosted.observe_immediate_stop(10, 10.25, quick_key, late)["stop_in_window"])
 
     async def test_app_close_reports_graceful_exit_and_forced_timeout(self):
         browser = SimpleNamespace(send=AsyncMock(), close=AsyncMock())

@@ -42,6 +42,8 @@ this chain, the CPU fallback streams the same WAVs to the bundled verified
 server at real-time speed. This yields replay-only stop-to-final, accuracy and
 server resource observations. Editor insertion, clipboard, app-side timing
 and resources remain open on the fallback.
+Replay uses a different audio and finalization path, so its timings are
+diagnostic and leave the frozen stop-to-editor rows open.
 
 The first observed final is scored. Insertion, clipboard restoration and
 History are checked independently. Confirmed empty output counts as all

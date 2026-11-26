@@ -79,11 +79,13 @@ class AcceptanceScoreTests(unittest.TestCase):
             "cancel-capture": {"status": "PASS", "cancellation_phase_reached": True,
                                "close_request_sent": True, "exit_path": "forced-after-timeout"},
             "cancel-final": {"status": "PASS"},
+            "immediate-stop": {"status": "PASS", "stop_in_window": False},
         }}
         report, _ = render([evidence], None, None)
         for metric, status in (("Canary omitted from logs with tracing off", "FAIL"),
                                ("Cancel during capture and next Quick", "FAIL"),
-                               ("Cancel during finalization and next Quick", "OPEN")):
+                               ("Cancel during finalization and next Quick", "OPEN"),
+                               ("Immediate stop and next Quick", "OPEN")):
             row = next(line for line in report.splitlines() if metric in line)
             self.assertTrue(row.endswith(f"| {status} |"), row)
 
