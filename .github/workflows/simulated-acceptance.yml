@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       smoke_only:
-        description: Run one excluded close/quiet fake-mic capture
+        description: Smoke close/quiet and relaunch once if paste is skipped before dispatch
         default: false
         type: boolean
 

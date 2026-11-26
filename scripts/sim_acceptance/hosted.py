@@ -19,7 +19,7 @@ from pathlib import Path
 
 import psutil
 from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.sim_acceptance.replay import (
@@ -54,19 +54,49 @@ CDP_SCRIPT = """(() => {
   return true;
 })()"""
 LISTENING = {"listening", "transcribing"}
+FIXTURE_REASONS = {
+    "bundled-replay-server-exited", "cdp-command-error", "cdp-http-unreachable",
+    "cdp-websocket-unavailable", "desktop-command-timeout", "desktop-editor-exited",
+    "desktop-editor-unavailable", "editor-foreground-unavailable", "editor-no-longer-foreground",
+    "fake-track-did-not-end", "global-hotkey-unobserved", "installed-version-mismatch",
+    "invalid-hosted-scratch", "main-renderer-unavailable", "managed-model-not-ready-in-app",
+    "managed-server-listener-mismatch", "managed-server-no-longer-owned",
+    "managed-server-ownership-unverified", "packaged-model-not-ready", "qa-clipboard-allocation-failed",
+    "qa-clipboard-lock-failed", "qa-clipboard-seed-failed", "qa-clipboard-unavailable",
+    "renderer-command-error", "renderer-preload-unavailable", "replay-server-pid-mismatch",
+    "sendinput-unavailable", "settings-save-unobserved", "socket-did-not-enter-ready",
+    "unexpected-cdp-endpoint", "unknown-desktop-command", "warmup-clipboard-not-restored",
+    "warmup-editor-insertion-unobserved", "warmup-editor-insertion-timing-unobserved",
+    "warmup-editor-stop-key-unobserved",
+    "warmup-native-editor-control-unobserved", "warmup-packaged-capture-unavailable",
+    "warmup-paste-skipped-before-helper",
+} | {f"fake-capture-no-first-audio-{phase}" for phase in (
+    "idle", "listening", "transcribing", "processing", "success", "notice", "error"
+)}
 
 
 class FixtureUnavailable(RuntimeError):
     pass
 
 
-async def poll(observe, condition, seconds):
+def fixture_reason(error):
+    if isinstance(error, FixtureUnavailable):
+        reason = str(error)
+        return reason if reason in FIXTURE_REASONS else "unspecified-fixture"
+    if isinstance(error, ConnectionClosed):
+        return "cdp-connection-closed"
+    return type(error).__name__
+
+
+async def poll(observe, condition, seconds, *, failure=None):
     deadline = time.perf_counter() + seconds
     while time.perf_counter() < deadline:
         value = await observe()
         if condition(value):
             return value
         await asyncio.sleep(.08)
+    if failure is not None:
+        raise FixtureUnavailable(failure)
     raise TimeoutError("observation-timeout")
 
 
@@ -84,6 +114,14 @@ def cdp_socket(target, port, kind):
     return url
 
 
+async def open_cdp(target, port, kind):
+    url = cdp_socket(target, port, kind)
+    try:
+        return await connect(url, close_timeout=2)
+    except (OSError, TimeoutError, WebSocketException) as error:
+        raise FixtureUnavailable("cdp-websocket-unavailable") from error
+
+
 class Cdp:
     def __init__(self, ws):
         self.ws = ws
@@ -97,7 +135,7 @@ class Cdp:
                 result = json.loads(await self.ws.recv())
                 if result.get("id") == self.sequence:
                     if "error" in result:
-                        raise RuntimeError("cdp-command-error")
+                        raise FixtureUnavailable("cdp-command-error")
                     return result["result"]
 
     async def eval(self, expression):
@@ -105,7 +143,7 @@ class Cdp:
             "expression": expression, "awaitPromise": True, "returnByValue": True,
         })
         if result.get("exceptionDetails"):
-            raise RuntimeError("renderer-command-error")
+            raise FixtureUnavailable("renderer-command-error")
         return result["result"].get("value")
 
 
@@ -118,7 +156,10 @@ class Desktop:
             raise FixtureUnavailable("desktop-editor-exited")
         self.process.stdin.write((json.dumps({"action": action, **fields}) + "\n").encode())
         await self.process.stdin.drain()
-        raw = await asyncio.wait_for(self.process.stdout.readline(), 10)
+        try:
+            raw = await asyncio.wait_for(self.process.stdout.readline(), 10)
+        except TimeoutError as error:
+            raise FixtureUnavailable("desktop-command-timeout") from error
         if not raw:
             raise FixtureUnavailable("desktop-editor-unavailable")
         reply = json.loads(raw)
@@ -212,16 +253,19 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
     ], install, env, stdout, stderr)
     browser = None
     try:
-        version = await poll(lambda: http(cdp_port, "/json/version"), bool, 20)
-        browser = await connect(cdp_socket(version, cdp_port, "browser"), close_timeout=2)
+        version = await poll(lambda: http(cdp_port, "/json/version"), bool, 20,
+                             failure="cdp-http-unreachable")
+        browser = await open_cdp(version, cdp_port, "browser")
         url = (install / "resources/app.asar/dist/renderer/app/index.html").as_uri().lower()
         pages = await poll(lambda: http(cdp_port, "/json/list"), lambda targets: bool(targets)
-                           and any(page.get("url", "").lower() == url for page in targets), 20)
+                           and any(page.get("url", "").lower() == url for page in targets), 20,
+                           failure="main-renderer-unavailable")
         target, = [page for page in pages if page.get("type") == "page" and page.get("url", "").lower() == url]
-        async with connect(cdp_socket(target, cdp_port, "page"), close_timeout=2) as ws:
+        async with await open_cdp(target, cdp_port, "page") as ws:
             main = Cdp(ws)
             main.port = cdp_port
-            await poll(lambda: main.eval("typeof window.murmurMain?.getAppVersion === 'function'"), bool, 15)
+            await poll(lambda: main.eval("typeof window.murmurMain?.getAppVersion === 'function'"), bool, 15,
+                       failure="renderer-preload-unavailable")
             version = await main.eval("window.murmurMain.getAppVersion()")
             if version != "0.9.0-beta.1":
                 raise FixtureUnavailable("installed-version-mismatch")
@@ -240,9 +284,12 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
                     return None
                 return owner
 
-            owner = await poll(server_port, bool, 45)
+            owner = await poll(server_port, bool, 45, failure="managed-server-ownership-unverified")
             if wait_for_model:
-                await wait_health(owner["port"], "cpu", MODEL, 720)
+                try:
+                    await wait_health(owner["port"], "cpu", MODEL, 720)
+                except (RuntimeError, TimeoutError) as error:
+                    raise FixtureUnavailable("packaged-model-not-ready") from error
                 # The app rejects dictation until its own managed-server
                 # snapshot is ready, which can lag the direct health endpoint.
                 await poll(
@@ -252,7 +299,7 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
                     and state.get("pid") == owner["pid"]
                     and state.get("port") == owner["port"]
                     and (state.get("engineStatus") or {}).get("status") == "ready",
-                    30,
+                    30, failure="managed-model-not-ready-in-app",
                 )
             yield main, process, owner, stdout, stderr
     finally:
@@ -765,6 +812,42 @@ async def hosted_replay(root, install, clips, evidence, output, audit):
         stop_owned_tree(process)
 
 
+async def observe_warmup(root, install, desktop, clip, evidence, output, label, control_key):
+    async with app_session(root, install, clip, label=label) as (main, process, _, log, _):
+        await desktop.send("reset")
+        probe = await desktop.send("probe-paste")
+        await asyncio.sleep(.3)
+        control = await desktop.send("read")
+        evidence[control_key] = (
+            probe and len(control["insertions"]) == 1 and control["clipboard_restored"]
+            and text_hash(control["text"]) == text_hash("EVE QA CLIPBOARD SEED")
+        )
+        write_evidence(output, evidence)
+        record, _ = await capture(main, process, desktop, log, clip)
+        return record
+
+
+def validate_warmup_capture(record):
+    if record["final_count"] != 1 or record["empty"] or not record["history_correct"]:
+        raise FixtureUnavailable("warmup-packaged-capture-unavailable")
+
+
+def smoke_delivery_issue(record, native_control):
+    if record["failed"] or not record["insert_matches_final"]:
+        if not native_control:
+            return "warmup-native-editor-control-unobserved"
+        if record["delivery"] == "paste_skipped" and not record["paste_helper_request_observed"]:
+            return "warmup-paste-skipped-before-helper"
+        return "warmup-editor-insertion-unobserved"
+    if not record["clipboard_restored"]:
+        return "warmup-clipboard-not-restored"
+    if record["stop_to_insert_ms"] is None:
+        if record["editor_stop_key_observed"]:
+            return "warmup-editor-insertion-timing-unobserved"
+        return "warmup-editor-stop-key-unobserved"
+    return None
+
+
 async def run(args):
     root, install = args.root.resolve(), args.install.resolve()
     runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
@@ -802,39 +885,40 @@ async def run(args):
                 }
                 write_evidence(args.output, evidence)
         try:
-            async with app_session(root, install, clips[0], label="warmup") as (main, process, _, log, _):
-                await desktop.send("reset")
-                probe = await desktop.send("probe-paste")
-                await asyncio.sleep(.3)
-                control = await desktop.send("read")
-                evidence["runner_editor_control_paste_observed"] = (
-                    probe and len(control["insertions"]) == 1 and control["clipboard_restored"]
-                    and text_hash(control["text"]) == text_hash("EVE QA CLIPBOARD SEED")
-                )
-                write_evidence(args.output, evidence)
-                warmup, _ = await capture(main, process, desktop, log, clips[0])
-                evidence["warmup"] = warmup
-                write_evidence(args.output, evidence)
-                if warmup["final_count"] != 1 or warmup["empty"] or not warmup["history_correct"]:
-                    raise FixtureUnavailable("warmup-packaged-capture-unavailable")
-                if args.smoke and not (not warmup["failed"] and warmup["clipboard_restored"]
-                                       and warmup["insert_matches_final"]
-                                       and warmup["stop_to_insert_ms"] is not None):
-                    raise FixtureUnavailable("warmup-insertion-or-timing-unavailable")
-                if interrupted_bytes and not warmup["failed"]:
-                    evidence["robustness"]["tls-retry"] = {
-                        "status": "PASS",
-                        "method": "process interrupted during HTTPS model preparation",
-                        "bytes_received_before_interrupt": interrupted_bytes,
-                        "recovery_insertions": warmup["insertion_count"],
-                    }
+            native_control = "runner_editor_control_paste_observed"
+            warmup = await observe_warmup(root, install, desktop, clips[0], evidence,
+                                          args.output, "warmup", native_control)
+            evidence["warmup"] = warmup
+            write_evidence(args.output, evidence)
+            validate_warmup_capture(warmup)
+            if args.smoke:
+                issue = smoke_delivery_issue(warmup, evidence[native_control])
+                if issue == "warmup-paste-skipped-before-helper":
+                    print(f"Hosted smoke [{issue}]. Rechecking after one relaunch.", flush=True)
+                    retry_control = "smoke_retry_control_paste_observed"
+                    retry = await observe_warmup(root, install, desktop, clips[0], evidence,
+                                                 args.output, "smoke-relaunch", retry_control)
+                    evidence["smoke_retry"] = retry
                     write_evidence(args.output, evidence)
+                    validate_warmup_capture(retry)
+                    issue = smoke_delivery_issue(retry, evidence[retry_control])
+                if issue is not None:
+                    raise FixtureUnavailable(issue)
+            if interrupted_bytes and not warmup["failed"]:
+                evidence["robustness"]["tls-retry"] = {
+                    "status": "PASS",
+                    "method": "process interrupted during HTTPS model preparation",
+                    "bytes_received_before_interrupt": interrupted_bytes,
+                    "recovery_insertions": warmup["insertion_count"],
+                }
+                write_evidence(args.output, evidence)
         except (FixtureUnavailable, TimeoutError, ConnectionClosed) as error:
-            evidence["app_fixture_gap"] = (str(error) if isinstance(error, FixtureUnavailable)
-                                           else type(error).__name__)
+            reason = fixture_reason(error)
+            evidence["app_fixture_gap"] = reason
             write_evidence(args.output, evidence)
             if args.smoke:
-                raise FixtureUnavailable("hosted-smoke-incomplete") from error
+                raise
+            print(f"Packaged editor fixture unavailable [{reason}]. Running bundled replay.", flush=True)
             await hosted_replay(root, install, clips, evidence, args.output, audit)
             return
         if args.smoke:
@@ -845,8 +929,10 @@ async def run(args):
                     trial, resources = await capture(main, process, desktop, log, clip,
                                                      time_idle=clip["mode"] == "long", audit=audit)
                     evidence["resources"].update(resources)
-            except (FixtureUnavailable, TimeoutError):
-                trial = trial_record(clip, None, output_observed=False, failed=True)
+            except (FixtureUnavailable, TimeoutError, ConnectionClosed) as error:
+                reason = fixture_reason(error)
+                print(f"{args.config} {clip['id']}: fixture unavailable [{reason}]", flush=True)
+                trial = trial_record(clip, None, output_observed=False, failed=True, fixture_gap=reason)
             evidence["trials"].append(trial)
             write_evidence(args.output, evidence)
             print(f"{args.config} {clip['id']}: observed={trial['output_observed']}", flush=True)
@@ -886,7 +972,7 @@ def main():
         asyncio.run(run(parser.parse_args()))
     except Exception as error:  # noqa: BLE001 - raw exceptions may disclose speech or machine paths
         # Raw errors can contain path, transport payload or transcript data.
-        print(f"Packaged acceptance stopped with {type(error).__name__}.", file=sys.stderr)
+        print(f"Packaged acceptance stopped [{fixture_reason(error)}].", file=sys.stderr)
         return 1
     return 0
 
