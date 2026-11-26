@@ -243,6 +243,17 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
             owner = await poll(server_port, bool, 45)
             if wait_for_model:
                 await wait_health(owner["port"], "cpu", MODEL, 720)
+                # The app rejects dictation until its own managed-server
+                # snapshot is ready, which can lag the direct health endpoint.
+                await poll(
+                    lambda: main.eval("window.murmurMain.getServerStatus()"),
+                    lambda state: bool(state)
+                    and state.get("status") == "running"
+                    and state.get("pid") == owner["pid"]
+                    and state.get("port") == owner["port"]
+                    and (state.get("engineStatus") or {}).get("status") == "ready",
+                    30,
+                )
             yield main, process, owner, stdout, stderr
     finally:
         if browser is not None:
