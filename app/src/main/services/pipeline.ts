@@ -147,13 +147,10 @@ export async function dispatchToOutputs(
         targetWindowHandle: pasteTargetWindowHandle ?? null,
         ...(perfTraceId ? { perfTraceId } : {}),
       });
-      if (settings.autoCopy) {
-        if (delivery.kind === 'failed') {
-          await copyToClipboard(entry.text, perfTraceId);
-        } else if (delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
-          const copy = await copyToClipboard(entry.text, perfTraceId);
-          delivery = copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
-        }
+      // A paste may already have changed the clipboard or sent input before reporting failure.
+      if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+        const copy = await copyToClipboard(entry.text, perfTraceId);
+        delivery = copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
       }
     } else if (settings.autoCopy && entry.text) {
       delivery = await copyToClipboard(entry.text, perfTraceId);

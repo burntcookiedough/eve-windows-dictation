@@ -110,8 +110,9 @@ describe('processFinalTranscription', () => {
     expect(completed).toBe(true);
   });
 
-  test('copies text when auto-paste fails and auto-copy is enabled', async () => {
-    pasteText.mockResolvedValueOnce({ kind: 'failed' });
+  test('preserves the paste failure without a second clipboard write', async () => {
+    const failure = { kind: 'failed', clipboardWrite: 'written', dispatch: 'uncertain' } as const;
+    pasteText.mockResolvedValueOnce(failure);
 
     const saved: TranscriptionEntry[] = [];
     const result = await processFinalTranscription(
@@ -123,8 +124,8 @@ describe('processFinalTranscription', () => {
     );
 
     expect(pasteText).toHaveBeenCalledTimes(1);
-    expect(copyToClipboard).toHaveBeenCalledWith('Hello from eve.', undefined);
-    expect(result.delivery).toEqual({ kind: 'failed' });
+    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(result.delivery).toEqual(failure);
     expect(saved).toHaveLength(1);
   });
 
@@ -146,7 +147,8 @@ describe('processFinalTranscription', () => {
 
   test('retains dictated text in History when baseline protection aborts paste without auto-copy', async () => {
     const saved: TranscriptionEntry[] = [];
-    pasteText.mockResolvedValueOnce({ kind: 'failed' });
+    const failure = { kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' } as const;
+    pasteText.mockResolvedValueOnce(failure);
     const result = await processFinalTranscription(
       frame,
       { ...settings, autoPaste: true, autoCopy: false, restoreClipboardAfterPaste: true },
@@ -158,7 +160,7 @@ describe('processFinalTranscription', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0].text).toBe('Hello from eve.');
     expect(result.entryWithGroup?.text).toBe(saved[0]?.text);
-    expect(result.delivery).toEqual({ kind: 'failed' });
+    expect(result.delivery).toEqual(failure);
   });
 
   test.each([false, true])('saves History after skipping a missing target (auto-copy: %s)', async (autoCopy) => {

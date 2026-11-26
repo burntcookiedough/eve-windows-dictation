@@ -306,7 +306,7 @@ describe('pasteText', () => {
       restoreClipboard: true,
       restoreDelayMs: 1,
       targetWindowHandle: 12345,
-    })).resolves.toEqual({ kind: 'failed' });
+    })).resolves.toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
 
     expect(clipboardWrites).toEqual([]);
     expect(execFile).not.toHaveBeenCalled();
@@ -343,20 +343,20 @@ describe('pasteText', () => {
       new MockClipboardItem({ 'text/plain': 'baseline', 'text/html': '<b>baseline</b>' }),
     ], 'baseline');
     await pasteText('first text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
 
     let rejectRead: ((error: Error) => void) | undefined;
     clipboardRead.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject; }));
     const failure = pasteText('second text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, oldTimerFired ? 800 : 0));
     expect(rejectRead).toBeDefined();
     rejectRead?.(new Error('Synthetic successor snapshot failure'));
-    expect(await failure).toEqual({ kind: 'failed' });
+    expect(await failure).toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     expect(clipboardWrites).toEqual(['first text']);
@@ -732,7 +732,7 @@ describe('pasteText', () => {
     clipboardFormats = ['custom/unreadable'];
 
     await pasteText('explicitly replace clipboard', {
-      restoreClipboard: false, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: false, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
 
@@ -747,7 +747,7 @@ describe('pasteText', () => {
     clipboardFormats = [];
     clipboardItems = [];
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -761,7 +761,7 @@ describe('pasteText', () => {
       new MockClipboardItem({ 'image/png': new Blob([new Uint8Array([1, 2, 3])]) }),
     ], 'first');
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -779,7 +779,7 @@ describe('pasteText', () => {
     ], 'baseline');
     clipboardWrite.mockImplementationOnce(async () => { throw new Error('Synthetic atomic write failure'); });
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -803,7 +803,7 @@ describe('pasteText', () => {
       restoreClipboard: true,
       restoreDelayMs: 1,
       targetWindowHandle: 12345,
-    })).resolves.toEqual({ kind: 'failed' });
+    })).resolves.toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
 
     expect(clipboardWrites).toEqual([]);
     expect(clipboardItemWrites).toEqual([]);
@@ -883,6 +883,43 @@ describe('persistent paste helper', () => {
       .toEqual(preparations.map(({ id }) => id));
     expect(new Set(preparations.map(({ id }) => id)).size).toBe(3);
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('preserves a newer copy when a dispatched paste loses its reply', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'baseline' })], 'baseline');
+    const child = nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      if (request.type === 'commit') {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'new copy' })], 'new copy');
+        helper.crash();
+      }
+    });
+    const { delivery } = await processFinalTranscription({
+      frame: 'text', type: 'final', text: 'Synthetic dictation',
+      confidence: 1, audio_duration: 1, transcription_time: 0.5,
+    }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, dictationMode: 'raw' }, null, 'quick', 12345);
+
+    expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
+    expect(clipboardText).toBe('new copy');
+    expect(delivery).toEqual({ kind: 'failed', clipboardWrite: 'written', dispatch: 'uncertain' });
+  });
+
+  test('checks whether the dictation is still copied when a foreground abort arrives', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'baseline' })], 'baseline');
+    nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      if (request.type === 'commit') {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'new copy' })], 'new copy');
+        helper.reply(request, 'aborted', { code: PasteAbortCode.ForegroundChanged });
+      }
+    });
+
+    const delivery = await pasteText('Synthetic dictation', {
+      restoreClipboard: true, restoreDelayMs: 1, targetWindowHandle: 12345,
+    });
+
+    expect(clipboardText).toBe('new copy');
+    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'foreground_changed', copied: false });
   });
 
   test('prewarms without capturing a window or sending keys', async () => {
