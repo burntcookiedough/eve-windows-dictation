@@ -13,6 +13,7 @@ from ctypes import wintypes
 
 SEED = "EVE QA CLIPBOARD SEED"
 VKEYS = {"quick": 0x78, "long": 0x79}
+CF_UNICODETEXT = 13
 
 
 class KeyInput(ctypes.Structure):
@@ -40,12 +41,24 @@ class Input(ctypes.Structure):
 class Desktop:
     def __init__(self):
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         self.user32.GetForegroundWindow.restype = wintypes.HWND
         self.user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
         self.user32.GetAncestor.restype = wintypes.HWND
         self.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
         self.user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
         self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int]
+        self.user32.OpenClipboard.argtypes = [wintypes.HWND]
+        self.user32.GetClipboardData.argtypes = [wintypes.UINT]
+        self.user32.GetClipboardData.restype = wintypes.HANDLE
+        self.user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        self.user32.SetClipboardData.restype = wintypes.HANDLE
+        self.kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        self.kernel32.GlobalAlloc.restype = wintypes.HANDLE
+        self.kernel32.GlobalLock.argtypes = [wintypes.HANDLE]
+        self.kernel32.GlobalLock.restype = ctypes.c_void_p
+        self.kernel32.GlobalUnlock.argtypes = [wintypes.HANDLE]
+        self.kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
         self.root = tk.Tk()
         self.root.withdraw()
         self.new_window()
@@ -116,6 +129,52 @@ class Desktop:
             raise RuntimeError("sendinput-unavailable")
         return start
 
+    def open_clipboard(self):
+        window = self.user32.GetAncestor(self.window.winfo_id(), 2)
+        for _ in range(10):
+            if self.user32.OpenClipboard(window):
+                return
+            time.sleep(.015)
+        raise RuntimeError("qa-clipboard-unavailable")
+
+    def seed_clipboard(self):
+        text = (SEED + "\0").encode("utf-16le")
+        handle = self.kernel32.GlobalAlloc(2, len(text))
+        if not handle:
+            raise RuntimeError("qa-clipboard-allocation-failed")
+        try:
+            address = self.kernel32.GlobalLock(handle)
+            if not address:
+                raise RuntimeError("qa-clipboard-lock-failed")
+            ctypes.memmove(address, text, len(text))
+            self.kernel32.GlobalUnlock(handle)
+            self.open_clipboard()
+            try:
+                if not self.user32.EmptyClipboard() or not self.user32.SetClipboardData(CF_UNICODETEXT, handle):
+                    raise RuntimeError("qa-clipboard-seed-failed")
+                handle = None  # The system owns the movable handle after SetClipboardData.
+            finally:
+                self.user32.CloseClipboard()
+        finally:
+            if handle:
+                self.kernel32.GlobalFree(handle)
+
+    def read_clipboard(self):
+        self.open_clipboard()
+        try:
+            handle = self.user32.GetClipboardData(CF_UNICODETEXT)
+            if not handle:
+                return None
+            address = self.kernel32.GlobalLock(handle)
+            if not address:
+                return None
+            try:
+                return ctypes.wstring_at(address)
+            finally:
+                self.kernel32.GlobalUnlock(handle)
+        finally:
+            self.user32.CloseClipboard()
+
     def handle(self, command):
         action = command["action"]
         if action == "reset":
@@ -123,9 +182,8 @@ class Desktop:
             self.editor.edit_modified(False)
             self.events.clear()
             self.keys.clear()
-            self.root.clipboard_clear()
-            self.root.clipboard_append(SEED)
             self.focus()
+            self.seed_clipboard()
             return True
         if action == "key":
             return self.send_key(command["mode"])
@@ -135,10 +193,7 @@ class Desktop:
             self.focus()
             return True
         if action == "read":
-            try:
-                clipboard = self.root.clipboard_get()
-            except tk.TclError:
-                clipboard = None
+            clipboard = self.read_clipboard()
             return {
                 "text": self.editor.get("1.0", "end-1c"), "insertions": self.events,
                 "keys": self.keys, "clipboard_restored": clipboard == SEED,

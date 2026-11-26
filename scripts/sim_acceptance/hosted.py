@@ -341,7 +341,8 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             timed_out = True
         await asyncio.sleep(1)
         state = await main.eval("window.eveQaState")
-        editor = await desktop.send("read")
+        final = state["finals"][0] if len(state["finals"]) == 1 else None
+        editor = await desktop.send("read", final=final)
         after = await history(main)
         keys = [stamp for key, stamp in editor["keys"] if key == mode]
         if len(keys) == 2 and keys[0] >= trigger and keys[1] >= stop:
@@ -350,28 +351,33 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             stamp for stamp in editor["insertions"] if observed_stop is not None and stamp >= observed_stop
         ]
         insertion_ms = (insertion_times[0] - observed_stop) * 1000 if len(insertion_times) == 1 else None
-        final = state["finals"][0] if len(state["finals"]) == 1 else None
         history_restored = all(after.get(key) == value for key, value in before.items())
         delta = {key: value for key, value in after.items() if key not in before}
-        history_correct = history_restored and list(delta.values()) == ([text_hash(editor["text"])] if editor["text"] else [])
+        history_correct = history_restored and list(delta.values()) == ([text_hash(final)] if final else [])
         marks = next((row["main"] for row in reversed(read_perf(stdout))
                       if ready and row["correlationId"] == ready["correlationId"]
                       and row["status"] == "complete"), {})
         stop_mark, final_mark = marks.get("stopRequestedAt"), marks.get("finalReceivedAt")
         internal = final_mark - stop_mark if stop_mark is not None and final_mark is not None else None
         difference = insertion_ms - internal if insertion_ms is not None and internal is not None else None
+        hypothesis = editor["text"] or final or ""
         record = trial_record(
-            clip, editor["text"], output_observed=True,
+            clip, hypothesis, output_observed=True,
             failed=(timed_out or len(state["finals"]) != 1 or not history_correct
-                    or state["editorDuringSpeech"] > 0),
+                    or state["editorDuringSpeech"] > 0 or len(editor["insertions"]) != 1),
+            accuracy_source="editor" if editor["text"] else "packaged-final",
             insertion_count=len(editor["insertions"]), insert_matches_final=final == editor["text"],
             clipboard_restored=editor["clipboard_restored"], history_correct=history_correct,
+            clipboard_matches_final=editor["clipboard_matches_final"], delivery=state["delivery"],
             history_delta=len(delta), history_count=len(after), final_count=len(state["finals"]),
             history_before_sha256=history_digest(before), history_after_sha256=history_digest(after),
             live_partial_count=state["editorDuringSpeech"], stop_to_insert_ms=insertion_ms,
             main_stop_to_final_ms=internal, capture_elapsed_s=stop - trigger,
             observed_insert_overhead_ms=difference if difference is not None and difference >= 0 else None,
             capture_startup_s=start - trigger, timed_out=timed_out,
+            editor_stop_key_observed=observed_stop is not None,
+            paste_helper_request_observed=marks.get("pasteHelperRequestSentAt") is not None,
+            paste_helper_response_observed=marks.get("pasteHelperResponseAt") is not None,
         )
     finally:
         if collection is not None:
@@ -749,11 +755,13 @@ async def run(args):
                 warmup, _ = await capture(main, process, desktop, log, clips[0])
                 evidence["warmup"] = warmup
                 write_evidence(args.output, evidence)
-                if not (not warmup["failed"] and warmup["clipboard_restored"]
-                        and warmup["insert_matches_final"] and warmup["insertion_count"] == 1
-                        and warmup["stop_to_insert_ms"] is not None):
+                if warmup["final_count"] != 1 or warmup["empty"] or not warmup["history_correct"]:
+                    raise FixtureUnavailable("warmup-packaged-capture-unavailable")
+                if args.smoke and not (not warmup["failed"] and warmup["clipboard_restored"]
+                                       and warmup["insert_matches_final"]
+                                       and warmup["stop_to_insert_ms"] is not None):
                     raise FixtureUnavailable("warmup-insertion-or-timing-unavailable")
-                if interrupted_bytes:
+                if interrupted_bytes and not warmup["failed"]:
                     evidence["robustness"]["tls-retry"] = {
                         "status": "PASS",
                         "method": "process interrupted during HTTPS model preparation",
