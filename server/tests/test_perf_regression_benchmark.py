@@ -63,6 +63,9 @@ async def test_replay_observes_real_protocol_receipt_and_leaves_outputs_unavaila
     assert observation['outcome'] == 'success'
     assert observation['first_partial_ms'] >= 0
     assert observation['stop_to_final_text_ms'] >= 0
+    assert observation['stream_started_at'] < observation['stop_requested_at'] <= observation['final_received_at']
+    assert observation['stop_to_final_text_ms'] == pytest.approx(
+        (observation['final_received_at'] - observation['stop_requested_at']) * 1000)
     record = make_record(BASE_FIXTURE_RECORD, clip, observation, run_id='synthetic-test',
         trial_id='synthetic-01', repetition=1, repetitions=2, warmup=False, raw=True)
     assert validate_record_dict(record) == []
