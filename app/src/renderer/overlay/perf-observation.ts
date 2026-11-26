@@ -6,7 +6,8 @@ export class OverlayPerfObserver {
   constructor(traceId: string, startedAt = performance.now()) {
     this.observation = {
       traceId, clockDomain: 'overlay_performance_now', captureStartedAt: startedAt,
-      captureReadyAt: null, lastAudioAt: null, stopRequestedAt: null,
+      mediaResolvedAt: null, contextCreatedAt: null, workletModuleLoadedAt: null,
+      captureReadyAt: null, firstAudioPostedAt: null, lastAudioAt: null, stopRequestedAt: null,
       firstPartialReceivedAt: null, finalReceivedAt: null, finalDomCommittedAt: null,
     };
   }

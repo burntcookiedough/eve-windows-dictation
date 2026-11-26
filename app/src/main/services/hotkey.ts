@@ -15,14 +15,15 @@ import { HotkeyGestureRecognizer } from './hotkey-gesture.js';
 import { captureModifierChord } from './hotkey-gesture.js';
 import type { KeyEventSnapshot, ModifierState } from './hotkey-gesture.js';
 import { createLogger } from '../lib/logger.js';
+import { isPerfTraceEnabled } from './perf-trace.js';
 
 const log = createLogger('Hotkey');
 
 interface HotkeyCallbacks {
-  onHoldStart: () => void;
+  onHoldStart: (hotkeyAt?: number) => void;
   onHoldEnd: () => void;
-  onDoubleTap: () => void;
-  onLongShortcut: () => void;
+  onDoubleTap: (hotkeyAt?: number) => void;
+  onLongShortcut: (hotkeyAt?: number) => void;
 }
 
 let callbacks: HotkeyCallbacks | null = null;
@@ -88,23 +89,24 @@ export function setupHotkeyService(hotkeyCallbacks: HotkeyCallbacks): void {
   callbacks = hotkeyCallbacks;
 
   uIOhook.on('keydown', (e) => {
+    const hotkeyAt = isPerfTraceEnabled() ? performance.now() : undefined;
     updateHeldModifiers(e, true);
     const snapshot = eventSnapshot(e);
     const longAction = longRecognizer.keyDown(snapshot, getCurrentLongHotkey());
     if (longAction === 'hold-start' || longAction === 'double-tap') {
       quickRecognizer.reset();
       log.debug('Long hotkey', { keycode: e.keycode });
-      callbacks?.onLongShortcut();
+      callbacks?.onLongShortcut(hotkeyAt);
       return;
     }
 
     const action = quickRecognizer.keyDown(snapshot, getCurrentHotkey());
     if (action === 'hold-start') {
       log.debug('Hotkey hold start', { keycode: e.keycode });
-      callbacks?.onHoldStart();
+      callbacks?.onHoldStart(hotkeyAt);
     } else if (action === 'double-tap') {
       log.debug('Hotkey double tap', { keycode: e.keycode });
-      callbacks?.onDoubleTap();
+      callbacks?.onDoubleTap(hotkeyAt);
     }
   });
 

@@ -31,6 +31,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       transcriptionService: null, captureSession: null, latestTranscription: null, latestStatus: null,
       historyService: null, LOCAL_SERVER_URL: 'ws://localhost',
       beginOverlaySession: () => 1,
+      isPerfTraceEnabled: () => false,
       perfTraceManager: { startTrace: () => null, mark: () => {}, server: () => {}, completeTrace: () => {} },
       get autoPasteEnabled() { return autoPaste; },
       getSettings: () => {

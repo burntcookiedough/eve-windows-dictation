@@ -5,15 +5,26 @@ import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Performance');
 const ID_REGEX = /^[a-zA-Z0-9_.-]{1,64}$/;
+const startupEvents = [
+  'hotkeyAt', 'recordingStartDispatchedAt', 'wsOpenedAt', 'wsReadyAt',
+  'captureCommandAt', 'captureReadyObservedAt', 'firstAudioSentAt',
+] as const;
 const mainEvents = [
-  'captureCommandAt', 'stopRequestedAt', 'lastAudioDispatchedAt', 'stopDispatchedAt',
+  ...startupEvents, 'stopRequestedAt', 'lastAudioDispatchedAt', 'stopDispatchedAt',
   'firstPartialReceivedAt', 'finalReceivedAt', 'historyCompletedAt', 'clipboardCompletedAt',
   'pasteSettleCompletedAt', 'pasteOwnershipCheckedAt', 'pasteHelperRequestSentAt', 'pasteHelperResponseAt',
 ] as const;
 type MainEvent = typeof mainEvents[number];
-const rendererEvents = ['captureStartedAt', 'captureReadyAt', 'lastAudioAt', 'stopRequestedAt', 'firstPartialReceivedAt', 'finalReceivedAt', 'finalDomCommittedAt'] as const;
+const rendererEvents = [
+  'captureStartedAt', 'mediaResolvedAt', 'contextCreatedAt', 'workletModuleLoadedAt',
+  'captureReadyAt', 'firstAudioPostedAt', 'lastAudioAt', 'stopRequestedAt',
+  'firstPartialReceivedAt', 'finalReceivedAt', 'finalDomCommittedAt',
+] as const;
+const firstOnlyEvents = new Set<MainEvent>([...startupEvents, 'firstPartialReceivedAt']);
 const serverDurations = ['last_audio_offset_ms', 'stop_to_lock_wait_ms', 'lock_wait_ms', 'outstanding_partial_wait_ms', 'executor_queue_wait_ms', 'final_inference_start_offset_ms', 'final_inference_end_offset_ms', 'model_inference_ms', 'ws_send_duration_ms'] as const;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const elapsed = (start: number | null, end: number | null): number | null =>
+  start !== null && end !== null && end >= start ? end - start : null;
 
 export function isPerfTraceEnabled(): boolean {
   return ['1', 'true', 'yes', 'on'].includes((process.env.MURMUR_PERF_TRACE ?? '').trim().toLowerCase());
@@ -31,6 +42,11 @@ export interface ClientPerfTrace {
   status: 'open' | 'complete' | 'closed' | 'cancelled';
   startedAt: number;
   main: Record<MainEvent, number | null>;
+  startupSpansMs: {
+    hotkeyToReady: number | null;
+    readyToCaptureReadyObserved: number | null;
+    hotkeyToFirstAudioSent: number | null;
+  };
   historyCommitMs: number | null;
   clipboardWriteMs: number | null;
   renderer: OverlayPerfObservation | null;
@@ -39,16 +55,18 @@ export interface ClientPerfTrace {
   actualInsertionObservedAt: null;
 }
 
+type SessionTrace = Omit<ClientPerfTrace, 'startupSpansMs'>;
+
 /** Session-scoped passive diagnostics; old asynchronous callbacks cannot mutate a newer trace. */
 class PerfTraceManager {
-  private readonly traces = new Map<string, ClientPerfTrace>();
+  private readonly traces = new Map<string, SessionTrace>();
   private readonly emitted = new Map<string, number>();
   private readonly emittedTerminalStates = new Map<string, Set<ClientPerfTrace['status']>>();
 
   startTrace(correlationId?: string): ClientPerfTrace | null {
     if (!isPerfTraceEnabled()) return null;
     const id = sanitizeCorrelationId(correlationId);
-    const trace: ClientPerfTrace = {
+    const trace: SessionTrace = {
       correlationId: id, clientClockDomain: 'electron_main_performance_now', status: 'open',
       startedAt: performance.now(), main: Object.fromEntries(mainEvents.map(event => [event, null])) as ClientPerfTrace['main'],
       historyCommitMs: null, clipboardWriteMs: null, renderer: null, serverTimings: null,
@@ -63,15 +81,17 @@ class PerfTraceManager {
       this.emitted.delete(oldest);
       this.emittedTerminalStates.delete(oldest);
     }
-    return structuredClone(trace);
+    return structuredClone(this.snapshot(trace));
   }
 
-  mark(id: string | undefined, event: MainEvent, timestamp = performance.now()): void {
-    if (!isPerfTraceEnabled() || !id || !finite(timestamp)) return;
+  mark(id: string | undefined, event: MainEvent, timestamp?: number): void {
+    if (!id || !isPerfTraceEnabled()) return;
     const trace = this.traces.get(id);
     if (!trace) return;
-    if (event === 'firstPartialReceivedAt' && trace.main[event] !== null) return;
-    trace.main[event] = timestamp;
+    if (firstOnlyEvents.has(event) && trace.main[event] !== null) return;
+    const observedAt = timestamp ?? performance.now();
+    if (!finite(observedAt)) return;
+    trace.main[event] = observedAt;
   }
 
   output(id: string | undefined, kind: 'history' | 'clipboard', duration: number, completedAt = performance.now()): void {
@@ -104,6 +124,7 @@ class PerfTraceManager {
     if (Object.keys(raw).some(key => !allowed.has(key))) return false;
     for (const field of rendererEvents) if (raw[field] !== null && !finite(raw[field])) return false;
     trace.renderer = Object.fromEntries(['traceId', 'clockDomain', ...rendererEvents].map(field => [field, raw[field]])) as unknown as OverlayPerfObservation;
+    if (trace.renderer.captureReadyAt !== null) this.mark(raw.traceId, 'captureReadyObservedAt');
     this.emit(raw.traceId);
     return true;
   }
@@ -125,18 +146,32 @@ class PerfTraceManager {
       const states = this.emittedTerminalStates.get(id)!;
       if (states.has(trace.status)) return;
       states.add(trace.status);
-      log.info('B4_PERF', { trace: JSON.stringify(trace) });
+      log.info('B4_PERF', { trace: JSON.stringify(this.snapshot(trace)) });
       return;
     }
     const count = this.emitted.get(id) ?? 0;
     // Reserve one export for each terminal state, including completion after close.
     if (count < 5) {
       this.emitted.set(id, count + 1);
-      log.info('B4_PERF', { trace: JSON.stringify(trace) });
+      log.info('B4_PERF', { trace: JSON.stringify(this.snapshot(trace)) });
     }
   }
 
-  getRecentTraces(): ClientPerfTrace[] { return structuredClone([...this.traces.values()]); }
+  private snapshot(trace: SessionTrace): ClientPerfTrace {
+    const main = trace.main;
+    return {
+      ...trace,
+      startupSpansMs: {
+        hotkeyToReady: elapsed(main.hotkeyAt, main.wsReadyAt),
+        readyToCaptureReadyObserved: elapsed(main.wsReadyAt, main.captureReadyObservedAt),
+        hotkeyToFirstAudioSent: elapsed(main.hotkeyAt, main.firstAudioSentAt),
+      },
+    };
+  }
+
+  getRecentTraces(): ClientPerfTrace[] {
+    return structuredClone([...this.traces.values()].map(trace => this.snapshot(trace)));
+  }
   clear(): void { this.traces.clear(); this.emitted.clear(); this.emittedTerminalStates.clear(); }
 }
 export const perfTraceManager = new PerfTraceManager();
