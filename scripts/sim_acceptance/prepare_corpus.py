@@ -126,9 +126,9 @@ def entity_spans(reference):
     return spans
 
 
-def choose_quick(index):
+def choose_quick(index, splits=("test-clean", "test-other"), per_split=10):
     selected = []
-    for split in ("test-clean", "test-other"):
+    for split in splits:
         used = Counter()
         candidates = [
             row for row in index if row["split"] == split
@@ -136,7 +136,7 @@ def choose_quick(index):
             and row["entities"]
         ]
         # Prefer clips with both kinds of marked spans, then distinct speakers.
-        for _ in range(10):
+        for _ in range(per_split):
             picked = min(candidates, key=lambda row: (
                 used[row["speaker"]], -len({e[2] for e in row["entities"]}),
                 -len(row["entities"]), row["source_id"],
@@ -252,30 +252,32 @@ def write_wav(path, signal):
     return digest(path)
 
 
-def prepare(root, config=None):
+def prepare(root, config=None, smoke=False):
     if root.is_relative_to(Path(__file__).resolve().parents[2]):
         raise ValueError("Corpus cache must be outside the repository")
     root.mkdir(parents=True, exist_ok=True)
     pins = json.loads(SOURCES.read_text(encoding="utf-8"))
     audio_root = root / "public-flac"
     audio_root.mkdir(exist_ok=True)
+    splits = ("test-clean",) if smoke else ("test-clean", "test-other")
     rows = [
-        row for split in ("test-clean", "test-other")
+        row for split in splits
         for row in speech_index(source_file(root, pins[split]), split, audio_root)
     ]
     configs = (config,) if config else CONFIGS
     noise = demand_noise(source_file(root, pins["noise"])) if any(
         name.endswith("-moderate") for name in configs
     ) else None
-    quick = choose_quick(rows)
-    long_signal, long_ref = long_audio(rows)
+    quick = choose_quick(rows, splits, 1 if smoke else 10)
     manifest = []
     clips = [
         (f"Q{i:02}", np.pad(decode_audio(row), (6400, 6400)),
          {key: row[key] for key in ("reference", "entities", "speaker", "split", "source_id")})
         for i, row in enumerate(quick, 1)
     ]
-    clips.append(("L01", long_signal, long_ref))
+    if not smoke:
+        long_signal, long_ref = long_audio(rows)
+        clips.append(("L01", long_signal, long_ref))
     for seed, (clip_id, close, metadata) in enumerate(clips, 1):
         far = distant_mic(close) if any(name.startswith("far-") for name in configs) else None
         for name in configs:
@@ -297,8 +299,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--config", choices=CONFIGS)
+    parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
-    prepare(args.root.resolve(), args.config)
+    if args.smoke and args.config != "close-quiet":
+        parser.error("--smoke requires --config close-quiet")
+    prepare(args.root.resolve(), args.config, args.smoke)
 
 
 if __name__ == "__main__":

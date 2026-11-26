@@ -90,7 +90,9 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r scripts/sim_acceptance/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/sim_acceptance/prepare_corpus.py --root "$env:QA_ROOT/corpus" --config $env:CONFIG
+          $arguments = @('scripts/sim_acceptance/prepare_corpus.py', '--root', "$env:QA_ROOT/corpus", '--config', $env:CONFIG)
+          if ($env:SMOKE_ONLY -eq 'true') { $arguments += '--smoke' }
+          python @arguments
 
       - name: Run isolated acceptance
         shell: pwsh

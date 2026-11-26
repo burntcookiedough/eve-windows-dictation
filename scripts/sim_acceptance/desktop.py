@@ -46,11 +46,8 @@ class Desktop:
         self.user32.SetForegroundWindow.argtypes = [wintypes.HWND]
         self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.root = tk.Tk()
-        self.root.title("Eve simulated acceptance editor")
-        self.root.geometry("640x260+40+60")
-        self.editor = tk.Text(self.root, undo=False)
-        self.editor.pack(expand=True, fill="both")
-        self.editor.bind("<<Modified>>", self.modified)
+        self.root.withdraw()
+        self.new_window()
         self.root.bind_all("<F9>", lambda event: self.key("quick"))
         self.root.bind_all("<F10>", lambda event: self.key("long"))
         self.events = []
@@ -58,6 +55,14 @@ class Desktop:
         self.queue = queue.Queue()
         self.root.after(5, self.tick)
         threading.Thread(target=self.read_commands, daemon=True).start()
+
+    def new_window(self):
+        self.window = tk.Toplevel(self.root)
+        self.window.title("Eve simulated acceptance editor")
+        self.window.geometry("640x260+40+60")
+        self.editor = tk.Text(self.window, undo=False)
+        self.editor.pack(expand=True, fill="both")
+        self.editor.bind("<<Modified>>", self.modified)
 
     def read_commands(self):
         for line in sys.stdin:
@@ -73,20 +78,20 @@ class Desktop:
             self.editor.edit_modified(False)
 
     def focus(self):
-        self.root.deiconify()
+        self.window.deiconify()
         self.root.update()
-        window = self.user32.GetAncestor(self.root.winfo_id(), 2)
-        self.root.attributes("-topmost", True)
-        self.root.lift()
+        window = self.user32.GetAncestor(self.window.winfo_id(), 2)
+        self.window.attributes("-topmost", True)
+        self.window.lift()
         self.editor.focus_force()
         self.user32.SetForegroundWindow(window)
         self.root.update()
-        self.root.attributes("-topmost", False)
+        self.window.attributes("-topmost", False)
         if self.user32.GetForegroundWindow() != window:
             raise RuntimeError("editor-foreground-unavailable")
 
     def send_key(self, mode):
-        window = self.user32.GetAncestor(self.root.winfo_id(), 2)
+        window = self.user32.GetAncestor(self.window.winfo_id(), 2)
         if self.user32.GetForegroundWindow() != window:
             raise RuntimeError("editor-no-longer-foreground")
         vk = VKEYS[mode]
@@ -112,14 +117,20 @@ class Desktop:
             return True
         if action == "key":
             return self.send_key(command["mode"])
+        if action == "replace-editor":
+            self.window.destroy()
+            self.new_window()
+            self.focus()
+            return True
         if action == "read":
             try:
-                restored = self.root.clipboard_get() == SEED
+                clipboard = self.root.clipboard_get()
             except tk.TclError:
-                restored = False
+                clipboard = None
             return {
                 "text": self.editor.get("1.0", "end-1c"), "insertions": self.events,
-                "keys": self.keys, "clipboard_restored": restored,
+                "keys": self.keys, "clipboard_restored": clipboard == SEED,
+                "clipboard_matches_final": clipboard is not None and clipboard == command.get("final"),
             }
         if action == "exit":
             self.root.destroy()

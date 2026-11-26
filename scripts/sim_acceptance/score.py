@@ -27,13 +27,14 @@ def text_hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def load_clips(path, config):
+def load_clips(path, config, *, smoke=False):
     path = path.resolve()
     data = json.loads(path.read_text(encoding="utf-8"))
     clips = [row for row in data["clips"] if row["config"] == config]
-    if {row["id"] for row in clips} != {f"Q{i:02}" for i in range(1, 21)} | {"L01"}:
+    expected = {"Q01"} if smoke else {f"Q{i:02}" for i in range(1, 21)} | {"L01"}
+    if {row["id"] for row in clips} != expected:
         raise ValueError("Missing declared corpus trials")
-    if len(clips) != 21:
+    if len(clips) != len(expected):
         raise ValueError("Duplicate declared corpus trials")
     for clip in clips:
         name = f"{config}-{clip['id']}.wav"
@@ -224,8 +225,16 @@ def assess(config, evidence, hosted_overhead):
         passes = value is None or (value < limit if strict else value <= limit)
         scope = "server only" if evidence.get("method", "").endswith("replay") else "app + server"
         complete = scope == "app + server" and value is not None
-        add(label, f"{'<' if strict else '≤'} {limit} {units}", f"{fmt(value)} {units} ({scope})",
-            outcome(passes if complete else True, complete))
+        sample_key = "long_sample_count" if key.startswith("long") else "idle_sample_count"
+        detail = f"n={resources.get(sample_key, 0)}"
+        if key == "idle_cpu_pct":
+            detail += f", {fmt(resources.get('idle_cpu_valid_s'))} valid seconds"
+        # Server RSS and idle CPU are lower bounds for app + server. Growth
+        # percentages are different when the app footprint is unobserved.
+        comparable = key != "long_rss_growth_pct" or complete
+        add(label, f"{'<' if strict else '≤'} {limit} {units}",
+            f"{fmt(value)} {units} ({scope}, {detail})",
+            outcome(passes if comparable else True, complete))
     return observations
 
 
@@ -274,8 +283,12 @@ def render(all_evidence, lifecycle, history):
                 raise ValueError("Duplicate robustness observation")
             scenarios[key] = value
     for key, gate, label in ROBUSTNESS:
-        result = scenarios.get(key, {}).get("status", "OPEN")
-        tests.append((gate, label, "Scripted result, clean recovery and no lost History", key, result))
+        details = scenarios.get(key, {})
+        result = details.get("status", "OPEN")
+        facts = ", ".join(f"{name.replace('_', ' ')} = {value}"
+                          for name, value in details.items() if name != "status")
+        tests.append((gate, label, "Scripted result, clean recovery and no lost History",
+                      facts or "unobserved", result))
     for key in GPU_PACK:
         tests.append(("G9", f"GPU pack {key}", "Pass", key,
                       scenarios.get(f"gpu-pack-{key}", {}).get("status", "OPEN")))
