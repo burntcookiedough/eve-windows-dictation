@@ -141,12 +141,16 @@ export class PersistentPasteHelper {
   /**
    * Follows the auto-paste setting. Enabling warms both helpers in the
    * background. Disabling releases the snapshot helper once any accepted
-   * capture has settled, and stops both helpers from being replaced.
+   * capture has settled, cancels a cold paste helper, and stops replacements.
    */
   setAutoPaste(enabled: boolean): void {
     this.autoPaste = enabled;
     if (enabled) void this.warmUp().catch(() => {});
-    else this.releaseSnapshot();
+    else {
+      const paste = this.connections.paste;
+      if (paste && !paste.ready) this.disconnect(paste, 'Auto-paste disabled during warm-up');
+      this.releaseSnapshot();
+    }
     this.refreshReadiness();
   }
 
@@ -196,9 +200,11 @@ export class PersistentPasteHelper {
     }
   }
 
-  get pasteWarmup(): Promise<number | null> | undefined {
+  /** Null means that auto-paste is off and accepted work cannot reuse a ready helper. */
+  get pasteWarmup(): Promise<number | null> | null | undefined {
     const connection = this.connections.paste;
-    return connection?.ready ? undefined : connection?.warming;
+    if (connection?.ready) return undefined;
+    return this.autoPaste ? connection?.warming : null;
   }
 
   async clipboardSequence(): Promise<number | null> {
@@ -234,7 +240,9 @@ export class PersistentPasteHelper {
   }
 
   resume(): void {
+    if (!this.stopped) return;
     this.stopped = false;
+    if (this.autoPaste) void this.warmUp().catch(() => {});
     this.refreshReadiness();
   }
 

@@ -32,7 +32,6 @@ from scripts.sim_acceptance.replay import (
 )
 from scripts.sim_acceptance.score import (
     CANCELLATION_FAILURE_PATHS,
-    CANDIDATE,
     load_clips,
     text_hash,
     trial_record,
@@ -42,6 +41,7 @@ from scripts.validation_harness import normalize_text
 
 HERE = Path(__file__).resolve().parent
 MODEL = "small"
+LEGACY_PASTE_READINESS_COMMIT = "22aa01d70a10fc8b52668866ff1c0bd5ac02c751"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CDP_SCRIPT = """(() => {
   window.eveQaState = { finals: [], editorDuringSpeech: 0, history: [], recording: null, delivery: null };
@@ -108,20 +108,20 @@ def fixture_reason(error):
     return type(error).__name__
 
 
-def app_ready(state, owner):
+def app_ready(state, owner, *, candidate_commit):
     """Eve shows Ready: its managed engine is loaded and auto-paste is settled.
 
     `degraded` still counts: Eve reports it after a bounded wait and keeps
     the copy and History fallback, which the trial then observes.
-    Retained candidates from before paste readiness was added omit the field.
+    The verified legacy candidate predates the readiness field.
     """
     return (bool(state)
             and state.get("status") == "running"
             and state.get("pid") == owner["pid"]
             and state.get("port") == owner["port"]
             and (state.get("engineStatus") or {}).get("status") == "ready"
-            and ("pasteReadiness" not in state
-                 or state["pasteReadiness"] in ("ready", "degraded", "off")))
+            and (state.get("pasteReadiness") in ("ready", "degraded", "off")
+                 or (candidate_commit == LEGACY_PASTE_READINESS_COMMIT and "pasteReadiness" not in state)))
 
 
 async def poll(observe, condition, seconds, *, failure=None):
@@ -318,7 +318,7 @@ async def close_app(process, browser):
 
 
 @asynccontextmanager
-async def app_session(root, install, clip, *, trace=True, label=None, wait_for_model=True,
+async def app_session(root, install, clip, *, candidate_commit, trace=True, label=None, wait_for_model=True,
                       offline_cache=None, exit_observation=None):
     profile = root / "profile" / "Eve"
     candidate_settings(profile)
@@ -383,7 +383,7 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
                 # Ready also waits, bounded, for the auto-paste helpers.
                 await poll(
                     lambda: main.eval("window.murmurMain.getServerStatus()"),
-                    lambda state: app_ready(state, owner),
+                    lambda state: app_ready(state, owner, candidate_commit=candidate_commit),
                     30, failure="managed-model-not-ready-in-app",
                 )
             yield main, process, owner, stdout, stderr
@@ -574,9 +574,9 @@ def kill_managed_server(process, owner):
     server.wait(10)
 
 
-async def interrupt_download(root, install, clip):
+async def interrupt_download(root, install, clip, *, candidate_commit):
     async with app_session(root, install, clip, label="tls-interrupt",
-                           wait_for_model=False) as (_, process, owner, _, _):
+                           candidate_commit=candidate_commit, wait_for_model=False) as (_, process, owner, _, _):
         async def downloading():
             health = await http(owner["port"], "/health")
             state = (health or {}).get("model_download") or {}
@@ -635,13 +635,15 @@ def observe_immediate_stop(started, stopped, keys, marks):
 
 async def robustness(root, install, desktop, quick, evidence, output):
     scenarios = evidence["robustness"]
+    candidate_commit = evidence["candidate"]["commit"]
 
     def save(name, status, **fields):
         scenarios[name] = {"status": status, **fields}
         write_evidence(output, evidence)
 
     async def recover(label):
-        async with app_session(root, install, quick, label=f"{label}-recovery") as (main, process, _, log, _):
+        async with app_session(root, install, quick, candidate_commit=candidate_commit,
+                               label=f"{label}-recovery") as (main, process, _, log, _):
             record, _ = await capture(main, process, desktop, log, quick)
             return record
 
@@ -651,7 +653,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
                 and record["history_correct"] and not record["live_partial_count"])
 
     async def microphone_scenario(label, clip, missing=False):
-        async with app_session(root, install, clip, label=label) as (main, _, _, stdout, _):
+        async with app_session(root, install, clip, candidate_commit=candidate_commit,
+                               label=label) as (main, _, _, stdout, _):
             before = await history(main)
             if missing:
                 await main.eval("window.murmurMain.updateSetting('selectedDeviceId','qa-unavailable-device')")
@@ -689,7 +692,7 @@ async def robustness(root, install, desktop, quick, evidence, output):
              listening_at_check=was_listening, **timing)
 
     async def paste_safety(label):
-        async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
+        async with app_session(root, install, quick, candidate_commit=candidate_commit, label=label) as (main, _, _, _, _):
             before = await history(main)
             if label == "focus-safety":
                 await main.eval("window.murmurMain.updateSetting('autoCopy',true)")
@@ -732,7 +735,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
         label = "mic-lost"
         injected = False
         try:
-            async with app_session(root, install, quick, label=label) as (main, _, owner, _, _):
+            async with app_session(root, install, quick, candidate_commit=candidate_commit,
+                                   label=label) as (main, _, owner, _, _):
                 before = await history(main)
                 async with overlay_observer(main, install) as overlay:
                     await overlay.eval("""(() => {
@@ -797,7 +801,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
     for trace in (False, True):
         label = "canary-on" if trace else "canary-off"
         try:
-            async with app_session(root, install, quick, trace=trace, label=label) as session:
+            async with app_session(root, install, quick, candidate_commit=candidate_commit,
+                                   trace=trace, label=label) as session:
                 main, process, _, stdout, stderr = session
                 record, _ = await capture(main, process, desktop, stdout, quick, use_trace=trace)
                 state = await main.eval("window.eveQaState")
@@ -826,7 +831,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
         label = f"crash-{mode}-{phase}"
         injected = False
         try:
-            async with app_session(root, install, quick, label=label) as (main, process, owner, _, _):
+            async with app_session(root, install, quick, candidate_commit=candidate_commit,
+                                   label=label) as (main, process, owner, _, _):
                 before = await history(main)
                 await desktop.send("reset")
                 await desktop.send("key", mode=mode)
@@ -856,7 +862,7 @@ async def robustness(root, install, desktop, quick, evidence, output):
         exit_facts = {}
         injected = False
         try:
-            async with app_session(root, install, quick, label=label,
+            async with app_session(root, install, quick, candidate_commit=candidate_commit, label=label,
                                    exit_observation=exit_facts) as (main, _, _, _, _):
                 before = await history(main)
                 await desktop.send("reset")
@@ -890,7 +896,8 @@ async def robustness(root, install, desktop, quick, evidence, output):
     for label in ("socket-abort", "health-reload", "model-unavailable"):
         try:
             missing = label == "model-unavailable"
-            async with app_session(root, install, quick, label=label, wait_for_model=not missing,
+            async with app_session(root, install, quick, candidate_commit=candidate_commit,
+                                   label=label, wait_for_model=not missing,
                                    offline_cache=root / "missing-model" if missing else None
                                    ) as (main, _, owner, _, _):
                 port = owner["port"]
@@ -971,7 +978,8 @@ async def hosted_replay(root, install, clips, evidence, output, audit):
 
 
 async def observe_warmup(root, install, desktop, clip, evidence, output, label, control_key):
-    async with app_session(root, install, clip, label=label) as (main, process, _, log, _):
+    async with app_session(root, install, clip, candidate_commit=evidence["candidate"]["commit"],
+                           label=label) as (main, process, _, log, _):
         await desktop.send("reset")
         probe = await desktop.send("probe-paste")
         await asyncio.sleep(.3)
@@ -1008,6 +1016,8 @@ def smoke_delivery_issue(record, native_control):
 
 async def run(args):
     root, install = args.root.resolve(), args.install.resolve()
+    candidate = args.candidate
+    candidate_commit = candidate["commit"]
     runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
     if (root == runner_temp or not root.is_relative_to(runner_temp)
             or install == root or not install.is_relative_to(root)):
@@ -1018,9 +1028,9 @@ async def run(args):
     if args.entity_audit and not args.smoke:
         from scripts.sim_acceptance.entity_audit import EntityAudit
 
-        audit = EntityAudit(args.entity_audit, args.config, CANDIDATE)
+        audit = EntityAudit(args.entity_audit, args.config, candidate)
     evidence = {
-        "candidate": CANDIDATE, "config": args.config, "method": "packaged-editor",
+        "candidate": candidate, "config": args.config, "method": "packaged-editor",
         "model": MODEL, "device": "cpu", "trials": [], "resources": {},
         "robustness": {}, "hosted_run_id": os.environ["GITHUB_RUN_ID"],
         "harness_commit": os.environ["GITHUB_SHA"], "smoke_only": args.smoke,
@@ -1036,7 +1046,7 @@ async def run(args):
         interrupted_bytes = None
         if args.config == "close-quiet" and not args.smoke:
             try:
-                interrupted_bytes = await interrupt_download(root, install, clips[0])
+                interrupted_bytes = await interrupt_download(root, install, clips[0], candidate_commit=candidate_commit)
             except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
                 evidence["robustness"]["tls-retry"] = {
                     "status": "OPEN", "observation": type(error).__name__,
@@ -1051,7 +1061,8 @@ async def run(args):
             validate_warmup_capture(warmup)
             if args.smoke:
                 issue = smoke_delivery_issue(warmup, evidence[native_control])
-                if issue == "warmup-paste-skipped-before-helper":
+                if (candidate_commit == LEGACY_PASTE_READINESS_COMMIT
+                        and issue == "warmup-paste-skipped-before-helper"):
                     print(f"Hosted smoke [{issue}]. Rechecking after one relaunch.", flush=True)
                     retry_control = "smoke_retry_control_paste_observed"
                     retry = await observe_warmup(root, install, desktop, clips[0], evidence,
@@ -1083,7 +1094,7 @@ async def run(args):
             return
         for clip in clips:
             try:
-                async with app_session(root, install, clip) as (main, process, owner, log, _):
+                async with app_session(root, install, clip, candidate_commit=candidate_commit) as (main, process, owner, log, _):
                     trial, resources = await capture(main, process, desktop, log, clip,
                                                      time_idle=clip["mode"] == "long", audit=audit,
                                                      server_pid=owner["pid"])
@@ -1123,6 +1134,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--install", type=Path, required=True)
+    parser.add_argument("--candidate", type=json.loads, required=True, help="Verified candidate identity from the install step")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--output", type=Path, required=True)

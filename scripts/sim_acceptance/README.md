@@ -13,6 +13,9 @@ payload. The job uses a read-only token on GitHub-hosted Windows.
 four-job matrix. Same-repository pull requests targeting trunk run the smoke
 when this workflow or its harness changes. Apply the sim-full label once the
 smoke passes to run the full matrix. Keep the lane off the required checks.
+The verified legacy commit can omit paste readiness and retry once on a
+pre-dispatch paste skip. Other candidates must report settled paste readiness
+and insert on the first attempt.
 Manual dispatch is also available once the workflow exists on the default branch.
 
 Run ID `45784796424`, artifact ID `15101085356`, commit

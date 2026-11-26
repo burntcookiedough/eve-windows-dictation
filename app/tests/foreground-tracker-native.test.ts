@@ -99,28 +99,64 @@ test.skipIf(!windows)('the shipped snapshot helper answers keydown-bound request
   }
 }, 60_000);
 
-// The test build pauses the real hook inside a callback, outside the tracker lock.
+for (const [scenario, objectId, childId, thread] of [
+  ['another thread', 'objectId', 'childId', 'hookThreadId ^ 1u'],
+  ['a different object ID', 'objectId ^ 2', 'childId', 'hookThreadId'],
+  ['a different child ID', 'objectId', 'childId ^ 2', 'hookThreadId'],
+] as const) {
+  test.skipIf(!windows)(`a marker with ${scenario} cannot complete the foreground barrier`, async () => {
+    const tracker = FOREGROUND_TRACKER_TYPE.replace(
+      'NotifyWinEvent(EVENT_TRACKER_SYNC, window, objectId, childId);',
+      `OnEvent(IntPtr.Zero, EVENT_TRACKER_SYNC, window, ${objectId}, ${childId}, ${thread}, 0);`,
+    );
+    const output = await runPowerShell(`
+$ErrorActionPreference = 'Stop'
+${tracker}
+if (-not [ForegroundTracker]::Start(5000)) { throw 'Foreground tracker unavailable.' }
+Start-Sleep -Milliseconds 50
+$keydown = [BitConverter]::ToUInt32([BitConverter]::GetBytes([Environment]::TickCount), 0)
+$capture = [ForegroundTracker]::Capture($keydown, 200)
+[Console]::WriteLine((ConvertTo-Json -InputObject $capture -Compress))
+`);
+    expect(JSON.parse(output)).toEqual({ Handle: 0, Reason: 'tracker_unavailable' });
+  }, 60_000);
+}
+
+// A test-only thread message lets the hook pause after GetMessage returns.
 const ORDERING_PROBE = `
 public static class OrderingProbe {
-  private const uint PauseEvent = 0x01EF;
+  private const uint PauseMessage = 0x80EF;
   private static readonly ManualResetEvent Paused = new ManualResetEvent(false);
   private static readonly ManualResetEvent Release = new ManualResetEvent(false);
+  private static readonly ManualResetEvent Finished = new ManualResetEvent(false);
+  private static bool appThreadMessageReturned;
   [DllImport("kernel32.dll")] private static extern ulong GetTickCount64();
+  [DllImport("user32.dll")] private static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int idObject, int idChild);
 
   public static uint Now() { return (uint)GetTickCount64(); }
 
-  public static void Stall(long hwnd) {
-    Paused.Reset();
-    Release.Reset();
-    NotifyWinEvent(PauseEvent, new IntPtr(hwnd), 0, 0);
-    if (!Paused.WaitOne(5000)) throw new InvalidOperationException("Hook did not pause.");
+  public static void Stall(uint thread) {
+    if (!PostThreadMessage(thread, PauseMessage, IntPtr.Zero, IntPtr.Zero) || !Paused.WaitOne(5000)) {
+      throw new InvalidOperationException("Hook did not pause between message reads.");
+    }
   }
 
-  public static bool PauseHook(uint eventType, IntPtr hwnd) {
-    if (eventType != PauseEvent || hwnd.ToInt64() != ForegroundTracker.TrackerWindow) return false;
+  public static bool PauseBetweenReads(IntPtr hwnd, uint message) {
+    if (hwnd != IntPtr.Zero) return false;
+    if (message != PauseMessage) {
+      // Let the pump dispatch window messages. If it returns an app-defined
+      // thread message, hold the next read until Capture has judged its result.
+      if (message >= 0x8000 && message < 0xC000 && Release.WaitOne(0)) appThreadMessageReturned = true;
+      return false;
+    }
     Paused.Set();
     if (!Release.WaitOne(15000)) Paused.Reset();
+    return true;
+  }
+
+  public static bool BeforeGetMessage() {
+    if (appThreadMessageReturned) Finished.WaitOne(15000);
     return true;
   }
 
@@ -129,55 +165,56 @@ public static class OrderingProbe {
     Release.Set();
   }
 
+  public static void CaptureFinished() { Finished.Set(); }
+
   // A foreground notification that changes no focus. The tracker cannot tell it
   // apart from a real switch, which is what this test needs.
   public static void RaiseForeground(long hwnd) { NotifyWinEvent(3, new IntPtr(hwnd), 0, 0); }
 }
 `;
 
-test.skipIf(!windows)('a foreground change queued behind a stalled hook is seen before the capture decides', async () => {
+function orderingScript(raiseForeground: string): string {
+  const tracker = FOREGROUND_TRACKER_TYPE
+    .replace('    while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {', `
+    while (OrderingProbe.BeforeGetMessage() && GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
+      if (OrderingProbe.PauseBetweenReads(message.hwnd, message.message)) continue;`)
+    .replace('    ulong installed;', '    OrderingProbe.MarkerQueued();\n    ulong installed;')
+    .replace('\n"@', `${ORDERING_PROBE}\n"@`);
+  return `
+$ErrorActionPreference = 'Stop'
+${tracker}
+if (-not [ForegroundTracker]::Start(5000)) { throw 'Foreground tracker unavailable.' }
+$window = [ForegroundTracker]::TrackerWindow
+Start-Sleep -Milliseconds 50
+[OrderingProbe]::Stall([ForegroundTracker]::HookThreadId)
+${raiseForeground}
+try {
+  $capture = [ForegroundTracker]::Capture($keydown, 5000)
+} finally {
+  [OrderingProbe]::CaptureFinished()
+}
+[Console]::WriteLine((ConvertTo-Json -InputObject $capture -Compress))
+`;
+}
+
+test.skipIf(!windows)('a foreground change queued in-process precedes the capture marker', async () => {
+  const output = await runPowerShell(orderingScript(`
+$keydown = [OrderingProbe]::Now()
+[OrderingProbe]::RaiseForeground($window)
+`));
+  expect(JSON.parse(output)).toEqual({ Handle: 0, Reason: 'focus_changed' });
+}, 60_000);
+
+test.skipIf(!windows)('a foreground change queued cross-process precedes the capture marker', async () => {
   const { dlopen, FFIType } = await import('bun:ffi');
   const user32 = dlopen('user32.dll', {
     NotifyWinEvent: { args: [FFIType.u32, FFIType.i64, FFIType.i32, FFIType.i32], returns: FFIType.void },
   });
   const kernel32 = dlopen('kernel32.dll', { GetTickCount64: { args: [], returns: FFIType.u64 } });
-  // Keep the shipping marker and foreground event on their real WinEvent queue.
-  const instrumentedTracker = FOREGROUND_TRACKER_TYPE
-    .replace('    if (eventType == EVENT_SYSTEM_FOREGROUND) {',
-      '    if (OrderingProbe.PauseHook(eventType, hwnd)) return;\n    if (eventType == EVENT_SYSTEM_FOREGROUND) {')
-    .replace('    ulong installed;', '    OrderingProbe.MarkerQueued();\n    ulong installed;')
-    .replace('\n"@', `${ORDERING_PROBE}\n"@`);
-  const script = `
-$ErrorActionPreference = 'Stop'
-${instrumentedTracker}
-if (-not [ForegroundTracker]::Start(5000)) { throw 'Foreground tracker unavailable.' }
-$window = [ForegroundTracker]::TrackerWindow
-$r = [ordered]@{}
-Start-Sleep -Milliseconds 50
-
-# Control: a stalled hook delays the sync marker but proves no change.
-[OrderingProbe]::Stall($window)
-$capture = [ForegroundTracker]::Capture([OrderingProbe]::Now(), 5000)
-$r.controlReason = $capture.Reason
-
-# A change after the keydown waits in the queue ahead of the marker.
-[OrderingProbe]::Stall($window)
-$keydown = [OrderingProbe]::Now()
-[OrderingProbe]::RaiseForeground($window)
-$capture = [ForegroundTracker]::Capture($keydown, 5000)
-$r.inProcessReason = $capture.Reason
-$r.inProcessHandle = $capture.Handle
-
-# The same, with the change raised by another process.
-Start-Sleep -Milliseconds 50
-[OrderingProbe]::Stall($window)
+  const script = orderingScript(`
 [Console]::WriteLine('raise ' + $window)
 $keydown = [uint32]::Parse([Console]::ReadLine())
-$capture = [ForegroundTracker]::Capture($keydown, 5000)
-$r.crossProcessReason = $capture.Reason
-$r.crossProcessHandle = $capture.Handle
-[Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))
-`;
+`);
   const child = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(script, 'utf16le').toString('base64')],
   { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
@@ -204,11 +241,7 @@ $r.crossProcessHandle = $capture.Handle
     await child.stdin.flush();
     const result = JSON.parse(await nextLine()) as Record<string, unknown>;
     expect(await child.exited).toBe(0);
-    expect(result).toMatchObject({
-      controlReason: null,
-      inProcessReason: 'focus_changed', inProcessHandle: 0,
-      crossProcessReason: 'focus_changed', crossProcessHandle: 0,
-    });
+    expect(result).toEqual({ Handle: 0, Reason: 'focus_changed' });
   } finally {
     clearTimeout(watchdog);
     if (child.exitCode === null) child.kill();

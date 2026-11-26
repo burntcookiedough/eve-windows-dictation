@@ -229,6 +229,7 @@ export const FOREGROUND_TRACKER_TYPE = `
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Threading;
 
 public sealed class ForegroundCapture {
@@ -243,7 +244,6 @@ public static class ForegroundTracker {
   private const uint EVENT_TRACKER_SYNC = 0x01EE;
   private const uint EVENT_OEM_DEFINED_END = 0x01FF;
   private const uint WINEVENT_OUTOFCONTEXT = 0;
-  private const int OBJID_WINDOW = 0;
   private const uint PM_NOREMOVE = 0;
   private const uint WS_POPUP = 0x80000000;
   private const uint WS_EX_TOOLWINDOW = 0x00000080;
@@ -284,13 +284,15 @@ public static class ForegroundTracker {
   private static extern uint GetCurrentThreadId();
 
   private static readonly object Gate = new object();
+  private static readonly RandomNumberGenerator MarkerRandom = RandomNumberGenerator.Create();
   private static WinEventProc callback;
   private static IntPtr trackerWindow;
   private static uint hookThreadId;
   private static ulong installedAt;
   private static ulong lastChangeAt;
-  private static int syncRequested;
-  private static int syncCompleted;
+  private static int syncObjectId;
+  private static int syncChildId;
+  private static bool syncCompleted;
 
   // Read-only views for diagnostics and the native ordering tests.
   public static long TrackerWindow { get { lock (Gate) { return trackerWindow.ToInt64(); } } }
@@ -354,17 +356,18 @@ public static class ForegroundTracker {
     Environment.Exit(3);
   }
 
-  private static void OnEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint eventTime) {
+  private static void OnEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint eventThread, uint eventTime) {
     if (eventType == EVENT_SYSTEM_FOREGROUND) {
       ulong at = EventTime(eventTime, GetTickCount64());
       lock (Gate) {
         if (at > lastChangeAt) lastChangeAt = at;
       }
-    } else if (eventType == EVENT_TRACKER_SYNC && idObject == OBJID_WINDOW) {
+    } else if (eventType == EVENT_TRACKER_SYNC) {
       lock (Gate) {
-        // Only this helper's window and the marker it is waiting for count.
-        if (hwnd == trackerWindow && idChild == syncRequested) {
-          syncCompleted = idChild;
+        // Windows attributes window events to the owner thread, including when
+        // NotifyWinEvent is called elsewhere. Match the per-capture IDs as well.
+        if (eventThread == hookThreadId && hwnd == trackerWindow && idObject == syncObjectId && idChild == syncChildId) {
+          syncCompleted = true;
           Monitor.PulseAll(Gate);
         }
       }
@@ -376,11 +379,16 @@ public static class ForegroundTracker {
     ulong now = GetTickCount64();
     ulong keydownAt = ExpandTick(keydownTick, now);
     long before = GetForegroundWindow().ToInt64();
-    int token;
+    byte[] nonce = new byte[8];
+    MarkerRandom.GetBytes(nonce);
+    // Positive custom object and child IDs, with neither ID equal to zero.
+    int objectId = (BitConverter.ToInt32(nonce, 0) & int.MaxValue) | 1;
+    int childId = (BitConverter.ToInt32(nonce, 4) & int.MaxValue) | 1;
     IntPtr window;
     lock (Gate) {
-      syncRequested = syncRequested == int.MaxValue ? 1 : syncRequested + 1;
-      token = syncRequested;
+      syncObjectId = objectId;
+      syncChildId = childId;
+      syncCompleted = false;
       window = trackerWindow;
     }
     if (window == IntPtr.Zero) {
@@ -389,12 +397,12 @@ public static class ForegroundTracker {
     }
     // Every change that completed before the read above is already queued to
     // the hook thread, ahead of this marker.
-    NotifyWinEvent(EVENT_TRACKER_SYNC, window, OBJID_WINDOW, token);
+    NotifyWinEvent(EVENT_TRACKER_SYNC, window, objectId, childId);
     ulong installed;
     ulong lastChange;
     DateTime until = DateTime.UtcNow.AddMilliseconds(Math.Max(0, waitMs));
     lock (Gate) {
-      while (syncCompleted != token) {
+      while (!syncCompleted) {
         int remaining = (int)(until - DateTime.UtcNow).TotalMilliseconds;
         if (remaining <= 0) {
           result.Reason = "tracker_unavailable";

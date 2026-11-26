@@ -411,6 +411,7 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
     try {
       if (isSuperseded()) return skip('superseded');
       const warming = pasteHelper.pasteWarmup;
+      if (warming === null) return skip('paste_unavailable', false, 'paste_helper_not_ready');
       if (warming) {
         // Sample the native sequence right after the write. Waiting between
         // those operations could bind the sequence of a different clipboard owner.

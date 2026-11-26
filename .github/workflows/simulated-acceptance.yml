@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       smoke_only:
-        description: Smoke close/quiet and relaunch once if paste is skipped before dispatch
+        description: Smoke close/quiet against the verified candidate
         default: false
         type: boolean
 
@@ -81,6 +81,13 @@ jobs:
             ManifestSha256 = $env:MANIFEST_SHA256
           }
           ./scripts/sim_acceptance/install.ps1 @pins
+          $identity = @{
+            run_id = $pins.RunId
+            artifact_id = $pins.ArtifactId
+            commit = $pins.Commit
+            manifest_sha256 = $pins.ManifestSha256
+          } | ConvertTo-Json -Compress
+          "identity=$identity" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 
       - name: Prepare public corpus
         shell: pwsh
@@ -99,10 +106,12 @@ jobs:
         env:
           QA_ROOT: ${{ steps.candidate.outputs.root }}
           INSTALL: ${{ steps.candidate.outputs.install }}
+          VERIFIED_CANDIDATE: ${{ steps.candidate.outputs.identity }}
           CONFIG: ${{ matrix.config }}
         run: |
           $arguments = @(
             'scripts/sim_acceptance/hosted.py', '--root', $env:QA_ROOT, '--install', $env:INSTALL,
+            '--candidate', $env:VERIFIED_CANDIDATE,
             '--manifest', "$env:QA_ROOT/corpus/manifest.json", '--config', $env:CONFIG,
             '--output', "$env:QA_ROOT/evidence.json", '--entity-audit', "$env:QA_ROOT/entity-audit.json"
           )

@@ -1020,8 +1020,8 @@ describe('persistent paste helper', () => {
 
   afterEach(() => {
     suspendClipboardPaste();
-    resumeClipboardPaste();
     spawn.mockImplementation(() => { throw new Error('Simulated paste helper unavailable'); });
+    resumeClipboardPaste();
     execFile.mockImplementation(execFileStub);
   });
 
@@ -1604,6 +1604,43 @@ describe('persistent paste helper', () => {
     expect(clipboardText).toBe('Synthetic dictation');
   });
 
+  for (const duringDelivery of [false, true]) {
+    test(`disabling auto-paste cancels a cold helper (delivery waiting: ${duringDelivery})`, async () => {
+      sequenceRead.mockRestore();
+      let readyRequest: HelperRequest | undefined;
+      const paste = nextHelper((request, helper) => {
+        if (request.type === 'ready') readyRequest = request;
+        else if (request.type === 'sequence') helper.reply(request, 'sequence', { sequence: clipboardSequence });
+        else if (request.type === 'paste') helper.reply(request, 'prepared');
+        else if (request.type === 'commit') helper.reply(request, 'pasted');
+      });
+      nextHelper();
+      void pasteHelper.warmUp().catch(() => {});
+      setSyntheticClipboard([], 'Synthetic baseline');
+      try {
+        if (!duringDelivery) pasteHelper.setAutoPaste(false);
+        const result = processFinalTranscription({
+          frame: 'text', type: 'final', text: 'Synthetic dictation',
+          confidence: 1, audio_duration: 1, transcription_time: 0.5,
+        }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, dictationMode: 'raw' },
+        null, 'quick', 12345, undefined, { clipboardTimeoutMs: 1700 });
+        if (duringDelivery) {
+          await settle();
+          expect(clipboardText).toBe('Synthetic baseline');
+          pasteHelper.setAutoPaste(false);
+        }
+        paste.reply(readyRequest!, 'ready');
+        expect((await result).delivery).toEqual({ kind: 'skipped_unsafe', reason: 'paste_unavailable', copied: true });
+        expect(paste.kill).toHaveBeenCalledTimes(1);
+        expect(types(paste)).toEqual(['ready']);
+        expect(clipboardText).toBe('Synthetic dictation');
+      } finally {
+        suspendClipboardPaste();
+        pasteHelper.setAutoPaste(true);
+      }
+    });
+  }
+
   test('disabling auto-paste releases the snapshot helper after an accepted capture settles', async () => {
     nextHelper();
     let pending: HelperRequest | undefined;
@@ -1677,6 +1714,28 @@ describe('persistent paste helper', () => {
       helper.setAutoPaste(false);
       expect(helper.readiness()).toBe('off');
       expect(reported).toEqual(['warming', 'ready', 'off']);
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('resuming after a failed quit warms both helpers before the next hotkey', async () => {
+    const helper = new PersistentPasteHelper();
+    try {
+      nextHelper();
+      nextHelper();
+      await helper.warmUp();
+      helper.shutdown();
+      expect(helper.readiness()).toBe('off');
+
+      const paste = nextHelper();
+      const snapshot = nextHelper();
+      helper.resume();
+      await settle();
+      expect(types(paste)).toEqual(['ready']);
+      expect(types(snapshot)).toEqual(['ready']);
+      expect(helper.readiness()).toBe('ready');
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
     } finally {
       helper.shutdown();
     }
