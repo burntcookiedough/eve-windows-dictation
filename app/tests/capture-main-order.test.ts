@@ -12,12 +12,13 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
 
-  for (const [source, initial, updated, autoCopy, historyFailed] of [
+  for (const [source, initial, updated, autoCopy, failure] of [
     ['normal', false, true, true], // Copy-only at start.
     ['normal', false, false, false], // History-only.
     ['normal', true, false, false], // Auto-paste at start.
     ['lab', true, true, false],
-    ['normal', true, true, false, true], // No target, copy disabled, and History unavailable.
+    ['normal', true, true, false, 'no_outputs'],
+    ['normal', false, false, true, 'timeout'],
   ] as const) {
     let autoPaste: boolean = initial;
     let captures = 0;
@@ -26,6 +27,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     let onFinal!: (frame: { text: string }) => Promise<string | undefined>;
     let onClose!: () => void;
     let onTranscription!: (payload: { type: 'final'; text: string }) => void;
+    const timedOut = Promise.withResolvers<void>();
     const context = {
       IPC_CHANNELS, app: { isPackaged: false }, serverManager: null, mainWindow: null,
       overlayWindow: { webContents: { send: () => {} } },
@@ -43,7 +45,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
         return { autoPaste, autoCopy, hotwordsEnabled: false };
       },
       getSetting: () => false,
-      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return historyFailed ? null : 12345; },
+      getForegroundWindowHandle: async () => { captures++; events.push('foreground'); return failure === 'no_outputs' ? null : 12345; },
       updateConnectionState: () => {}, sendOverlayRecordingState: () => {},
       updateRecordingState: () => {}, scheduleOverlayDismiss: () => {},
       updateTranscription: (payload: typeof context.latestTranscription) => { context.latestTranscription = payload; },
@@ -61,9 +63,14 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       processFinalTranscription: async (_frame: unknown, settings: { autoPaste: boolean; autoCopy: boolean },
         _history: unknown, _mode: unknown, target: number | null | Promise<number | null>) => {
         output = { autoPaste: settings.autoPaste, autoCopy: settings.autoCopy, target: await target };
-        return historyFailed
-          ? { delivery: { kind: 'skipped_unsafe', reason: 'no_target', copied: false }, entryWithGroup: null, historyFailed }
-          : { delivery: { kind: 'pasted' } };
+        if (failure === 'no_outputs') {
+          return { delivery: { kind: 'skipped_unsafe', reason: 'no_target', copied: false }, entryWithGroup: null, historyFailed: true };
+        }
+        if (failure === 'timeout') {
+          await timedOut.promise;
+          return { delivery: { kind: 'failed' } };
+        }
+        return { delivery: { kind: 'pasted' } };
       },
     };
     await runInNewContext(script + `\nstartRecording('${source}');`, context);
@@ -73,12 +80,19 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     autoPaste = updated;
     const payload = { type: 'final', text: 'Synthetic final text' } as const;
     onTranscription(payload);
-    const terminal = await onFinal({ text: 'Synthetic final text' });
+    const finalizing = onFinal({ text: 'Synthetic final text' });
+    if (failure === 'timeout') {
+      await runInNewContext('startRecording("normal");', context);
+      expect(context.isRecording).toBe(false);
+      expect(context.isStopping).toBe(true);
+      timedOut.resolve();
+    }
+    const terminal = await finalizing;
     expect(captures).toBe(source === 'normal' && initial ? 1 : 0);
     expect(output).toEqual(source === 'lab' ? undefined : {
-      autoPaste: initial, autoCopy, target: initial && !historyFailed ? 12345 : null,
+      autoPaste: initial, autoCopy, target: initial && failure !== 'no_outputs' ? 12345 : null,
     });
-    if (historyFailed) {
+    if (failure) {
       expect(terminal).toBe('failed');
       context.currentRecordingState.state = 'error';
       onClose();

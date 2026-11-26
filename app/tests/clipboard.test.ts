@@ -280,6 +280,7 @@ describe('pasteText', () => {
       const began = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       const historyEntries: TranscriptionEntry[] = [];
+      const announced: string[] = [];
       const fixture = {
         frame: 'text', type: 'final', text: 'Synthetic dictation',
         confidence: 1, audio_duration: 1, transcription_time: 0.5,
@@ -298,15 +299,20 @@ describe('pasteText', () => {
         });
       }
       const history = { save: (entry: TranscriptionEntry) => historyEntries.push(entry) };
-      const dispatch = processFinalTranscription(fixture, settings, history, 'quick', 12345, undefined, { clipboardTimeoutMs: 50 });
+      const dispatch = processFinalTranscription(fixture, settings, history, 'quick', 12345, undefined, {
+        clipboardTimeoutMs: 50,
+        onHistorySaved: entry => { announced.push(entry.id); },
+      });
       try {
         await began.promise;
         const entriesAtClipboardStart = historyEntries.map(entry => entry.text);
+        const announcedAtClipboardStart = [...announced];
         const result = await Promise.race([
           dispatch,
           new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Clipboard finalization did not return')), 250)),
         ]);
         expect(entriesAtClipboardStart).toEqual(['Synthetic dictation']);
+        expect(announcedAtClipboardStart).toEqual([result.entry.id]);
         expect(result.entryWithGroup?.text).toBe('Synthetic dictation');
         expect(result.delivery.kind).toBe('failed');
 
@@ -323,6 +329,29 @@ describe('pasteText', () => {
       }
     });
   }
+
+  test('never submits an expired dictation write waiting behind a pending Electron write', async () => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    clipboardWriteText.mockImplementationOnce(async () => {
+      writeStarted.resolve();
+      await finishWrite.promise;
+    });
+    const pending = copyToClipboard('Previous write');
+    try {
+      await writeStarted.promise;
+      const { delivery } = await processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Expired dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste: false, autoCopy: true }, null, 'quick', null, undefined, { clipboardTimeoutMs: 25 });
+      expect(delivery.kind).toBe('failed');
+    } finally {
+      finishWrite.resolve();
+      await pending;
+    }
+    expect(await copyToClipboard('Next write')).toEqual({ kind: 'copied' });
+    expect(clipboardWrites).toEqual(['Next write']);
+  });
 
   test('returns Electron clipboard text asynchronously', async () => {
     clipboardText = 'synthetic clipboard text';
