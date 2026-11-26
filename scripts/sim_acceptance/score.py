@@ -5,7 +5,9 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
+import zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -55,34 +57,38 @@ def score_text(clip, hypothesis):
         return {**expected, "chunks_expected": len(chunks)}
     actual = normalize_text(hypothesis).split()
     matches = {}
-    inserted = []
     for opcode in Levenshtein.opcodes(reference, actual):
         if opcode.tag == "equal":
             matches.update(zip(range(opcode.src_start, opcode.src_end),
                                range(opcode.dest_start, opcode.dest_end)))
-        if opcode.tag == "insert":
-            inserted.append(actual[opcode.dest_start:opcode.dest_end])
     entities_exact = sum(
         all(word in matches and (word == start or matches[word] == matches[word - 1] + 1)
             for word in range(start, end))
         for start, end, _ in clip["entities"]
     )
-    # Each LibriSpeech utterance is an annotated chunk. A compatible normalized
-    # word proves some of the aligned chunk survived. Count exact repeated
-    # passages in insertion spans and expose the detection limits in the report.
-    missing = sum(not any(word in matches for word in range(start, end))
-                  for start, end in chunks)
-    anchors = {tuple(reference[start:end]) for start, end in chunks if end - start >= 5}
+    # Flag a chunk if fewer than half its words align, or if only one
+    # word of a multiword chunk survives. This is a transcript heuristic.
+    missing = 0
+    for start, end in chunks:
+        length = end - start
+        aligned = sum(word in matches for word in range(start, end))
+        missing += aligned < min(length, max(2, math.ceil(length / 2)))
+    anchors = {tuple(reference[start:end]) for start, end in chunks if end > start}
     lengths = {len(anchor) for anchor in anchors}
-    duplicated = sum(
-        tuple(words[offset:offset + length]) in anchors
-        for words in inserted for length in lengths
-        for offset in range(len(words) - length + 1)
-    )
+
+    def occurrences(words):
+        return Counter(
+            phrase for length in lengths for offset in range(len(words) - length + 1)
+            if (phrase := tuple(words[offset:offset + length])) in anchors
+        )
+
+    # Also catch exact repeats absorbed into alignment replacements. Compare
+    # against all reference occurrences so existing repetitions are expected.
+    duplicated = (occurrences(actual) - occurrences(reference)).total()
     return {
         **expected, "word_errors": Levenshtein.distance(reference, actual),
         "entities_exact": entities_exact, "chunks_expected": len(chunks),
-        "chunks_missing": missing, "chunks_repeated": duplicated,
+        "chunk_heuristic_missing": missing, "chunk_heuristic_repeated": duplicated,
         "output_sha256": text_hash(hypothesis), "empty": not actual,
     }
 
@@ -109,19 +115,45 @@ def outcome(condition, complete):
     return "FAIL" if not condition else "PASS" if complete else "OPEN"
 
 
-def ratio(rows, hits, total):
-    present = [row for row in rows if hits in row and total in row]
-    numerator = sum(row[hits] for row in present)
-    denominator = sum(row[total] for row in present)
-    return (100 * numerator / denominator if denominator else None,
-            f"{numerator}/{denominator}, n={len(present)}", len(present))
+def ratio(rows, hits, total, *, empty_score, unit):
+    present = []
+    for row in rows:
+        if total not in row:
+            continue
+        if row.get("output_observed") and row.get("empty"):
+            present.append((empty_score(row), row[total]))
+        elif row.get(hits) is not None:
+            present.append((row[hits], row[total]))
+    numerator = sum(value for value, _ in present)
+    denominator = sum(count for _, count in present)
+    attempted_total = sum(row.get(total, 0) for row in rows)
+    known_total = sum(total in row for row in rows) == len(rows)
+    attempted_label = str(attempted_total) if known_total else f"≥{attempted_total}"
+    details = (f"{numerator}/{denominator}, n={len(present)} scored, "
+               f"{len(rows)} attempted, {attempted_label} attempted {unit}")
+    return numerator, denominator, len(present), attempted_total if known_total else None, details
+
+
+def rate(numerator, denominator):
+    return 100 * numerator / denominator if denominator else None
+
+
+def percentile_status(values, expected, targets):
+    missing = expected - len(values)
+    lower = [nearest_rank([*values, *([0] * missing)], q) for q, _ in targets]
+    upper = [nearest_rank([*values, *([math.inf] * missing)], q) for q, _ in targets]
+    if any(value > limit for value, (_, limit) in zip(lower, targets)):
+        return "FAIL"
+    if all(value <= limit for value, (_, limit) in zip(upper, targets)):
+        return "PASS"
+    return "OPEN"
 
 
 def fmt(value):
     return "unobserved" if value is None else f"{value:.3f}"
 
 
-def assess(config, evidence, hosted_overhead):
+def assess(config, evidence):
     gpu = config.startswith("gpu-")
     noisy = config.endswith("-moderate")
     rows = evidence.get("trials", [])
@@ -129,7 +161,7 @@ def assess(config, evidence, hosted_overhead):
     long = [row for row in rows if row["mode"] == "long"]
     known_ids = {f"Q{i:02}" for i in range(1, 21)} | {"L01"}
     if (len({row["id"] for row in rows}) != len(rows)
-            or any(row["id"] not in known_ids or
+            or any(row["id"] not in known_ids or row["mode"] not in {"quick", "long"} or
                    (row["id"] == "L01") != (row["mode"] == "long") for row in rows)):
         raise ValueError("Duplicate or undeclared trial observation")
     if any(row["id"] == "L01" and row["duration_s"] != 1800 for row in long):
@@ -151,68 +183,51 @@ def assess(config, evidence, hosted_overhead):
         ("Quick", quick, 20, 1, 18 if noisy else 12),
         ("Long", long, 1, 0, 20 if noisy else 15),
     ):
-        result_rows = [row for row in group if row.get("output_observed")]
+        result_rows = [row for row in group if row.get("output_observed") or row.get("failed")]
         bad = sum(row.get("empty", False) or row.get("failed", False) for row in result_rows)
         add(f"{mode} empty/failed", f"≤ {bad_limit}/{expected}",
             f"{bad}/{len(result_rows)} observed, {len(group)} attempted",
             outcome(bad <= bad_limit, len(result_rows) == expected))
-        wer, fraction, n = ratio(group, "word_errors", "reference_words")
+        errors, words, n, attempted_words, fraction = ratio(
+            group, "word_errors", "reference_words",
+            empty_score=lambda row: row["reference_words"], unit="reference words",
+        )
+        wer = rate(errors, words)
+        minimum_wer = rate(errors, attempted_words) if len(group) == expected else None
         add(f"{mode} WER", f"≤ {wer_limit}%", f"{fmt(wer)}% ({fraction})",
-            outcome(wer is None or wer <= wer_limit, n == expected))
+            outcome(minimum_wer is None or minimum_wer <= wer_limit, n == expected and wer is not None))
 
-    if long and "chunks_missing" in long[0]:
-        chunk = long[0]
-        missing, repeated = chunk["chunks_missing"], chunk["chunks_repeated"]
-        add("Long chunks", "0 dropped, 0 duplicated",
-            f"{missing} missing, {repeated} repeated, {chunk['chunks_expected']} expected",
-            outcome(missing == repeated == 0, chunk["chunks_expected"] > 0))
-    else:
-        add("Long chunks", "0 dropped, 0 duplicated", "unobserved", "OPEN")
+    add("Long chunks", "0 dropped, 0 duplicated", "Chunk sequence verification unobserved", "OPEN")
 
-    pct, fraction, n = ratio(rows, "entities_exact", "entities_expected")
-    quick_entities = ratio(quick, "entities_exact", "entities_expected")[1]
-    long_entities = ratio(long, "entities_exact", "entities_expected")[1]
+    def entity_ratio(group):
+        return ratio(group, "entities_exact", "entities_expected", empty_score=lambda _: 0, unit="entities")
+
+    exact, entities, _, attempted_entities, fraction = entity_ratio(rows)
+    pct = rate(exact, entities)
+    entity_status = "OPEN"
+    if len(rows) == 21 and attempted_entities:
+        if rate(exact + attempted_entities - entities, attempted_entities) < 85:
+            entity_status = "FAIL"
+        elif rate(exact, attempted_entities) >= 85:
+            entity_status = "PASS"
     add("Names / numbers / terms", "≥ 85% exact",
-        f"{fmt(pct)}% ({fraction}), Quick {quick_entities}, Long {long_entities}",
-        outcome(pct is None or pct >= 85, n == 21 and pct is not None))
+        f"{fmt(pct)}% ({fraction}), Quick {entity_ratio(quick)[-1]}, Long {entity_ratio(long)[-1]}",
+        entity_status)
 
     def latency(group):
         return [row["stop_to_insert_ms"] for row in group if row.get("stop_to_insert_ms") is not None]
 
-    def replay_latency(group):
-        return [row["stop_to_final_ms"] for row in group if row.get("stop_to_final_ms") is not None]
-
     quick_limit = (800, 1500) if gpu else (1500, 3000)
     long_limit = 20_000 if gpu else 90_000
     quick_values, long_values = latency(quick), latency(long)
-    method = "editor"
-    replay_quick, replay_long = replay_latency(quick), replay_latency(long)
-    if gpu:
-        method = "GPU replay + hosted insertion estimate"
-        quick_values = [value + hosted_overhead[0] for value in replay_quick
-                        if hosted_overhead[0] is not None]
-        long_values = [value + hosted_overhead[1] for value in replay_long
-                       if hosted_overhead[1] is not None]
     p50, p95 = (nearest_rank(quick_values, q) for q in (.5, .95))
-    qlabel = f"{method} p50 {fmt(p50)} ms, p95 {fmt(p95)} ms, n={len(quick_values)}"
-    llabel = f"{method} {fmt(max(long_values, default=None))} ms, n={len(long_values)}"
-    if replay_quick:
-        qlabel += (
-            f"; replay final p50 {fmt(nearest_rank(replay_quick, .5))} ms, "
-            f"p95 {fmt(nearest_rank(replay_quick, .95))} ms, n={len(replay_quick)}"
-        )
-    if replay_long:
-        llabel += f"; replay final {fmt(max(replay_long))} ms, n={len(replay_long)}"
-    # A replay can expose a timing miss by itself. A passing proxy still
-    # leaves true editor latency open because the GPU app was never exercised.
-    q_lower = () if quick_values or not gpu else tuple(nearest_rank(replay_quick, q) for q in (.5, .95))
-    q_compare = (p50, p95) if quick_values else q_lower
+    qlabel = (f"editor p50 {fmt(p50)} ms, p95 {fmt(p95)} ms, "
+              f"n={len(quick_values)}/20, {len(quick)} attempted")
+    llabel = f"editor {fmt(max(long_values, default=None))} ms, n={len(long_values)}/1, {len(long)} attempted"
     add("Quick stop → insert", f"p50 ≤ {quick_limit[0]} ms, p95 ≤ {quick_limit[1]} ms", qlabel,
-        outcome(all(value is None or value <= limit for value, limit in zip(q_compare, quick_limit)),
-                len(quick_values) == 20 and not gpu))
-    l_compare = long_values or (replay_long if gpu else [])
+        percentile_status(quick_values, 20, tuple(zip((.5, .95), quick_limit))))
     add("Long finalization", f"≤ {long_limit} ms", llabel,
-        outcome(all(value <= long_limit for value in l_compare), len(long_values) == 1 and not gpu))
+        outcome(all(value <= long_limit for value in long_values), len(long_values) == 1))
 
     resources = evidence.get("resources", {})
     for key, label, limit, units, strict in (
@@ -225,13 +240,20 @@ def assess(config, evidence, hosted_overhead):
         passes = value is None or (value < limit if strict else value <= limit)
         scope = "server only" if evidence.get("method", "").endswith("replay") else "app + server"
         complete = scope == "app + server" and value is not None
-        sample_key = "long_sample_count" if key.startswith("long") else "idle_sample_count"
-        detail = f"n={resources.get(sample_key, 0)}"
+        window = "long" if key.startswith("long") else "idle"
+        detail = f"n={resources.get(f'{window}_sample_count', 0)}"
         if key == "idle_cpu_pct":
             detail += f", {fmt(resources.get('idle_cpu_valid_s'))} valid seconds"
-        # Server RSS and idle CPU are lower bounds for app + server. Growth
-        # percentages are different when the app footprint is unobserved.
-        comparable = key != "long_rss_growth_pct" or complete
+            complete = (complete and (resources.get("idle_cpu_valid_s") or 0) >= 120
+                        and resources.get("idle_rss_window_covered") is not False)
+        else:
+            covered = resources.get(f"{window}_rss_window_covered") is True
+            detail += ", window covered" if covered else ", window coverage unverified"
+            if resources.get(f"{window}_sample_errors"):
+                detail += f", {resources[f'{window}_sample_errors']} sample errors"
+            complete = complete and covered
+        # Only absolute RSS provides a lower bound if the required coverage is missing.
+        comparable = key in {"idle_rss_gib", "long_peak_rss_gib"} or complete
         add(label, f"{'<' if strict else '≤'} {limit} {units}",
             f"{fmt(value)} {units} ({scope}, {detail})",
             outcome(passes if comparable else True, complete))
@@ -260,6 +282,49 @@ ROBUSTNESS = (
     ("history", "G7", "History preserved across failures and relaunch"),
 )
 GPU_PACK = ("install", "interrupt", "corrupt", "wrong-version", "repair", "remove", "cpu-fallback")
+CANCELLATION_FAILURE_PATHS = {"forced-after-timeout", "force-stop-unverified", "nonzero-exit"}
+
+
+def supplemental_observations(by_config, overhead):
+    chunks = []
+    replay = []
+    for config in CONFIGS:
+        trials = by_config.get(config, {}).get("trials", [])
+        long = next((row for row in trials if row["mode"] == "long"), {})
+        for keys, method in (
+            (("chunk_heuristic_missing", "chunk_heuristic_repeated"), "Transcript alignment"),
+            (("chunks_missing", "chunks_repeated"), "Legacy transcript alignment"),
+        ):
+            if all(key in long for key in keys):
+                missing, repeated = (long[key] for key in keys)
+                chunks.append(f"| {config} | {method} | {long['chunks_expected']} | {missing} | {repeated} |")
+                break
+
+        for mode, extra in zip(("quick", "long"), overhead):
+            values = [row["stop_to_final_ms"] for row in trials
+                      if row["mode"] == mode and row.get("stop_to_final_ms") is not None]
+            if not values:
+                continue
+            quantiles = (.5, .95) if mode == "quick" else (1,)
+            summary = " / ".join(fmt(nearest_rank(values, q)) for q in quantiles)
+            estimate = "unobserved"
+            if config == "gpu-close-quiet" and extra is not None:
+                estimate = " / ".join(fmt(nearest_rank(values, q) + extra) for q in quantiles)
+            replay.append(f"| {config} | {mode.title()} | {len(values)} | {summary} | {estimate} |")
+
+    out = []
+    if chunks:
+        out.extend(("", "## Long transcript heuristic", "",
+                    "| Config | Method | Expected chunks | Suspected missing | Exact excess matches |",
+                    "|---|---|---:|---:|---:|", *chunks))
+    if replay:
+        out.extend(("", "## Replay timing", "",
+                    ("Quick reports p50 / p95. Long reports the observed duration. "
+                     "The GPU proxy adds the largest observed hosted close/quiet insertion duration "
+                     f"for each mode. Quick {fmt(overhead[0])} ms. Long {fmt(overhead[1])} ms."),
+                    "", "| Config | Mode | Samples | Stop → final (ms) | GPU proxy (ms) |",
+                    "|---|---|---:|---:|---:|", *replay))
+    return out
 
 
 def render(all_evidence, lifecycle, history):
@@ -275,7 +340,7 @@ def render(all_evidence, lifecycle, history):
             default=None)
         for mode in ("quick", "long")
     )
-    tests = [row for name in CONFIGS for row in assess(name, by_config.get(name, {}), overhead)]
+    tests = [row for name in CONFIGS for row in assess(name, by_config.get(name, {}))]
     scenarios = {}
     for item in all_evidence:
         for key, value in item.get("robustness", {}).items():
@@ -287,6 +352,16 @@ def render(all_evidence, lifecycle, history):
         result = details.get("status", "OPEN")
         facts = ", ".join(f"{name.replace('_', ' ')} = {value}"
                           for name, value in details.items() if name != "status")
+        if key.startswith("canary-") and details.get("matches", 0) > 0:
+            result = "FAIL"
+        if key in {"cancel-capture", "cancel-final"}:
+            path = details.get("exit_path")
+            injected = details.get("cancellation_phase_reached") and details.get("close_request_sent")
+            if injected and path in CANCELLATION_FAILURE_PATHS:
+                result = "FAIL"
+            elif result == "PASS" and not (injected and path == "graceful"):
+                result = "OPEN"
+                facts += (", " if facts else "") + "graceful exit unverified"
         tests.append((gate, label, "Scripted result, clean recovery and no lost History",
                       facts or "unobserved", result))
     for key in GPU_PACK:
@@ -302,14 +377,38 @@ def render(all_evidence, lifecycle, history):
         (f"Candidate commit `{CANDIDATE['commit']}`, retained run {CANDIDATE['run_id']}, "
          f"artifact {CANDIDATE['artifact_id']}. Manifest SHA-256 `{CANDIDATE['manifest_sha256']}`."),
         "",
-        ("GPU insertion estimate uses the largest observed close/quiet app-side duration "
-         f"for each mode when available. Quick {fmt(overhead[0])} ms. Long {fmt(overhead[1])} ms."),
-        "",
         "| Config or gate | Metric | Frozen limit | Observed | Result |",
         "|---|---|---|---|---|",
     ]
     out.extend("| " + " | ".join(row) + " |" for row in tests)
+    out.extend(supplemental_observations(by_config, overhead))
     return "\n".join(out) + "\n", statuses
+
+
+def verify_history(run_id, artifact, metadata_path):
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+    workflow_run = metadata.get("workflow_run") or {}
+    if (not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or str(workflow_run.get("id")) != run_id
+            or metadata.get("name") != f"eve-retained-history-evidence-{run_id}"):
+        raise ValueError("History artifact does not match the requested workflow run and archive digest")
+    with artifact.open("rb") as source:
+        archive_digest = hashlib.file_digest(source, "sha256").hexdigest()
+        if (metadata.get("size_in_bytes") != source.seek(0, 2)
+                or metadata.get("digest") != f"sha256:{archive_digest}"):
+            raise ValueError("History artifact does not match its metadata size and digest")
+        with zipfile.ZipFile(source) as archive:
+            member = "functional-history-evidence.json"
+            if archive.namelist().count(member) != 1:
+                raise ValueError("History artifact must contain one gate evidence file")
+            gate = json.loads(archive.read(member).decode("utf-8-sig"))
+    source = gate["candidateSource"]
+    if (gate["overallStatus"] != "passed" or source["runId"] != CANDIDATE["run_id"]
+            or source["artifactId"] != CANDIDATE["artifact_id"]
+            or gate["candidateCommit"] != CANDIDATE["commit"]
+            or gate["manifestSha256"] != CANDIDATE["manifest_sha256"]):
+        raise ValueError("History evidence does not show a passing gate on the retained candidate")
+    return run_id
 
 
 def main():
@@ -318,22 +417,17 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--lifecycle-run")
     parser.add_argument("--history-run")
-    parser.add_argument("--history-evidence", type=Path)
+    parser.add_argument("--history-evidence", type=Path, help="Original retained History artifact ZIP")
+    parser.add_argument("--history-metadata", type=Path, help="GitHub API metadata for the ZIP")
     args = parser.parse_args()
     if args.lifecycle_run and args.lifecycle_run != CANDIDATE["run_id"]:
         raise ValueError("Lifecycle run must match the candidate")
-    if bool(args.history_run) != bool(args.history_evidence):
-        raise ValueError("History run and downloaded evidence are required together")
-    if args.history_evidence:
-        gate = json.loads(args.history_evidence.read_text(encoding="utf-8-sig"))
-        source = gate["candidateSource"]
-        if (not args.history_run.isdecimal() or gate["overallStatus"] != "passed"
-                or source["runId"] != CANDIDATE["run_id"] or source["artifactId"] != CANDIDATE["artifact_id"]
-                or gate["candidateCommit"] != CANDIDATE["commit"]
-                or gate["manifestSha256"] != CANDIDATE["manifest_sha256"]):
-            raise ValueError("History evidence does not show a passing gate on the retained candidate")
+    history_inputs = (args.history_run, args.history_evidence, args.history_metadata)
+    if any(history_inputs) and not all(history_inputs):
+        raise ValueError("History run, downloaded ZIP, and artifact metadata are required together")
+    history = verify_history(*history_inputs) if all(history_inputs) else None
     evidence = [json.loads(path.read_text(encoding="utf-8-sig")) for path in args.files]
-    markdown, statuses = render(evidence, args.lifecycle_run, args.history_run)
+    markdown, statuses = render(evidence, args.lifecycle_run, history)
     args.output.write_text(markdown, encoding="utf-8")
     return 1 if statuses["FAIL"] else 2 if statuses["OPEN"] else 0
 
