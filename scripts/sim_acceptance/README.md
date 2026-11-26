@@ -30,7 +30,9 @@ Scored trials enable paste and restoration with auto-copy disabled, because
 the candidate retains the dictated text on the clipboard when auto-copy is
 enabled. An isolated native Ctrl+V control checks the runner/editor path.
 Evidence retains counts, timings, hashes and scores. Performance marks use
-Eve's main clock for stop-to-final and for paste helper diagnostics. For the
+Eve's main clock for stop-to-final and for paste helper diagnostics. The
+completed trace's allowlisted `paste_pre_dispatch_reason` is retained in
+smoke evidence when the candidate provides it. For the
 GPU latency estimate the scorer adds the largest observed close/quiet
 stop-to-insert minus main stop-to-final interval per mode. This subtraction
 uses durations and includes hotkey delivery and observer timing. Full GPU

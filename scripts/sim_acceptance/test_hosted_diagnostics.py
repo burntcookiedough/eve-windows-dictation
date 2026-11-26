@@ -64,6 +64,35 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["insertion_count"], 2)
         self.assertFalse(record["insert_matches_final"])
 
+    async def test_capture_reports_only_the_correlated_allowlisted_pre_dispatch_reason(self):
+        clip = {"id": "Q01", "mode": "quick", "sha256": "0" * 64, "duration_s": 0,
+                "reference": "Alice arrived", "entities": []}
+        main = SimpleNamespace(eval=AsyncMock(return_value={
+            "finals": ["Alice arrived"], "editorDuringSpeech": 0, "delivery": "paste_skipped",
+        }))
+        editor = {"keys": [], "insertions": [], "text": "",
+                  "clipboard_restored": True, "clipboard_matches_final": False}
+        ready = {"correlationId": "warmup", "status": "open"}
+        decoy = {"correlationId": "other", "status": "complete", "pastePreDispatchReason": "helper_busy"}
+        for fields, expected in (
+            ({"pastePreDispatchReason": "rpc_timeout"}, "rpc_timeout"),
+            ({"pastePreDispatchReason": "unsafe diagnostic text"}, None),
+            ({"pastePreDispatchReason": {"handle": 12345}}, None),
+            ({}, None),
+        ):
+            with self.subTest(fields=fields):
+                completed = {**ready, "status": "complete", "main": {}, **fields}
+                desktop = SimpleNamespace(send=AsyncMock(side_effect=[None, 0, 1, editor]))
+                with (patch.object(hosted, "history", AsyncMock(return_value={})),
+                      patch.object(hosted, "poll", AsyncMock(side_effect=[ready, None])),
+                      patch.object(hosted.asyncio, "sleep", AsyncMock()),
+                      patch.object(hosted, "read_perf", return_value=[ready, completed, decoy]),
+                      patch.object(hosted, "detect_paste_diagnostics", return_value={})):
+                    record, _ = await hosted.capture(main, SimpleNamespace(pid=os.getpid()), desktop,
+                                                     Path("trial.out.log"), clip)
+                self.assertEqual(record["paste_pre_dispatch_reason"], expected)
+                self.assertFalse(record["paste_helper_request_observed"])
+
     async def test_runtime_warmup_error_requests_bundled_recovery(self):
         fallback = AsyncMock()
         result = await self.run_stub(RuntimeError("private diagnostic"), fallback=fallback)

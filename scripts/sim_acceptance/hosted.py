@@ -60,6 +60,16 @@ LISTENING = {"listening", "transcribing"}
 DESKTOP_COMMAND_TIMEOUT_S = 10
 IMMEDIATE_STOP_WINDOW_MS = 400
 FIXTURE_ERRORS = (OSError, TimeoutError, RuntimeError, WebSocketException)
+# Match the app trace allowlist before copying a reason into public evidence.
+PASTE_PRE_DISPATCH_REASONS = {
+    "helper_absent", "helper_unready", "helper_busy", "rpc_timeout", "no_hwnd",
+    "no_target", "superseded", "clipboard_baseline_read_failed", "clipboard_write_failed",
+    "clipboard_written_read_failed", "clipboard_written_text_changed",
+    "clipboard_ownership_read_failed", "clipboard_ownership_changed", "clipboard_sequence_unavailable",
+    "clipboard_authorization_read_failed", "clipboard_authorization_changed", "paste_expired",
+    "native_clipboard_changed", "native_foreground_changed",
+    "paste_prepare_failed", "paste_not_authorized", "clipboard_finalization_timeout", "clipboard_delivery_failed",
+}
 FIXTURE_REASONS = {
     "bundled-replay-server-exited", "cancellation-force-stop-unverified",
     "cdp-command-error", "cdp-http-unreachable",
@@ -498,10 +508,15 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             "clipboard_matches_final": editor["clipboard_matches_final"],
         } if editor else {"insertion_count": None}
         marks, paste_diagnostics = {}, {}
+        paste_pre_dispatch_reason = None
         try:
-            marks = next((row["main"] for row in reversed(read_perf(stdout))
-                          if ready and row["correlationId"] == ready["correlationId"]
-                          and row["status"] == "complete"), {})
+            completed = next((row for row in reversed(read_perf(stdout))
+                              if ready and row["correlationId"] == ready["correlationId"]
+                              and row["status"] == "complete"), {})
+            marks = completed.get("main", {})
+            reason = completed.get("pastePreDispatchReason")
+            if isinstance(reason, str) and reason in PASTE_PRE_DISPATCH_REASONS:
+                paste_pre_dispatch_reason = reason
             paste_diagnostics = detect_paste_diagnostics(
                 stdout, stdout.with_name(stdout.name.replace(".out.log", ".err.log"))
             )
@@ -521,6 +536,7 @@ async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_
             editor_stop_key_observed=observed_stop is not None,
             paste_helper_request_observed=marks.get("pasteHelperRequestSentAt") is not None,
             paste_helper_response_observed=marks.get("pasteHelperResponseAt") is not None,
+            paste_pre_dispatch_reason=paste_pre_dispatch_reason,
             paste_diagnostics=paste_diagnostics,
             **gaps, **history_facts, **delivery_facts,
         )
