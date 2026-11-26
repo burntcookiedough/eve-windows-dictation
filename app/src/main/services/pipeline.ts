@@ -142,6 +142,7 @@ async function deliverToClipboard(
   pasteTarget: PasteTarget | undefined,
   perfTraceId: string | undefined,
   signal: AbortSignal,
+  deadlineUnixMs: number,
 ): Promise<ClipboardCopyOutcome | ClipboardPasteOutcome> {
   if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal);
 
@@ -151,6 +152,7 @@ async function deliverToClipboard(
     restoreDelayMs: settings.clipboardRestoreDelayMs,
     targetWindowHandle,
     signal,
+    deadlineUnixMs,
     ...(perfTraceId ? { perfTraceId } : {}),
   });
   // A paste that reached the target check may already have written or sent input.
@@ -200,17 +202,19 @@ export async function dispatchToOutputs(
   let delivery: DeliveryOutcome = entryWithGroup ? { kind: 'saved' } : { kind: 'failed' };
   if (entry.text && (settings.autoCopy || settings.autoPaste)) {
     const controller = new AbortController();
+    const timeoutMs = options.clipboardTimeoutMs ?? CLIPBOARD_FINALIZATION_TIMEOUT_MS;
+    const deadlineUnixMs = Date.now() + timeoutMs;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const expiration = new Promise<DeliveryOutcome>(resolve => {
       timeout = setTimeout(() => {
         controller.abort();
         log.warn('Clipboard finalization timed out');
         resolve({ kind: 'failed' });
-      }, options.clipboardTimeoutMs ?? CLIPBOARD_FINALIZATION_TIMEOUT_MS);
+      }, timeoutMs);
     });
     try {
       delivery = await Promise.race([
-        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal),
+        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal, deadlineUnixMs),
         expiration,
       ]);
     } catch {

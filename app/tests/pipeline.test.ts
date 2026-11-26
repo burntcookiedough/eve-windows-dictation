@@ -66,6 +66,7 @@ describe('processFinalTranscription', () => {
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
       signal: expect.any(AbortSignal),
+      deadlineUnixMs: expect.any(Number),
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
@@ -144,6 +145,7 @@ describe('processFinalTranscription', () => {
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
       signal: expect.any(AbortSignal),
+      deadlineUnixMs: expect.any(Number),
     });
   });
 
