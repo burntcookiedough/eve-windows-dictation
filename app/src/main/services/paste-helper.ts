@@ -96,7 +96,9 @@ export class PersistentPasteHelper {
     if (!connection.ready) return { reason: 'helper_unready' };
     if (connection.requests.size > 0) return { reason: 'helper_busy' };
     try {
-      const handle = await this.request('snapshot', 'foreground', SNAPSHOT_TIMEOUT_MS);
+      const response = this.request('snapshot', 'foreground', SNAPSHOT_TIMEOUT_MS);
+      if (!this.connections.paste) void this.warmChannel('paste').catch(() => {});
+      const handle = await response;
       return handle === null ? { reason: 'no_hwnd' } : { handle };
     } catch (error) {
       return { reason: error instanceof PasteHelperUnavailableError && error.timedOut ? 'rpc_timeout' : 'helper_absent' };
@@ -104,11 +106,7 @@ export class PersistentPasteHelper {
   }
 
   async clipboardSequence(): Promise<number | null> {
-    const connection = this.connections.paste;
-    if (!connection?.ready) {
-      if (!connection) void this.warmChannel('paste').catch(() => {});
-      return null;
-    }
+    if (!this.connections.paste?.ready) return null;
     return this.request('paste', 'sequence', SNAPSHOT_TIMEOUT_MS);
   }
 

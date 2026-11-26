@@ -65,8 +65,10 @@ describe('processFinalTranscription', () => {
       restoreClipboard: false,
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
+      snapshotFailure: undefined,
       signal: expect.any(AbortSignal),
       deadlineUnixMs: expect.any(Number),
+      onDispatch: expect.any(Function),
     });
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
@@ -144,8 +146,10 @@ describe('processFinalTranscription', () => {
       restoreClipboard: true,
       restoreDelayMs: 250,
       targetWindowHandle: 12345,
+      snapshotFailure: undefined,
       signal: expect.any(AbortSignal),
       deadlineUnixMs: expect.any(Number),
+      onDispatch: expect.any(Function),
     });
   });
 
