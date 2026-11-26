@@ -51,6 +51,9 @@
     busy,
     delivery,
   }));
+  const spokenStatus = $derived(
+    pillView.busy || pillView.phase === 'done' || pillView.phase === 'error' ? pillView.label : ''
+  );
 
   function clearWarning() {
     if (warningTimeout) {
@@ -174,6 +177,7 @@
         delivery = payload.delivery;
         sessionMode = payload.mode ?? sessionMode;
         isVisible = payload.isRecording || recordingState === 'success' || recordingState === 'notice' || recordingState === 'error';
+        if (!payload.isRecording) clearBusy();
 
         // Main opens every session with idle then 'processing', before the server is ready
         if (recordingState === 'processing' && previousState === 'idle') {
@@ -215,6 +219,7 @@
     cleanupFns.push(
       window.murmur.onWarning((payload: RecordingWarningPayload) => {
         if (payload.code === 'recording_busy') {
+          if (recordingState !== 'processing') return;
           clearBusy();
           busy = true;
           busyTimeout = setTimeout(clearBusy, 700);
@@ -294,3 +299,4 @@
 >
   <Pill view={pillView} levels={audioLevels} />
 </div>
+<div role="status" aria-live="polite" aria-atomic="true" class="sr-only">{spokenStatus}</div>

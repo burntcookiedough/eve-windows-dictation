@@ -123,9 +123,10 @@ test('hotkeys signal Busy during finalization and retain startup timestamps when
     getSetting: () => false,
   };
 
-  runInNewContext(script + '\nquickHotkey(10); toggleLongRecording(20);', context);
+  const rejected = runInNewContext(script + '\n[quickHotkey(10), toggleLongRecording(20)];', context);
   const pulse = [IPC_CHANNELS.STATE_WARNING, { code: 'recording_busy', message: 'Busy' }];
   expect(events).toEqual([pulse, pulse]);
+  expect(rejected).toEqual([false, false]);
 
   events.length = 0;
   context.isStopping = false;

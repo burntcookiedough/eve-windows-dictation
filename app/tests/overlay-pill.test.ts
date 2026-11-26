@@ -94,7 +94,7 @@ describe('derivePillView', () => {
     ['error', 'failed', 'Delivery failed', true],
     ['error', 'history_failed', 'History save failed', true],
   ] as const)('shows %s delivery %s with a compact status label', (state, delivery, label, isAlert) => {
-    expect(derivePillView({ ...base, state, delivery, busy: true })).toMatchObject({ label, isAlert, isOpen: true });
+    expect(derivePillView({ ...base, state, delivery, busy: true })).toMatchObject({ label, isAlert, isOpen: true, busy: false });
   });
 
   test('shows a busy pulse during finalization and then resumes the working label', () => {

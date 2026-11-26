@@ -66,7 +66,7 @@ export function holdVoice(level: number, now: number, openUntil: number): number
 
 export function derivePillView(input: PillInput): PillView {
   const { state, alert } = input;
-  const closed = { tag: '', isAlert: false, busy: input.busy ?? false };
+  const closed = { tag: '', isAlert: false, busy: false };
 
   switch (state) {
     case 'idle':
@@ -96,7 +96,7 @@ export function derivePillView(input: PillInput): PillView {
     }
     case 'processing': {
       const phase = input.hasListened ? 'working' : 'starting';
-      if (input.busy) return { ...closed, phase, label: 'Busy', isOpen: true, isAlert: true };
+      if (input.busy) return { ...closed, phase, label: 'Busy', isOpen: true, isAlert: true, busy: true };
       if (alert) return { ...closed, phase, label: alert, isOpen: true, isAlert: true };
       if (!input.hasListened) return { ...closed, phase, label: 'Starting', isOpen: true };
       return {

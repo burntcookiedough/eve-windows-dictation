@@ -448,10 +448,12 @@ function queueLongRecordingAfterStop(hotkeyAt?: number): void {
   }
 }
 
-function toggleLongRecording(hotkeyAt?: number): void {
+function toggleLongRecording(hotkeyAt?: number): boolean {
   if (isStopping) {
     showRecordingBusy();
-  } else if (isRecording && recordingSessionMode === 'long') {
+    return false;
+  }
+  if (isRecording && recordingSessionMode === 'long') {
     log.info('Long dictation stopped');
     startLongAfterStop = null;
     stopRecording();
@@ -463,6 +465,7 @@ function toggleLongRecording(hotkeyAt?: number): void {
     startRecording('normal', 'long', hotkeyAt);
     log.info('Long dictation started');
   }
+  return true;
 }
 
 // Handle audio data from overlay renderer
@@ -677,13 +680,16 @@ async function startApplication(): Promise<void> {
     onHoldStart: (hotkeyAt) => {
       if (isStopping) {
         showRecordingBusy();
-      } else if (!isRecording) {
+        return false;
+      }
+      if (!isRecording) {
         startRecording('normal', 'quick', hotkeyAt);
         log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
       } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
         stopRecording();
       }
+      return true;
     },
     onHoldEnd: () => {
       if (getSetting('holdToTalk') && recordingSessionMode === 'quick') {
@@ -692,12 +698,14 @@ async function startApplication(): Promise<void> {
       }
     },
     onDoubleTap: (hotkeyAt) => {
-      toggleLongRecording(hotkeyAt);
+      if (!toggleLongRecording(hotkeyAt)) return false;
       log.info('Long dictation toggled (double-tap)');
+      return true;
     },
     onLongShortcut: (hotkeyAt) => {
-      toggleLongRecording(hotkeyAt);
+      if (!toggleLongRecording(hotkeyAt)) return false;
       log.info('Long dictation toggled (long hotkey)');
+      return true;
     },
   });
 
