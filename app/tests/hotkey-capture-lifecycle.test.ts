@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 
 type KeyboardEvent = {
   keycode: number;
@@ -55,7 +55,7 @@ mock.module('../src/main/services/settings.js', () => ({
   }),
 }));
 
-const { cancelHotkeyCapture, setupHotkeyService, startHotkeyCapture, unregisterHotkey } = await import('../src/main/services/hotkey.js');
+const { cancelHotkeyCapture, resetKeyState, setupHotkeyService, startHotkeyCapture, unregisterHotkey } = await import('../src/main/services/hotkey.js');
 
 const keyEvent = (keycode: number): KeyboardEvent => ({
   keycode,
@@ -99,7 +99,8 @@ test('a tap rejected during delivery cannot seed Long or release Quick', () => {
 });
 
 test('each hotkey callback receives the hook timestamp of its own keydown', () => {
-  const ticks: unknown[] = [];
+  const ticks: Array<[callback: string, keydownTick: number]> = [];
+  resetKeyState();
   setupHotkeyService({
     onHoldStart: (_hotkeyAt, keydownTick) => { ticks.push(['quick', keydownTick]); return true; },
     onHoldEnd: () => {},
@@ -109,20 +110,37 @@ test('each hotkey callback receives the hook timestamp of its own keydown', () =
   // KBDLLHOOKSTRUCT.time is a 32-bit GetTickCount value, so it may sit near the wrap.
   const down = (code: number, time: number) => listeners.forEach(listener => listener({ ...keyEvent(code), time }));
   const up = (code: number) => keyUpListeners.forEach(listener => listener(keyEvent(code)));
+  let nowMs = 1000;
+  const clock = spyOn(Date, 'now').mockImplementation(() => nowMs);
   try {
     down(29, 4294967000);
     down(3675, 4294967001);
+    nowMs += 30;
     up(3675);
     up(29);
+
+    nowMs += 70;
     down(29, 4294967100);
-    down(42, 4294967101);
-    down(3675, 4294967102);
-    // The gesture kind depends on earlier taps; the tick must be the keydown's own.
-    expect(ticks.map(entry => (entry as unknown[])[1])).toEqual([4294967001, 4294967102]);
+    down(3675, 4294967101);
+    nowMs += 30;
+    up(3675);
+    up(29);
+
+    nowMs += 70;
+    down(29, 4294967200);
+    down(42, 4294967201);
+    down(3675, 4294967202);
+    expect(ticks).toEqual([
+      ['quick', 4294967001],
+      ['double', 4294967101],
+      ['long', 4294967202],
+    ]);
   } finally {
     up(3675);
     up(42);
     up(29);
+    clock.mockRestore();
+    resetKeyState();
     unregisterHotkey();
     listeners.clear();
     keyUpListeners.clear();
