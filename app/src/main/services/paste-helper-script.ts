@@ -238,10 +238,16 @@ public sealed class ForegroundCapture {
 
 public static class ForegroundTracker {
   public const ulong MaxKeydownAgeMs = 2000;
-  private const uint EVENT_SYSTEM_FOREGROUND = 3;
+  private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+  // A private event in the OEM range marks how far the hook has drained.
+  private const uint EVENT_TRACKER_SYNC = 0x01EE;
+  private const uint EVENT_OEM_DEFINED_END = 0x01FF;
   private const uint WINEVENT_OUTOFCONTEXT = 0;
-  private const uint WM_TRACKER_SYNC = 0x8001;
+  private const int OBJID_WINDOW = 0;
   private const uint PM_NOREMOVE = 0;
+  private const uint WS_POPUP = 0x80000000;
+  private const uint WS_EX_TOOLWINDOW = 0x00000080;
+  private const uint WS_EX_NOACTIVATE = 0x08000000;
 
   private delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint eventTime);
 
@@ -259,6 +265,10 @@ public static class ForegroundTracker {
   [DllImport("user32.dll")]
   private static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr module, WinEventProc callback, uint processId, uint threadId, uint flags);
   [DllImport("user32.dll")]
+  private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int idObject, int idChild);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern IntPtr CreateWindowEx(uint exStyle, string className, string windowName, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+  [DllImport("user32.dll")]
   private static extern int GetMessage(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax);
   [DllImport("user32.dll")]
   private static extern bool PeekMessage(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax, uint remove);
@@ -266,8 +276,6 @@ public static class ForegroundTracker {
   private static extern bool TranslateMessage(ref MSG message);
   [DllImport("user32.dll")]
   private static extern IntPtr DispatchMessage(ref MSG message);
-  [DllImport("user32.dll")]
-  private static extern bool PostThreadMessage(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")]
   private static extern IntPtr GetForegroundWindow();
   [DllImport("kernel32.dll")]
@@ -277,11 +285,16 @@ public static class ForegroundTracker {
 
   private static readonly object Gate = new object();
   private static WinEventProc callback;
+  private static IntPtr trackerWindow;
   private static uint hookThreadId;
   private static ulong installedAt;
   private static ulong lastChangeAt;
-  private static long syncRequested;
-  private static long syncCompleted;
+  private static int syncRequested;
+  private static int syncCompleted;
+
+  // Read-only views for diagnostics and the native ordering tests.
+  public static long TrackerWindow { get { lock (Gate) { return trackerWindow.ToInt64(); } } }
+  public static uint HookThreadId { get { lock (Gate) { return hookThreadId; } } }
 
   // Places a past GetTickCount value on the 64-bit clock that produced it.
   public static ulong ExpandTick(uint tick, ulong now) {
@@ -317,10 +330,16 @@ public static class ForegroundTracker {
   private static void Run(ManualResetEvent started) {
     MSG message;
     PeekMessage(out message, IntPtr.Zero, 0, 0, PM_NOREMOVE);
-    callback = OnForeground;
-    IntPtr hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, callback, 0, 0, WINEVENT_OUTOFCONTEXT);
+    // A hidden, never-activated window that only names this helper's sync events.
+    IntPtr window = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "STATIC", "", WS_POPUP, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+    callback = OnEvent;
+    // One hook delivers foreground changes and sync markers through the same
+    // per-thread event queue, so a marker is never seen before an earlier change.
+    IntPtr hook = window == IntPtr.Zero ? IntPtr.Zero
+      : SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OEM_DEFINED_END, IntPtr.Zero, callback, 0, 0, WINEVENT_OUTOFCONTEXT);
     if (hook != IntPtr.Zero) {
       lock (Gate) {
+        trackerWindow = window;
         hookThreadId = GetCurrentThreadId();
         installedAt = GetTickCount64();
       }
@@ -328,13 +347,6 @@ public static class ForegroundTracker {
     started.Set();
     if (hook == IntPtr.Zero) return;
     while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
-      if (message.hwnd == IntPtr.Zero && message.message == WM_TRACKER_SYNC) {
-        lock (Gate) {
-          syncCompleted = message.wParam.ToInt64();
-          Monitor.PulseAll(Gate);
-        }
-        continue;
-      }
       TranslateMessage(ref message);
       DispatchMessage(ref message);
     }
@@ -342,10 +354,20 @@ public static class ForegroundTracker {
     Environment.Exit(3);
   }
 
-  private static void OnForeground(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint eventTime) {
-    ulong at = EventTime(eventTime, GetTickCount64());
-    lock (Gate) {
-      if (at > lastChangeAt) lastChangeAt = at;
+  private static void OnEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint eventTime) {
+    if (eventType == EVENT_SYSTEM_FOREGROUND) {
+      ulong at = EventTime(eventTime, GetTickCount64());
+      lock (Gate) {
+        if (at > lastChangeAt) lastChangeAt = at;
+      }
+    } else if (eventType == EVENT_TRACKER_SYNC && idObject == OBJID_WINDOW) {
+      lock (Gate) {
+        // Only this helper's window and the marker it is waiting for count.
+        if (hwnd == trackerWindow && idChild == syncRequested) {
+          syncCompleted = idChild;
+          Monitor.PulseAll(Gate);
+        }
+      }
     }
   }
 
@@ -354,23 +376,25 @@ public static class ForegroundTracker {
     ulong now = GetTickCount64();
     ulong keydownAt = ExpandTick(keydownTick, now);
     long before = GetForegroundWindow().ToInt64();
-    long token;
-    uint threadId;
+    int token;
+    IntPtr window;
     lock (Gate) {
-      token = ++syncRequested;
-      threadId = hookThreadId;
+      syncRequested = syncRequested == int.MaxValue ? 1 : syncRequested + 1;
+      token = syncRequested;
+      window = trackerWindow;
     }
-    // Out-of-context events already queued to the hook thread are dispatched
-    // before this posted message, so every change that preceded the sample is seen.
-    if (threadId == 0 || !PostThreadMessage(threadId, WM_TRACKER_SYNC, new IntPtr(token), IntPtr.Zero)) {
+    if (window == IntPtr.Zero) {
       result.Reason = "tracker_unavailable";
       return result;
     }
+    // Every change that completed before the read above is already queued to
+    // the hook thread, ahead of this marker.
+    NotifyWinEvent(EVENT_TRACKER_SYNC, window, OBJID_WINDOW, token);
     ulong installed;
     ulong lastChange;
     DateTime until = DateTime.UtcNow.AddMilliseconds(Math.Max(0, waitMs));
     lock (Gate) {
-      while (syncCompleted < token) {
+      while (syncCompleted != token) {
         int remaining = (int)(until - DateTime.UtcNow).TotalMilliseconds;
         if (remaining <= 0) {
           result.Reason = "tracker_unavailable";

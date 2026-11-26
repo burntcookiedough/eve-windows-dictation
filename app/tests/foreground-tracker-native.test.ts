@@ -100,3 +100,123 @@ test.skipIf(!windows)('the shipped snapshot helper answers keydown-bound request
     kernel32.close();
   }
 }, 60_000);
+
+// Test-only probes. The shipped tracker exposes only its hook thread id and window.
+const ORDERING_PROBE = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class OrderingProbe {
+  [DllImport("kernel32.dll")] private static extern ulong GetTickCount64();
+  [DllImport("kernel32.dll")] private static extern IntPtr OpenThread(uint access, bool inherit, uint threadId);
+  [DllImport("kernel32.dll")] private static extern uint SuspendThread(IntPtr thread);
+  [DllImport("kernel32.dll")] private static extern uint ResumeThread(IntPtr thread);
+  [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int idObject, int idChild);
+
+  public static uint Now() { return (uint)GetTickCount64(); }
+
+  // Starves the hook thread, as a busy or descheduled helper would, so later
+  // events wait in its queue.
+  public static void Stall(uint threadId, int ms) {
+    IntPtr thread = OpenThread(0x0002, false, threadId);
+    if (thread == IntPtr.Zero || SuspendThread(thread) == 0xFFFFFFFF) throw new InvalidOperationException("Could not stall the hook thread.");
+    Thread resume = new Thread(delegate() { Thread.Sleep(ms); ResumeThread(thread); });
+    resume.IsBackground = true;
+    resume.Start();
+  }
+
+  // A foreground notification that changes no focus. The tracker cannot tell it
+  // apart from a real switch, which is what this test needs.
+  public static void RaiseForeground(long hwnd) { NotifyWinEvent(3, new IntPtr(hwnd), 0, 0); }
+}
+"@
+`;
+
+test.skipIf(!windows)('a foreground change queued behind a stalled hook is seen before the capture decides', async () => {
+  const { dlopen, FFIType } = await import('bun:ffi');
+  const user32 = dlopen('user32.dll', {
+    NotifyWinEvent: { args: [FFIType.u32, FFIType.i64, FFIType.i32, FFIType.i32], returns: FFIType.void },
+  });
+  const script = `
+$ErrorActionPreference = 'Stop'
+${FOREGROUND_TRACKER_TYPE}
+${ORDERING_PROBE}
+if (-not [ForegroundTracker]::Start(2000)) { throw 'Foreground tracker unavailable.' }
+$thread = [ForegroundTracker]::HookThreadId
+$window = [ForegroundTracker]::TrackerWindow
+$watch = [Diagnostics.Stopwatch]::new()
+$r = [ordered]@{}
+Start-Sleep -Milliseconds 50
+$keydown = [OrderingProbe]::Now()
+Start-Sleep -Milliseconds 40
+
+# Control: a stalled hook delays the sync marker but proves no change.
+[OrderingProbe]::Stall($thread, 400)
+$watch.Restart()
+$capture = [ForegroundTracker]::Capture($keydown, 2000)
+$r.controlReason = $capture.Reason
+$r.controlWaitedMs = $watch.ElapsedMilliseconds
+
+# A change after the keydown waits in the queue ahead of the marker.
+[OrderingProbe]::Stall($thread, 400)
+[OrderingProbe]::RaiseForeground($window)
+$watch.Restart()
+$capture = [ForegroundTracker]::Capture($keydown, 2000)
+$r.inProcessReason = $capture.Reason
+$r.inProcessHandle = $capture.Handle
+$r.inProcessWaitedMs = $watch.ElapsedMilliseconds
+
+# The same, with the change raised by another process.
+$keydown = [OrderingProbe]::Now()
+Start-Sleep -Milliseconds 40
+[OrderingProbe]::Stall($thread, 1000)
+[Console]::WriteLine('raise ' + $window)
+$null = [Console]::ReadLine()
+$watch.Restart()
+$capture = [ForegroundTracker]::Capture($keydown, 3000)
+$r.crossProcessReason = $capture.Reason
+$r.crossProcessHandle = $capture.Handle
+$r.crossProcessWaitedMs = $watch.ElapsedMilliseconds
+[Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))
+`;
+  const child = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64')],
+  { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  const reader = child.stdout.getReader();
+  let buffered = '';
+  const nextLine = async () => {
+    while (!buffered.includes('\n')) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`Ordering probe exited: ${await new Response(child.stderr).text()}`);
+      buffered += new TextDecoder().decode(value);
+    }
+    const newline = buffered.indexOf('\n');
+    const line = buffered.slice(0, newline).trim();
+    buffered = buffered.slice(newline + 1);
+    return line;
+  };
+  try {
+    const raise = await nextLine();
+    expect(raise).toMatch(/^raise \d+$/);
+    user32.symbols.NotifyWinEvent(3, BigInt(raise.slice(6)), 0, 0);
+    child.stdin.write('\n');
+    await child.stdin.flush();
+    const result = JSON.parse(await nextLine()) as Record<string, unknown>;
+    expect(await child.exited).toBe(0);
+    expect(result).toMatchObject({
+      controlReason: null,
+      inProcessReason: 'focus_changed', inProcessHandle: 0,
+      crossProcessReason: 'focus_changed', crossProcessHandle: 0,
+    });
+    // Each marker was delivered only after the stall ended, behind the queued change.
+    expect(result.controlWaitedMs).toBeGreaterThanOrEqual(250);
+    expect(result.inProcessWaitedMs).toBeGreaterThanOrEqual(250);
+    expect(result.crossProcessWaitedMs).toBeGreaterThanOrEqual(250);
+  } finally {
+    if (child.exitCode === null) child.kill();
+    await child.exited;
+    user32.close();
+  }
+}, 60_000);
