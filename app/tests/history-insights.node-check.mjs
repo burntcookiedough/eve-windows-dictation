@@ -127,9 +127,8 @@ try {
       const wordsBefore = inspection.prepare('SELECT * FROM insights_word_counts ORDER BY day, word').all();
       inspection.exec(`CREATE TRIGGER fail_insights BEFORE INSERT ON ${table}
         BEGIN SELECT RAISE(ABORT, 'synthetic Insights failure'); END`);
-      assert.throws(
+      assert.doesNotThrow(
         () => atomicService.save(transcription('interrupted', now, 'Interrupted project notes', 20, 2000)),
-        /synthetic Insights failure/,
       );
       assert.equal(atomicService.getById('interrupted')?.text, 'Interrupted project notes');
       assert.equal(atomicService.getEntryIds().length, 2);

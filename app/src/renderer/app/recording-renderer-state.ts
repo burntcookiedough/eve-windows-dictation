@@ -40,6 +40,7 @@ function cactusStateFor(recording: RecordingStatePayload['state']): CactusMotion
     case 'transcribing': return 'transcribing';
     case 'success': return 'done';
     case 'idle':
+    case 'notice':
     case 'error': return 'idle';
   }
 }

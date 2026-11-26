@@ -5,7 +5,8 @@ import { PassThrough } from 'node:stream';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { perfTraceManager } from '../src/main/services/perf-trace.js';
-import { PasteAbortCode } from '../src/main/services/paste-helper-script.js';
+import { buildPersistentPasteScript, PasteAbortCode } from '../src/main/services/paste-helper-script.js';
+import type { ClipboardCopyOutcome } from '../src/main/services/clipboard.js';
 import { DEFAULT_SETTINGS } from '../src/shared/types.js';
 import type { Settings, TranscriptionEntry } from '../src/shared/types.js';
 
@@ -151,6 +152,7 @@ interface HelperRequest {
   type: 'ready' | 'foreground' | 'sequence' | 'paste' | 'commit' | 'discard';
   targetWindowHandle?: number;
   clipboardSequence?: number;
+  deadlineUnixMs?: number;
 }
 
 class FakePasteHelper extends EventEmitter {
@@ -265,13 +267,145 @@ describe('pasteText', () => {
     expect(clipboardWrites).toEqual(['copied text']);
   });
 
-  test('rejects copy when Electron rejects the clipboard write', async () => {
+  test('reports copy failure when Electron rejects the clipboard write', async () => {
     clipboardWriteText.mockImplementationOnce(async () => {
       throw new Error('synthetic write failure');
     });
 
-    await expect(copyToClipboard('copied text')).rejects.toThrow('Could not write to clipboard.');
+    await expect(copyToClipboard('copied text')).resolves.toEqual({ kind: 'failed' });
     expect(clipboardWrites).toEqual([]);
+  });
+
+  test('reports copy failure when a resolved Electron write leaves the old clipboard intact', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Previous copy' })], 'Previous copy');
+    clipboardWriteText.mockResolvedValueOnce(undefined);
+
+    await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+    expect(clipboardText).toBe('Previous copy');
+  });
+
+  test('does not report copied when the native clipboard owner changes during read-back', async () => {
+    sequenceRead.mockResolvedValueOnce(clipboardSequence).mockResolvedValueOnce(clipboardSequence + 1);
+
+    await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+  });
+
+  test('releases the copy queue when verification cannot read the clipboard', async () => {
+    const stalledRead = Promise.withResolvers<string>();
+    clipboardReadText.mockImplementationOnce(() => stalledRead.promise);
+
+    try {
+      await expect(copyToClipboard('Synthetic dictation')).resolves.toEqual({ kind: 'failed' });
+      await expect(copyToClipboard('Next copy')).resolves.toEqual({ kind: 'copied' });
+    } finally {
+      stalledRead.resolve('Synthetic dictation');
+    }
+  });
+
+  for (const stalled of ['read', 'write'] as const) {
+    test(`saves History before a stalled clipboard ${stalled} and ignores its late completion`, async () => {
+      const began = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const historyEntries: TranscriptionEntry[] = [];
+      const announced: string[] = [];
+      const fixture = {
+        frame: 'text', type: 'final', text: 'Synthetic dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      } as const;
+      const settings = { ...DEFAULT_SETTINGS, autoCopy: false, autoPaste: true, dictationMode: 'raw' } as const;
+      if (stalled === 'read') {
+        clipboardReadText.mockImplementationOnce(async () => {
+          began.resolve();
+          await release.promise;
+          return clipboardText;
+        });
+      } else {
+        clipboardWriteText.mockImplementationOnce(async () => {
+          began.resolve();
+          await release.promise;
+        });
+      }
+      const history = { save: (entry: TranscriptionEntry) => historyEntries.push(entry) };
+      const dispatch = processFinalTranscription(fixture, settings, history, 'quick', 12345, undefined, {
+        clipboardTimeoutMs: 50,
+        onHistorySaved: entry => { announced.push(entry.id); },
+      });
+      try {
+        await began.promise;
+        const entriesAtClipboardStart = historyEntries.map(entry => entry.text);
+        const announcedAtClipboardStart = [...announced];
+        const result = await Promise.race([
+          dispatch,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Clipboard finalization did not return')), 250)),
+        ]);
+        expect(entriesAtClipboardStart).toEqual(['Synthetic dictation']);
+        expect(announcedAtClipboardStart).toEqual([result.entry.id]);
+        expect(result.entryWithGroup?.text).toBe('Synthetic dictation');
+        expect(result.delivery.kind).toBe('failed');
+
+        const next = copyToClipboard('Next dictation');
+        if (stalled === 'write') release.resolve();
+        expect(await next).toEqual({ kind: 'copied' });
+        release.resolve();
+        await new Promise(resolve => setTimeout(resolve, 140));
+        expect(clipboardWrites).toEqual(['Next dictation']);
+        expect(execFile).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        await dispatch;
+      }
+    });
+  }
+
+  test('never submits an expired dictation write waiting behind a pending Electron write', async () => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    clipboardWriteText.mockImplementationOnce(async () => {
+      writeStarted.resolve();
+      await finishWrite.promise;
+    });
+    const pending = copyToClipboard('Previous write');
+    try {
+      await writeStarted.promise;
+      const { delivery } = await processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Expired dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste: false, autoCopy: true }, null, 'quick', null, undefined, { clipboardTimeoutMs: 25 });
+      expect(delivery.kind).toBe('failed');
+    } finally {
+      finishWrite.resolve();
+      await pending;
+    }
+    expect(await copyToClipboard('Next write')).toEqual({ kind: 'copied' });
+    expect(clipboardWrites).toEqual(['Next write']);
+  });
+
+  test.each([false, true])('checks the queued copy deadline before the timeout callback runs (auto-paste: %s)', async (autoPaste) => {
+    const writeStarted = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    clipboardWriteText.mockImplementationOnce(async () => {
+      writeStarted.resolve();
+      await finishWrite.promise;
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Previous copy' })], 'Previous copy');
+    });
+    const previous = copyToClipboard('Previous copy');
+    const clock = spyOn(Date, 'now').mockReturnValue(100_000);
+    try {
+      await writeStarted.promise;
+      const expired = processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Expired dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste, autoCopy: true }, null, 'quick', null, undefined, { clipboardTimeoutMs: 2000 });
+      clock.mockReturnValue(102_001);
+      finishWrite.resolve();
+      expect((await expired).delivery).toEqual({ kind: 'failed' });
+      expect(clipboardWrites).toEqual([]);
+      expect(clipboardText).toBe('Previous copy');
+    } finally {
+      finishWrite.resolve();
+      await previous;
+      clock.mockRestore();
+    }
   });
 
   test('returns Electron clipboard text asynchronously', async () => {
@@ -284,7 +418,6 @@ describe('pasteText', () => {
     await pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
     clipboardWriteText.mockImplementationOnce(async () => {
@@ -305,9 +438,8 @@ describe('pasteText', () => {
     await expect(pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
-    })).rejects.toThrow('synthetic read failure');
+    })).resolves.toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
 
     expect(clipboardWrites).toEqual([]);
     expect(execFile).not.toHaveBeenCalled();
@@ -317,7 +449,6 @@ describe('pasteText', () => {
     await pasteText('first text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -331,7 +462,6 @@ describe('pasteText', () => {
     const secondPaste = pasteText('second text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
     finishRead?.('first text');
@@ -341,27 +471,76 @@ describe('pasteText', () => {
     expect(clipboardText).toBe('second text');
   });
 
+  test('releases the write queue when the restore snapshot never completes', async () => {
+    await pasteText('Dictation', {
+      restoreClipboard: true, restoreDelayMs: 1, targetWindowHandle: 12345,
+    });
+    const readStarted = Promise.withResolvers<void>();
+    const finishRead = Promise.withResolvers<string>();
+    clipboardReadText.mockImplementationOnce(() => {
+      readStarted.resolve();
+      return finishRead.promise;
+    });
+    await readStarted.promise;
+    const nextCopy = copyToClipboard('New copy');
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await expect(Promise.race([
+        nextCopy,
+        new Promise(resolve => { watchdog = setTimeout(() => resolve('queue blocked'), 1500); }),
+      ])).resolves.toEqual({ kind: 'copied' });
+    } finally {
+      clearTimeout(watchdog);
+      finishRead.resolve('Dictation');
+      await nextCopy;
+    }
+    expect(clipboardWrites).toEqual(['Dictation', 'New copy']);
+  });
+
+  test('checks the current owner after preparing the baseline text for restoration', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Baseline' })], 'Baseline');
+    await pasteText('Dictation', {
+      restoreClipboard: true, restoreDelayMs: 1, targetWindowHandle: 12345,
+    });
+    const getType = MockClipboardItem.prototype.getType;
+    const clipboardReplaced = Promise.withResolvers<void>();
+    const replaceDuringPreparation = spyOn(MockClipboardItem.prototype, 'getType').mockImplementation(async function (this: MockClipboardItem, type) {
+      const data = await getType.call(this, type);
+      if (data instanceof Blob && await data.text() === 'Baseline') {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'New copy' })], 'New copy');
+        clipboardReplaced.resolve();
+      }
+      return data;
+    });
+    try {
+      await clipboardReplaced.promise;
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(clipboardWrites).toEqual(['Dictation']);
+      expect(clipboardText).toBe('New copy');
+    } finally {
+      replaceDuringPreparation.mockRestore();
+    }
+  });
+
   test.each([false, true])('retains the original restore after a failed successor snapshot (old timer fired: %s)', async (oldTimerFired) => {
     setSyntheticClipboard([
       new MockClipboardItem({ 'text/plain': 'baseline', 'text/html': '<b>baseline</b>' }),
     ], 'baseline');
     await pasteText('first text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
 
     let rejectRead: ((error: Error) => void) | undefined;
     clipboardRead.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject; }));
     const failure = pasteText('second text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
-    }).then(() => null, (error: unknown) => error);
+    });
     await new Promise((resolve) => setTimeout(resolve, oldTimerFired ? 800 : 0));
     expect(rejectRead).toBeDefined();
     rejectRead?.(new Error('Synthetic successor snapshot failure'));
-    const error = await failure;
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe('Synthetic successor snapshot failure');
+    expect(await failure).toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     expect(clipboardWrites).toEqual(['first text']);
@@ -376,7 +555,6 @@ describe('pasteText', () => {
     await pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -402,7 +580,6 @@ describe('pasteText', () => {
     await pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -423,7 +600,6 @@ describe('pasteText', () => {
     await pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -437,7 +613,6 @@ describe('pasteText', () => {
     await pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -452,14 +627,12 @@ describe('pasteText', () => {
     const firstPaste = pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const secondPaste = pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -474,14 +647,12 @@ describe('pasteText', () => {
     const firstPaste = pasteText('first text', {
       restoreClipboard: false,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 11111,
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const secondPaste = pasteText('second text', {
       restoreClipboard: false,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 22222,
     });
 
@@ -503,7 +674,6 @@ describe('pasteText', () => {
     const firstPaste = pasteText('first text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 11111,
     });
     await new Promise((resolve) => setTimeout(resolve, 140));
@@ -513,7 +683,6 @@ describe('pasteText', () => {
     const secondPaste = pasteText('second text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 22222,
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -534,7 +703,6 @@ describe('pasteText', () => {
     const firstPaste = pasteText('first text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 11111,
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -542,7 +710,6 @@ describe('pasteText', () => {
     const secondPaste = pasteText('second text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 22222,
     });
 
@@ -560,7 +727,7 @@ describe('pasteText', () => {
       return { kill: mock(() => {}) };
     });
 
-    await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toThrow('target activation failed');
+    await expect(simulatePaste(12345, clipboardSequence)).rejects.toThrow('target activation failed');
     expect(execFile).toHaveBeenCalledTimes(1);
   });
 
@@ -570,22 +737,14 @@ describe('pasteText', () => {
       return { kill: mock(() => {}) };
     });
 
-    await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toThrow('sendinput failed');
+    await expect(simulatePaste(12345, clipboardSequence)).rejects.toThrow('sendinput failed');
     expect(execFile).toHaveBeenCalledTimes(1);
-  });
-
-  test('runs VBScript only when explicitly selected', async () => {
-    await simulatePaste('vbscript', 12345, null);
-
-    expect(execFile).toHaveBeenCalledTimes(1);
-    expect(execFile.mock.calls[0]?.[0]).toBe('cscript');
   });
 
   test('keeps transcript on clipboard when restoreClipboard is disabled', async () => {
     await pasteText('final transcript', {
       restoreClipboard: false,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -605,7 +764,6 @@ describe('pasteText', () => {
     await pasteText('transcription text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -632,7 +790,6 @@ describe('pasteText', () => {
     await pasteText('transcription text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -667,7 +824,6 @@ describe('pasteText', () => {
     await pasteText('transcription text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -694,7 +850,6 @@ describe('pasteText', () => {
     await pasteText('transcription text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -734,7 +889,6 @@ describe('pasteText', () => {
     await pasteText('transcription text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
     });
 
@@ -762,7 +916,7 @@ describe('pasteText', () => {
     clipboardFormats = ['custom/unreadable'];
 
     await pasteText('explicitly replace clipboard', {
-      restoreClipboard: false, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: false, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
 
@@ -777,7 +931,7 @@ describe('pasteText', () => {
     clipboardFormats = [];
     clipboardItems = [];
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -791,7 +945,7 @@ describe('pasteText', () => {
       new MockClipboardItem({ 'image/png': new Blob([new Uint8Array([1, 2, 3])]) }),
     ], 'first');
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -809,7 +963,7 @@ describe('pasteText', () => {
     ], 'baseline');
     clipboardWrite.mockImplementationOnce(async () => { throw new Error('Synthetic atomic write failure'); });
     await pasteText('temporary text', {
-      restoreClipboard: true, restoreDelayMs: 1, method: 'sendinput',
+      restoreClipboard: true, restoreDelayMs: 1,
       targetWindowHandle: 12345,
     });
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -832,9 +986,8 @@ describe('pasteText', () => {
     await expect(pasteText('new text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
-      method: 'sendinput',
       targetWindowHandle: 12345,
-    })).rejects.toThrow('OS format cannot be read');
+    })).resolves.toEqual({ kind: 'failed', clipboardWrite: 'not_attempted', dispatch: 'not_attempted' });
 
     expect(clipboardWrites).toEqual([]);
     expect(clipboardItemWrites).toEqual([]);
@@ -862,11 +1015,44 @@ describe('persistent paste helper', () => {
     execFile.mockImplementation(execFileStub);
   });
 
+  for (const moved of [false, true]) {
+    test(`routes a legacy VBScript profile through the guarded helper (focus moved: ${moved})`, async () => {
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'previous' })], 'previous');
+      let foreground = 12345;
+      const child = nextHelper((request, helper) => {
+        if (request.type === 'ready') helper.reply(request, 'ready');
+        if (request.type === 'foreground') helper.reply(request, 'foreground', { handle: foreground });
+        if (request.type === 'paste') {
+          expect(request.targetWindowHandle).toBe(12345);
+          expect(request.clipboardSequence).toBe(clipboardSequence);
+          if (moved) foreground = 23456;
+          helper.reply(request, 'prepared');
+        }
+        if (request.type === 'commit') {
+          if (foreground === 12345) helper.reply(request, 'pasted');
+          else helper.reply(request, 'aborted', { code: PasteAbortCode.ForegroundChanged });
+        }
+      });
+      await pasteHelper.warmUp();
+      const target = await getForegroundWindowHandle();
+      const { delivery } = await processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Synthetic dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, pasteMethod: 'vbscript', dictationMode: 'raw' }, null, 'quick', target);
+      expect(delivery).toEqual(moved
+        ? { kind: 'skipped_unsafe', reason: 'foreground_changed', copied: true }
+        : { kind: 'pasted' });
+      expect(child.requests.map(({ type }) => type)).toEqual(['ready', 'foreground', 'paste', 'commit']);
+      expect(execFile).not.toHaveBeenCalled();
+      expect(clipboardText).toBe('Synthetic dictation');
+    });
+  }
+
   test('uses one hidden PowerShell process for foreground and several pastes', async () => {
     const child = nextHelper();
     await pasteHelper.warmUp();
     expect(await getForegroundWindowHandle()).toBe(12345);
-    for (const target of [12345, 23456, 34567]) await simulatePaste('sendinput', target, clipboardSequence);
+    for (const target of [12345, 23456, 34567]) await simulatePaste(target, clipboardSequence);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledWith('powershell',
       ['-NoProfile', '-NonInteractive', '-EncodedCommand', expect.any(String)],
@@ -881,6 +1067,43 @@ describe('persistent paste helper', () => {
       .toEqual(preparations.map(({ id }) => id));
     expect(new Set(preparations.map(({ id }) => id)).size).toBe(3);
     expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('preserves a newer copy when a dispatched paste loses its reply', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'baseline' })], 'baseline');
+    const child = nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      if (request.type === 'commit') {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'new copy' })], 'new copy');
+        helper.crash();
+      }
+    });
+    const { delivery } = await processFinalTranscription({
+      frame: 'text', type: 'final', text: 'Synthetic dictation',
+      confidence: 1, audio_duration: 1, transcription_time: 0.5,
+    }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, dictationMode: 'raw' }, null, 'quick', 12345);
+
+    expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
+    expect(clipboardText).toBe('new copy');
+    expect(delivery).toEqual({ kind: 'failed', clipboardWrite: 'written', dispatch: 'uncertain' });
+  });
+
+  test('checks whether the dictation is still copied when a foreground abort arrives', async () => {
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'baseline' })], 'baseline');
+    nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      if (request.type === 'commit') {
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'new copy' })], 'new copy');
+        helper.reply(request, 'aborted', { code: PasteAbortCode.ForegroundChanged });
+      }
+    });
+
+    const delivery = await pasteText('Synthetic dictation', {
+      restoreClipboard: true, restoreDelayMs: 1, targetWindowHandle: 12345,
+    });
+
+    expect(clipboardText).toBe('new copy');
+    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'foreground_changed', copied: false });
   });
 
   test('prewarms without capturing a window or sending keys', async () => {
@@ -913,11 +1136,14 @@ describe('persistent paste helper', () => {
         }
       });
       await pasteHelper.warmUp();
-      await pasteText('Synthetic dictation', {
-        method: 'sendinput', targetWindowHandle: 12345,
+      const outcome = await pasteText('Synthetic dictation', {
+        targetWindowHandle: 12345,
         restoreClipboard: false, restoreDelayMs: 750,
       });
       expect(clipboardAtSample).toBe('Synthetic dictation');
+      expect(outcome).toEqual(expectedSequence
+        ? { kind: 'pasted' }
+        : { kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: true });
       expect(clipboardText).toBe('Synthetic dictation');
       expect(child.requests.map(({ type }) => type)).toEqual(
         expectedSequence ? ['ready', 'sequence', 'paste', 'commit'] : ['ready', 'sequence']
@@ -933,7 +1159,7 @@ describe('persistent paste helper', () => {
         if (request.type === 'paste') helper.reply(request, 'prepared');
         else if (request.type === 'commit') helper.reply(request, 'aborted', { code });
       });
-      await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toMatchObject({ code });
+      await expect(simulatePaste(12345, clipboardSequence)).rejects.toMatchObject({ code });
       expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
       expect(child.kill).not.toHaveBeenCalled();
       expect(execFile).not.toHaveBeenCalled();
@@ -945,13 +1171,41 @@ describe('persistent paste helper', () => {
         callback?.(Object.assign(new Error('Native paste aborted'), { code }));
         return { kill: mock(() => {}) };
       });
-      await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toMatchObject({ code });
+      await expect(simulatePaste(12345, clipboardSequence)).rejects.toMatchObject({ code });
       expect(execFile).toHaveBeenCalledTimes(1);
-      expect(execFile.mock.calls[0]?.[1].slice(-4)).toEqual([
+      expect(execFile.mock.calls[0]?.[1].slice(-6)).toEqual([
         '-TargetWindowHandle', '12345', '-ClipboardSequence', String(clipboardSequence),
+        '-DeadlineUnixMs', expect.stringMatching(/^\d+$/),
       ]);
     });
   }
+
+  test('passes the pipeline deadline through preparation and reports native expiry without retrying', async () => {
+    const clock = spyOn(Date, 'now').mockReturnValue(100_000);
+    const child = nextHelper((request, helper) => {
+      if (request.type === 'paste') helper.reply(request, 'prepared');
+      if (request.type === 'commit') {
+        clock.mockReturnValue(104_001); // Focus restoration finished after the deadline.
+        helper.reply(request, 'aborted', { code: 22 });
+      }
+    });
+    try {
+      const { delivery } = await processFinalTranscription({
+        frame: 'text', type: 'final', text: 'Synthetic dictation',
+        confidence: 1, audio_duration: 1, transcription_time: 0.5,
+      }, { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true }, null, 'quick', 12345, undefined, {
+        clipboardTimeoutMs: 4000,
+      });
+      expect(child.requests).toMatchObject([
+        { type: 'paste', deadlineUnixMs: 104_000 },
+        { type: 'commit' },
+      ]);
+      expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'expired', copied: false });
+      expect(execFile).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   test('a sequence mismatch preserves a new clipboard owner even when its text matches', async () => {
     setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'previous' })], 'previous');
@@ -959,24 +1213,25 @@ describe('persistent paste helper', () => {
       if (request.type === 'paste') helper.reply(request, 'prepared');
       else if (request.type === 'commit') helper.reply(request, 'aborted', { code: PasteAbortCode.ClipboardChanged });
     });
-    await pasteText('Synthetic dictation', {
-      method: 'sendinput', targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
+    const outcome = await pasteText('Synthetic dictation', {
+      targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
     });
     await new Promise(resolve => setTimeout(resolve, 800));
+    expect(outcome).toEqual({ kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: false });
     expect(clipboardText).toBe('Synthetic dictation');
     expect(execFile).not.toHaveBeenCalled();
   });
 
   test('an invalid target never becomes an untargeted paste', async () => {
-    await expect(simulatePaste('sendinput', NaN, clipboardSequence)).rejects.toThrow('Invalid paste target');
-    await expect(simulatePaste('sendinput', 0, clipboardSequence)).rejects.toThrow('Invalid paste target');
+    await expect(simulatePaste(NaN, clipboardSequence)).rejects.toThrow('Invalid paste target');
+    await expect(simulatePaste(0, clipboardSequence)).rejects.toThrow('Invalid paste target');
     expect(spawn).not.toHaveBeenCalled();
     expect(execFile).not.toHaveBeenCalled();
   });
 
   test('falls back exactly once if the helper crashes during preparation and restarts on demand', async () => {
     const crashed = nextHelper((_request, child) => child.crash());
-    await simulatePaste('sendinput', 12345, clipboardSequence);
+    await simulatePaste(12345, clipboardSequence);
     expect(crashed.requests.map(({ type }) => type)).toEqual(['paste']);
     expect(crashed.kill).toHaveBeenCalledTimes(1);
     expect(execFile).toHaveBeenCalledTimes(1);
@@ -984,7 +1239,7 @@ describe('persistent paste helper', () => {
     expect(spawn).toHaveBeenCalledTimes(1);
 
     const restarted = nextHelper();
-    await simulatePaste('sendinput', 23456, clipboardSequence);
+    await simulatePaste(23456, clipboardSequence);
     expect(restarted.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(execFile).toHaveBeenCalledTimes(1);
@@ -992,7 +1247,7 @@ describe('persistent paste helper', () => {
 
   test('kills a helper that replies with the wrong id and falls back before commit', async () => {
     const child = nextHelper((request, helper) => helper.reply({ ...request, id: request.id + 1 }, 'prepared'));
-    await simulatePaste('sendinput', 12345, clipboardSequence);
+    await simulatePaste(12345, clipboardSequence);
     expect(child.kill).toHaveBeenCalledTimes(1);
     expect(execFile).toHaveBeenCalledTimes(1);
   });
@@ -1050,18 +1305,21 @@ describe('persistent paste helper', () => {
         if (request.type === 'paste') prepared.resolve(request);
       });
       const paste = pasteText('Synthetic dictation', {
-        method: 'sendinput', targetWindowHandle: 12345,
+        targetWindowHandle: 12345,
         restoreClipboard: false, restoreDelayMs: 750,
       });
       const request = await Promise.race([prepared.promise, paste.then(() => {
         throw new Error('Paste finished before preparation');
       })]);
 
-      let newerOperation: Promise<void> | undefined;
+      let newerOperation: Promise<ClipboardCopyOutcome> | undefined;
       if (outcome === 'newer operation') newerOperation = copyToClipboard('New synthetic copy');
       else setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'New synthetic copy' })], 'New synthetic copy');
       if (outcome !== 'prepare timeout') child.reply(request, 'prepared');
-      await paste;
+      const delivery = await paste;
+      if (outcome === 'newer operation') {
+        expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'superseded', copied: false });
+      }
       await newerOperation;
       if (outcome === 'prepare timeout') child.reply(request, 'prepared');
 
@@ -1109,7 +1367,7 @@ describe('persistent paste helper', () => {
         helper.reply(request, 'prepared');
       });
       await pasteText('Synthetic dictation', {
-        method: 'sendinput', targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
+        targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
       });
       expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'discard']);
       expect(execFile).not.toHaveBeenCalled();
@@ -1129,7 +1387,7 @@ describe('persistent paste helper', () => {
         else if (failure === 'malformed JSON') helper.stdout.write('broken\n');
       });
       const error = { exit: 'exited', 'malformed JSON': 'Malformed', timeout: 'timed out' }[failure];
-      await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toThrow(error);
+      await expect(simulatePaste(12345, clipboardSequence)).rejects.toThrow(error);
       expect(child.requests.map(({ type }) => type)).toEqual(['paste', 'commit']);
       expect(child.kill).toHaveBeenCalledTimes(1);
       expect(execFile).not.toHaveBeenCalled();
@@ -1141,8 +1399,8 @@ describe('persistent paste helper', () => {
       if (request.type === 'paste') helper.reply(request, 'prepared');
       else helper.reply(request, 'failed', { error: 'Target window no longer exists before paste.' });
     });
-    await expect(simulatePaste('sendinput', 12345, clipboardSequence)).rejects.toThrow('Target window no longer exists');
-    await expect(simulatePaste('sendinput', 23456, clipboardSequence)).rejects.toThrow('Target window no longer exists');
+    await expect(simulatePaste(12345, clipboardSequence)).rejects.toThrow('Target window no longer exists');
+    await expect(simulatePaste(23456, clipboardSequence)).rejects.toThrow('Target window no longer exists');
     expect(child.kill).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(execFile).not.toHaveBeenCalled();
@@ -1167,7 +1425,7 @@ describe('persistent paste helper', () => {
       const traceId = perfTraceManager.startTrace()!.correlationId;
       perfTraceManager.mark(traceId, 'finalReceivedAt');
       await pasteText('Synthetic timing sample', {
-        method: 'sendinput', targetWindowHandle: 12345,
+        targetWindowHandle: 12345,
         restoreClipboard: false, restoreDelayMs: 750, perfTraceId: traceId,
       });
       const { main } = perfTraceManager.getRecentTraces().find(trace => trace.correlationId === traceId)!;
@@ -1220,14 +1478,13 @@ describe('persistent paste helper', () => {
     });
 
     try {
-      const paste = simulatePaste('sendinput', 12345, clipboardSequence);
+      const paste = simulatePaste(12345, clipboardSequence);
       await Promise.race([started.promise, paste.then(() => { throw new Error('Fallback did not start'); })]);
       beforeQuit({ preventDefault });
       expect(preventDefault).toHaveBeenCalledTimes(1);
       expect(kill).toHaveBeenCalledTimes(1);
       await paste;
-      await simulatePaste('sendinput', 12345, clipboardSequence);
-      await simulatePaste('vbscript', 12345, null);
+      await simulatePaste(12345, clipboardSequence);
       expect(execFile).toHaveBeenCalledTimes(1);
       expect(spawn).toHaveBeenCalledTimes(1);
       flush.resolve();
@@ -1240,6 +1497,16 @@ describe('persistent paste helper', () => {
 });
 
 describe('buildSendInputScriptContent', () => {
+  test('checks the same absolute deadline after focus restoration, immediately before sending Ctrl+V', () => {
+    const oneShot = buildSendInputScriptContent();
+    const persistent = buildPersistentPasteScript();
+    for (const script of [oneShot, persistent]) {
+      expect(script).toMatch(/WaitForForeground\(target\)[\s\S]*GetClipboardSequenceNumber\(\) != expectedClipboardSequence[\s\S]*GetForegroundWindow\(\) != new IntPtr\(targetWindowHandle\)[\s\S]*UtcNow\.ToUnixTimeMilliseconds\(\) >= deadlineUnixMs\) \{\s*return 22;\s*\}\s*uint sent = SendInput\(\(uint\)inputs.Length/);
+    }
+    expect(oneShot).toContain('::Paste($TargetWindowHandle, $ClipboardSequence, $DeadlineUnixMs)');
+    expect(persistent).toContain('::Paste($paste.target, $paste.sequence, $paste.deadline)');
+  });
+
   test('uses the full Windows INPUT union so SendInput has the correct x64 size', () => {
     const script = buildSendInputScriptContent();
 

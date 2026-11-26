@@ -20,10 +20,10 @@ import { isPerfTraceEnabled } from './perf-trace.js';
 const log = createLogger('Hotkey');
 
 interface HotkeyCallbacks {
-  onHoldStart: (hotkeyAt?: number) => void;
+  onHoldStart: (hotkeyAt?: number) => boolean;
   onHoldEnd: () => void;
-  onDoubleTap: (hotkeyAt?: number) => void;
-  onLongShortcut: (hotkeyAt?: number) => void;
+  onDoubleTap: (hotkeyAt?: number) => boolean;
+  onLongShortcut: (hotkeyAt?: number) => boolean;
 }
 
 let callbacks: HotkeyCallbacks | null = null;
@@ -96,17 +96,17 @@ export function setupHotkeyService(hotkeyCallbacks: HotkeyCallbacks): void {
     if (longAction === 'hold-start' || longAction === 'double-tap') {
       quickRecognizer.reset();
       log.debug('Long hotkey', { keycode: e.keycode });
-      callbacks?.onLongShortcut(hotkeyAt);
+      if (callbacks?.onLongShortcut(hotkeyAt) === false) longRecognizer.rejectActivePress();
       return;
     }
 
     const action = quickRecognizer.keyDown(snapshot, getCurrentHotkey());
     if (action === 'hold-start') {
       log.debug('Hotkey hold start', { keycode: e.keycode });
-      callbacks?.onHoldStart(hotkeyAt);
+      if (callbacks?.onHoldStart(hotkeyAt) === false) quickRecognizer.rejectActivePress();
     } else if (action === 'double-tap') {
       log.debug('Hotkey double tap', { keycode: e.keycode });
-      callbacks?.onDoubleTap(hotkeyAt);
+      if (callbacks?.onDoubleTap(hotkeyAt) === false) quickRecognizer.rejectActivePress();
     }
   });
 

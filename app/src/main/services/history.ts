@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'path';
+import { createLogger } from '../lib/logger.js';
 import {
   addLocalDays,
   buildPhraseStats,
@@ -32,6 +33,7 @@ import type {
 
 const INSIGHTS_PHRASE_ENTRY_LIMIT = 5000;
 const HISTORY_ID_CHUNK_SIZE = 500;
+const log = createLogger('History');
 
 function computeDateGroup(timestamp: number): string {
   const now = new Date();
@@ -216,9 +218,14 @@ export class HistoryService {
 
     // Keep the dictation durable if derived writes fail; startup catch-up retries
     // rows without a ledger entry. Aggregates and the ledger must commit together.
-    this.db.transaction(() => {
-      this.addEntryToInsights({ ...entry, wordCount });
-    })();
+    try {
+      this.db.transaction(() => {
+        this.addEntryToInsights({ ...entry, wordCount });
+      })();
+    } catch {
+      log.error('Could not update Insights after saving History');
+      this.scheduleInsightsCatchup();
+    }
   }
 
   getEntries(offset: number, limit: number, filters?: HistoryFilters): HistoryResponse {

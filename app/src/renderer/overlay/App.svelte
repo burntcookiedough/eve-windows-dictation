@@ -8,6 +8,7 @@
   import { AUDIO_HEADER_SIZE } from '../../shared/protocol';
   import { countWords } from '../../shared/insights';
   import type {
+    RecordingDelivery,
     RecordingState,
     RecordingStatusPayload,
     RecordingWarningPayload,
@@ -16,11 +17,14 @@
   } from '../../shared/types';
 
   let recordingState = $state<RecordingState>('idle');
+  let delivery = $state<RecordingDelivery>();
   let sessionMode = $state<DictationSessionMode>('quick');
   let audioLevels = $state<number[]>(new Array(AUDIO_CONFIG.WAVEFORM_BARS).fill(0));
   let isVisible = $state(false);
   let warningMessage = $state('');
   let warningTimeout: ReturnType<typeof setTimeout> | null = null;
+  let busy = $state(false);
+  let busyTimeout: ReturnType<typeof setTimeout> | null = null;
   let isLongSession = $state(false);
   let chunk = $state<{ index: number; total: number } | null>(null);
   let wordCount = $state<number | null>(null);
@@ -44,7 +48,12 @@
     chunk,
     wordCount,
     alert: warningMessage,
+    busy,
+    delivery,
   }));
+  const spokenStatus = $derived(
+    pillView.busy || pillView.phase === 'done' || pillView.phase === 'error' ? pillView.label : ''
+  );
 
   function clearWarning() {
     if (warningTimeout) {
@@ -56,11 +65,18 @@
 
   function beginSession() {
     clearWarning();
+    clearBusy();
     isLongSession = sessionMode === 'long';
     chunk = null;
     wordCount = null;
     hasListened = false;
     elapsedMs = 0;
+  }
+
+  function clearBusy() {
+    if (busyTimeout) clearTimeout(busyTimeout);
+    busyTimeout = null;
+    busy = false;
   }
 
   function tickClock() {
@@ -158,8 +174,10 @@
       window.murmur.onRecordingState((payload) => {
         const previousState = recordingState;
         recordingState = payload.state;
+        delivery = payload.delivery;
         sessionMode = payload.mode ?? sessionMode;
-        isVisible = payload.isRecording || recordingState === 'success' || recordingState === 'error';
+        isVisible = payload.isRecording || recordingState === 'success' || recordingState === 'notice' || recordingState === 'error';
+        if (!payload.isRecording) clearBusy();
 
         // Main opens every session with idle then 'processing', before the server is ready
         if (recordingState === 'processing' && previousState === 'idle') {
@@ -200,6 +218,13 @@
 
     cleanupFns.push(
       window.murmur.onWarning((payload: RecordingWarningPayload) => {
+        if (payload.code === 'recording_busy') {
+          if (recordingState !== 'processing') return;
+          clearBusy();
+          busy = true;
+          busyTimeout = setTimeout(clearBusy, 700);
+          return;
+        }
         warningMessage = condenseWarning(payload.code, payload.message);
 
         if (warningTimeout) {
@@ -262,6 +287,7 @@
     stopAudioCapture();
     stopClock();
     clearWarning();
+    clearBusy();
     cleanupFns.forEach(fn => fn());
     window.murmur.removeAllListeners();
   });
@@ -273,3 +299,4 @@
 >
   <Pill view={pillView} levels={audioLevels} />
 </div>
+<div role="status" aria-live="polite" aria-atomic="true" class="sr-only">{spokenStatus}</div>
