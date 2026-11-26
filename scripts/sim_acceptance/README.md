@@ -1,9 +1,7 @@
 # Simulated Windows acceptance
 
-Use this lane for the verified Eve 0.9.0-beta.1 bundle retained from lifecycle
-run 45784796424, artifact 15101085356. It expires on 2026-12-03 at 08:50 UTC.
-The candidate commit, artifact ID, run ID and release manifest SHA-256 are pinned
-in the verifier. The workflow downloads the original zip, verifies provenance,
+Use this lane for a verified Eve 0.9.0-beta.1 bundle retained by the installer
+lifecycle workflow. The workflow downloads the original zip, verifies provenance,
 phase status, expected manifest and each staged file, then verifies the installed
 payload. The job uses a read-only token on GitHub-hosted Windows.
 
@@ -13,15 +11,31 @@ payload. The job uses a read-only token on GitHub-hosted Windows.
 four-job matrix. Same-repository pull requests targeting trunk run the smoke
 when this workflow or its harness changes. Apply the sim-full label once the
 smoke passes to run the full matrix. Keep the lane off the required checks.
-The verified legacy commit can omit paste readiness and retry once on a
-pre-dispatch paste skip. Other candidates must report settled paste readiness
-and insert on the first attempt.
-Manual dispatch is also available once the workflow exists on the default branch.
 
 Run ID `45784796424`, artifact ID `15101085356`, commit
 `22aa01d70a10fc8b52668866ff1c0bd5ac02c751` and manifest SHA-256
 `e0004b05ee119467a037c201ea723159e01adda3615f5a2668cfb05433fe763f` are the
-approved inputs. Each CPU job uses `small` and an isolated candidate profile
+pull request defaults. That candidate expires on 2026-12-03 at 08:50 UTC and can
+omit paste readiness or retry once after a pre-dispatch paste skip. Other
+candidates must report settled paste readiness and must insert on the first
+attempt in smoke mode.
+
+For a new candidate, dispatch `installer-lifecycle-ci.yml` on `trunk` with
+`expected_commit` set to the full trunk commit and `retain_candidate=true`.
+After that run succeeds, use its retained artifact to dispatch the full matrix
+on `trunk` from Windows PowerShell.
+
+```powershell
+@{
+  candidate_run_id = '<successful lifecycle run ID>'
+  artifact_id = '<ID of eve-v0.9.0-beta.1-unsigned-candidate-qa-RUN_ID>'
+  candidate_commit = '<40-character commit SHA from the lifecycle run>'
+  manifest_sha256 = '<SHA-256 of eve-v0.9.0-beta.1-artifact-manifest.json>'
+  smoke_only = $false
+} | ConvertTo-Json -Compress | gh workflow run simulated-acceptance.yml --ref trunk --json
+```
+
+Each CPU job uses `small` and an isolated candidate profile
 and Hugging Face cache. The launch includes Chromium's fake audio capture
 flags and a non-looping file. Eve opens its normal audio worklet with packaged
 media processing enabled. The noise mix SNR applies at the WAV input.
