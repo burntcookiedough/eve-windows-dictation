@@ -63,6 +63,7 @@ FIXTURE_ERRORS = (OSError, TimeoutError, RuntimeError, WebSocketException)
 # Match the app trace allowlist before copying a reason into public evidence.
 PASTE_PRE_DISPATCH_REASONS = {
     "helper_absent", "helper_unready", "helper_busy", "rpc_timeout", "no_hwnd",
+    "keydown_unverified", "tracker_unready", "tracker_unavailable", "focus_changed",
     "no_target", "superseded", "clipboard_baseline_read_failed", "clipboard_write_failed",
     "clipboard_written_read_failed", "clipboard_written_text_changed",
     "clipboard_ownership_read_failed", "clipboard_ownership_changed", "clipboard_sequence_unavailable",

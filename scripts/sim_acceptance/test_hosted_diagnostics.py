@@ -76,6 +76,7 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         decoy = {"correlationId": "other", "status": "complete", "pastePreDispatchReason": "helper_busy"}
         for fields, expected in (
             ({"pastePreDispatchReason": "rpc_timeout"}, "rpc_timeout"),
+            ({"pastePreDispatchReason": "focus_changed"}, "focus_changed"),
             ({"pastePreDispatchReason": "unsafe diagnostic text"}, None),
             ({"pastePreDispatchReason": {"handle": 12345}}, None),
             ({}, None),
