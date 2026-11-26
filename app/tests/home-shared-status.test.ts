@@ -4,6 +4,7 @@ import { get } from 'svelte/store';
 import {
   disposeServerStatus,
   getDownloadMilestone,
+  getServerStatusAnnouncement,
   getServerStatusPhase,
   initializeServerStatus,
   refresh,
@@ -169,6 +170,20 @@ describe('Home and shared server status', () => {
     expect(statusController).toContain('publish(null);');
   });
 
+  test('holds Ready while auto-paste warms and reports a degraded paste honestly', () => {
+    const engine = { current: 'whisper', status: 'ready' } as const;
+    const running = { status: 'running', managed: true, engineStatus: engine } as const;
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'warming' })).toBe('preparing');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'ready' })).toBe('ready');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'off' })).toBe('ready');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'degraded' })).toBe('ready');
+    // The speech model still decides first: a loading model is not "preparing auto-paste".
+    expect(getServerStatusPhase({ ...running, engineStatus: { current: 'whisper', status: 'loading' }, pasteReadiness: 'warming' })).toBe('loading');
+    expect(getServerStatusAnnouncement('preparing', { ...running, pasteReadiness: 'warming' })).toBe('Preparing auto-paste.');
+    expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'degraded' }))
+      .toBe('Speech model is ready. Auto-paste is unavailable, so dictation is saved to History instead.');
+    expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'ready' })).toBe('Speech model is ready.');
+  });
   test('announces only bounded download milestones after 25%', () => {
     expect(getDownloadMilestone(0)).toBeNull();
     expect(getDownloadMilestone(24)).toBeNull();

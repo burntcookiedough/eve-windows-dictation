@@ -1629,6 +1629,88 @@ describe('persistent paste helper', () => {
     }
   });
 
+  test('reports warming until both helpers answer, then ready, and off when disabled', async () => {
+    let pasteReady: HelperRequest | undefined;
+    const paste = nextHelper((request, helper) => {
+      if (request.type === 'ready') pasteReady = request;
+      else helper.reply(request, 'sequence', { sequence: clipboardSequence });
+    });
+    nextHelper();
+    const helper = new PersistentPasteHelper(10_000);
+    const reported: string[] = [];
+    helper.onReadinessChange(readiness => reported.push(readiness));
+    try {
+      const warming = helper.warmUp();
+      expect(helper.readiness()).toBe('warming');
+      await settle();
+      expect(helper.readiness()).toBe('warming');
+      paste.reply(pasteReady!, 'ready');
+      await warming;
+      expect(helper.readiness()).toBe('ready');
+      helper.setAutoPaste(false);
+      expect(helper.readiness()).toBe('off');
+      expect(reported).toEqual(['warming', 'ready', 'off']);
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('reports degraded after the bounded wait, keeps hotkeys on the fallback, and recovers', async () => {
+    let snapshotReady: HelperRequest | undefined;
+    nextHelper();
+    const snapshot = nextHelper(request => {
+      if (request.type === 'ready') snapshotReady = request;
+    });
+    const helper = new PersistentPasteHelper(50);
+    const reported: string[] = [];
+    helper.onReadinessChange(readiness => reported.push(readiness));
+    try {
+      void helper.warmUp().catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(helper.readiness()).toBe('degraded');
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_unready' });
+      expect(types(snapshot)).toEqual(['ready']);
+      snapshot.reply(snapshotReady!, 'ready');
+      await settle();
+      expect(helper.readiness()).toBe('ready');
+      expect(reported).toEqual(['warming', 'degraded', 'ready']);
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('a helper that exits before ready degrades readiness at once', async () => {
+    nextHelper();
+    const snapshot = nextHelper(() => {});
+    const helper = new PersistentPasteHelper(10_000);
+    try {
+      const warming = helper.warmUp();
+      snapshot.crash();
+      await expect(warming).rejects.toThrow();
+      expect(helper.readiness()).toBe('degraded');
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('a crashed ready helper reports warming while its replacement starts', async () => {
+    nextHelper();
+    const snapshot = nextHelper();
+    let replacementReady: HelperRequest | undefined;
+    nextHelper(request => {
+      if (request.type === 'ready') replacementReady = request;
+    });
+    const helper = new PersistentPasteHelper(10_000);
+    try {
+      await helper.warmUp();
+      expect(helper.readiness()).toBe('ready');
+      snapshot.crash();
+      expect(helper.readiness()).toBe('warming');
+      expect(replacementReady).toBeDefined();
+    } finally {
+      helper.shutdown();
+    }
+  });
   test('switching auto-paste off during warm-up stops the snapshot helper without stranding callers', async () => {
     nextHelper();
     const snapshot = nextHelper(() => {});

@@ -107,6 +107,20 @@ def fixture_reason(error):
     return type(error).__name__
 
 
+def app_ready(state, owner):
+    """Eve shows Ready: its managed engine is loaded and auto-paste is settled.
+
+    `degraded` still counts: Eve reports it after a bounded wait and keeps
+    the copy and History fallback, which the trial then observes.
+    """
+    return (bool(state)
+            and state.get("status") == "running"
+            and state.get("pid") == owner["pid"]
+            and state.get("port") == owner["port"]
+            and (state.get("engineStatus") or {}).get("status") == "ready"
+            and state.get("pasteReadiness") in ("ready", "degraded", "off"))
+
+
 async def poll(observe, condition, seconds, *, failure=None):
     deadline = time.perf_counter() + seconds
     while time.perf_counter() < deadline:
@@ -363,13 +377,10 @@ async def app_session(root, install, clip, *, trace=True, label=None, wait_for_m
                     raise FixtureUnavailable("packaged-model-not-ready") from error
                 # The app rejects dictation until its own managed-server
                 # snapshot is ready, which can lag the direct health endpoint.
+                # Ready also waits, bounded, for the auto-paste helpers.
                 await poll(
                     lambda: main.eval("window.murmurMain.getServerStatus()"),
-                    lambda state: bool(state)
-                    and state.get("status") == "running"
-                    and state.get("pid") == owner["pid"]
-                    and state.get("port") == owner["port"]
-                    and (state.get("engineStatus") or {}).get("status") == "ready",
+                    lambda state: app_ready(state, owner),
                     30, failure="managed-model-not-ready-in-app",
                 )
             yield main, process, owner, stdout, stderr

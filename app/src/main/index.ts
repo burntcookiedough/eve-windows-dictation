@@ -663,6 +663,9 @@ async function startApplication(): Promise<void> {
   // Initialize server manager
   const server = new ServerManager(gpuPackManager);
   serverManager = server;
+  // Ready also waits, for a bounded time, until auto-paste can insert text.
+  pasteHelper.onReadinessChange(readiness => server.setPasteReadiness(readiness));
+  server.setPasteReadiness(pasteHelper.readiness());
   log.info('Server manager initialized');
 
   // Set up IPC handlers before creating windows (renderers call handlers on mount)

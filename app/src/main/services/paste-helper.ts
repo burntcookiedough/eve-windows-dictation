@@ -3,9 +3,12 @@ import type { ChildProcessByStdio } from 'child_process';
 import type { Readable, Writable } from 'node:stream';
 import { buildForegroundSnapshotScript, buildPersistentPasteScript, PasteAbortCode } from './paste-helper-script.js';
 import { foregroundRejections, perfTraceManager, type ForegroundRejection, type ForegroundSnapshotFailure } from './perf-trace.js';
+import type { PasteReadiness } from '../../shared/types.js';
 
 const SNAPSHOT_TIMEOUT_MS = 100;
 const PASTE_TIMEOUT_MS = 5000;
+// How long Ready waits for both helpers before reporting auto-paste degraded.
+const PASTE_READY_WAIT_MS = 10_000;
 const MAX_REPLY_LENGTH = 4096;
 
 type RequestType = 'ready' | 'foreground' | 'sequence' | 'paste' | 'commit' | 'discard';
@@ -90,6 +93,45 @@ export class PersistentPasteHelper {
   private nextId = 0;
   private stopped = false;
   private autoPaste = true;
+  private degraded = false;
+  private degradeTimer: ReturnType<typeof setTimeout> | undefined;
+  private reportedReadiness: PasteReadiness | undefined;
+  private readonly readinessListeners = new Set<(readiness: PasteReadiness) => void>();
+
+  constructor(private readonly readyWaitMs = PASTE_READY_WAIT_MS) {}
+
+  /** Both helpers answer, so a hotkey now gets a keydown-bound target. */
+  readiness(): PasteReadiness {
+    if (!this.autoPaste || this.stopped) return 'off';
+    if (this.connections.paste?.ready && this.connections.snapshot?.ready) return 'ready';
+    return this.degraded ? 'degraded' : 'warming';
+  }
+
+  onReadinessChange(listener: (readiness: PasteReadiness) => void): () => void {
+    this.readinessListeners.add(listener);
+    return () => this.readinessListeners.delete(listener);
+  }
+
+  // Warming lasts at most readyWaitMs, or until a helper fails to start.
+  private refreshReadiness(): void {
+    const readiness = this.readiness();
+    if (readiness === 'off' || readiness === 'ready') {
+      clearTimeout(this.degradeTimer);
+      this.degradeTimer = undefined;
+      this.degraded = false;
+    } else if (readiness === 'warming' && !this.degradeTimer) {
+      this.degradeTimer = setTimeout(() => {
+        this.degradeTimer = undefined;
+        this.degraded = true;
+        this.refreshReadiness();
+      }, this.readyWaitMs);
+      this.degradeTimer.unref?.();
+    }
+    const current = this.readiness();
+    if (current === this.reportedReadiness) return;
+    this.reportedReadiness = current;
+    for (const listener of this.readinessListeners) listener(current);
+  }
 
   async warmUp(): Promise<void> {
     const results = await Promise.allSettled([this.warmChannel('paste'), this.warmChannel('snapshot')]);
@@ -105,6 +147,7 @@ export class PersistentPasteHelper {
     this.autoPaste = enabled;
     if (enabled) void this.warmUp().catch(() => {});
     else this.releaseSnapshot();
+    this.refreshReadiness();
   }
 
   private releaseSnapshot(): void {
@@ -119,6 +162,7 @@ export class PersistentPasteHelper {
   private async warmChannel(channel: HelperChannel): Promise<void> {
     if (this.stopped || (channel === 'snapshot' && !this.autoPaste)) return;
     const connection = this.connections[channel] ?? this.start(channel);
+    this.refreshReadiness();
     if (!connection.ready) {
       connection.warming ??= this.request(channel, 'ready', PASTE_TIMEOUT_MS);
       await connection.warming;
@@ -191,6 +235,7 @@ export class PersistentPasteHelper {
     for (const connection of Object.values(this.connections)) {
       this.disconnect(connection, 'Paste helper shut down');
     }
+    this.refreshReadiness();
   }
 
   cancelPaste(): void {
@@ -200,6 +245,7 @@ export class PersistentPasteHelper {
 
   resume(): void {
     this.stopped = false;
+    this.refreshReadiness();
   }
 
   private request(
@@ -339,6 +385,7 @@ export class PersistentPasteHelper {
     if (failure) pending.reject(failure);
     else pending.resolve(result);
     if (connection.channel === 'snapshot') this.releaseSnapshot();
+    if (pending.type === 'ready') this.refreshReadiness();
     return true;
   }
 
@@ -379,9 +426,12 @@ export class PersistentPasteHelper {
       pending.reject(new PasteHelperUnavailableError(reason, !this.stopped && pending.type !== 'commit', timedOut));
     }
     connection.requests.clear();
+    // A helper that never became ready failed to start, so stop warming.
+    if (!connection.ready && this.autoPaste && !this.stopped) this.degraded = true;
     // A failed replacement never reached ready, so it cannot start a retry loop.
     // With auto-paste off, accepted sessions use the one-shot paste fallback.
     if (connection.ready && !this.stopped && this.autoPaste) void this.warmChannel(channel).catch(() => {});
+    this.refreshReadiness();
   }
 }
 

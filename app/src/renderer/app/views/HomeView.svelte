@@ -40,6 +40,7 @@
     checking: 'checking speech model files',
     downloading: 'downloading speech model',
     loading: 'loading speech model',
+    preparing: 'preparing auto-paste',
     ready: 'ready',
     error: 'speech setup needs attention',
   };

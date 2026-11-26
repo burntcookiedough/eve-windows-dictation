@@ -14,7 +14,6 @@ from ctypes import wintypes
 SEED = "EVE QA CLIPBOARD SEED"
 VKEYS = {"quick": 0x78, "long": 0x79}
 CF_UNICODETEXT = 13
-FOCUS_SETTLE_S = .2
 
 
 class KeyInput(ctypes.Structure):
@@ -60,6 +59,7 @@ class Desktop:
         self.kernel32.GlobalLock.restype = ctypes.c_void_p
         self.kernel32.GlobalUnlock.argtypes = [wintypes.HANDLE]
         self.kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
+        self.kernel32.GetTickCount64.restype = ctypes.c_uint64
         self.root = tk.Tk()
         self.root.withdraw()
         self.new_window()
@@ -115,9 +115,11 @@ class Desktop:
         self.window.attributes("-topmost", False)
         if self.user32.GetForegroundWindow() != window:
             raise RuntimeError("editor-foreground-unavailable")
-        # Eve rejects a capture when the foreground changed in the hotkey's own
-        # timer tick, so leave a human-scale gap before the next key.
-        time.sleep(FOCUS_SETTLE_S)
+        # Eve rejects a capture whose keydown shares a GetTickCount tick with a
+        # foreground change, so wait until that clock moves past the verified switch.
+        focused_at = self.kernel32.GetTickCount64()
+        while self.kernel32.GetTickCount64() <= focused_at:
+            time.sleep(.002)
 
     def send_key(self, mode):
         window = self.user32.GetAncestor(self.window.winfo_id(), 2)

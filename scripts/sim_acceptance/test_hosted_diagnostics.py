@@ -94,6 +94,16 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(record["paste_pre_dispatch_reason"], expected)
                 self.assertFalse(record["paste_helper_request_observed"])
 
+    def test_app_ready_waits_for_settled_auto_paste(self):
+        owner = {"pid": 10, "port": 20}
+        base = {"status": "running", "pid": 10, "port": 20, "engineStatus": {"status": "ready"}}
+        for readiness, expected in (("warming", False), (None, False), ("ready", True),
+                                    ("degraded", True), ("off", True)):
+            with self.subTest(readiness=readiness):
+                state = {**base, "pasteReadiness": readiness} if readiness else base
+                self.assertEqual(hosted.app_ready(state, owner), expected)
+        self.assertFalse(hosted.app_ready({**base, "pasteReadiness": "ready", "pid": 11}, owner))
+
     async def test_runtime_warmup_error_requests_bundled_recovery(self):
         fallback = AsyncMock()
         result = await self.run_stub(RuntimeError("private diagnostic"), fallback=fallback)

@@ -17,19 +17,25 @@ for (const startupAutoPaste of [true, false]) {
     const serverStarted = Promise.withResolvers<void>();
     const events: string[] = [];
     let changeAutoPaste: ((value: boolean) => void) | undefined;
+    let reportReadiness: ((readiness: string) => void) | undefined;
     const context = {
       log: { info: (message: string) => events.push(message), debug: () => {} },
       autoPasteEnabled: startupAutoPaste,
       getSetting: () => false,
       onAutoPasteChange: (callback: typeof changeAutoPaste) => { changeAutoPaste = callback; },
       // Warm-up never settles here: startup, hotkeys and Ready must not wait for it.
-      pasteHelper: { setAutoPaste: (enabled: boolean) => events.push(`autoPaste:${enabled}`) },
+      pasteHelper: {
+        setAutoPaste: (enabled: boolean) => events.push(`autoPaste:${enabled}`),
+        readiness: () => 'warming',
+        onReadinessChange: (callback: typeof reportReadiness) => { reportReadiness = callback; },
+      },
       historyService: null, gpuPackManager: null, serverManager: null, mainWindow: null, overlayWindow: null,
       HistoryService: class { initialize() {} },
       createGpuPackManager: () => ({}), resolveGpuPackStorageRoot: () => '',
       PINNED_GPU_PACK_DESCRIPTOR: null, GPU_PACK_CTRANSLATE2_BUILD_ID: null,
       ServerManager: class {
         setMainWindow() {}
+        setPasteReadiness(readiness: string) { events.push(`paste:${readiness}`); }
         detectExisting() { events.push('server'); serverStarted.resolve(); return server.promise; }
         getState() { return { status: 'running' }; }
       },
@@ -52,6 +58,10 @@ for (const startupAutoPaste of [true, false]) {
     changeAutoPaste?.(!startupAutoPaste);
     changeAutoPaste?.(startupAutoPaste);
     expect(events.slice(-2)).toEqual([`autoPaste:${!startupAutoPaste}`, `autoPaste:${startupAutoPaste}`]);
+    // The status the UI and harness show as Ready carries helper readiness from the start.
+    expect(events.indexOf('paste:warming')).toBeLessThan(events.indexOf('server'));
+    reportReadiness?.('ready');
+    expect(events.at(-1)).toBe('paste:ready');
   });
 }
 

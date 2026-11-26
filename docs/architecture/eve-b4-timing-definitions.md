@@ -94,7 +94,13 @@ observer.
 With auto-paste enabled, Eve starts the paste and foreground helpers when it
 starts, in parallel with window creation and server startup. The dictation hook
 is registered before the server can report Ready and never waits for the
-helpers. Enabling auto-paste in Settings starts the same warm-up. Disabling it
+helpers. The server state carries `pasteReadiness` (`off`, `warming`, `ready`
+or `degraded`). While it is `warming`, the app shows "Preparing auto-paste"
+instead of Ready. The hosted harness waits for the same state. After
+10 seconds without both helpers, or as soon as one exits before it is ready,
+Eve reports Ready with auto-paste degraded. Hotkeys work throughout and use the
+copy and History fallback. Enabling auto-paste in Settings starts the same
+warm-up. Disabling it
 stops the foreground helper once any accepted capture has settled. While
 auto-paste is off, neither helper is replaced after it exits. With auto-paste
 on, a ready helper that disconnects starts one replacement in the background.
@@ -102,10 +108,15 @@ on, a ready helper that disconnects starts one replacement in the background.
 The foreground target is bound to the hotkey keydown. The global hook reports
 the keydown's `KBDLLHOOKSTRUCT.time`, a 32-bit `GetTickCount` value, and Eve
 sends it with the capture request. The foreground helper runs a
-`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` tracker on a message-pumping thread.
-Each change is recorded at its `dwmsEventTime`, which uses the same clock.
-For each request, the helper reads the foreground window and drains events that
-were already queued. It returns that window only when no foreground change
+`SetWinEventHook` tracker on a message-pumping thread.
+Each `EVENT_SYSTEM_FOREGROUND` is recorded at its `dwmsEventTime`, which uses the
+same clock. For each request, the helper reads the foreground window, then raises
+a private OEM event with `NotifyWinEvent` on a hidden helper-owned window and
+waits until the same hook delivers it. Out-of-context events reach the hook
+thread in the order they were raised. A thread message would not work here,
+because `GetMessage` can return a posted message before pending events. So every
+change that finished before the read is recorded by the time the marker arrives,
+even when the hook thread lags. The helper returns that window only when no foreground change
 happened at or after the keydown's tick and the window did not change during
 the read. The tick has a resolution of about 16 ms, so a change in the
 keydown's own tick counts as a later change. Otherwise the helper rejects the
