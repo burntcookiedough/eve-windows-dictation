@@ -140,6 +140,7 @@ const {
 const { PersistentPasteHelper, pasteHelper } = await import('../src/main/services/paste-helper.js');
 const { processFinalTranscription } = await import('../src/main/services/pipeline.js');
 const clipboardSequence = 77;
+const KEYDOWN_TICK = 4242;
 let sequenceRead: ReturnType<typeof spyOn>;
 beforeEach(() => {
   sequenceRead = spyOn(pasteHelper, 'clipboardSequence').mockResolvedValue(clipboardSequence);
@@ -152,6 +153,7 @@ interface HelperRequest {
   targetWindowHandle?: number;
   clipboardSequence?: number;
   deadlineUnixMs?: number;
+  keydownTick?: number;
 }
 
 class FakePasteHelper extends EventEmitter {
@@ -1042,7 +1044,7 @@ describe('persistent paste helper', () => {
       });
       const snapshot = nextHelper();
       await pasteHelper.warmUp();
-      const target = await pasteHelper.foreground();
+      const target = await pasteHelper.foreground(KEYDOWN_TICK);
       const { delivery } = await processFinalTranscription({
         frame: 'text', type: 'final', text: 'Synthetic dictation',
         confidence: 1, audio_duration: 1, transcription_time: 0.5,
@@ -1061,7 +1063,7 @@ describe('persistent paste helper', () => {
     const child = nextHelper();
     const snapshot = nextHelper();
     await pasteHelper.warmUp();
-    expect(await pasteHelper.foreground()).toEqual({ handle: 12345 });
+    expect(await pasteHelper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
     for (const target of [12345, 23456, 34567]) await simulatePaste(target, clipboardSequence);
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(spawn).toHaveBeenCalledWith('powershell',
@@ -1126,7 +1128,7 @@ describe('persistent paste helper', () => {
       await helper.warmUp();
       expect(child.requests.map(({ type }) => type)).toEqual(['ready']);
       expect(snapshot.requests.map(({ type }) => type)).toEqual(['ready']);
-      expect(await helper.foreground()).toEqual({ handle: 12345 });
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
       expect(spawn).toHaveBeenCalledTimes(2);
     } finally {
       helper.shutdown();
@@ -1273,7 +1275,7 @@ describe('persistent paste helper', () => {
     const result = await processFinalTranscription({
       frame: 'text', type: 'final', text: 'First synthetic dictation',
       confidence: 1, audio_duration: 1, transcription_time: 0.5,
-    }, { ...DEFAULT_SETTINGS, autoPaste: true }, null, 'quick', pasteHelper.foreground());
+    }, { ...DEFAULT_SETTINGS, autoPaste: true }, null, 'quick', pasteHelper.foreground(KEYDOWN_TICK));
     expect(result.delivery).toEqual({ kind: 'pasted' });
     expect(snapshot.requests.map(({ type }) => type)).toEqual(['ready', 'foreground']);
     expect(paste.requests.map(({ type }) => type)).toEqual(['ready', 'paste', 'commit']);
@@ -1294,7 +1296,7 @@ describe('persistent paste helper', () => {
         await helper.warmUp();
         const inFlight = operation === 'commit' ? helper.paste(67890, clipboardSequence) : helper.clipboardSequence();
         const request = await pending.promise;
-        const target = await helper.foreground();
+        const target = await helper.foreground(KEYDOWN_TICK);
         paste.reply(request, operation === 'commit' ? 'pasted' : 'sequence', { sequence: clipboardSequence });
         await inFlight;
         expect(target).toEqual({ handle: 12345 });
@@ -1315,7 +1317,7 @@ describe('persistent paste helper', () => {
         await helper.warmUp();
         (channel === 'snapshot' ? snapshot : paste).crash();
         expect(restarted.requests.map(({ type }) => type)).toEqual(['ready']);
-        expect(await helper.foreground()).toEqual({ handle: 12345 });
+        expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
         expect(await helper.clipboardSequence()).toBe(clipboardSequence);
         expect(spawn).toHaveBeenCalledTimes(3);
       } finally {
@@ -1329,12 +1331,12 @@ describe('persistent paste helper', () => {
     const snapshot = nextHelper(() => {});
     const helper = new PersistentPasteHelper();
     try {
-      expect(await helper.foreground()).toEqual({ reason: 'helper_absent' });
-      expect(await helper.foreground()).toEqual({ reason: 'helper_unready' });
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_absent' });
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_unready' });
       expect(snapshot.requests.map(({ type }) => type)).toEqual(['ready']);
       snapshot.reply(snapshot.requests[0]!, 'ready');
-      const sampling = helper.foreground();
-      expect(await helper.foreground()).toEqual({ reason: 'helper_busy' });
+      const sampling = helper.foreground(KEYDOWN_TICK);
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_busy' });
       snapshot.reply(snapshot.requests[1]!, 'foreground', { handle: 0 });
       expect(await sampling).toEqual({ reason: 'no_hwnd' });
       expect(snapshot.requests.map(({ type }) => type)).toEqual(['ready', 'foreground']);
@@ -1348,7 +1350,7 @@ describe('persistent paste helper', () => {
     process.env.MURMUR_PERF_TRACE = '1';
     try {
       const traceId = perfTraceManager.startTrace('synthetic-missing-foreground')!.correlationId;
-      const target = pasteHelper.foreground();
+      const target = pasteHelper.foreground(KEYDOWN_TICK);
       const { delivery } = await processFinalTranscription({
         frame: 'text', type: 'final', text: 'Synthetic dictation',
         confidence: 1, audio_duration: 1, transcription_time: 0.5,
@@ -1401,7 +1403,7 @@ describe('persistent paste helper', () => {
         return { kill: mock(() => {}) };
       });
       await pasteHelper.warmUp();
-      const capture = pasteHelper.foreground();
+      const capture = pasteHelper.foreground(KEYDOWN_TICK);
       foreground = 23456; // A later sample would see chat B.
       const target = await capture;
       const foregroundRequest = child.requests.at(-1)!;
@@ -1425,6 +1427,222 @@ describe('persistent paste helper', () => {
       expect(paste.requests.map(({ type }) => type)).toEqual(['ready']);
     });
   }
+
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  const types = (child: FakePasteHelper) => child.requests.map(({ type }) => type);
+  const syntheticFinal = {
+    frame: 'text', type: 'final', text: 'Synthetic dictation',
+    confidence: 1, audio_duration: 1, transcription_time: 0.5,
+  } as const;
+
+  test('binds the capture to its keydown and never pastes after focus moved before the sample', async () => {
+    const paste = nextHelper();
+    const snapshot = nextHelper((request, helper) => {
+      if (request.type === 'ready') helper.reply(request, 'ready');
+      // Editor A had focus at the keydown; chat B took it before the helper sampled.
+      else helper.reply(request, 'rejected', { reason: 'focus_changed' });
+    });
+    await pasteHelper.warmUp();
+    setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'previous' })], 'previous');
+    const saved: TranscriptionEntry[] = [];
+    const target = pasteHelper.foreground(KEYDOWN_TICK);
+    const { delivery } = await processFinalTranscription(syntheticFinal,
+      { ...DEFAULT_SETTINGS, autoPaste: true, autoCopy: true, dictationMode: 'raw' },
+      { save: entry => saved.push(entry) }, 'quick', target);
+    expect(await target).toEqual({ reason: 'focus_changed' });
+    expect(snapshot.requests).toMatchObject([{ type: 'ready' }, { type: 'foreground', keydownTick: KEYDOWN_TICK }]);
+    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'no_target', copied: true });
+    expect(saved.map(entry => entry.text)).toEqual(['Synthetic dictation']);
+    expect(clipboardText).toBe('Synthetic dictation');
+    expect(types(paste)).toEqual(['ready']);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  test('refuses a capture that cannot name its keydown without sampling the current window', async () => {
+    nextHelper();
+    const snapshot = nextHelper();
+    await pasteHelper.warmUp();
+    for (const tick of [undefined, -1, 1.5, 2 ** 32, Number.NaN]) {
+      expect(await pasteHelper.foreground(tick)).toEqual({ reason: 'keydown_unverified' });
+    }
+    expect(types(snapshot)).toEqual(['ready']);
+  });
+
+  test('treats an unknown rejection reason as a broken helper, not a target', async () => {
+    nextHelper();
+    const snapshot = nextHelper((request, helper) => {
+      if (request.type === 'ready') helper.reply(request, 'ready');
+      else helper.reply(request, 'rejected', { reason: 'C:\\private\\path' });
+    });
+    nextHelper();
+    await pasteHelper.warmUp();
+    expect(await pasteHelper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_absent' });
+    expect(snapshot.kill).toHaveBeenCalledTimes(1);
+  });
+
+  test('a hotkey before the replacement snapshot helper is ready falls back without sampling', async () => {
+    nextHelper();
+    const snapshot = nextHelper();
+    let readyRequest: HelperRequest | undefined;
+    const replacement = nextHelper((request, helper) => {
+      if (request.type === 'ready') readyRequest = request;
+      else helper.reply(request, 'foreground', { handle: 23456 });
+    });
+    const helper = new PersistentPasteHelper();
+    try {
+      await helper.warmUp();
+      snapshot.crash();
+      expect(types(replacement)).toEqual(['ready']);
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_unready' });
+      expect(types(replacement)).toEqual(['ready']);
+      replacement.reply(readyRequest!, 'ready');
+      await settle();
+      expect(await helper.foreground(KEYDOWN_TICK + 1)).toEqual({ handle: 23456 });
+      expect(replacement.requests.at(-1)).toMatchObject({ type: 'foreground', keydownTick: KEYDOWN_TICK + 1 });
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('a snapshot helper that never answers times out once and is replaced', async () => {
+    nextHelper();
+    const silent = nextHelper((request, helper) => {
+      if (request.type === 'ready') helper.reply(request, 'ready');
+    });
+    const replacement = nextHelper();
+    const helper = new PersistentPasteHelper();
+    try {
+      await helper.warmUp();
+      const sentAt = performance.now();
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'rpc_timeout' });
+      expect(performance.now() - sentAt).toBeGreaterThanOrEqual(90);
+      expect(types(silent)).toEqual(['ready', 'foreground']);
+      expect(silent.kill).toHaveBeenCalledTimes(1);
+      expect(types(replacement)).toEqual(['ready']);
+      await settle();
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  for (const frame of ['late handle', 'expired'] as const) {
+    test(`a ${frame} frame that arrives before the timer fires settles as a timeout`, async () => {
+      nextHelper();
+      let clock: ReturnType<typeof spyOn> | undefined;
+      const snapshot = nextHelper((request, helper) => {
+        if (request.type === 'ready') {
+          helper.reply(request, 'ready');
+        } else if (frame === 'expired') {
+          helper.reply(request, 'expired');
+        } else {
+          // The reply is read after its deadline, before the 100 ms JS timer runs.
+          const now = performance.now();
+          clock = spyOn(performance, 'now').mockReturnValue(now + 1000);
+          helper.reply(request, 'foreground', { handle: 23456 });
+        }
+      });
+      nextHelper();
+      const helper = new PersistentPasteHelper();
+      try {
+        await helper.warmUp();
+        const sentAt = Date.now();
+        const result = await helper.foreground(KEYDOWN_TICK);
+        const settledAfterMs = Date.now() - sentAt;
+        clock?.mockRestore();
+        expect(result).toEqual({ reason: 'rpc_timeout' });
+        expect(settledAfterMs).toBeLessThan(90);
+        expect(snapshot.kill).toHaveBeenCalledTimes(frame === 'expired' ? 0 : 1);
+      } finally {
+        clock?.mockRestore();
+        helper.shutdown();
+      }
+    });
+  }
+
+  test('a quick stop while the paste helper warms waits for it instead of skipping', async () => {
+    sequenceRead.mockRestore();
+    let readyRequest: HelperRequest | undefined;
+    const paste = nextHelper((request, helper) => {
+      if (request.type === 'ready') readyRequest = request;
+      else if (request.type === 'sequence') helper.reply(request, 'sequence', { sequence: clipboardSequence });
+      else if (request.type === 'paste') helper.reply(request, 'prepared');
+      else if (request.type === 'commit') helper.reply(request, 'pasted');
+    });
+    nextHelper();
+    const warming = pasteHelper.warmUp();
+    const delivery = pasteText('Synthetic dictation', {
+      targetWindowHandle: 12345, restoreClipboard: false, restoreDelayMs: 750,
+      deadlineUnixMs: Date.now() + 5000,
+    });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(types(paste)).toEqual(['ready']);
+    paste.reply(readyRequest!, 'ready');
+    await warming;
+    expect(await delivery).toEqual({ kind: 'pasted' });
+    expect(types(paste)).toEqual(['ready', 'sequence', 'paste', 'commit']);
+    expect(paste.requests[2]).toMatchObject({ targetWindowHandle: 12345, clipboardSequence });
+  });
+
+  test('a paste helper that stays cold keeps the copy fallback inside the delivery deadline', async () => {
+    sequenceRead.mockRestore();
+    const paste = nextHelper(() => {});
+    const startedAt = Date.now();
+    const delivery = await pasteText('Synthetic dictation', {
+      targetWindowHandle: 12345, restoreClipboard: false, restoreDelayMs: 750,
+      deadlineUnixMs: Date.now() + 1700,
+    });
+    expect(delivery).toEqual({ kind: 'skipped_unsafe', reason: 'clipboard_changed', copied: true });
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(types(paste)).toEqual(['ready']);
+    expect(clipboardText).toBe('Synthetic dictation');
+  });
+
+  test('disabling auto-paste releases the snapshot helper after an accepted capture settles', async () => {
+    nextHelper();
+    let pending: HelperRequest | undefined;
+    const snapshot = nextHelper((request, helper) => {
+      if (request.type === 'ready') helper.reply(request, 'ready');
+      else pending = request;
+    });
+    const helper = new PersistentPasteHelper();
+    try {
+      await helper.warmUp();
+      const capture = helper.foreground(KEYDOWN_TICK);
+      helper.setAutoPaste(false);
+      expect(snapshot.kill).not.toHaveBeenCalled();
+      snapshot.reply(pending!, 'foreground', { handle: 23456 });
+      expect(await capture).toEqual({ handle: 23456 });
+      expect(snapshot.kill).toHaveBeenCalledTimes(1);
+      snapshot.crash();
+      await helper.warmUp();
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_absent' });
+      expect(spawn).toHaveBeenCalledTimes(2);
+
+      const reenabled = nextHelper();
+      helper.setAutoPaste(true);
+      await settle();
+      expect(types(reenabled)).toEqual(['ready']);
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ handle: 12345 });
+    } finally {
+      helper.shutdown();
+    }
+  });
+
+  test('switching auto-paste off during warm-up stops the snapshot helper without stranding callers', async () => {
+    nextHelper();
+    const snapshot = nextHelper(() => {});
+    const helper = new PersistentPasteHelper();
+    try {
+      const warming = helper.warmUp();
+      helper.setAutoPaste(false);
+      await expect(warming).rejects.toThrow();
+      expect(snapshot.kill).toHaveBeenCalledTimes(1);
+      expect(spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      helper.shutdown();
+    }
+  });
 
   for (const outcome of ['late prepare', 'prepare timeout', 'newer operation'] as const) {
     test(`skips keyboard dispatch if ownership expires during preparation: ${outcome}`, async () => {
@@ -1540,7 +1758,7 @@ describe('persistent paste helper', () => {
     const pending = helper.paste(12345, clipboardSequence);
     helper.shutdown();
     await expect(pending).rejects.toMatchObject({ allowFallback: false });
-    await expect(helper.foreground()).resolves.toEqual({ reason: 'helper_absent' });
+    await expect(helper.foreground(KEYDOWN_TICK)).resolves.toEqual({ reason: 'helper_absent' });
     expect(child.kill).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledTimes(1);
   });

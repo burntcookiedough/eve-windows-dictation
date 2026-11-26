@@ -15,7 +15,7 @@ import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
 import { suspendClipboardPaste } from './services/clipboard.js';
-import { pasteHelper, type ForegroundSnapshot } from './services/paste-helper.js';
+import { isPasteWarmingUp, pasteHelper, type ForegroundSnapshot } from './services/paste-helper.js';
 import { autoPasteEnabled, getSettings, getSetting, onAutoPasteChange } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
@@ -195,12 +195,14 @@ async function startRecording(
   source: 'lab' | 'normal',
   sessionMode: DictationSessionMode = 'quick',
   hotkeyAt?: number,
+  keydownTick?: number,
   queuedPasteTarget?: Promise<ForegroundSnapshot> | null,
 ) {
   if (isRecording || isStopping || !overlayWindow) return;
   const dispatchedAt = isPerfTraceEnabled() ? performance.now() : undefined;
+  // The target is bound to the keydown that started this session.
   const pasteTarget = queuedPasteTarget === undefined
-    ? (source === 'normal' && autoPasteEnabled ? pasteHelper.foreground() : null)
+    ? (source === 'normal' && autoPasteEnabled ? pasteHelper.foreground(keydownTick) : null)
     : queuedPasteTarget;
   const autoPaste = pasteTarget !== null;
 
@@ -281,6 +283,13 @@ async function startRecording(
   );
   transcriptionService = service;
   let serviceCapture: CaptureSession | null = null;
+  // A session that started while the helpers warmed keeps its copy and History
+  // fallback; say so instead of implying that paste is available.
+  void pasteTarget?.then(snapshot => {
+    if (transcriptionService === service && isPasteWarmingUp(snapshot) && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, { code: 'paste_warming_up', message: 'Paste warming up' });
+    }
+  });
   const serviceSessionMode = sessionMode;
 
   service.onRecordingState((payload) => {
@@ -385,7 +394,7 @@ async function startRecording(
 
     if (shouldStartLongAfterStop) {
       startLongAfterStop = null;
-      void startRecording('normal', 'long', shouldStartLongAfterStop.hotkeyAt, shouldStartLongAfterStop.pasteTarget);
+      void startRecording('normal', 'long', shouldStartLongAfterStop.hotkeyAt, undefined, shouldStartLongAfterStop.pasteTarget);
     }
   });
 
@@ -447,11 +456,11 @@ async function stopRecording() {
   service?.stop();
 }
 
-function queueLongRecordingAfterStop(hotkeyAt?: number): void {
-  startLongAfterStop = { hotkeyAt, pasteTarget: autoPasteEnabled ? pasteHelper.foreground() : null };
+function queueLongRecordingAfterStop(hotkeyAt?: number, keydownTick?: number): void {
+  startLongAfterStop = { hotkeyAt, pasteTarget: autoPasteEnabled ? pasteHelper.foreground(keydownTick) : null };
 }
 
-function toggleLongRecording(hotkeyAt?: number): boolean {
+function toggleLongRecording(hotkeyAt?: number, keydownTick?: number): boolean {
   if (isStopping) {
     showRecordingBusy();
     return false;
@@ -461,11 +470,11 @@ function toggleLongRecording(hotkeyAt?: number): boolean {
     startLongAfterStop = null;
     stopRecording();
   } else if (isRecording) {
-    queueLongRecordingAfterStop(hotkeyAt);
+    queueLongRecordingAfterStop(hotkeyAt, keydownTick);
     log.info('Long dictation queued after quick dictation stop');
     stopRecording();
   } else {
-    startRecording('normal', 'long', hotkeyAt);
+    startRecording('normal', 'long', hotkeyAt, keydownTick);
     log.info('Long dictation started');
   }
   return true;
@@ -631,13 +640,10 @@ function setupDisplayChangeHandlers() {
 
 async function startApplication(): Promise<void> {
   log.info('Eve starting');
-  const warmPasteHelper = () => pasteHelper.warmUp().catch(() => {
-    log.debug('Paste helper prewarm failed');
-  });
-  let pasteWarmup = autoPasteEnabled ? warmPasteHelper() : Promise.resolve();
-  onAutoPasteChange(enabled => {
-    if (enabled) pasteWarmup = warmPasteHelper();
-  });
+  // The helpers warm in the background and never gate the hotkeys. A dictation
+  // that starts before they are ready keeps its copy and History fallback.
+  pasteHelper.setAutoPaste(autoPasteEnabled);
+  onAutoPasteChange(enabled => pasteHelper.setAutoPaste(enabled));
 
   // Initialize history service early
   historyService = new HistoryService();
@@ -687,28 +693,15 @@ async function startApplication(): Promise<void> {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // The server and helpers initialize independently. Register dictation hotkeys
-  // only after the bounded helper readiness check settles.
-  const startServer = async () => {
-    if (!app.isPackaged) {
-      log.info('Development mode: detecting existing server');
-      await server.detectExisting();
-    } else if (getSetting('serverAutoStart')) {
-      log.info('Production mode: auto-starting server');
-      await server.start();
-    } else {
-      log.info('Production mode: server auto-start disabled, detecting existing');
-      await server.detectExisting();
-    }
-  };
-  const installHotkeys = () => setupHotkeyService({
-    onHoldStart: (hotkeyAt) => {
+  // Register the dictation hook before the server can report Ready.
+  setupHotkeyService({
+    onHoldStart: (hotkeyAt, keydownTick) => {
       if (isStopping) {
         showRecordingBusy();
         return false;
       }
       if (!isRecording) {
-        startRecording('normal', 'quick', hotkeyAt);
+        startRecording('normal', 'quick', hotkeyAt, keydownTick);
         log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
       } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
@@ -722,13 +715,13 @@ async function startApplication(): Promise<void> {
         stopRecording();
       }
     },
-    onDoubleTap: (hotkeyAt) => {
-      if (!toggleLongRecording(hotkeyAt)) return false;
+    onDoubleTap: (hotkeyAt, keydownTick) => {
+      if (!toggleLongRecording(hotkeyAt, keydownTick)) return false;
       log.info('Long dictation toggled (double-tap)');
       return true;
     },
-    onLongShortcut: (hotkeyAt) => {
-      if (!toggleLongRecording(hotkeyAt)) return false;
+    onLongShortcut: (hotkeyAt, keydownTick) => {
+      if (!toggleLongRecording(hotkeyAt, keydownTick)) return false;
       log.info('Long dictation toggled (long hotkey)');
       return true;
     },
@@ -741,7 +734,16 @@ async function startApplication(): Promise<void> {
     }
   });
 
-  await Promise.all([startServer(), pasteWarmup.then(installHotkeys)]);
+  if (!app.isPackaged) {
+    log.info('Development mode: detecting existing server');
+    await server.detectExisting();
+  } else if (getSetting('serverAutoStart')) {
+    log.info('Production mode: auto-starting server');
+    await server.start();
+  } else {
+    log.info('Production mode: server auto-start disabled, detecting existing');
+    await server.detectExisting();
+  }
   log.info('Eve ready');
 
   // Handle app lifecycle

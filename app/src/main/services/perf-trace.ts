@@ -26,8 +26,11 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 const elapsed = (start: number | null, end: number | null): number | null =>
   start !== null && end !== null && end >= start ? end - start : null;
 
+// Reasons the snapshot helper itself gives when it cannot prove the keydown window.
+export const foregroundRejections = ['keydown_unverified', 'tracker_unready', 'tracker_unavailable', 'focus_changed'] as const;
+export type ForegroundRejection = typeof foregroundRejections[number];
 const foregroundSnapshotFailures = [
-  'helper_absent', 'helper_unready', 'helper_busy', 'rpc_timeout', 'no_hwnd',
+  'helper_absent', 'helper_unready', 'helper_busy', 'rpc_timeout', 'no_hwnd', ...foregroundRejections,
 ] as const;
 export type ForegroundSnapshotFailure = typeof foregroundSnapshotFailures[number];
 const pastePreDispatchReasons = [

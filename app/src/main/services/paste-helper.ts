@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import type { ChildProcessByStdio } from 'child_process';
 import type { Readable, Writable } from 'node:stream';
 import { buildForegroundSnapshotScript, buildPersistentPasteScript, PasteAbortCode } from './paste-helper-script.js';
-import { perfTraceManager, type ForegroundSnapshotFailure } from './perf-trace.js';
+import { foregroundRejections, perfTraceManager, type ForegroundRejection, type ForegroundSnapshotFailure } from './perf-trace.js';
 
 const SNAPSHOT_TIMEOUT_MS = 100;
 const PASTE_TIMEOUT_MS = 5000;
@@ -14,6 +14,24 @@ type NativePasteAbortCode = typeof PasteAbortCode[keyof typeof PasteAbortCode];
 
 export type AuthorizePaste = (dispatch: () => void | Promise<void>) => Promise<void>;
 export type ForegroundSnapshot = { handle: number } | { reason: ForegroundSnapshotFailure };
+
+const warmingReasons: readonly ForegroundSnapshotFailure[] = ['helper_absent', 'helper_unready', 'tracker_unready'];
+
+/** The capture failed only because the helpers were still starting. */
+export function isPasteWarmingUp(snapshot: ForegroundSnapshot): boolean {
+  return 'reason' in snapshot && warmingReasons.includes(snapshot.reason);
+}
+
+/** uiohook reports KBDLLHOOKSTRUCT.time, a 32-bit GetTickCount value. */
+function isKeydownTick(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+}
+
+class ForegroundRejectedError extends Error {
+  constructor(readonly reason: ForegroundRejection) {
+    super('Foreground capture rejected');
+  }
+}
 
 interface PendingRequest {
   type: Exclude<RequestType, 'discard'> | 'authorizing';
@@ -35,9 +53,10 @@ interface HelperConnection {
 }
 
 interface PasteRequest {
-  targetWindowHandle: number;
-  clipboardSequence: number;
-  deadlineUnixMs: number;
+  targetWindowHandle?: number;
+  clipboardSequence?: number;
+  deadlineUnixMs?: number;
+  keydownTick?: number;
   perfTraceId?: string;
   authorize?: AuthorizePaste;
 }
@@ -70,14 +89,35 @@ export class PersistentPasteHelper {
   private readonly connections: Partial<Record<HelperChannel, HelperConnection>> = {};
   private nextId = 0;
   private stopped = false;
+  private autoPaste = true;
 
   async warmUp(): Promise<void> {
     const results = await Promise.allSettled([this.warmChannel('paste'), this.warmChannel('snapshot')]);
     if (results.some(result => result.status === 'rejected')) throw new Error('Could not warm paste helpers');
   }
 
+  /**
+   * Follows the auto-paste setting. Enabling warms both helpers in the
+   * background. Disabling releases the snapshot helper once any accepted
+   * capture has settled, and stops both helpers from being replaced.
+   */
+  setAutoPaste(enabled: boolean): void {
+    this.autoPaste = enabled;
+    if (enabled) void this.warmUp().catch(() => {});
+    else this.releaseSnapshot();
+  }
+
+  private releaseSnapshot(): void {
+    const connection = this.connections.snapshot;
+    if (this.autoPaste || !connection) return;
+    for (const pending of connection.requests.values()) {
+      if (pending.type === 'foreground') return;
+    }
+    this.disconnect(connection, 'Auto-paste disabled');
+  }
+
   private async warmChannel(channel: HelperChannel): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || (channel === 'snapshot' && !this.autoPaste)) return;
     const connection = this.connections[channel] ?? this.start(channel);
     if (!connection.ready) {
       connection.warming ??= this.request(channel, 'ready', PASTE_TIMEOUT_MS);
@@ -85,28 +125,50 @@ export class PersistentPasteHelper {
     }
   }
 
-  async foreground(): Promise<ForegroundSnapshot> {
-    // A delayed request could see a later window. Warm missing channels for
-    // the next hotkey and send only to an idle, dedicated snapshot process.
+  /**
+   * Returns the window that was foreground at the hotkey keydown, or why that
+   * cannot be proven. The helper rejects the capture when the foreground
+   * changed at or after the keydown, so a later window is never returned.
+   * A helper that is not ready yet cannot prove anything about an earlier
+   * keydown, so it is warmed for the next hotkey instead of being asked.
+   */
+  async foreground(keydownTick?: number): Promise<ForegroundSnapshot> {
     const connection = this.connections.snapshot;
     if (!connection) {
-      if (!this.stopped) void this.warmUp().catch(() => {});
+      if (!this.stopped && this.autoPaste) void this.warmUp().catch(() => {});
       return { reason: 'helper_absent' };
     }
     if (!connection.ready) return { reason: 'helper_unready' };
+    if (!isKeydownTick(keydownTick)) return { reason: 'keydown_unverified' };
     if (connection.requests.size > 0) return { reason: 'helper_busy' };
     try {
-      const response = this.request('snapshot', 'foreground', SNAPSHOT_TIMEOUT_MS);
+      const response = this.request('snapshot', 'foreground', SNAPSHOT_TIMEOUT_MS, { keydownTick });
       if (!this.connections.paste) void this.warmChannel('paste').catch(() => {});
       const handle = await response;
       return handle === null ? { reason: 'no_hwnd' } : { handle };
     } catch (error) {
+      if (error instanceof ForegroundRejectedError) return { reason: error.reason };
       return { reason: error instanceof PasteHelperUnavailableError && error.timedOut ? 'rpc_timeout' : 'helper_absent' };
     }
   }
 
-  async clipboardSequence(): Promise<number | null> {
-    if (!this.connections.paste?.ready) return null;
+  /**
+   * Reads the clipboard sequence for an accepted paste. When the paste helper
+   * is still starting after auto-paste was enabled or a crash, waits up to
+   * `warmWaitMs` for it rather than giving up on the paste.
+   */
+  async clipboardSequence(warmWaitMs = 0): Promise<number | null> {
+    if (this.stopped) return null;
+    if (!this.connections.paste?.ready) {
+      if (warmWaitMs <= 0) return null;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const warmed = await Promise.race([
+        this.warmChannel('paste').then(() => true, () => false),
+        new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), warmWaitMs); }),
+      ]);
+      clearTimeout(timer);
+      if (!warmed || !this.connections.paste?.ready) return null;
+    }
     return this.request('paste', 'sequence', SNAPSHOT_TIMEOUT_MS);
   }
 
@@ -144,7 +206,7 @@ export class PersistentPasteHelper {
     channel: HelperChannel,
     type: 'ready' | 'foreground' | 'sequence' | 'paste',
     timeoutMs: number,
-    paste?: PasteRequest
+    fields?: PasteRequest
   ): Promise<number | null> {
     if (this.stopped) {
       return Promise.reject(new PasteHelperUnavailableError('Paste helper shut down', false));
@@ -159,11 +221,11 @@ export class PersistentPasteHelper {
     return new Promise((resolve, reject) => {
       const expiresAt = performance.now() + timeoutMs;
       const timeout = setTimeout(() => this.disconnect(connection, 'Paste helper request timed out', true), timeoutMs);
-      const { perfTraceId, authorize, targetWindowHandle, clipboardSequence, deadlineUnixMs } = paste ?? {};
+      const { perfTraceId, authorize, targetWindowHandle, clipboardSequence, deadlineUnixMs, keydownTick } = fields ?? {};
       connection.requests.set(id, { type, timeout, expiresAt, perfTraceId, authorize, resolve, reject });
       if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
       this.send(connection, {
-        id, type, targetWindowHandle, clipboardSequence,
+        id, type, targetWindowHandle, clipboardSequence, keydownTick,
         deadlineUnixMs: type === 'foreground' ? Date.now() + timeoutMs : deadlineUnixMs,
       });
     });
@@ -205,7 +267,10 @@ export class PersistentPasteHelper {
 
   private send(
     connection: HelperConnection,
-    request: { id: number; type: RequestType; targetWindowHandle?: number; clipboardSequence?: number; deadlineUnixMs?: number }
+    request: {
+      id: number; type: RequestType; targetWindowHandle?: number; clipboardSequence?: number;
+      deadlineUnixMs?: number; keydownTick?: number;
+    }
   ): void {
     try {
       connection.child.stdin.write(JSON.stringify(request) + '\n');
@@ -222,7 +287,7 @@ export class PersistentPasteHelper {
       return false;
     }
     if (!response || typeof response !== 'object') return false;
-    const { id, type, handle, sequence, code, error } = response as Record<string, unknown>;
+    const { id, type, handle, sequence, code, error, reason } = response as Record<string, unknown>;
     if (typeof id !== 'number') return false;
     const pending = connection.requests.get(id);
     if (!pending) return false;
@@ -247,7 +312,10 @@ export class PersistentPasteHelper {
         break;
       case 'foreground':
         if (type === 'expired') failure = new PasteHelperUnavailableError('Foreground snapshot expired', false, true);
-        else {
+        else if (type === 'rejected') {
+          if (!(foregroundRejections as readonly unknown[]).includes(reason)) return false;
+          failure = new ForegroundRejectedError(reason as ForegroundRejection);
+        } else {
           if (type !== 'foreground' || typeof handle !== 'number' || !Number.isSafeInteger(handle)) return false;
           result = handle > 0 ? handle : null;
         }
@@ -270,6 +338,7 @@ export class PersistentPasteHelper {
     if (pending.perfTraceId) perfTraceManager.mark(pending.perfTraceId, 'pasteHelperResponseAt');
     if (failure) pending.reject(failure);
     else pending.resolve(result);
+    if (connection.channel === 'snapshot') this.releaseSnapshot();
     return true;
   }
 
@@ -311,7 +380,8 @@ export class PersistentPasteHelper {
     }
     connection.requests.clear();
     // A failed replacement never reached ready, so it cannot start a retry loop.
-    if (connection.ready && !this.stopped) void this.warmChannel(channel).catch(() => {});
+    // With auto-paste off, accepted sessions use the one-shot paste fallback.
+    if (connection.ready && !this.stopped && this.autoPaste) void this.warmChannel(channel).catch(() => {});
   }
 }
 

@@ -91,27 +91,47 @@ ambiguous, so Eve reports the failure and skips retrying the paste. The helper
 reply measures dispatch and leaves actual editor insertion to the isolated
 observer.
 
-With auto-paste enabled, Eve warms the paste and foreground helpers in parallel
-with server startup. The dictation hotkeys become available after both helper
-readiness checks settle, with a five-second deadline per helper. Enabling
-auto-paste in Settings starts the same warm-up. A ready helper that disconnects
-starts one replacement in the background.
+With auto-paste enabled, Eve starts the paste and foreground helpers when it
+starts, in parallel with window creation and server startup. The dictation hook
+is registered before the server can report Ready and never waits for the
+helpers. Enabling auto-paste in Settings starts the same warm-up. Disabling it
+stops the foreground helper once any accepted capture has settled. While
+auto-paste is off, neither helper is replaced after it exits. With auto-paste
+on, a ready helper that disconnects starts one replacement in the background.
 
-Eve requests the foreground window at hotkey time, before settings-file reads
-or overlay work. A dedicated helper only handles readiness and foreground
-requests, so clipboard sequence queries and paste commits cannot delay the
-snapshot. Eve accepts a reply within 100 ms and retains that result for the
+The foreground target is bound to the hotkey keydown. The global hook reports
+the keydown's `KBDLLHOOKSTRUCT.time`, a 32-bit `GetTickCount` value, and Eve
+sends it with the capture request. The foreground helper runs a
+`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` tracker on a message-pumping thread.
+Each change is recorded at its `dwmsEventTime`, which uses the same clock.
+For each request, the helper reads the foreground window and drains events that
+were already queued. It returns that window only when no foreground change
+happened at or after the keydown's tick and the window did not change during
+the read. The tick has a resolution of about 16 ms, so a change in the
+keydown's own tick counts as a later change. Otherwise the helper rejects the
+capture and never returns a window that became foreground after the keydown.
+The helper also rejects a keydown older than two seconds, and one that happened
+before its tracker was installed. The foreground helper handles only readiness
+and capture requests, so clipboard sequence queries and paste commits cannot
+delay a capture. Eve accepts a reply within 100 ms and keeps that result for the
 session, including when a Long dictation waits for a Quick dictation to finish.
-When no valid handle is captured, Eve follows the session's copy and History
-settings.
+
+When no target is proven, Eve follows the session's copy and History settings.
+A hotkey pressed while the helpers are still starting, after auto-paste is
+enabled or while a crashed helper is replaced, shows "Paste warming up" on the
+overlay. That dictation keeps the copy and History fallback. If a target was
+captured but the paste helper is still starting at stop, Eve waits up to
+2.5 seconds for the helper and keeps 1.5 seconds of the delivery deadline for
+the guarded paste or the copy fallback.
 
 Completed performance traces include an allowlisted `pastePreDispatchReason`
-when a foreground snapshot or clipboard preflight prevents dispatch. Snapshot
-reasons are `helper_absent`, `helper_unready`, `helper_busy`, `rpc_timeout`, and
-`no_hwnd`. Clipboard reasons identify the failing preflight step, such as
-`clipboard_sequence_unavailable` or `clipboard_ownership_changed`. The field
-contains only a reason code or null.
-
+when a foreground capture or clipboard preflight prevents dispatch. Capture
+reasons from Eve are `helper_absent`, `helper_unready`, `helper_busy`,
+`rpc_timeout`, and `no_hwnd`. Reasons from the foreground helper are
+`focus_changed`, `tracker_unready`, `tracker_unavailable`, and
+`keydown_unverified`. Clipboard reasons identify the failing preflight step,
+such as `clipboard_sequence_unavailable` or `clipboard_ownership_changed`. The
+field contains only a reason code or null.
 For the explicit editor, from `app/` run `bun run dev:vite` and open
 `http://127.0.0.1:5173/app/fixtures/isolated-editor-observer.html` (use the configured
 port if different). Focus its empty textarea before the scripted dictation paste.

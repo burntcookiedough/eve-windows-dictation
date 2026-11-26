@@ -17,6 +17,10 @@ const MIN_RESTORE_DELAY_MS = 750;
 const COPY_READ_TIMEOUT_MS = 1000;
 const RESTORE_READ_TIMEOUT_MS = 1000;
 const PASTE_PROCESS_TIMEOUT_MS = 5000;
+// A paste helper that is still starting gets this long, leaving the rest of the
+// delivery deadline for the guarded paste or the copy fallback.
+const SEQUENCE_WARM_WAIT_MS = 2500;
+const SEQUENCE_DEADLINE_RESERVE_MS = 1500;
 let pasteLifetime = new AbortController();
 
 let sendInputScriptPath: string | null = null;
@@ -421,7 +425,9 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
       await clipboard.writeText(text);
       clipboardWrite = 'written';
       if (isSuperseded()) return skip('superseded');
-      const sequenceRequest = pasteHelper.clipboardSequence().catch(() => null);
+      const warmWaitMs = Math.min(SEQUENCE_WARM_WAIT_MS,
+        (options.deadlineUnixMs ?? Infinity) - Date.now() - SEQUENCE_DEADLINE_RESERVE_MS);
+      const sequenceRequest = pasteHelper.clipboardSequence(warmWaitMs).catch(() => null);
       if (writeStart !== null) {
         const completedAt = performance.now();
         perfTraceManager.output(options.perfTraceId, 'clipboard', completedAt - writeStart, completedAt);

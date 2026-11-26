@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 
 type KeyboardEvent = {
   keycode: number;
+  time?: number;
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
@@ -97,8 +98,38 @@ test('a tap rejected during delivery cannot seed Long or release Quick', () => {
   }
 });
 
-describe('hotkey capture lifecycle', () => {
-  test('cancellation settles the pending invocation and detaches its listener', async () => {
+test('each hotkey callback receives the hook timestamp of its own keydown', () => {
+  const ticks: unknown[] = [];
+  setupHotkeyService({
+    onHoldStart: (_hotkeyAt, keydownTick) => { ticks.push(['quick', keydownTick]); return true; },
+    onHoldEnd: () => {},
+    onDoubleTap: (_hotkeyAt, keydownTick) => { ticks.push(['double', keydownTick]); return true; },
+    onLongShortcut: (_hotkeyAt, keydownTick) => { ticks.push(['long', keydownTick]); return true; },
+  });
+  // KBDLLHOOKSTRUCT.time is a 32-bit GetTickCount value, so it may sit near the wrap.
+  const down = (code: number, time: number) => listeners.forEach(listener => listener({ ...keyEvent(code), time }));
+  const up = (code: number) => keyUpListeners.forEach(listener => listener(keyEvent(code)));
+  try {
+    down(29, 4294967000);
+    down(3675, 4294967001);
+    up(3675);
+    up(29);
+    down(29, 4294967100);
+    down(42, 4294967101);
+    down(3675, 4294967102);
+    // The gesture kind depends on earlier taps; the tick must be the keydown's own.
+    expect(ticks.map(entry => (entry as unknown[])[1])).toEqual([4294967001, 4294967102]);
+  } finally {
+    up(3675);
+    up(42);
+    up(29);
+    unregisterHotkey();
+    listeners.clear();
+    keyUpListeners.clear();
+  }
+});
+
+describe('hotkey capture lifecycle', () => {  test('cancellation settles the pending invocation and detaches its listener', async () => {
     const pending = startHotkeyCapture();
 
     cancelHotkeyCapture();
