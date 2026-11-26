@@ -26,7 +26,7 @@ for (const startupAutoPaste of [true, false]) {
       // Warm-up never settles here: startup, hotkeys and Ready must not wait for it.
       pasteHelper: {
         setAutoPaste: (enabled: boolean) => events.push(`autoPaste:${enabled}`),
-        readiness: () => 'warming',
+        readiness: () => startupAutoPaste ? 'warming' : 'off',
         onReadinessChange: (callback: typeof reportReadiness) => { reportReadiness = callback; },
       },
       historyService: null, gpuPackManager: null, serverManager: null, mainWindow: null, overlayWindow: null,
@@ -52,14 +52,15 @@ for (const startupAutoPaste of [true, false]) {
     expect(events.indexOf('hotkeys')).toBeGreaterThan(-1);
     expect(events.indexOf('hotkeys')).toBeLessThan(events.indexOf('server'));
     expect(events.indexOf(`autoPaste:${startupAutoPaste}`)).toBeLessThan(events.indexOf('hotkeys'));
+    const initialReadiness = events.indexOf(startupAutoPaste ? 'paste:warming' : 'paste:off');
+    expect(initialReadiness).toBeGreaterThanOrEqual(0);
+    expect(initialReadiness).toBeLessThan(events.indexOf('server'));
     server.resolve();
     await startup;
     expect(events.at(-1)).toBe('Eve ready');
     changeAutoPaste?.(!startupAutoPaste);
     changeAutoPaste?.(startupAutoPaste);
     expect(events.slice(-2)).toEqual([`autoPaste:${!startupAutoPaste}`, `autoPaste:${startupAutoPaste}`]);
-    // The status the UI and harness show as Ready carries helper readiness from the start.
-    expect(events.indexOf('paste:warming')).toBeLessThan(events.indexOf('server'));
     reportReadiness?.('ready');
     expect(events.at(-1)).toBe('paste:ready');
   });
@@ -72,7 +73,7 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
 
-  for (const [source, initial, updated, autoCopy, failure] of [
+  for (const [source, initial, updated, autoCopy, failure, queued] of [
     ['normal', false, true, true], // Copy-only at start.
     ['normal', false, false, false], // History-only.
     ['normal', true, false, false], // Auto-paste at start.
@@ -82,6 +83,9 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
     ['normal', true, true, true, 'copied_not_pasted'],
     ['normal', false, false, true, 'timeout'],
     ['normal', true, true, true, 'warming'],
+    ['normal', true, true, false, undefined, true], // Keep the queued keydown target.
+    ['normal', false, false, true, undefined, true], // Disabled before queued Long starts.
+    ['normal', true, false, true, undefined, true], // Disabled before queued Long delivers.
   ] as const) {
     let autoPaste: boolean = initial;
     let captures = 0;
@@ -160,12 +164,14 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
         return { delivery: { kind: 'pasted' } };
       },
     };
-    await runInNewContext(script + `\nstartRecording('${source}', 'quick', undefined, 777);`, context);
-    expect(events).toEqual(source === 'normal' && initial
+    const queuedTarget = queued ? ', Promise.resolve({ handle: 23456 })' : '';
+    await runInNewContext(script + `\nstartRecording('${source}', '${queued ? 'long' : 'quick'}', undefined, 777${queuedTarget});`, context);
+    const shouldCapture = source === 'normal' && initial && !queued;
+    expect(events).toEqual(shouldCapture
       ? ['foreground', 'settings', 'overlay']
       : ['settings', 'overlay']);
     // The capture is bound to the keydown that started this session.
-    expect(keydownTicks).toEqual(source === 'normal' && initial ? [777] : []);
+    expect(keydownTicks).toEqual(shouldCapture ? [777] : []);
     await Promise.resolve();
     // Both helper_unready and helper_absent mean the helpers are still starting.
     expect(warnings).toEqual(failure === 'warming' || (failure === 'no_outputs' && source === 'normal')
@@ -181,9 +187,11 @@ test('recording snapshots auto-paste and captures the foreground only when enabl
       timedOut.resolve();
     }
     const terminal = await finalizing;
-    expect(captures).toBe(source === 'normal' && initial ? 1 : 0);
+    expect(captures).toBe(shouldCapture ? 1 : 0);
     expect(output).toEqual(source === 'lab' ? undefined : {
-      autoPaste: initial, autoCopy, target: initial && failure !== 'no_outputs' && failure !== 'warming' ? 12345 : null,
+      autoPaste: initial && (!queued || updated),
+      autoCopy,
+      target: initial && failure !== 'no_outputs' && failure !== 'warming' ? (queued ? 23456 : 12345) : null,
     });
     if (failure) {
       expect(terminal).toBe(failure === 'no_outputs' || failure === 'timeout' ? 'failed'

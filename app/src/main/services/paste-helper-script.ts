@@ -403,9 +403,9 @@ public static class ForegroundTracker {
         Monitor.Wait(Gate, remaining);
       }
       installed = installedAt;
-      lastChange = lastChangeAt;
     }
     long after = GetForegroundWindow().ToInt64();
+    lock (Gate) { lastChange = lastChangeAt; }
     result.Reason = Judge(keydownAt, now, installed, lastChange, before, after);
     if (result.Reason == null) result.Handle = before;
     return result;

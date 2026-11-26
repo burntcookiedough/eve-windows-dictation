@@ -112,13 +112,15 @@ def app_ready(state, owner):
 
     `degraded` still counts: Eve reports it after a bounded wait and keeps
     the copy and History fallback, which the trial then observes.
+    Retained candidates from before paste readiness was added omit the field.
     """
     return (bool(state)
             and state.get("status") == "running"
             and state.get("pid") == owner["pid"]
             and state.get("port") == owner["port"]
             and (state.get("engineStatus") or {}).get("status") == "ready"
-            and state.get("pasteReadiness") in ("ready", "degraded", "off"))
+            and ("pasteReadiness" not in state
+                 or state["pasteReadiness"] in ("ready", "degraded", "off")))
 
 
 async def poll(observe, condition, seconds, *, failure=None):

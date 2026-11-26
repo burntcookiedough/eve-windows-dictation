@@ -1629,6 +1629,27 @@ describe('persistent paste helper', () => {
     }
   });
 
+  test('auto-paste off lets accepted work use a ready paste helper without starting a replacement', async () => {
+    const paste = nextHelper();
+    nextHelper();
+    const helper = new PersistentPasteHelper();
+    try {
+      await helper.warmUp();
+      helper.setAutoPaste(false);
+      const sequence = await helper.clipboardSequence(100);
+      expect(sequence).toBe(clipboardSequence);
+
+      paste.crash();
+      expect(await helper.clipboardSequence(100)).toBeNull();
+      await helper.warmUp();
+      expect(await helper.foreground(KEYDOWN_TICK)).toEqual({ reason: 'helper_absent' });
+      await expect(helper.paste(12345, sequence!)).rejects.toThrow('Auto-paste disabled');
+      expect(spawn).toHaveBeenCalledTimes(2);
+    } finally {
+      helper.shutdown();
+    }
+  });
+
   test('reports warming until both helpers answer, then ready, and off when disabled', async () => {
     let pasteReady: HelperRequest | undefined;
     const paste = nextHelper((request, helper) => {

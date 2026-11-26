@@ -98,8 +98,9 @@ function publish(state: ServerStatePayload | null): void {
   const phase = getServerStatusPhase(state);
   const nextMilestone = milestone(state);
   const phaseChanged = phase !== current.phase;
+  const readinessChanged = phase === 'ready' && state?.pasteReadiness !== current.state?.pasteReadiness;
   const milestoneChanged = phase === 'downloading' && nextMilestone !== null && nextMilestone !== announcedMilestone;
-  const announcement = phaseChanged || milestoneChanged
+  const announcement = phaseChanged || readinessChanged || milestoneChanged
     ? (milestoneChanged ? `Speech model download ${nextMilestone}% complete.` : getServerStatusAnnouncement(phase, state))
     : current.announcement;
 

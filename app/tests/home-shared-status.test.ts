@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { get } from 'svelte/store';
+import type { ServerStatePayload } from '../src/shared/types';
 import {
   disposeServerStatus,
   getDownloadMilestone,
@@ -31,6 +32,38 @@ const packageJson = source('../package.json');
 const serverVersion = source('../../server/src/version.py');
 
 describe('Home and shared server status', () => {
+  test('publishes updated announcements when paste readiness changes within Ready', async () => {
+    const degraded: ServerStatePayload = {
+      status: 'running', managed: true, engineStatus: { current: 'whisper', status: 'ready' },
+      pasteReadiness: 'degraded',
+    };
+    let publish: (state: ServerStatePayload) => void = () => { throw new Error('Server status is not subscribed'); };
+    (globalThis as { window: unknown }).window = {
+      murmurMain: {
+        getServerStatus: async () => degraded,
+        onServerStateChange: (callback: typeof publish) => { publish = callback; return () => {}; },
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+
+    initializeServerStatus();
+    try {
+      await Promise.resolve();
+      for (const readiness of ['off', 'ready'] as const) {
+        publish(degraded);
+        expect(get(serverStatusState)).toMatchObject({
+          phase: 'ready',
+          announcement: 'Speech model is ready. Auto-paste is unavailable, so dictation is saved to History instead.',
+        });
+        publish({ ...degraded, pasteReadiness: readiness });
+        expect(get(serverStatusState)).toMatchObject({ phase: 'ready', announcement: 'Speech model is ready.' });
+      }
+    } finally {
+      disposeServerStatus();
+    }
+  });
+
   test('initializes one subscription, reseeds on focus, and tears down only its own listener', async () => {
     let getCalls = 0;
     let stateSubscriptions = 0;

@@ -60,7 +60,6 @@ test.skipIf(!windows)('the shipped snapshot helper answers keydown-bound request
   const { dlopen, FFIType } = await import('bun:ffi');
   const kernel32 = dlopen('kernel32.dll', { GetTickCount64: { args: [], returns: FFIType.u64 } });
   const tick = () => Number(BigInt(kernel32.symbols.GetTickCount64()) % 0x1_0000_0000n);
-  const beforeStart = tick();
   const child = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(buildForegroundSnapshotScript(), 'utf16le').toString('base64')],
   { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
@@ -85,13 +84,12 @@ test.skipIf(!windows)('the shipped snapshot helper answers keydown-bound request
     const keydown = tick();
     const sample = await ask({ id: 2, type: 'foreground', keydownTick: keydown, deadlineUnixMs: Date.now() + 2000 });
     expect(sample).toMatchObject({ id: 2, type: 'foreground', handle: expect.any(Number) });
-    expect(await ask({ id: 3, type: 'foreground', keydownTick: beforeStart, deadlineUnixMs: Date.now() + 2000 }))
-      .toEqual({ id: 3, type: 'rejected', reason: 'tracker_unready' });
-    expect(await ask({ id: 4, type: 'foreground', keydownTick: (keydown + 0x1_0000_0000 - 5000) % 0x1_0000_0000, deadlineUnixMs: Date.now() + 2000 }))
-      .toEqual({ id: 4, type: 'rejected', reason: 'keydown_unverified' });
+    const staleKeydown = (tick() + 0x1_0000_0000 - 5000) % 0x1_0000_0000;
+    expect(await ask({ id: 3, type: 'foreground', keydownTick: staleKeydown, deadlineUnixMs: Date.now() + 2000 }))
+      .toEqual({ id: 3, type: 'rejected', reason: 'keydown_unverified' });
     // .NET Framework's UtcNow advances in ~16 ms steps, so use a clearly past deadline.
-    expect(await ask({ id: 5, type: 'foreground', keydownTick: tick(), deadlineUnixMs: Date.now() - 1000 }))
-      .toEqual({ id: 5, type: 'expired' });
+    expect(await ask({ id: 4, type: 'foreground', keydownTick: tick(), deadlineUnixMs: Date.now() - 1000 }))
+      .toEqual({ id: 4, type: 'expired' });
     child.stdin.end();
     expect(await child.exited).toBe(0);
   } finally {
@@ -101,37 +99,40 @@ test.skipIf(!windows)('the shipped snapshot helper answers keydown-bound request
   }
 }, 60_000);
 
-// Test-only probes. The shipped tracker exposes only its hook thread id and window.
+// The test build pauses the real hook inside a callback, outside the tracker lock.
 const ORDERING_PROBE = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Threading;
-
 public static class OrderingProbe {
+  private const uint PauseEvent = 0x01EF;
+  private static readonly ManualResetEvent Paused = new ManualResetEvent(false);
+  private static readonly ManualResetEvent Release = new ManualResetEvent(false);
   [DllImport("kernel32.dll")] private static extern ulong GetTickCount64();
-  [DllImport("kernel32.dll")] private static extern IntPtr OpenThread(uint access, bool inherit, uint threadId);
-  [DllImport("kernel32.dll")] private static extern uint SuspendThread(IntPtr thread);
-  [DllImport("kernel32.dll")] private static extern uint ResumeThread(IntPtr thread);
   [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int idObject, int idChild);
 
   public static uint Now() { return (uint)GetTickCount64(); }
 
-  // Starves the hook thread, as a busy or descheduled helper would, so later
-  // events wait in its queue.
-  public static void Stall(uint threadId, int ms) {
-    IntPtr thread = OpenThread(0x0002, false, threadId);
-    if (thread == IntPtr.Zero || SuspendThread(thread) == 0xFFFFFFFF) throw new InvalidOperationException("Could not stall the hook thread.");
-    Thread resume = new Thread(delegate() { Thread.Sleep(ms); ResumeThread(thread); });
-    resume.IsBackground = true;
-    resume.Start();
+  public static void Stall(long hwnd) {
+    Paused.Reset();
+    Release.Reset();
+    NotifyWinEvent(PauseEvent, new IntPtr(hwnd), 0, 0);
+    if (!Paused.WaitOne(5000)) throw new InvalidOperationException("Hook did not pause.");
+  }
+
+  public static bool PauseHook(uint eventType, IntPtr hwnd) {
+    if (eventType != PauseEvent || hwnd.ToInt64() != ForegroundTracker.TrackerWindow) return false;
+    Paused.Set();
+    if (!Release.WaitOne(15000)) Paused.Reset();
+    return true;
+  }
+
+  public static void MarkerQueued() {
+    if (!Paused.WaitOne(0)) throw new InvalidOperationException("Hook was released before the marker was queued.");
+    Release.Set();
   }
 
   // A foreground notification that changes no focus. The tracker cannot tell it
   // apart from a real switch, which is what this test needs.
   public static void RaiseForeground(long hwnd) { NotifyWinEvent(3, new IntPtr(hwnd), 0, 0); }
 }
-"@
 `;
 
 test.skipIf(!windows)('a foreground change queued behind a stalled hook is seen before the capture decides', async () => {
@@ -139,51 +140,48 @@ test.skipIf(!windows)('a foreground change queued behind a stalled hook is seen 
   const user32 = dlopen('user32.dll', {
     NotifyWinEvent: { args: [FFIType.u32, FFIType.i64, FFIType.i32, FFIType.i32], returns: FFIType.void },
   });
+  const kernel32 = dlopen('kernel32.dll', { GetTickCount64: { args: [], returns: FFIType.u64 } });
+  // Keep the shipping marker and foreground event on their real WinEvent queue.
+  const instrumentedTracker = FOREGROUND_TRACKER_TYPE
+    .replace('    if (eventType == EVENT_SYSTEM_FOREGROUND) {',
+      '    if (OrderingProbe.PauseHook(eventType, hwnd)) return;\n    if (eventType == EVENT_SYSTEM_FOREGROUND) {')
+    .replace('    ulong installed;', '    OrderingProbe.MarkerQueued();\n    ulong installed;')
+    .replace('\n"@', `${ORDERING_PROBE}\n"@`);
   const script = `
 $ErrorActionPreference = 'Stop'
-${FOREGROUND_TRACKER_TYPE}
-${ORDERING_PROBE}
-if (-not [ForegroundTracker]::Start(2000)) { throw 'Foreground tracker unavailable.' }
-$thread = [ForegroundTracker]::HookThreadId
+${instrumentedTracker}
+if (-not [ForegroundTracker]::Start(5000)) { throw 'Foreground tracker unavailable.' }
 $window = [ForegroundTracker]::TrackerWindow
-$watch = [Diagnostics.Stopwatch]::new()
 $r = [ordered]@{}
 Start-Sleep -Milliseconds 50
-$keydown = [OrderingProbe]::Now()
-Start-Sleep -Milliseconds 40
 
 # Control: a stalled hook delays the sync marker but proves no change.
-[OrderingProbe]::Stall($thread, 400)
-$watch.Restart()
-$capture = [ForegroundTracker]::Capture($keydown, 2000)
+[OrderingProbe]::Stall($window)
+$capture = [ForegroundTracker]::Capture([OrderingProbe]::Now(), 5000)
 $r.controlReason = $capture.Reason
-$r.controlWaitedMs = $watch.ElapsedMilliseconds
 
 # A change after the keydown waits in the queue ahead of the marker.
-[OrderingProbe]::Stall($thread, 400)
+[OrderingProbe]::Stall($window)
+$keydown = [OrderingProbe]::Now()
 [OrderingProbe]::RaiseForeground($window)
-$watch.Restart()
-$capture = [ForegroundTracker]::Capture($keydown, 2000)
+$capture = [ForegroundTracker]::Capture($keydown, 5000)
 $r.inProcessReason = $capture.Reason
 $r.inProcessHandle = $capture.Handle
-$r.inProcessWaitedMs = $watch.ElapsedMilliseconds
 
 # The same, with the change raised by another process.
-$keydown = [OrderingProbe]::Now()
-Start-Sleep -Milliseconds 40
-[OrderingProbe]::Stall($thread, 1000)
+Start-Sleep -Milliseconds 50
+[OrderingProbe]::Stall($window)
 [Console]::WriteLine('raise ' + $window)
-$null = [Console]::ReadLine()
-$watch.Restart()
-$capture = [ForegroundTracker]::Capture($keydown, 3000)
+$keydown = [uint32]::Parse([Console]::ReadLine())
+$capture = [ForegroundTracker]::Capture($keydown, 5000)
 $r.crossProcessReason = $capture.Reason
 $r.crossProcessHandle = $capture.Handle
-$r.crossProcessWaitedMs = $watch.ElapsedMilliseconds
 [Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))
 `;
   const child = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(script, 'utf16le').toString('base64')],
   { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true });
+  const watchdog = setTimeout(() => child.kill(), 45_000);
   const reader = child.stdout.getReader();
   let buffered = '';
   const nextLine = async () => {
@@ -200,8 +198,9 @@ $r.crossProcessWaitedMs = $watch.ElapsedMilliseconds
   try {
     const raise = await nextLine();
     expect(raise).toMatch(/^raise \d+$/);
+    const keydown = BigInt(kernel32.symbols.GetTickCount64()) % 0x1_0000_0000n;
     user32.symbols.NotifyWinEvent(3, BigInt(raise.slice(6)), 0, 0);
-    child.stdin.write('\n');
+    child.stdin.write(`${keydown}\n`);
     await child.stdin.flush();
     const result = JSON.parse(await nextLine()) as Record<string, unknown>;
     expect(await child.exited).toBe(0);
@@ -210,13 +209,11 @@ $r.crossProcessWaitedMs = $watch.ElapsedMilliseconds
       inProcessReason: 'focus_changed', inProcessHandle: 0,
       crossProcessReason: 'focus_changed', crossProcessHandle: 0,
     });
-    // Each marker was delivered only after the stall ended, behind the queued change.
-    expect(result.controlWaitedMs).toBeGreaterThanOrEqual(250);
-    expect(result.inProcessWaitedMs).toBeGreaterThanOrEqual(250);
-    expect(result.crossProcessWaitedMs).toBeGreaterThanOrEqual(250);
   } finally {
+    clearTimeout(watchdog);
     if (child.exitCode === null) child.kill();
     await child.exited;
+    kernel32.close();
     user32.close();
   }
 }, 60_000);

@@ -160,7 +160,7 @@ export class PersistentPasteHelper {
   }
 
   private async warmChannel(channel: HelperChannel): Promise<void> {
-    if (this.stopped || (channel === 'snapshot' && !this.autoPaste)) return;
+    if (this.stopped || !this.autoPaste) return;
     const connection = this.connections[channel] ?? this.start(channel);
     this.refreshReadiness();
     if (!connection.ready) {
@@ -204,7 +204,7 @@ export class PersistentPasteHelper {
   async clipboardSequence(warmWaitMs = 0): Promise<number | null> {
     if (this.stopped) return null;
     if (!this.connections.paste?.ready) {
-      if (warmWaitMs <= 0) return null;
+      if (!this.autoPaste || warmWaitMs <= 0) return null;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const warmed = await Promise.race([
         this.warmChannel('paste').then(() => true, () => false),
@@ -256,6 +256,9 @@ export class PersistentPasteHelper {
   ): Promise<number | null> {
     if (this.stopped) {
       return Promise.reject(new PasteHelperUnavailableError('Paste helper shut down', false));
+    }
+    if (!this.autoPaste && !this.connections[channel]) {
+      return Promise.reject(new PasteHelperUnavailableError('Auto-paste disabled', true));
     }
     let connection: HelperConnection;
     try {

@@ -23,6 +23,13 @@ from scripts.sim_acceptance.hosted import (
 
 
 class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
+    def test_app_ready_accepts_retained_candidate_without_paste_readiness(self):
+        owner = {"pid": 123, "port": 456}
+        state = {**owner, "status": "running", "engineStatus": {"status": "ready"}}
+        self.assertTrue(hosted.app_ready(state, owner))
+        self.assertFalse(hosted.app_ready({**state, "pid": 321}, owner))
+        self.assertFalse(hosted.app_ready({**state, "engineStatus": {"status": "loading"}}, owner))
+
     async def test_startup_poll_reports_the_named_fixture(self):
         with self.assertRaises(FixtureUnavailable) as caught:
             await poll(None, bool, 0, failure="cdp-http-unreachable")
@@ -98,10 +105,9 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         owner = {"pid": 10, "port": 20}
         base = {"status": "running", "pid": 10, "port": 20, "engineStatus": {"status": "ready"}}
         for readiness, expected in (("warming", False), (None, False), ("ready", True),
-                                    ("degraded", True), ("off", True)):
+                                    ("degraded", True), ("off", True), ("unknown", False)):
             with self.subTest(readiness=readiness):
-                state = {**base, "pasteReadiness": readiness} if readiness else base
-                self.assertEqual(hosted.app_ready(state, owner), expected)
+                self.assertEqual(hosted.app_ready({**base, "pasteReadiness": readiness}, owner), expected)
         self.assertFalse(hosted.app_ready({**base, "pasteReadiness": "ready", "pid": 11}, owner))
 
     async def test_runtime_warmup_error_requests_bundled_recovery(self):

@@ -201,9 +201,10 @@ async function startRecording(
   if (isRecording || isStopping || !overlayWindow) return;
   const dispatchedAt = isPerfTraceEnabled() ? performance.now() : undefined;
   // The target is bound to the keydown that started this session.
-  const pasteTarget = queuedPasteTarget === undefined
-    ? (source === 'normal' && autoPasteEnabled ? pasteHelper.foreground(keydownTick) : null)
-    : queuedPasteTarget;
+  let pasteTarget: Promise<ForegroundSnapshot> | null = null;
+  if (source === 'normal' && autoPasteEnabled) {
+    pasteTarget = queuedPasteTarget === undefined ? pasteHelper.foreground(keydownTick) : queuedPasteTarget;
+  }
   const autoPaste = pasteTarget !== null;
 
   // Packaged builds only trust the URL discovered from the managed server.
@@ -338,7 +339,7 @@ async function startRecording(
 
     const result = await processFinalTranscription(
       frame,
-      { ...getSettings(), autoPaste },
+      { ...getSettings(), autoPaste: autoPaste && (queuedPasteTarget === undefined || autoPasteEnabled) },
       historyService,
       serviceSessionMode,
       pasteTarget,
