@@ -1,0 +1,698 @@
+"""Exercise the retained Eve build on a disposable GitHub-hosted Windows runner."""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+import re
+import socket
+import struct
+import subprocess
+import sys
+import time
+import wave
+from contextlib import asynccontextmanager
+from itertools import pairwise
+from pathlib import Path
+
+import psutil
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.sim_acceptance.replay import (
+    ProcessSamples,
+    get_json,
+    run_replay,
+    wait_health,
+)
+from scripts.sim_acceptance.score import (
+    CANDIDATE,
+    load_clips,
+    text_hash,
+    trial_record,
+    write_evidence,
+)
+from scripts.validation_harness import normalize_text
+
+HERE = Path(__file__).resolve().parent
+MODEL = "small"
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+CDP_SCRIPT = """(() => {
+  window.eveQaState = { finals: [], editorDuringSpeech: 0, history: [], recording: null };
+  window.murmurMain.onTranscription(payload => {
+    if (payload.type === 'final') window.eveQaState.finals.push(payload.text);
+    else window.eveQaState.editorDuringSpeech++;
+  });
+  window.murmurMain.onRecordingState(payload => window.eveQaState.recording = payload);
+  window.murmurMain.onNewHistoryEntry(payload => window.eveQaState.history.push(payload.id));
+  return true;
+})()"""
+LISTENING = {"listening", "transcribing"}
+
+
+class FixtureUnavailable(RuntimeError):
+    pass
+
+
+async def poll(observe, condition, seconds):
+    deadline = time.perf_counter() + seconds
+    while time.perf_counter() < deadline:
+        value = await observe()
+        if condition(value):
+            return value
+        await asyncio.sleep(.08)
+    raise TimeoutError("observation-timeout")
+
+
+async def http(port, endpoint):
+    try:
+        return await asyncio.to_thread(get_json, port, endpoint)
+    except OSError:
+        return None
+
+
+def cdp_socket(target, port, kind):
+    url = target.get("webSocketDebuggerUrl", "")
+    if not re.fullmatch(rf"ws://127\.0\.0\.1:{port}/devtools/{kind}/[\w-]+", url):
+        raise FixtureUnavailable("unexpected-cdp-endpoint")
+    return url
+
+
+class Cdp:
+    def __init__(self, ws):
+        self.ws = ws
+        self.sequence = 0
+
+    async def send(self, method, params=None):
+        self.sequence += 1
+        await self.ws.send(json.dumps({"id": self.sequence, "method": method, "params": params or {}}))
+        async with asyncio.timeout(10):
+            while True:
+                result = json.loads(await self.ws.recv())
+                if result.get("id") == self.sequence:
+                    if "error" in result:
+                        raise RuntimeError("cdp-command-error")
+                    return result["result"]
+
+    async def eval(self, expression):
+        result = await self.send("Runtime.evaluate", {
+            "expression": expression, "awaitPromise": True, "returnByValue": True,
+        })
+        if result.get("exceptionDetails"):
+            raise RuntimeError("renderer-command-error")
+        return result["result"].get("value")
+
+
+class Desktop:
+    def __init__(self, process):
+        self.process = process
+
+    async def send(self, action, **fields):
+        if self.process.returncode is not None:
+            raise FixtureUnavailable("desktop-editor-exited")
+        self.process.stdin.write((json.dumps({"action": action, **fields}) + "\n").encode())
+        await self.process.stdin.drain()
+        raw = await asyncio.wait_for(self.process.stdout.readline(), 10)
+        if not raw:
+            raise FixtureUnavailable("desktop-editor-unavailable")
+        reply = json.loads(raw)
+        if "error" in reply:
+            raise FixtureUnavailable(reply["error"])
+        return reply["result"]
+
+
+def localhost_port():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def stop_owned_tree(process):
+    if process.poll() is not None:
+        return
+    root = psutil.Process(process.pid)
+    children = root.children(recursive=True)
+    for member in [*reversed(children), root]:
+        try:
+            member.kill()
+        except psutil.NoSuchProcess:
+            pass
+    process.wait(timeout=20)
+
+
+def start_process(command, cwd, env, stdout, stderr):
+    with stdout.open("wb") as out, stderr.open("wb") as err:
+        return subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=err, creationflags=NO_WINDOW)
+
+
+def runtime_environment(root):
+    env = os.environ.copy()
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        env.pop(name, None)
+    env.update({
+        "TEMP": str(root / "runtime-temp"), "TMP": str(root / "runtime-temp"),
+        "HF_HOME": str(root / "hf"), "HF_HUB_CACHE": str(root / "hf" / "hub"),
+        "HUGGINGFACE_HUB_CACHE": str(root / "hf" / "hub"),
+        "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1", "HF_HUB_DISABLE_TELEMETRY": "1",
+        "HF_HUB_DOWNLOAD_TIMEOUT": "120", "PYTHONNOUSERSITE": "1",
+        "CUDA_VISIBLE_DEVICES": "-1", "MURMUR_PERF_TRACE": "1",
+        "MURMUR_WHISPER_DEVICE": "cpu", "MURMUR_WHISPER_LANGUAGE": "en",
+    })
+    return env
+
+
+def candidate_settings(profile):
+    profile.mkdir(parents=True, exist_ok=True)
+    defaults = profile / "settings.json"
+    if not defaults.exists():
+        hotkey = {"ctrlKey": False, "altKey": False, "shiftKey": False, "metaKey": False}
+        write_evidence(defaults, {
+            "hotkey": {**hotkey, "keycode": 0x43},
+            "longHotkey": {**hotkey, "keycode": 0x44},
+            "holdToTalk": False, "startMinimized": False, "serverAutoStart": True,
+            "autoCopy": True, "autoPaste": True, "restoreClipboardAfterPaste": True,
+            "dictationMode": "raw", "silenceTimeout": 15,
+        })
+        write_evidence(profile / "server-settings.json", {"whisper_model": MODEL})
+
+
+@asynccontextmanager
+async def app_session(root, install, clip, *, trace=True, label=None, wait_for_model=True):
+    profile = root / "profile" / "Eve"
+    candidate_settings(profile)
+    env = runtime_environment(root)
+    env["MURMUR_PERF_TRACE"] = "1" if trace else "0"
+    cdp_port = localhost_port()
+    name = label or clip["id"]
+    stdout, stderr = (root / f"{name}.{stream}.log" for stream in ("out", "err"))
+    process = start_process([
+        str(install / "Eve.exe"), "--eve-qa-isolation", f"--eve-qa-user-data-root={profile}",
+        f"--remote-debugging-port={cdp_port}", "--remote-debugging-address=127.0.0.1",
+        "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+        f"--use-file-for-fake-audio-capture={clip['audio']}%noloop",
+    ], install, env, stdout, stderr)
+    browser = None
+    try:
+        version = await poll(lambda: http(cdp_port, "/json/version"), bool, 20)
+        browser = await connect(cdp_socket(version, cdp_port, "browser"), close_timeout=2)
+        url = (install / "resources/app.asar/dist/renderer/app/index.html").as_uri().lower()
+        pages = await poll(lambda: http(cdp_port, "/json/list"), lambda targets: bool(targets)
+                           and any(page.get("url", "").lower() == url for page in targets), 20)
+        target, = [page for page in pages if page.get("type") == "page" and page.get("url", "").lower() == url]
+        async with connect(cdp_socket(target, cdp_port, "page"), close_timeout=2) as ws:
+            main = Cdp(ws)
+            version = await main.eval("window.murmurMain.getAppVersion()")
+            if version != "0.9.0-beta.1":
+                raise FixtureUnavailable("installed-version-mismatch")
+            await main.eval(CDP_SCRIPT)
+            owner_file = profile / "server.pid"
+
+            async def server_port():
+                if not owner_file.exists():
+                    return None
+                owner = json.loads(owner_file.read_text(encoding="utf-8"))
+                owned = {child.pid for child in psutil.Process(process.pid).children(recursive=True)}
+                if owner["pid"] not in owned:
+                    return None
+                executable = Path(psutil.Process(owner["pid"]).exe()).resolve()
+                if not executable.is_relative_to(install / "resources/server"):
+                    return None
+                return owner
+
+            owner = await poll(server_port, bool, 45)
+            if wait_for_model:
+                await wait_health(owner["port"], "cpu", MODEL, 720)
+            yield main, process, owner, stdout, stderr
+    finally:
+        if browser is not None:
+            try:
+                await Cdp(browser).send("Browser.close")
+            except (OSError, TimeoutError, RuntimeError, ConnectionClosed):
+                pass
+            finally:
+                await browser.close()
+        try:
+            await asyncio.to_thread(process.wait, 12)
+        except subprocess.TimeoutExpired:
+            stop_owned_tree(process)
+
+
+def read_perf(path):
+    observations = []
+    marker = ' B4_PERF trace="'
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if marker in line and line.endswith('"'):
+            observations.append(json.loads(line.split(marker, 1)[1][:-1]))
+    return observations
+
+
+async def history(main):
+    rows = await main.eval("window.murmurMain.getHistoryEntries(0, 100)")
+    if rows["hasMore"]:
+        raise RuntimeError("history-observer-limit")
+    return {row["id"]: text_hash(row["text"]) for row in rows["entries"]}
+
+
+def history_digest(entries):
+    return text_hash(json.dumps(entries, sort_keys=True, separators=(",", ":")))
+
+
+async def recording(main):
+    return (await main.eval("window.murmurMain.getRecordingDebugState()"))["recording"]
+
+
+async def idle_resources(process):
+    sampler = ProcessSamples(process.pid)
+    collect = asyncio.create_task(sampler.collect())
+    try:
+        await asyncio.sleep(122)
+    finally:
+        collect.cancel()
+        await asyncio.gather(collect, return_exceptions=True)
+    return sampler.idle()
+
+
+async def capture(main, process, desktop, stdout, clip, *, time_idle=False, use_trace=True):
+    before = await history(main)
+    if time_idle:
+        idle = await idle_resources(process)
+    else:
+        idle = {}
+    await desktop.send("reset")
+    mode = clip["mode"]
+    trigger = await desktop.send("key", mode=mode)
+
+    async def first_audio():
+        return next((trace for trace in reversed(read_perf(stdout))
+                     if trace["main"]["firstAudioSentAt"] is not None), None)
+
+    try:
+        if use_trace:
+            ready = await poll(first_audio, bool, 8)
+        else:
+            await poll(lambda: recording(main), lambda value: value["state"] in LISTENING, 8)
+            ready = None
+    except TimeoutError as error:
+        state = await main.eval("window.eveQaState")
+        if state["recording"] is None:
+            raise FixtureUnavailable("global-hotkey-unobserved") from error
+        raise FixtureUnavailable("fake-capture-no-first-audio") from error
+    start = time.perf_counter()
+    sampler = ProcessSamples(process.pid)
+    collection = asyncio.create_task(sampler.collect()) if mode == "long" else None
+    observed_stop = None
+    try:
+        await asyncio.sleep(clip["duration_s"])
+        stop = await desktop.send("key", mode=mode)
+
+        async def final_state():
+            return await main.eval("window.murmurMain.getRecordingDebugState()")
+
+        try:
+            await poll(final_state, lambda state: state["recording"]["state"] == "idle",
+                       180 if mode == "long" else 45)
+            timed_out = False
+        except TimeoutError:
+            timed_out = True
+        await asyncio.sleep(1)
+        state = await main.eval("window.eveQaState")
+        editor = await desktop.send("read")
+        after = await history(main)
+        keys = [stamp for key, stamp in editor["keys"] if key == mode]
+        if len(keys) == 2 and keys[0] >= trigger and keys[1] >= stop:
+            observed_stop = keys[1]
+        insertion_times = [
+            stamp for stamp in editor["insertions"] if observed_stop is not None and stamp >= observed_stop
+        ]
+        insertion_ms = (insertion_times[0] - observed_stop) * 1000 if len(insertion_times) == 1 else None
+        final = state["finals"][0] if len(state["finals"]) == 1 else None
+        history_restored = all(after.get(key) == value for key, value in before.items())
+        delta = {key: value for key, value in after.items() if key not in before}
+        history_correct = history_restored and list(delta.values()) == ([text_hash(editor["text"])] if editor["text"] else [])
+        marks = next((row["main"] for row in reversed(read_perf(stdout))
+                      if ready and row["correlationId"] == ready["correlationId"]
+                      and row["status"] == "complete"), {})
+        stop_mark, final_mark = marks.get("stopRequestedAt"), marks.get("finalReceivedAt")
+        internal = final_mark - stop_mark if stop_mark is not None and final_mark is not None else None
+        difference = insertion_ms - internal if insertion_ms is not None and internal is not None else None
+        record = trial_record(
+            clip, editor["text"], output_observed=True,
+            failed=timed_out or len(state["finals"]) != 1 or not history_correct,
+            insertion_count=len(editor["insertions"]), insert_matches_final=final == editor["text"],
+            clipboard_restored=editor["clipboard_restored"], history_correct=history_correct,
+            history_delta=len(delta), history_count=len(after), final_count=len(state["finals"]),
+            history_before_sha256=history_digest(before), history_after_sha256=history_digest(after),
+            live_partial_count=state["editorDuringSpeech"], stop_to_insert_ms=insertion_ms,
+            main_stop_to_final_ms=internal, capture_elapsed_s=stop - trigger,
+            observed_insert_overhead_ms=difference if difference is not None and difference >= 0 else None,
+            capture_startup_s=start - trigger, timed_out=timed_out,
+        )
+    finally:
+        if collection is not None:
+            collection.cancel()
+            await asyncio.gather(collection, return_exceptions=True)
+            sampler.sample()
+    if collection is not None and observed_stop is not None:
+        idle.update(sampler.long(start, observed_stop))
+    return record, idle
+
+
+def kill_managed_server(process, owner):
+    server = next((child for child in psutil.Process(process.pid).children(recursive=True)
+                   if child.pid == owner["pid"]), None)
+    if server is None:
+        raise FixtureUnavailable("managed-server-no-longer-owned")
+    if not any(conn.status == psutil.CONN_LISTEN and conn.laddr.ip == "127.0.0.1"
+               and conn.laddr.port == owner["port"] for conn in server.net_connections("tcp4")):
+        raise FixtureUnavailable("managed-server-listener-mismatch")
+    server.kill()
+    server.wait(10)
+
+
+async def interrupt_download(root, install, clip):
+    async with app_session(root, install, clip, label="tls-interrupt",
+                           wait_for_model=False) as (_, process, owner, _, _):
+        async def downloading():
+            health = await http(owner["port"], "/health")
+            return ((health or {}).get("model_download") or {}).get("downloaded_bytes")
+
+        received = await poll(downloading, lambda count: count and count > 0, 120)
+        kill_managed_server(process, owner)
+        return received
+
+
+async def abrupt_socket(port, scratch):
+    from scripts.perf_regression_benchmark import validate_url
+
+    url = validate_url(f"ws://127.0.0.1:{port}/transcribe")
+    temp_before = set(scratch.iterdir())
+    baseline = (await http(port, "/health"))["active_sessions"]
+    observations = []
+    for _ in range(2):
+        async with connect(url, close_timeout=2) as client:
+            await client.send(json.dumps({"frame": "control", "type": "start", "silence_timeout": 60}))
+            first = json.loads(await asyncio.wait_for(client.recv(), 5))
+            if first.get("type") != "ready":
+                raise FixtureUnavailable("socket-did-not-enter-ready")
+            await client.send(struct.pack(">HHB", 0, 3200, 0) + b"\0" * 6400)
+            during = await poll(lambda: http(port, "/health"),
+                                lambda health: health and health["active_sessions"] == baseline + 1, 5)
+            client.transport.abort()
+        after = await poll(lambda: http(port, "/health"),
+                           lambda health: health and health["active_sessions"] == baseline, 10)
+        observations.append([during["active_sessions"], after["active_sessions"]])
+    return {
+        "sessions_before": baseline, "sessions_during_after": observations,
+        "scratch_entries_unchanged": set(scratch.iterdir()) == temp_before,
+    }
+
+
+async def robustness(root, install, desktop, quick, evidence, output):
+    scenarios = evidence["robustness"]
+
+    def save(name, status, **fields):
+        scenarios[name] = {"status": status, **fields}
+        write_evidence(output, evidence)
+
+    async def recover(label):
+        async with app_session(root, install, quick, label=f"{label}-recovery") as (main, process, _, log, _):
+            record, _ = await capture(main, process, desktop, log, quick)
+            return record
+
+    def delivered(record):
+        return (not record["failed"] and record["insertion_count"] == record["final_count"] == 1
+                and record["insert_matches_final"] and record["clipboard_restored"])
+
+    async def microphone_scenario(label, clip, missing=False):
+        async with app_session(root, install, clip, label=label) as (main, _, _, _, _):
+            before = await history(main)
+            if missing:
+                await main.eval("window.murmurMain.updateSetting('selectedDeviceId','qa-unavailable-device')")
+            try:
+                await desktop.send("reset")
+                await desktop.send("key", mode="quick")
+                await asyncio.sleep(5 if label == "silence" else .25)
+                if (await recording(main))["state"] in LISTENING:
+                    await desktop.send("key", mode="quick")
+                await poll(lambda: recording(main), lambda state: state["state"] == "idle", 25)
+                after = await history(main)
+                attempt = await desktop.send("read")
+                state = await main.eval("window.eveQaState")
+            finally:
+                if missing:
+                    await main.eval("window.murmurMain.updateSetting('selectedDeviceId','default')")
+        recovery = await recover(label)
+        ok = (before == after and not attempt["insertions"] and delivered(recovery)
+              and recovery["history_before_sha256"] == history_digest(before)
+              and state["recording"] is not None)
+        save(label, "PASS" if ok else "FAIL", fault_insertions=len(attempt["insertions"]),
+             recovery_insertions=recovery["insertion_count"], history_unchanged=before == after)
+
+    silent_file = root / "silence.wav"
+    with wave.open(str(silent_file), "wb") as wav:
+        wav.setparams((1, 2, 16000, 0, "NONE", ""))
+        wav.writeframes(b"\0" * 32000 * 6)
+    for label, clip in (("silence", {**quick, "audio": silent_file}),
+                        ("immediate-stop", quick), ("mic-unavailable", quick)):
+        try:
+            await microphone_scenario(label, clip, missing=label == "mic-unavailable")
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+            save(label, "OPEN", observation=type(error).__name__)
+
+    # Use a task-private canary taken from the public reference. Both the
+    # reference and the recognized five-word spans are scanned in memory.
+    for trace in (False, True):
+        label = "canary-on" if trace else "canary-off"
+        try:
+            async with app_session(root, install, quick, trace=trace, label=label) as session:
+                main, process, _, stdout, stderr = session
+                record, _ = await capture(main, process, desktop, stdout, quick, use_trace=trace)
+                editor = await desktop.send("read")
+                health_logs = await main.eval("window.murmurMain.getServerLogs()")
+                logs = [stdout.read_text(encoding="utf-8", errors="replace"),
+                        stderr.read_text(encoding="utf-8", errors="replace"),
+                        json.dumps(health_logs, ensure_ascii=False)]
+                words = normalize_text(editor["text"]).split()
+                anchors = {" ".join(words[index:index + 5]) for index in range(len(words) - 4)}
+                anchors.add(normalize_text(quick["reference"]))
+                hits = sum(anchor in normalize_text(log) for anchor in anchors for log in logs)
+                traced = any("B4_PERF" in log for log in logs)
+                observed = delivered(record) and len(words) >= 5
+                save(label, "OPEN" if not observed else "PASS" if hits == 0 and traced == trace else "FAIL",
+                     matches=hits, trace_observed=traced, canary_inserted=observed)
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+            save(label, "OPEN", observation=type(error).__name__)
+
+    for mode, phase in ((mode, phase) for mode in ("quick", "long") for phase in ("capture", "final")):
+        label = f"crash-{mode}-{phase}"
+        try:
+            async with app_session(root, install, quick, label=label) as (main, process, owner, _, _):
+                before = await history(main)
+                await desktop.send("reset")
+                await desktop.send("key", mode=mode)
+                await poll(lambda: recording(main), lambda state: state["state"] in LISTENING, 5)
+                if phase == "final":
+                    await asyncio.sleep(2)
+                    await desktop.send("key", mode=mode)
+                    await poll(lambda: recording(main), lambda state: state["state"] == "processing", 3)
+                kill_managed_server(process, owner)
+                await poll(lambda: recording(main), lambda state: state["state"] == "idle", 15)
+                after = await history(main)
+                editor = await desktop.send("read")
+                kept = all(after.get(key) == value for key, value in before.items())
+            recovery = await recover(label)
+            preserved = recovery["history_before_sha256"] == history_digest(after)
+            ok = kept and preserved and len(editor["insertions"]) <= 1 and delivered(recovery)
+            save(label, "PASS" if ok else "FAIL", history_before=len(before), history_after=len(after),
+                 recovery_insertions=recovery["insertion_count"], fault_insertions=len(editor["insertions"]),
+                 settled_history_preserved=preserved and kept)
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+            save(label, "OPEN", observation=type(error).__name__)
+
+    for phase in ("capture", "final"):
+        label = f"cancel-{phase}"
+        try:
+            async with app_session(root, install, quick, label=label) as (main, _, _, _, _):
+                before = await history(main)
+                await desktop.send("reset")
+                await desktop.send("key", mode="quick")
+                await poll(lambda: recording(main), lambda state: state["state"] in LISTENING, 5)
+                if phase == "final":
+                    await asyncio.sleep(2)
+                    await desktop.send("key", mode="quick")
+                    await poll(lambda: recording(main), lambda state: state["state"] == "processing", 3)
+                # Leaving the context requests graceful Browser.close, exercising
+                # Eve's cancellation/quit disposition through relaunch.
+            fault = await desktop.send("read")
+            recovery = await recover(label)
+            kept = recovery["history_before_sha256"] == history_digest(before)
+            save(label, "PASS" if kept and not fault["insertions"] and delivered(recovery) else "FAIL",
+                 history_before=len(before), fault_insertions=len(fault["insertions"]),
+                 recovery_insertions=recovery["insertion_count"], settled_history_preserved=kept)
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+            save(label, "OPEN", observation=type(error).__name__)
+
+    for label in ("socket-abort", "health-reload"):
+        try:
+            async with app_session(root, install, quick, label=label) as (main, _, owner, _, _):
+                port = owner["port"]
+                before = await history(main)
+                if label == "socket-abort":
+                    facts = await abrupt_socket(port, root / "runtime-temp")
+                    ok = facts["scratch_entries_unchanged"] and psutil.pid_exists(owner["pid"])
+                else:
+                    for model in ("tiny", MODEL):
+                        response = await main.eval(
+                            f"window.murmurMain.updateServerSettings({json.dumps({'whisper_model': model})})"
+                        )
+                        if not response:
+                            raise FixtureUnavailable("settings-save-unobserved")
+                        await wait_health(port, "cpu", model, 720)
+                    ok = True
+                    facts = {"startup_healthy": True, "reload_ready_count": 2}
+            recovery = await recover(label)
+            kept = recovery["history_before_sha256"] == history_digest(before)
+            save(label, "PASS" if ok and kept and delivered(recovery) else "FAIL",
+                 recovery_insertions=recovery["insertion_count"], settled_history_preserved=kept, **facts)
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+            save(label, "OPEN", observation=type(error).__name__)
+
+
+async def hosted_replay(root, install, clips, evidence, output):
+    server = install / "resources/server"
+    env = runtime_environment(root)
+    pid_file = root / "replay.pid"
+    env.update({
+        "MURMUR_HOST": "127.0.0.1", "MURMUR_PORT": "0",
+        "MURMUR_PID_FILE": str(pid_file), "MURMUR_SETTINGS_FILE": str(root / "replay-settings.json"),
+        "MURMUR_WHISPER_MODEL": MODEL,
+    })
+    process = start_process([str(server / ".runtime/python.exe"), str(server / "src/main.py")],
+                            server, env, root / "replay.out.log", root / "replay.err.log")
+    try:
+        owner = await poll(lambda: asyncio.sleep(0, result=(
+            json.loads(pid_file.read_text(encoding="utf-8")) if pid_file.exists() else None
+        )), bool, 30)
+        if owner["pid"] != process.pid:
+            raise FixtureUnavailable("replay-server-pid-mismatch")
+        await wait_health(owner["port"], "cpu", MODEL, 720)
+        evidence["method"] = "retained-cpu-replay"
+        write_evidence(output, evidence)
+        await run_replay(owner["port"], owner["pid"], clips, evidence, output)
+    finally:
+        stop_owned_tree(process)
+
+
+async def run(args):
+    root, install = args.root.resolve(), args.install.resolve()
+    runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
+    if (root == runner_temp or not root.is_relative_to(runner_temp)
+            or install == root or not install.is_relative_to(root)):
+        raise FixtureUnavailable("invalid-hosted-scratch")
+    (root / "runtime-temp").mkdir()
+    clips = load_clips(args.manifest, args.config)
+    evidence = {
+        "candidate": CANDIDATE, "config": args.config, "method": "packaged-editor",
+        "model": MODEL, "device": "cpu", "trials": [], "resources": {},
+        "robustness": {}, "hosted_run_id": os.environ["GITHUB_RUN_ID"],
+        "harness_commit": os.environ["GITHUB_SHA"], "smoke_only": args.smoke,
+        "corpus_manifest_sha256": hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
+    }
+    write_evidence(args.output, evidence)
+    editor_process = await asyncio.create_subprocess_exec(
+        sys.executable, str(HERE / "desktop.py"), stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, creationflags=NO_WINDOW,
+    )
+    desktop = Desktop(editor_process)
+    try:
+        interrupted_bytes = None
+        if args.config == "close-quiet" and not args.smoke:
+            try:
+                interrupted_bytes = await interrupt_download(root, install, clips[0])
+            except (FixtureUnavailable, TimeoutError, ConnectionClosed, RuntimeError) as error:
+                evidence["robustness"]["tls-retry"] = {
+                    "status": "OPEN", "observation": type(error).__name__,
+                }
+                write_evidence(args.output, evidence)
+        try:
+            async with app_session(root, install, clips[0], label="warmup") as (main, process, _, log, _):
+                warmup, _ = await capture(main, process, desktop, log, clips[0])
+                evidence["warmup"] = warmup
+                write_evidence(args.output, evidence)
+                if not (warmup["insert_matches_final"] and warmup["insertion_count"] == 1
+                        and warmup["stop_to_insert_ms"] is not None):
+                    raise FixtureUnavailable("warmup-insertion-or-timing-unavailable")
+                if interrupted_bytes:
+                    evidence["robustness"]["tls-retry"] = {
+                        "status": "PASS",
+                        "method": "process interrupted during HTTPS model preparation",
+                        "bytes_received_before_interrupt": interrupted_bytes,
+                        "recovery_insertions": warmup["insertion_count"],
+                    }
+                    write_evidence(args.output, evidence)
+        except (FixtureUnavailable, TimeoutError, ConnectionClosed) as error:
+            evidence["app_fixture_gap"] = type(error).__name__
+            write_evidence(args.output, evidence)
+            if args.smoke:
+                raise FixtureUnavailable("hosted-smoke-incomplete") from error
+            await hosted_replay(root, install, clips, evidence, args.output)
+            return
+        if args.smoke:
+            return
+        for clip in clips:
+            try:
+                async with app_session(root, install, clip) as (main, process, _, log, _):
+                    trial, resources = await capture(main, process, desktop, log, clip,
+                                                     time_idle=clip["mode"] == "long")
+                    evidence["resources"].update(resources)
+            except (FixtureUnavailable, TimeoutError):
+                trial = trial_record(clip, None, output_observed=False, failed=True)
+            evidence["trials"].append(trial)
+            write_evidence(args.output, evidence)
+            print(f"{args.config} {clip['id']}: observed={trial['output_observed']}", flush=True)
+        if args.config == "close-quiet":
+            observed = [evidence["warmup"], *evidence["trials"]]
+            complete = all("history_before_sha256" in row for row in observed)
+            if complete:
+                contiguous = all(before["history_after_sha256"] == after["history_before_sha256"]
+                                 for before, after in pairwise(observed))
+                evidence["robustness"]["history"] = {
+                    "status": "PASS" if contiguous and all(row["history_correct"] for row in observed) else "FAIL",
+                    "observed_launches": len(observed),
+                }
+                write_evidence(args.output, evidence)
+            await robustness(root, install, desktop, clips[0], evidence, args.output)
+    finally:
+        if editor_process.returncode is None:
+            editor_process.kill()
+        await editor_process.wait()
+
+
+def main():
+    if (os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+            or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+            or os.environ.get("GITHUB_REPOSITORY") != "burntcookiedough/eve-windows-dictation"):
+        raise SystemExit("Packaged acceptance requires the repository's disposable hosted Windows runner")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--install", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--smoke", action="store_true")
+    try:
+        asyncio.run(run(parser.parse_args()))
+    except Exception as error:  # noqa: BLE001 - raw exceptions may disclose speech or machine paths
+        # Raw errors can contain path, transport payload or transcript data.
+        print(f"Packaged acceptance stopped with {type(error).__name__}.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

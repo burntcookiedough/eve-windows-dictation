@@ -1,0 +1,107 @@
+name: Windows Simulated Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Verified installer lifecycle run ID
+        required: true
+        type: string
+      artifact_id:
+        description: Retained candidate Actions artifact ID
+        required: true
+        type: string
+      candidate_commit:
+        description: Full retained candidate commit
+        required: true
+        type: string
+      manifest_sha256:
+        description: Independently verified artifact manifest SHA-256
+        required: true
+        type: string
+      smoke_only:
+        description: Run one excluded close/quiet fake-mic capture
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: eve-simulated-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Simulated CPU (${{ matrix.config }})
+    if: github.repository == 'burntcookiedough/eve-windows-dictation'
+    runs-on: windows-2022
+    timeout-minutes: 105
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON(inputs.smoke_only && '["close-quiet"]' || '["far-quiet","far-moderate","close-moderate","close-quiet"]') }}
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up QA Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Verify and install retained candidate
+        id: candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+        run: |
+          $pins = @{
+            RunId = $env:CANDIDATE_RUN_ID
+            ArtifactId = $env:ARTIFACT_ID
+            Commit = $env:CANDIDATE_COMMIT
+            ManifestSha256 = $env:MANIFEST_SHA256
+          }
+          ./scripts/sim_acceptance/install.ps1 @pins
+
+      - name: Prepare public corpus
+        shell: pwsh
+        env:
+          QA_ROOT: ${{ steps.candidate.outputs.root }}
+          CONFIG: ${{ matrix.config }}
+        run: |
+          python -m pip install --disable-pip-version-check -r scripts/sim_acceptance/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/sim_acceptance/prepare_corpus.py --root "$env:QA_ROOT/corpus" --config $env:CONFIG
+
+      - name: Run isolated acceptance
+        shell: pwsh
+        env:
+          QA_ROOT: ${{ steps.candidate.outputs.root }}
+          INSTALL: ${{ steps.candidate.outputs.install }}
+          CONFIG: ${{ matrix.config }}
+          SMOKE_ONLY: ${{ inputs.smoke_only }}
+        run: |
+          $arguments = @(
+            'scripts/sim_acceptance/hosted.py', '--root', $env:QA_ROOT, '--install', $env:INSTALL,
+            '--manifest', "$env:QA_ROOT/corpus/manifest.json", '--config', $env:CONFIG,
+            '--output', "$env:QA_ROOT/evidence.json"
+          )
+          if ($env:SMOKE_ONLY -eq 'true') { $arguments += '--smoke' }
+          python @arguments
+
+      - name: Upload sanitized observations
+        if: always() && steps.candidate.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: eve-sim-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.config }}
+          path: ${{ steps.candidate.outputs.root }}/evidence.json
+          retention-days: 7
+          if-no-files-found: warn
