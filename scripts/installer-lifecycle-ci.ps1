@@ -2,7 +2,8 @@
 param(
     [string]$RetainedArtifactDir = '',
     [string]$ExpectedCommit = '',
-    [ValidateSet('Default', 'RetainedHistory')][string]$Mode = 'Default'
+    [ValidateSet('Default', 'RetainedHistory')][string]$Mode = 'Default',
+    [System.Collections.IDictionary]$HistoryCandidate
 )
 
 Set-StrictMode -Version Latest
@@ -13,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $script:ProductGuid = '0204d005-75b3-5b31-b1f6-ef2831e2b204'
 $script:BaselineTag = 'v0.8.2-alpha.5'
 $script:BaselineVersion = '0.8.2-alpha.5'
-$script:CandidateVersion = '0.8.2-alpha.9'
+$script:CandidateVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../app/package.json') -Raw | ConvertFrom-Json).version
 $script:Repository = 'burntcookiedough/eve-windows-dictation'
 $script:OwnedAppPid = $null
 $script:OwnedServerPid = $null
@@ -453,7 +454,7 @@ function Invoke-InstalledCpuInference {
     $sitePackages = Join-Path $serverRoot '.venv\Lib\site-packages'
     $audioPath = Join-Path $script:RepoRoot 'server\tests\ui\test_audio.wav'
     if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf) -or -not (Test-Path -LiteralPath $sitePackages -PathType Container)) {
-        throw 'Installed alpha.9 bundled Python or Faster-Whisper environment is missing.'
+        throw 'Installed candidate bundled Python or Faster-Whisper environment is missing.'
     }
     if (-not (Test-Path -LiteralPath $audioPath -PathType Leaf) -or -not (Assert-PathWithin -Path $audioPath -Root $script:RepoRoot)) {
         throw 'The repository-controlled transcription fixture is missing or outside the checkout.'
@@ -523,10 +524,10 @@ print(json.dumps({
     if ($LASTEXITCODE -ne 0) { throw "Bundled CPU transcription probe failed with exit code $LASTEXITCODE." }
     $report = ($output | Out-String | ConvertFrom-Json -Depth 10)
     if ($report.has_text -ne $true -or [int]$report.segment_count -le 0 -or [int]$report.character_count -le 0) {
-        throw 'Installed alpha.9 CPU inference returned no transcription text.'
+        throw 'Installed candidate CPU inference returned no transcription text.'
     }
     if (@($report.nvidia_modules).Count -ne 0) { throw "CPU inference loaded NVIDIA modules: $(@($report.nvidia_modules) -join ', ')" }
-    Write-Step "Installed alpha.9 CPU inference produced text (segments=$($report.segment_count), characters=$($report.character_count)); no cuBLAS/nvcuda modules loaded."
+    Write-Step "Installed candidate CPU inference produced text (segments=$($report.segment_count), characters=$($report.character_count)); no cuBLAS/nvcuda modules loaded."
 }
 
 function Uninstall-Current {
@@ -611,7 +612,7 @@ if (Test-Path -LiteralPath $script:RunRoot) { throw 'Unique runner temp lifecycl
 New-Item -ItemType Directory -Path $script:RunRoot | Out-Null
 if (-not (Assert-PathWithin -Path $script:RunRoot -Root $env:RUNNER_TEMP)) { throw 'Lifecycle scratch directory escaped runner temp.' }
 
-$script:RetainedArtifactDir = if ($RetainedArtifactDir) { [System.IO.Path]::GetFullPath($RetainedArtifactDir) } elseif ($env:RUNNER_TEMP -and $env:GITHUB_RUN_ID) { Join-Path $env:RUNNER_TEMP "eve-alpha9-candidate-artifacts-$env:GITHUB_RUN_ID" } else { Join-Path $script:RunRoot 'retained' }
+$script:RetainedArtifactDir = if ($RetainedArtifactDir) { [System.IO.Path]::GetFullPath($RetainedArtifactDir) } elseif ($env:GITHUB_RUN_ID) { Join-Path $env:RUNNER_TEMP "eve-candidate-artifacts-$env:GITHUB_RUN_ID" } else { Join-Path $script:RunRoot 'retained' }
 if (-not (Assert-PathWithin -Path $script:RetainedArtifactDir -Root $env:RUNNER_TEMP) -or
     (Assert-PathWithin -Path $script:RetainedArtifactDir -Root $script:RepoRoot) -or
     (Assert-PathWithin -Path $script:RepoRoot -Root $script:RetainedArtifactDir)) {
@@ -636,7 +637,7 @@ if (Test-Path -LiteralPath (Join-Path $script:ProfileRoot 'Eve')) { throw 'Synth
 $candidateStatusPath = Join-Path $script:RetainedArtifactDir 'qa/candidate-phase-status.json'
 if ($Mode -eq 'RetainedHistory') {
     . (Join-Path $PSScriptRoot 'retained-history-ci.ps1')
-    Invoke-RetainedHistoryCi -RetainedArtifactDir $script:RetainedArtifactDir -ExpectedCommit $script:ExpectedCommit
+    Invoke-RetainedHistoryCi -RetainedArtifactDir $script:RetainedArtifactDir -ExpectedCommit $script:ExpectedCommit -Candidate $HistoryCandidate
     return
 }
 try {
@@ -660,9 +661,9 @@ try {
     $env:PYTHONNOUSERSITE = '1'
 
     $baselineInstaller = Join-Path $script:BaselineArtifactDir 'Eve.Web.Setup.0.8.2-alpha.5.exe'
-    $candidateInstaller = Join-Path $script:CandidateArtifactDir 'Eve.Web.Setup.0.8.2-alpha.9.exe'
+    $candidateInstaller = Join-Path $script:CandidateArtifactDir "Eve.Web.Setup.$script:CandidateVersion.exe"
     $baselinePayload = Join-Path $script:BaselineArtifactDir 'murmur-0.8.2-alpha.5-x64.nsis.7z'
-    $candidatePayload = Join-Path $script:CandidateArtifactDir 'murmur-0.8.2-alpha.9-x64.nsis.7z'
+    $candidatePayload = Join-Path $script:CandidateArtifactDir "murmur-$script:CandidateVersion-x64.nsis.7z"
     foreach ($path in @($baselineInstaller, $candidateInstaller, $baselinePayload, $candidatePayload)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Verified installer or web payload is missing: $path" }
     }
@@ -678,7 +679,7 @@ try {
     Set-CandidatePhaseStatus -PhaseName 'baseline_install_launch' -Status 'passed'
 
     Set-CandidatePhaseStatus -PhaseName 'candidate_upgrade' -Status 'started'
-    Write-Step 'Upgrading alpha.5 in place to the locally built alpha.9 candidate.'
+    Write-Step 'Upgrading alpha.5 in place to the locally built candidate.'
     Assert-CandidateBinding
     Invoke-Installer -Installer $candidateInstaller -InstallDir $script:InstallDir
     Assert-CandidateBinding
@@ -690,7 +691,7 @@ try {
     Set-CandidatePhaseStatus -PhaseName 'candidate_upgrade' -Status 'passed'
 
     Set-CandidatePhaseStatus -PhaseName 'candidate_removal' -Status 'started'
-    Write-Step 'Rolling back by uninstalling alpha.9 and reinstalling the published alpha.5 baseline.'
+    Write-Step 'Rolling back by uninstalling the candidate and reinstalling the published alpha.5 baseline.'
     Uninstall-Current -Version $script:CandidateVersion
     Set-CandidatePhaseStatus -PhaseName 'candidate_removal' -Status 'passed'
     Set-CandidatePhaseStatus -PhaseName 'baseline_rollback' -Status 'started'
@@ -707,7 +708,7 @@ try {
     Set-CandidatePhaseStatus -PhaseName 'baseline_removal' -Status 'passed'
 
     Set-CandidatePhaseStatus -PhaseName 'candidate_clean_install' -Status 'started'
-    Write-Step 'Installing alpha.9 into a fresh installation and synthetic profile.'
+    Write-Step 'Installing the candidate into a fresh installation and synthetic profile.'
     $earlierProfileSentinel = $profileSentinel
     $cleanProfileRoot = Join-Path $script:RunRoot 'clean-profile'
     $cleanInstallRoot = Join-Path $script:RunRoot 'clean-install'
@@ -751,5 +752,5 @@ try {
     }
 }
 Set-CandidatePhaseStatus -PhaseName 'overall' -Status 'passed'
-Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to alpha.9 upgrade, and alpha.5 rollback completed.'
+Write-Step 'PASS: candidate clean CPU install and uninstall, alpha.5 to candidate upgrade, and alpha.5 rollback completed.'
 Write-Step 'Silent installer UI was exercised; visual installer dialogs/popups were not inspected.'

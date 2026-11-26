@@ -7,6 +7,29 @@ on:
         description: 'Required 40-character lowercase harness commit SHA to test on trunk'
         required: true
         type: string
+      candidate_source:
+        description: 'Artifact from a successful lifecycle run, or the pinned published release'
+        required: true
+        type: choice
+        options:
+          - retained
+          - published
+      candidate_id:
+        description: 'Numeric Actions artifact ID (retained) or GitHub release ID (published)'
+        required: true
+        type: string
+      candidate_commit:
+        description: 'Required 40-character lowercase commit SHA of the candidate build'
+        required: true
+        type: string
+      candidate_tag:
+        description: 'Exact version tag of the candidate, including the leading v'
+        required: true
+        type: string
+      expected_manifest_sha256:
+        description: 'Independently verified lowercase SHA-256 of the release artifact manifest'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -57,27 +80,24 @@ jobs:
           python -B -I -c "import sqlite3,sys; assert sys.version_info >= (3,9)"
           if ($LASTEXITCODE -ne 0) { throw 'Hosted Python/SQLite is unavailable.' }
 
-      - name: Download and verify published candidate release
-        id: download-candidate
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $retainedDir = Join-Path $env:RUNNER_TEMP "eve-retained-candidate-artifacts-$env:GITHUB_RUN_ID"
-          . ./scripts/installer-candidate-artifacts.ps1
-          . ./scripts/retained-history-ci.ps1
-          Save-RetainedHistoryCandidate -RetainedDir $retainedDir
-
-      - name: Run isolated Retained History acceptance lifecycle
-        id: lifecycle
+      - name: Verify selected candidate and run isolated History acceptance
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
+          CANDIDATE_ID: ${{ inputs.candidate_id }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $retainedDir = Join-Path $env:RUNNER_TEMP "eve-retained-candidate-artifacts-$env:GITHUB_RUN_ID"
-          ./scripts/installer-lifecycle-ci.ps1 -Mode RetainedHistory -RetainedArtifactDir $retainedDir -ExpectedCommit $env:EXPECTED_COMMIT
+          . ./scripts/retained-history-ci.ps1
+          $candidate = Save-RetainedHistoryCandidate -RetainedDir $retainedDir -Source $env:CANDIDATE_SOURCE `
+            -CandidateId $env:CANDIDATE_ID -CandidateCommit $env:CANDIDATE_COMMIT -CandidateTag $env:CANDIDATE_TAG `
+            -ExpectedManifestSha256 $env:EXPECTED_MANIFEST_SHA256
+          ./scripts/installer-lifecycle-ci.ps1 -Mode RetainedHistory -RetainedArtifactDir $retainedDir -ExpectedCommit $env:EXPECTED_COMMIT -HistoryCandidate $candidate
 
       - name: Upload explicit aggregate JSON evidence
         if: always()

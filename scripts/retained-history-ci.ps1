@@ -44,15 +44,11 @@ function Assert-RetainedHistoryCiHost {
     }
 
     Assert-ExpectedCommit -Commit $ExpectedCommit -RepoRoot $RepoRoot
-
-    $candidateCommit = (Get-RetainedCandidatePins).CandidateCommit
-    if ($ExpectedCommit.ToLowerInvariant() -eq $candidateCommit) {
-        Write-Step "Note: Harness commit matches candidate source commit $candidateCommit."
-    }
 }
 
-function Get-RetainedCandidatePins {
+function Get-PublishedHistoryCandidatePins {
     return [ordered]@{
+        Source                = 'published'
         ReleaseId             = '429752581'
         CandidateCommit       = 'b557f7dd772923d35612bde5d32bf8d9103ef42d'
         CandidateVersion      = '0.8.2-alpha.9'
@@ -83,7 +79,12 @@ function Get-RetainedCandidatePins {
 
 function Save-RetainedHistoryCandidate {
     param(
-        [Parameter(Mandatory)][string]$RetainedDir
+        [Parameter(Mandatory)][string]$RetainedDir,
+        [Parameter(Mandatory)][ValidateSet('retained', 'published')][string]$Source,
+        [Parameter(Mandatory)][ValidatePattern('^[1-9][0-9]*$')][string]$CandidateId,
+        [Parameter(Mandatory)][ValidatePattern('(?-i)^[0-9a-f]{40}$')][string]$CandidateCommit,
+        [Parameter(Mandatory)][ValidatePattern('(?-i)^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$')][string]$CandidateTag,
+        [Parameter(Mandatory)][ValidatePattern('(?-i)^[0-9a-f]{64}$')][string]$ExpectedManifestSha256
     )
 
     if (-not $env:RUNNER_TEMP) {
@@ -112,11 +113,21 @@ function Save-RetainedHistoryCandidate {
         New-Item -ItemType Directory -Path $targetFull -Force | Out-Null
     }
 
-    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { throw 'curl.exe is required for release asset download.' }
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI required for release identity verification.' }
-    $pins = Get-RetainedCandidatePins
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) { throw 'curl.exe is required for candidate download.' }
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI required for candidate identity verification.' }
     $repository = 'burntcookiedough/eve-windows-dictation'
+
+    if ($Source -eq 'retained') {
+        return Save-RetainedHistoryArtifact -TargetDir $targetFull -Repository $repository -ArtifactId $CandidateId `
+            -CandidateCommit $CandidateCommit -CandidateTag $CandidateTag -ManifestSha256 $ExpectedManifestSha256
+    }
+
+    $pins = Get-PublishedHistoryCandidatePins
     $tag = "v$($pins.CandidateVersion)"
+    if ($CandidateId -cne $pins.ReleaseId -or $CandidateCommit -cne $pins.CandidateCommit -or
+        $CandidateTag -cne $tag -or $ExpectedManifestSha256 -cne $pins.ManifestSha256) {
+        throw 'Published inputs must match the explicitly supported release pins.'
+    }
 
     $json = & gh api "repos/$repository/releases/$($pins.ReleaseId)"
     if ($LASTEXITCODE -ne 0) { throw 'Candidate release metadata unavailable.' }
@@ -174,15 +185,122 @@ function Save-RetainedHistoryCandidate {
         if (Test-Path -LiteralPath $extractDir) { Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Write-Host "[retained-history] Downloaded published $tag assets from release $($pins.ReleaseId) and derived the $($pins.PayloadFileCount)-file payload manifest."
+    return $pins
+}
+
+function Save-RetainedHistoryArtifact {
+    param(
+        [string]$TargetDir,
+        [string]$Repository,
+        [string]$ArtifactId,
+        [string]$CandidateCommit,
+        [string]$CandidateTag,
+        [string]$ManifestSha256
+    )
+
+    $version = $CandidateTag.Substring(1)
+    $json = & gh api "repos/$Repository/actions/artifacts/$ArtifactId"
+    if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact metadata unavailable.' }
+    $artifact = $json | Out-String | ConvertFrom-Json
+    $runId = [string]$artifact.workflow_run.id
+    if ([string]$artifact.id -cne $ArtifactId -or $artifact.expired -ne $false -or
+        $runId -cnotmatch '^[1-9][0-9]*$' -or $artifact.workflow_run.head_sha -cne $CandidateCommit -or
+        $artifact.name -cne "eve-$CandidateTag-unsigned-candidate-qa-$runId" -or
+        $artifact.digest -cnotmatch '^sha256:[0-9a-f]{64}$' -or [int64]$artifact.size_in_bytes -le 0) {
+        throw 'Retained candidate artifact identity mismatch.'
+    }
+    $zipSha256 = $artifact.digest.Substring(7)
+    $zipBytes = [int64]$artifact.size_in_bytes
+
+    $json = & gh api "repos/$Repository/actions/runs/$runId"
+    if ($LASTEXITCODE -ne 0) { throw 'Candidate lifecycle run metadata unavailable.' }
+    $run = $json | Out-String | ConvertFrom-Json
+    if ([string]$run.id -cne $runId -or $run.head_sha -cne $CandidateCommit -or
+        $run.head_repository.full_name -cne $Repository -or $run.head_branch -cne 'trunk' -or
+        $run.path -cne '.github/workflows/installer-lifecycle-ci.yml' -or $run.event -cne 'workflow_dispatch' -or
+        $run.status -cne 'completed' -or $run.conclusion -cne 'success') {
+        throw 'Retained candidate must come from a successful trunk installer lifecycle run on the requested commit.'
+    }
+
+    $names = @(
+        "Eve.Web.Setup.$version.exe", "murmur-$version-x64.nsis.7z", "eve-$CandidateTag-artifact-manifest.json",
+        'latest.yml', 'THIRD_PARTY_NOTICES.txt', 'SHA256SUMS.txt', 'SHA512SUMS.txt',
+        'qa/candidate-payload-manifest.json', 'qa/candidate-provenance.json', 'qa/candidate-phase-status.json'
+    )
+    $zipPath = Join-Path $TargetDir 'candidate-artifact.zip'
+    try {
+        & curl.exe --disable --fail --silent --show-error --location --retry 3 --max-time 1800 `
+            --header "Authorization: Bearer $env:GH_TOKEN" --header 'Accept: application/vnd.github+json' `
+            --output $zipPath "https://api.github.com/repos/$Repository/actions/artifacts/$ArtifactId/zip"
+        if ($LASTEXITCODE -ne 0) { throw 'Retained candidate archive download failed.' }
+        if ((Get-Item -LiteralPath $zipPath).Length -ne $zipBytes -or
+            (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $zipSha256) {
+            throw 'Retained candidate archive size or SHA-256 mismatch.'
+        }
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        try {
+            $entries = @($archive.Entries.FullName | Sort-Object)
+            if ($entries.Count -ne $names.Count -or (Compare-Object $names $entries -CaseSensitive)) {
+                throw 'Retained candidate archive file allowlist mismatch.'
+            }
+        } finally {
+            $archive.Dispose()
+        }
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $TargetDir)
+    } finally {
+        if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+    }
+
+    $files = [ordered]@{}
+    foreach ($name in $names) {
+        $files[$name] = (Get-FileHash -LiteralPath (Join-Path $TargetDir $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $payloadManifestSha256 = $files['qa/candidate-payload-manifest.json']
+    $provenance = Get-Content -LiteralPath (Join-Path $TargetDir 'qa/candidate-provenance.json') -Raw | ConvertFrom-Json
+    if ($provenance.schema -ne 1 -or $provenance.tag -cne $CandidateTag -or
+        $provenance.version -cne $version -or $provenance.commit -cne $CandidateCommit -or
+        [string]$provenance.runId -cne $runId -or
+        $provenance.manifestSha256 -cne $ManifestSha256 -or $files["eve-$CandidateTag-artifact-manifest.json"] -cne $ManifestSha256 -or
+        $provenance.payloadManifestSha256 -cne $payloadManifestSha256 -or
+        $provenance.build.signed -ne $false -or $provenance.build.allowUnsigned -ne $true -or
+        $provenance.build.publish -cne 'never' -or $provenance.build.target -cne 'nsis-web') {
+        throw 'Retained candidate provenance does not match the verified archive and requested build.'
+    }
+
+    $status = Get-Content -LiteralPath (Join-Path $TargetDir 'qa/candidate-phase-status.json') -Raw | ConvertFrom-Json -AsHashtable
+    $requiredPhases = @('candidate_artifacts_prepared', 'candidate_staging', 'build_cache_cleanup',
+        'baseline_download', 'qa_profile_setup', 'baseline_install_launch', 'candidate_upgrade',
+        'candidate_removal', 'baseline_rollback', 'baseline_removal', 'candidate_clean_install',
+        'candidate_clean_removal', 'cleanup', 'overall')
+    if ($status.schema -ne 1 -or $status.commit -cne $CandidateCommit -or $status.version -cne $version -or
+        $status.overallStatus -cne 'passed' -or
+        @($requiredPhases | Where-Object { $status.phases[$_]?.status -cne 'passed' }).Count -gt 0 -or
+        @($status.phases.Values | Where-Object { $_.status -cne 'passed' }).Count -gt 0) {
+        throw 'Retained candidate lifecycle evidence is incomplete or unsuccessful.'
+    }
+
+    return [ordered]@{
+        Source = 'retained'
+        RunId = $runId
+        ArtifactId = $ArtifactId
+        ZipSha256 = $zipSha256
+        ZipBytes = $zipBytes
+        CandidateCommit = $CandidateCommit
+        CandidateVersion = $version
+        ManifestSha256 = $ManifestSha256
+        PayloadManifestSha256 = $payloadManifestSha256
+        Files = $files
+    }
 }
 
 function Assert-RetainedCandidateStaging {
     param(
         [Parameter(Mandatory)][string]$RetainedDir,
-        [Parameter(Mandatory)][string]$CandidateArtifactDir
+        [Parameter(Mandatory)][string]$CandidateArtifactDir,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Candidate,
+        [switch]$Stage
     )
 
-    $pins = Get-RetainedCandidatePins
     $retainedFull = [System.IO.Path]::GetFullPath($RetainedDir)
     if (-not (Test-Path -LiteralPath $retainedFull -PathType Container)) {
         throw 'Retained candidate directory does not exist.'
@@ -199,7 +317,7 @@ function Assert-RetainedCandidateStaging {
         $_.FullName.Substring($retainedFull.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
     })
 
-    $expectedRelativePaths = @($pins.Files.Keys)
+    $expectedRelativePaths = @($Candidate.Files.Keys)
     $missing = @($expectedRelativePaths | Where-Object { $_ -notin $actualRelativePaths })
     $unexpected = @($actualRelativePaths | Where-Object { $_ -notin $expectedRelativePaths })
     if ($missing.Count -gt 0 -or $unexpected.Count -gt 0) {
@@ -209,7 +327,7 @@ function Assert-RetainedCandidateStaging {
     foreach ($relativePath in $expectedRelativePaths) {
         $fullPath = Join-Path $retainedFull ($relativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         $actualHash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        $expectedHash = $pins.Files[$relativePath].ToLowerInvariant()
+        $expectedHash = $Candidate.Files[$relativePath]
         if ($actualHash -ne $expectedHash) {
             throw "Retained candidate hash mismatch for ${relativePath}: expected $expectedHash, got $actualHash"
         }
@@ -217,14 +335,14 @@ function Assert-RetainedCandidateStaging {
 
     $releaseScript = Join-Path $script:RepoRoot 'scripts/release-artifacts.ps1'
     $global:LASTEXITCODE = 0
-    & $releaseScript -Mode Verify -ArtifactDir $retainedFull -ExpectedTag "v$($pins.CandidateVersion)" -ExpectedCommit $pins.CandidateCommit -ExpectedManifestSha256 $pins.ManifestSha256 -AllowUnsigned
+    & $releaseScript -Mode Verify -ArtifactDir $retainedFull -ExpectedTag "v$($Candidate.CandidateVersion)" -ExpectedCommit $Candidate.CandidateCommit -ExpectedManifestSha256 $Candidate.ManifestSha256 -AllowUnsigned
     if ($LASTEXITCODE -ne 0) {
         throw 'Retained candidate release verification failed; refusing to stage artifacts.'
     }
 
     $stagedItems = @(
-        @("Eve.Web.Setup.$($pins.CandidateVersion).exe", "Eve.Web.Setup.$($pins.CandidateVersion).exe"),
-        @("murmur-$($pins.CandidateVersion)-x64.nsis.7z", "murmur-$($pins.CandidateVersion)-x64.nsis.7z"),
+        @("Eve.Web.Setup.$($Candidate.CandidateVersion).exe", "Eve.Web.Setup.$($Candidate.CandidateVersion).exe"),
+        @("murmur-$($Candidate.CandidateVersion)-x64.nsis.7z", "murmur-$($Candidate.CandidateVersion)-x64.nsis.7z"),
         @('qa/candidate-payload-manifest.json', 'candidate-payload-manifest.json'),
         @('latest.yml', 'latest.yml')
     )
@@ -232,10 +350,13 @@ function Assert-RetainedCandidateStaging {
     foreach ($pair in $stagedItems) {
         $src = Join-Path $retainedFull ($pair[0] -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         $dst = Join-Path $CandidateArtifactDir $pair[1]
-        Copy-Item -LiteralPath $src -Destination $dst -Force
+        if ($Stage) { Copy-Item -LiteralPath $src -Destination $dst }
+        if ((Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Candidate.Files[$pair[0]]) {
+            throw "Staged candidate hash mismatch for $($pair[1])."
+        }
     }
 
-    Write-Step 'Retained candidate artifacts verified against pinned cryptographic digests and staged for test execution.'
+    Write-Step 'Retained and staged candidate artifacts verified against the selected digests.'
 }
 
 function Assert-NodeWebSocketCapability {
@@ -535,7 +656,8 @@ function Invoke-RetainedHistoryProbe {
         [Parameter(Mandatory)][int]$CdpPort,
         [Parameter(Mandatory)][string]$Phase,
         [Parameter(Mandatory)][string]$InstallDir,
-        [Parameter(Mandatory)][string]$ExpectationsPath
+        [Parameter(Mandatory)][string]$ExpectationsPath,
+        [Parameter(Mandatory)][string]$ExpectedVersion
     )
 
     $probeScript = Join-Path $script:RepoRoot 'scripts/retained-history-probe.mjs'
@@ -548,7 +670,8 @@ function Invoke-RetainedHistoryProbe {
         "--port=$CdpPort",
         "--phase=$Phase",
         "--install-dir=$InstallDir",
-        "--expectations=$ExpectationsPath"
+        "--expectations=$ExpectationsPath",
+        "--expected-version=$ExpectedVersion"
     )
 
     $output = & node @arguments
@@ -578,10 +701,12 @@ function Observe-RetainedHistoryLaunch {
         $CdpPort = Get-EphemeralLoopbackPort
     }
 
+    $expectedVersion = if ($Phase.StartsWith('candidate-')) { $script:CandidateVersion } else { $script:BaselineVersion }
     $procInfo = Launch-AppWithCdp -InstallDir $InstallDir -UserDataDir $UserDataDir -CdpPort $CdpPort
     $evidence = $null
     try {
-        $evidence = Invoke-RetainedHistoryProbe -CdpPort $CdpPort -Phase $Phase -InstallDir $InstallDir -ExpectationsPath $ExpectationsPath
+        $evidence = Invoke-RetainedHistoryProbe -CdpPort $CdpPort -Phase $Phase -InstallDir $InstallDir `
+            -ExpectationsPath $ExpectationsPath -ExpectedVersion $expectedVersion
         Wait-ForOwnedProcessExit -ProcInfo $procInfo -TimeoutSeconds 30
     } catch {
         Stop-OwnedHistoryProcess
@@ -643,7 +768,8 @@ function Write-FunctionalHistoryEvidence {
 function Invoke-RetainedHistoryCi {
     param(
         [string]$RetainedArtifactDir = $script:RetainedArtifactDir,
-        [string]$ExpectedCommit = $script:ExpectedCommit
+        [string]$ExpectedCommit = $script:ExpectedCommit,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Candidate
     )
 
     Write-Step 'Starting Retained History acceptance lifecycle.'
@@ -651,13 +777,23 @@ function Invoke-RetainedHistoryCi {
     Assert-NodeWebSocketCapability
 
     # Harness release versions may advance independently of the immutable candidate.
-    $script:CandidateVersion = (Get-RetainedCandidatePins).CandidateVersion
+    $script:CandidateVersion = $Candidate.CandidateVersion
+    $sourceEvidence = if ($Candidate.Source -eq 'retained') {
+        [ordered]@{ source = 'retained'; runId = $Candidate.RunId; artifactId = $Candidate.ArtifactId
+            zipSha256 = $Candidate.ZipSha256; zipBytes = $Candidate.ZipBytes }
+    } else {
+        [ordered]@{ source = 'published'; releaseId = $Candidate.ReleaseId }
+    }
     $script:FunctionalHistoryComplete = $false
     $script:FunctionalHistoryEvidence = [ordered]@{
         schema           = 1
         harnessCommit    = $ExpectedCommit
-        candidateCommit  = (Get-RetainedCandidatePins).CandidateCommit
+        candidateCommit  = $Candidate.CandidateCommit
         candidateVersion = $script:CandidateVersion
+        candidateSource  = $sourceEvidence
+        manifestSha256   = $Candidate.ManifestSha256
+        payloadManifestSha256 = $Candidate.PayloadManifestSha256
+        candidateFileSha256 = $Candidate.Files
         startTimeUtc     = [DateTimeOffset]::UtcNow.ToString('o')
         currentPhase     = 'candidate_verification'
         phases           = [ordered]@{}
@@ -682,7 +818,7 @@ function Invoke-RetainedHistoryCi {
         Assert-NoNvidiaDriver
 
         Set-FunctionalHistoryPhase -PhaseName 'candidate_verification' -Status 'started'
-        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir
+        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir -Candidate $Candidate -Stage
         Set-FunctionalHistoryPhase -PhaseName 'candidate_verification' -Status 'passed'
 
         Set-FunctionalHistoryPhase -PhaseName 'baseline_download' -Status 'started'
@@ -714,7 +850,7 @@ function Invoke-RetainedHistoryCi {
         Set-FunctionalHistoryPhase -PhaseName 'baseline_read' -Status 'passed' -Observations $obsBaseRead.observations
 
         Set-FunctionalHistoryPhase -PhaseName 'candidate_upgrade' -Status 'started'
-        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir
+        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir -Candidate $Candidate
         Invoke-Installer -Installer $candidateInstaller -InstallDir $script:InstallDir
         Assert-Installed -Version $script:CandidateVersion
         Set-FunctionalHistoryPhase -PhaseName 'candidate_upgrade' -Status 'passed'
@@ -745,7 +881,7 @@ function Invoke-RetainedHistoryCi {
         Set-FunctionalHistoryPhase -PhaseName 'baseline_uninstall' -Status 'passed'
 
         Set-FunctionalHistoryPhase -PhaseName 'candidate_final_binding' -Status 'started'
-        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir
+        Assert-RetainedCandidateStaging -RetainedDir $RetainedArtifactDir -CandidateArtifactDir $script:CandidateArtifactDir -Candidate $Candidate
         Set-FunctionalHistoryPhase -PhaseName 'candidate_final_binding' -Status 'passed'
 
         $script:FunctionalHistoryComplete = $true

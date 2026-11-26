@@ -49,20 +49,20 @@ def staged(tmp_path):
     unpacked.mkdir()
     (unpacked / "Eve.exe").write_bytes(b"fictional unpacked content")
     names = {
-        "Eve.Web.Setup.0.8.2-alpha.9.exe": unsigned_pe(),
-        "murmur-0.8.2-alpha.9-x64.nsis.7z": b"fixture payload",
+        "Eve.Web.Setup.0.9.0-beta.1.exe": unsigned_pe(),
+        "murmur-0.9.0-beta.1-x64.nsis.7z": b"fixture payload",
     }
     for name, content in names.items():
         (source / name).write_bytes(content)
     wrapper, payload = names.values()
     latest = (
-        "version: 0.8.2-alpha.9\nfiles:\n  - url: Eve.Web.Setup.0.8.2-alpha.9.exe\n"
+        "version: 0.9.0-beta.1\nfiles:\n  - url: Eve.Web.Setup.0.9.0-beta.1.exe\n"
         f"    sha512: {base64.b64encode(hashlib.sha512(wrapper).digest()).decode()}\n"
-        "path: Eve.Web.Setup.0.8.2-alpha.9.exe\n"
+        "path: Eve.Web.Setup.0.9.0-beta.1.exe\n"
         f"sha512: {base64.b64encode(hashlib.sha512(wrapper).digest()).decode()}\n"
         "releaseDate: '2026-10-28T00:00:00.000Z'\npackages:\n  x64:\n"
-        "    file: murmur-0.8.2-alpha.9-x64.nsis.7z\n"
-        "    path: murmur-0.8.2-alpha.9-x64.nsis.7z\n"
+        "    file: murmur-0.9.0-beta.1-x64.nsis.7z\n"
+        "    path: murmur-0.9.0-beta.1-x64.nsis.7z\n"
         f"    size: {len(payload)}\n"
         f"    sha512: {base64.b64encode(hashlib.sha512(payload).digest()).decode()}\n"
     )
@@ -72,7 +72,7 @@ def staged(tmp_path):
     values = dict(SRC=source, UNPACKED=unpacked, NOTICES=notices, TARGET=retained, REPO=ROOT, COMMIT=HEAD)
     prepare = (
         "New-CandidateArtifactSet -SourceBuildDir $env:SRC -WinUnpackedDir $env:UNPACKED "
-        "-LegalNoticesFile $env:NOTICES -TargetDir $env:TARGET -CandidateVersion '0.8.2-alpha.9' "
+        "-LegalNoticesFile $env:NOTICES -TargetDir $env:TARGET -CandidateVersion '0.9.0-beta.1' "
         "-ExpectedCommit $env:COMMIT -RepoRoot $env:REPO"
     )
     result = run_ps(prepare, **values)
@@ -88,9 +88,9 @@ def staged(tmp_path):
 def binding(retained, candidate):
     return run_ps(
         "Assert-CandidateBinding -CandidateInstaller $env:INSTALLER -CandidatePayload $env:PAYLOAD "
-        "-RetainedDir $env:RETAINED -CandidateVersion '0.8.2-alpha.9' -RepoRoot $env:REPO",
-        INSTALLER=candidate / "Eve.Web.Setup.0.8.2-alpha.9.exe",
-        PAYLOAD=candidate / "murmur-0.8.2-alpha.9-x64.nsis.7z", RETAINED=retained, REPO=ROOT,
+        "-RetainedDir $env:RETAINED -CandidateVersion '0.9.0-beta.1' -RepoRoot $env:REPO",
+        INSTALLER=candidate / "Eve.Web.Setup.0.9.0-beta.1.exe",
+        PAYLOAD=candidate / "murmur-0.9.0-beta.1-x64.nsis.7z", RETAINED=retained, REPO=ROOT,
     )
 
 
@@ -110,11 +110,11 @@ def test_rejects_changed_candidate_evidence(staged, target):
     retained, candidate, _, _ = staged
     assert binding(retained, candidate).returncode == 0
     paths = {
-        "installer": candidate / "Eve.Web.Setup.0.8.2-alpha.9.exe",
-        "payload": candidate / "murmur-0.8.2-alpha.9-x64.nsis.7z",
+        "installer": candidate / "Eve.Web.Setup.0.9.0-beta.1.exe",
+        "payload": candidate / "murmur-0.9.0-beta.1-x64.nsis.7z",
         "qa-manifest": candidate / "candidate-payload-manifest.json",
         "retained-qa": retained / "qa/candidate-payload-manifest.json",
-        "retained-manifest": retained / "eve-v0.8.2-alpha.9-artifact-manifest.json",
+        "retained-manifest": retained / "eve-v0.9.0-beta.1-artifact-manifest.json",
     }
     if target == "source":
         path = retained / "qa/candidate-provenance.json"
@@ -165,9 +165,13 @@ def test_workflow_upload_allowlist_excludes_other_qa_files(staged):
     (retained / "qa/not-for-upload.txt").write_text("fictional canary")
     workflow = (ROOT / ".github/workflows/installer-lifecycle-ci.yml").read_text()
     upload = workflow.split("- name: Upload candidate QA artifacts", 1)[1]
+    version = re.search(r"^  CANDIDATE_VERSION: '([^']+)'$", workflow, re.MULTILINE)[1]
+    assert version == "0.9.0-beta.1"
+    assert "name: eve-v${{ env.CANDIDATE_VERSION }}-unsigned-candidate-qa-${{ github.run_id }}" in upload
+    upload = upload.replace("${{ env.CANDIDATE_VERSION }}", version)
     block = upload.split("path: |\n", 1)[1].split("retention-days", 1)[0]
     entries = [line.strip() for line in block.splitlines() if line.strip()]
-    prefix = "${{ runner.temp }}/eve-alpha9-candidate-artifacts-${{ github.run_id }}/"
+    prefix = "${{ runner.temp }}/eve-candidate-artifacts-${{ github.run_id }}/"
     assert len(entries) == 10
     assert all(entry.startswith(prefix) for entry in entries)
     patterns = [entry[len(prefix):] for entry in entries]
@@ -181,11 +185,11 @@ def test_binding_defaults_match_lifecycle_scope(staged):
     retained, candidate, _, _ = staged
     command = (
         "$script:candidateInstaller=$env:INSTALLER; $script:candidatePayload=$env:PAYLOAD; "
-        "$script:RetainedArtifactDir=$env:RETAINED; $script:CandidateVersion='0.8.2-alpha.9'; "
+        "$script:RetainedArtifactDir=$env:RETAINED; $script:CandidateVersion='0.9.0-beta.1'; "
         "Assert-CandidateBinding"
     )
-    values = dict(INSTALLER=candidate / "Eve.Web.Setup.0.8.2-alpha.9.exe",
-                  PAYLOAD=candidate / "murmur-0.8.2-alpha.9-x64.nsis.7z", RETAINED=retained)
+    values = dict(INSTALLER=candidate / "Eve.Web.Setup.0.9.0-beta.1.exe",
+                  PAYLOAD=candidate / "murmur-0.9.0-beta.1-x64.nsis.7z", RETAINED=retained)
     result = run_ps(command, **values)
     assert result.returncode == 0, result.stderr
     (candidate / "candidate-payload-manifest.json").write_text("changed QA evidence")

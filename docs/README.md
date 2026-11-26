@@ -1,11 +1,11 @@
 # Eve documentation
 
-Eve is a local Windows push-to-talk dictation assistant built with Electron and Faster-Whisper. The current published release is `v0.8.2-alpha.8`.
+Eve is a local Windows push-to-talk dictation assistant built with Electron and Faster-Whisper. The current published release is `v0.8.2-alpha.9`.
 
 ## Start here
 
 - [Windows development and building](development/building.md): Build, package, and verify the app on Windows.
-- [Project roadmap](project/roadmap.md): Current baseline (alpha.8), shipped CPU default, optional GPU pack, and milestones.
+- [Project roadmap](project/roadmap.md): Shipped CPU default, optional GPU pack, and milestones.
 - [Speech-model selection](speech-model-selection.md): Curated Faster-Whisper model choices and download behavior.
 - [Installer dependencies](installer-dependencies.md): Standalone Python runtime, CTranslate2, and optional NVIDIA pack dependencies.
 - [Protocol](protocol.md): Local WebSocket client-server transcription protocol.
@@ -28,7 +28,8 @@ Eve is a local Windows push-to-talk dictation assistant built with Electron and 
 - [Alpha quality gates](development/alpha-quality-gates.md): Mandatory evidence, provisional limits, and existing release verification procedures.
 - [Microphone validation protocol](development/microphone-validation-protocol.md): Consented physical microphone testing procedure, prompt cards, and offline scoring harness.
 - [GPU lifecycle validation](development/gpu-pack-lifecycle-validation.md): Repeatable Windows source checks and exact-candidate acceptance exercises.
-- [v0.8.2-alpha.8 release notes](releases/eve-v0.8.2-alpha.8-release-notes.md): Current published alpha release notes.
+- [Beta.1 release plan](architecture/eve-beta1-release-plan.md) and [candidate notes](releases/eve-v0.9.0-beta.1-release-notes.md)
+- [v0.8.2-alpha.9 release notes](releases/eve-v0.8.2-alpha.9-release-notes.md): Current published alpha release notes.
 
 ## History and archive
 

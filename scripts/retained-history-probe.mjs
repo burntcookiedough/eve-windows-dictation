@@ -96,11 +96,11 @@ async function waitFor(observe, accept) {
   throw new Error('Packaged app observation timed out');
 }
 
-export async function observeHistory(session, phase, expected) {
-  const version = phase.startsWith('candidate-') ? '0.8.2-alpha.9' : '0.8.2-alpha.5';
-  const transcriptSelector = version === '0.8.2-alpha.5'
+export async function observeHistory(session, phase, expected, expectedVersion) {
+  const transcriptSelector = expectedVersion === '0.8.2-alpha.5'
     ? 'button[aria-expanded] > p:first-of-type' : '[data-history-entry] .entry-text';
-  assert.equal(await session.evaluate('window.murmurMain.getAppVersion()'), version);
+  assert.equal(await session.evaluate('window.murmurMain.getAppVersion()'), expectedVersion,
+    'Installed app version did not match the verified release');
   const settings = await session.evaluate('window.murmurMain.getSettings()');
   assert.equal(settings.serverAutoStart, false, 'Server auto-start must stay disabled');
   assert.equal(settings.startMinimized, false);
@@ -153,12 +153,13 @@ export async function observeHistory(session, phase, expected) {
     // The pinned alpha.5 baseline predates the appearance setting and never reports it.
     assert.equal(settings.appearance, undefined, 'Baseline unexpectedly reports appearance');
   }
-  return { version, records: actual, renderedCount: rendered.texts.length, settingsMounted: false, backendRunning: false,
+  return { version: expectedVersion, records: actual, renderedCount: rendered.texts.length, settingsMounted: false, backendRunning: false,
     searchControlVerified: phase === 'candidate-upgrade-read-mutate' };
 }
 
-export async function runProbePhase({ port, phase, installDir, expectations }) {
+export async function runProbePhase({ port, phase, installDir, expectations, expectedVersion }) {
   assert.ok(Number.isInteger(port) && port > 0 && port <= 65535);
+  assert.match(expectedVersion, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
   assert.ok(['baseline-initialize','baseline-read','candidate-upgrade-read-mutate',
     'candidate-relaunch-verify','baseline-rollback-read'].includes(phase));
   const expected = phase === 'baseline-initialize' ? [] : expectations.records;
@@ -176,7 +177,7 @@ export async function runProbePhase({ port, phase, installDir, expectations }) {
   try {
     await session.connect();
     await waitFor(() => session.evaluate("typeof window.murmurMain?.getHistoryEntries === 'function'"), Boolean);
-    const observations = await observeHistory(session, phase, expected);
+    const observations = await observeHistory(session, phase, expected, expectedVersion);
     await browser.connect();
     // Acknowledgement can race process exit. PowerShell independently requires actual graceful exit.
     try { await browser.send('Browser.close'); } catch (error) {
@@ -189,12 +190,13 @@ export async function runProbePhase({ port, phase, installDir, expectations }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const args = Object.fromEntries(process.argv.slice(2).map(arg => {
-      const match = /^--(port|phase|install-dir|expectations)=(.+)$/.exec(arg);
+      const match = /^--(port|phase|install-dir|expectations|expected-version)=(.+)$/.exec(arg);
       assert.ok(match, 'Unknown or empty probe argument');
       return [match[1], match[2]];
     }));
     const evidence = await runProbePhase({ port: Number(args.port), phase: args.phase,
-      installDir: args['install-dir'], expectations: JSON.parse(readFileSync(args.expectations, 'utf8')) });
+      installDir: args['install-dir'], expectations: JSON.parse(readFileSync(args.expectations, 'utf8')),
+      expectedVersion: args['expected-version'] });
     console.log(JSON.stringify(evidence));
   } catch {
     // Never expose unexpected renderer text, paths or protocol responses in uploaded diagnostics.

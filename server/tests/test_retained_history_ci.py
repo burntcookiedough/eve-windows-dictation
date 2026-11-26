@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+from zipfile import ZipFile
 
 import pytest
 
@@ -92,6 +93,7 @@ def test_probe_accepts_json_stdout_with_stderr_warning(tmp_path):
     scripts = tmp_path / 'scripts'
     scripts.mkdir()
     (scripts / 'retained-history-probe.mjs').write_text(
+        'if (!process.argv.includes("--expected-version=0.9.0-beta.1")) process.exit(1);\n'
         'console.error("benign warning");\n'
         'console.log(JSON.stringify({status:"passed",closeRequested:true}));\n',
         encoding='utf-8',
@@ -101,7 +103,7 @@ $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 $script:RepoRoot = {ps_literal(tmp_path.as_posix())}
 function Write-Step {{ param($Message) }}
-$result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture
+$result = Invoke-RetainedHistoryProbe -CdpPort 12345 -Phase fixture -InstallDir fixture -ExpectationsPath fixture -ExpectedVersion '0.9.0-beta.1'
 if ($result.status -ne 'passed') {{ throw 'Probe result lost' }}
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
@@ -123,11 +125,9 @@ def test_staging_stops_before_copy_when_release_verifier_exits_nonzero(tmp_path)
 $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 $script:RepoRoot = {ps_literal(tmp_path.as_posix())}
-function Get-RetainedCandidatePins {{
-    return @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
-}}
+$candidate = @{{ Files = @{{ 'fixture.txt' = '{digest}' }}; CandidateVersion = 'fixture'; CandidateCommit = 'fixture'; ManifestSha256 = 'fixture' }}
 function Copy-Item {{ throw 'COPY_REACHED' }}
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -CandidateArtifactDir {ps_literal(candidate.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained.as_posix())} -CandidateArtifactDir {ps_literal(candidate.as_posix())} -Candidate $candidate -Stage
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
                             capture_output=True, text=True, timeout=15)
@@ -179,7 +179,9 @@ $ErrorActionPreference = 'Stop'
 $env:RUNNER_TEMP = {ps_literal(runner_temp)}
 function gh {{ $global:LASTEXITCODE = 0; Get-Content -LiteralPath {ps_literal(release_json)} -Raw }}
 function curl.exe {{ throw 'DOWNLOAD_REACHED' }}
-Save-RetainedHistoryCandidate -RetainedDir {ps_literal(target)}
+$pins = Get-PublishedHistoryCandidatePins
+Save-RetainedHistoryCandidate -RetainedDir {ps_literal(target)} -Source published -CandidateId $pins.ReleaseId `
+    -CandidateCommit $pins.CandidateCommit -CandidateTag "v$($pins.CandidateVersion)" -ExpectedManifestSha256 $pins.ManifestSha256
 """
     result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
                             capture_output=True, text=True, timeout=15)
@@ -204,8 +206,119 @@ def test_scripts_parse_and_ast_intact():
         assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_history_mode_binds_candidate_version_before_installer_paths():
-    """A newer harness release must still consume the pinned alpha.9 candidate."""
+@pytest.mark.parametrize('defect,expected', [
+    (None, 'RETAINED_STAGING_VERIFIED'),
+    ('head', 'artifact identity mismatch'),
+    ('workflow', 'successful trunk installer lifecycle run'),
+    ('digest', 'archive size or SHA-256 mismatch'),
+    ('entry', 'archive file allowlist mismatch'),
+    ('payload', 'provenance does not match'),
+    ('phase', 'lifecycle evidence is incomplete or unsuccessful'),
+])
+def test_retained_download_binds_run_archive_and_staged_files(tmp_path, defect, expected):
+    version, commit = '0.9.0-beta.1', 'a' * 40
+    repository = 'burntcookiedough/eve-windows-dictation'
+    artifact_id, run_id = 123, 456
+    manifest_name = f'eve-v{version}-artifact-manifest.json'
+    payload_name = 'qa/candidate-payload-manifest.json'
+    files = {name: b'fictional' for name in (
+        f'Eve.Web.Setup.{version}.exe', f'murmur-{version}-x64.nsis.7z', manifest_name,
+        'latest.yml', 'THIRD_PARTY_NOTICES.txt', 'SHA256SUMS.txt', 'SHA512SUMS.txt', payload_name,
+    )}
+    manifest_hash = hashlib.sha256(files[manifest_name]).hexdigest()
+    files['qa/candidate-provenance.json'] = json.dumps({
+        'schema': 1, 'tag': f'v{version}', 'version': version, 'commit': commit, 'runId': str(run_id),
+        'manifestSha256': manifest_hash,
+        'payloadManifestSha256': '0' * 64 if defect == 'payload' else hashlib.sha256(files[payload_name]).hexdigest(),
+        'build': {'signed': False, 'allowUnsigned': True, 'publish': 'never', 'target': 'nsis-web'},
+    })
+    phases = {name: {'status': 'passed'} for name in (
+        'candidate_artifacts_prepared', 'candidate_staging', 'build_cache_cleanup',
+        'baseline_download', 'qa_profile_setup', 'baseline_install_launch', 'candidate_upgrade',
+        'candidate_removal', 'baseline_rollback', 'baseline_removal', 'candidate_clean_install',
+        'candidate_clean_removal', 'cleanup', 'overall',
+    )}
+    if defect == 'phase':
+        del phases['baseline_rollback']
+    files['qa/candidate-phase-status.json'] = json.dumps({
+        'schema': 1, 'commit': commit, 'version': version, 'overallStatus': 'passed', 'phases': phases,
+    })
+    if defect == 'entry':
+        files['qa/extra.txt'] = b'unexpected'
+    archive = tmp_path / 'fixture.zip'
+    with ZipFile(archive, 'w') as bundle:
+        for name, data in files.items():
+            bundle.writestr(name, data)
+    archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+    artifact_meta = tmp_path / 'artifact.json'
+    artifact_meta.write_text(json.dumps({
+        'id': artifact_id, 'expired': False, 'name': f'eve-v{version}-unsigned-candidate-qa-{run_id}',
+        'digest': 'sha256:' + ('0' * 64 if defect == 'digest' else archive_hash),
+        'size_in_bytes': archive.stat().st_size,
+        'workflow_run': {'id': run_id, 'head_sha': '0' * 40 if defect == 'head' else commit},
+    }))
+    run_meta = tmp_path / 'run.json'
+    run_meta.write_text(json.dumps({
+        'id': run_id, 'head_sha': commit, 'head_repository': {'full_name': repository}, 'head_branch': 'trunk',
+        'path': '.github/workflows/ci.yml' if defect == 'workflow' else '.github/workflows/installer-lifecycle-ci.yml',
+        'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success',
+    }))
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    (scripts / 'release-artifacts.ps1').write_text('exit 0\n')
+    (tmp_path / 'staged').mkdir()
+    command = f"""
+$ErrorActionPreference = 'Stop'
+. {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
+$env:RUNNER_TEMP = {ps_literal(tmp_path)}
+$script:RepoRoot = $env:RUNNER_TEMP
+$retained = Join-Path $env:RUNNER_TEMP 'retained'
+$staged = Join-Path $env:RUNNER_TEMP 'staged'
+function Write-Step {{ param($Message) }}
+function gh {{
+    $global:LASTEXITCODE = 0
+    switch ($args[1]) {{
+        'repos/{repository}/actions/artifacts/{artifact_id}' {{ Get-Content {ps_literal(artifact_meta)} -Raw }}
+        'repos/{repository}/actions/runs/{run_id}' {{ Get-Content {ps_literal(run_meta)} -Raw }}
+        default {{ throw 'Unexpected API request' }}
+    }}
+}}
+function curl.exe {{
+    $global:LASTEXITCODE = 0
+    $output = $args[[array]::IndexOf($args, '--output') + 1]
+    Copy-Item -LiteralPath {ps_literal(archive)} -Destination $output
+}}
+$binding = Save-RetainedHistoryCandidate -RetainedDir $retained -Source retained -CandidateId '{artifact_id}' `
+    -CandidateCommit '{commit}' -CandidateTag 'v{version}' -ExpectedManifestSha256 '{manifest_hash}'
+if ($binding.RunId -ne '{run_id}' -or $binding.ArtifactId -ne '{artifact_id}' -or $binding.ZipSha256 -ne '{archive_hash}' -or
+    $binding.ZipBytes -ne {archive.stat().st_size} -or $binding.CandidateCommit -ne '{commit}' -or $binding.CandidateVersion -ne '{version}') {{
+    throw 'Verified identity did not reach the lifecycle'
+}}
+Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding -Stage
+Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding
+Set-Content -LiteralPath (Join-Path $staged 'latest.yml') 'changed'
+try {{
+    Assert-RetainedCandidateStaging -RetainedDir $retained -CandidateArtifactDir $staged -Candidate $binding
+    throw 'Staged file mutation was accepted'
+}} catch {{
+    if ($_.Exception.Message -notlike 'Staged candidate hash mismatch*') {{ throw }}
+}}
+Write-Output 'RETAINED_STAGING_VERIFIED'
+"""
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command],
+                            capture_output=True, text=True, timeout=15)
+    if defect:
+        assert result.returncode != 0
+        assert expected in result.stderr, result.stdout + result.stderr
+        assert not list((tmp_path / 'staged').iterdir())
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert expected in result.stdout
+
+
+@pytest.mark.parametrize('version', ['0.9.0-beta.1', '0.8.2-alpha.9'])
+def test_history_mode_binds_candidate_version_before_installer_paths(version):
+    """The selected artifact determines the version, independently of the harness."""
     command = f"""
 $ErrorActionPreference = 'Stop'
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
@@ -217,9 +330,10 @@ $bindings = @($fn.Body.EndBlock.Statements | Where-Object {{
     $_.Left.VariablePath.UserPath -eq 'script:CandidateVersion'
 }})
 if ($bindings.Count -ne 1) {{ throw 'Expected one retained candidate version binding' }}
-$script:CandidateVersion = '0.8.2-alpha.10'
+$script:CandidateVersion = '0.9.0-beta.2'
+$Candidate = @{{ CandidateVersion = '{version}' }}
 Invoke-Expression $bindings[0].Extent.Text
-if ($script:CandidateVersion -cne '0.8.2-alpha.9') {{ throw 'Retained version inherited harness release' }}
+if ($script:CandidateVersion -cne '{version}') {{ throw 'Retained version inherited harness release' }}
 $installer = $fn.Body.EndBlock.Statements | Where-Object {{
     $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
     $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
@@ -305,7 +419,7 @@ Set-StrictMode -Version Latest
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())} -Candidate (Get-PublishedHistoryCandidatePins)
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -340,7 +454,7 @@ Set-StrictMode -Version Latest
 . {ps_literal(ROOT / 'scripts/retained-history-ci.ps1')}
 function Write-Step {{ param($Message) }}
 
-Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())}
+Assert-RetainedCandidateStaging -RetainedDir {ps_literal(retained_dir.as_posix())} -CandidateArtifactDir {ps_literal(candidate_dir.as_posix())} -Candidate (Get-PublishedHistoryCandidatePins)
 """, encoding='utf-8')
 
     res = subprocess.run(['pwsh', '-NoProfile', '-File', str(test_script)], capture_output=True, text=True, timeout=15)
@@ -528,6 +642,7 @@ def test_real_observer_checks_history_and_appearance_persistence(phase, appearan
     settings = {'serverAutoStart': False, 'startMinimized': False}
     if appearance is not None:
         settings['appearance'] = appearance
+    version = '0.9.0-beta.1' if phase.startswith('candidate-') else '0.8.2-alpha.5'
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
 import assert from 'node:assert/strict';
@@ -546,10 +661,10 @@ const document={{
    if(s!=={json.dumps('[data-history-entry] .entry-text' if phase.startswith('candidate-') else 'button[aria-expanded] > p:first-of-type')})return [];
    return rows.map(r=>({{textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}
 }};
-const window={{murmurMain:{{getAppVersion:()=> '{"0.8.2-alpha.9" if phase.startswith("candidate-") else "0.8.2-alpha.5"}',
+const window={{murmurMain:{{getAppVersion:()=> '{version}',
  getSettings:()=>({json.dumps(settings)}),getServerStatus:()=>({{status:'idle'}}),
  getHistoryEntries:(offset,limit)=>({{entries:apiRows.slice(offset,offset+limit),hasMore:offset+limit<apiRows.length}})}}}};
-const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected);
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'{phase}',expected,'{version}');
 if ({json.dumps(rejection)}) {{
  await assert.rejects(observe,new RegExp({json.dumps(rejection)}));
 }} else {{
@@ -562,7 +677,8 @@ if ({json.dumps(rejection)}) {{
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_upgrade_observer_uses_search_control_and_requires_seeded_appearance():
+@pytest.mark.parametrize('version', ['0.9.0-beta.1', '0.8.2-alpha.9'])
+def test_upgrade_observer_uses_search_control_and_requires_seeded_appearance(version):
     """Exercise the actual observer against DOM input events and IPC mutations."""
     probe = (ROOT / 'scripts/retained-history-probe.mjs').as_uri()
     code = f"""
@@ -573,7 +689,7 @@ const initial=[{{id:'fixture-hist-003',timestamp:3,text:'gamma baseline'}},
  {{id:'fixture-hist-002-delete',timestamp:2,text:'beta temporary'}},
  {{id:'fixture-hist-001',timestamp:1,text:'alpha baseline'}}];
 const expected=initial.map(r=>({{id:r.id,timestamp:r.timestamp,textHash:sha256(r.text)}}));
-async function exercise(appearance, filterRows=true) {{
+async function exercise(appearance, filterRows=true, installedVersion='{version}') {{
  let rows=[...initial], navigated=false, searched=false;
  const settings={{serverAutoStart:false,startMinimized:false,appearance}};
  const input={{value:'',dispatchEvent(event){{assert.equal(event.type,'input');assert.ok(event.bubbles);searched=true;}}}};
@@ -582,19 +698,23 @@ async function exercise(appearance, filterRows=true) {{
    querySelectorAll(s){{if(s!=='[data-history-entry] .entry-text')return [];
     return rows.filter(r=>!searched||!filterRows||r.text.includes(input.value)).map(r=>({{
     textContent:r.text,closest:()=>null,getBoundingClientRect:()=>({{width:20,height:10}})}}));}}}};
- const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.9',getSettings:()=>({{...settings}}),
+ const window={{murmurMain:{{getAppVersion:()=> installedVersion,getSettings:()=>({{...settings}}),
   getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:(offset,limit,filters)=>{{
    const selected=rows.filter(r=>!filters?.text||r.text.includes(filters.text));
    return {{entries:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length}};}},
   updateSetting:(key,value)=>{{settings[key]=value;}},deleteHistoryEntry:id=>{{rows=rows.filter(r=>r.id!==id);}}}}}};
  const session={{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document,Event}}))}};
- const result=await observeHistory(session,'candidate-upgrade-read-mutate',expected);
+ const result=await observeHistory(session,'candidate-upgrade-read-mutate',expected,'{version}');
  assert.ok(searched);assert.equal(input.value,'baseline');assert.ok(result.searchControlVerified);
+ assert.equal(result.version,'{version}');
  assert.equal(settings.appearance,'light');assert.equal(rows.length,2);
 }}
 await exercise('dark');
 await assert.rejects(exercise('light'),/Seeded appearance was not read/);
-await assert.rejects(exercise('dark',false),/Packaged app observation timed out/);
+await assert.rejects(exercise('dark',true,'0.8.2-alpha.5'),/Installed app version did not match the verified release/);
+if ('{version}' === '0.9.0-beta.1') {{
+ await assert.rejects(exercise('dark',false),/Packaged app observation timed out/);
+}}
 """
     result = subprocess.run(['node', '--input-type=module', '-e', code],
                             capture_output=True, text=True, timeout=30)
@@ -630,7 +750,7 @@ const document={{
 const window={{murmurMain:{{getAppVersion:()=> '0.8.2-alpha.5',
  getSettings:()=>({{serverAutoStart:false,startMinimized:false,appearance:'dark'}}),
  getServerStatus:()=>({{status:'idle'}}),getHistoryEntries:()=>({{entries:[],hasMore:false}})}}}};
-const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[]);
+const observe=()=>observeHistory({{evaluate:expression=>Promise.resolve(vm.runInNewContext(expression,{{window,document}}))}},'baseline-initialize',[],'0.8.2-alpha.5');
 if({json.dumps(unexpected_transcript)}){{await assert.rejects(observe,/Packaged app observation timed out/);}}
 else{{const result=await observe();assert.equal(result.renderedCount,0);assert.equal(result.settingsMounted,false);}}
 assert.ok(navigated);
