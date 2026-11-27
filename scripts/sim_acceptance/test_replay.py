@@ -3,7 +3,10 @@
 import asyncio
 import json
 import os
+import subprocess
+import sys
 import tempfile
+from contextlib import contextmanager
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +16,7 @@ import psutil
 from websockets.exceptions import ConnectionClosedError
 
 from scripts.sim_acceptance import replay, score
+from scripts.sim_acceptance.owned_process import launch_owned_process
 
 
 NEW_CANDIDATE = {"run_id": "45880000001", "artifact_id": "15110000002",
@@ -54,6 +58,9 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                 process.is_running.return_value = True
                 launcher.children.return_value = [process]
 
+                closed = Mock()
+
+                @contextmanager
                 def launch(command, *, cwd, env, **_options):
                     self.assertEqual(command, [str(python), "-B", str(entry_point)])
                     self.assertEqual(cwd, server)
@@ -62,7 +69,10 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(pid_file.exists())
                     pid = 456 if scenario == "foreign PID" else process.pid
                     pid_file.write_text(json.dumps({"pid": pid, "port": 789}), encoding="utf-8")
-                    return launcher
+                    try:
+                        yield launcher
+                    finally:
+                        closed()
 
                 async def replay_clips(port, owned, clips, result, path, audit):
                     self.assertEqual(port, 789)
@@ -76,8 +86,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
 
                 with (patch.object(replay.subprocess, "check_output",
                                    side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
-                      patch.object(replay.psutil, "Popen", side_effect=launch) as start,
-                      patch.object(replay, "stop_gpu_child") as stop,
+                      patch.object(replay, "launch_owned_process", side_effect=launch) as start,
                       patch.object(replay, "has_loopback_listener", return_value=True) as listener,
                       patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
                       patch.object(replay, "load_clips", return_value=[]),
@@ -100,7 +109,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                         report, _ = score.render([evidence], None, None, expected_candidate=NEW_CANDIDATE)
                         self.assertIn(NEW_CANDIDATE["commit"], report)
                     start.assert_called_once()
-                    stop.assert_called_once_with(launcher, None if scenario == "foreign PID" else process)
+                    closed.assert_called_once()
                 if scenario != "completed":
                     self.assertFalse(args.output.exists())
                     self.assertFalse(args.entity_audit.exists())
@@ -112,6 +121,62 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                   patch.object(replay.subprocess, "check_output", side_effect=[head, status]),
                   self.assertRaisesRegex(ValueError, "clean verified candidate source commit")):
                 replay.gpu_owner(args)
+
+    def test_candidate_git_checks_ignore_inherited_foreign_repository(self):
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+
+        def checkout(root, text):
+            root.mkdir()
+            (root / "main.py").write_text(text, encoding="utf-8")
+            def git(*args):
+                return subprocess.check_output(["git", "-C", root, *args], env=env, text=True).strip()
+            git("init", "--quiet")
+            git("add", "main.py")
+            git("-c", "user.name=Replay fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture")
+            return git("rev-parse", "HEAD")
+
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "candidate"
+            foreign = Path(temp) / "foreign"
+            expected = checkout(source, "# candidate\n")
+            other = checkout(foreign, "# other\n")
+            with patch.dict(os.environ, {"GIT_DIR": str(foreign / ".git"), "GIT_WORK_TREE": str(foreign)}):
+                replay.verify_candidate_source(source, expected)
+                with self.assertRaisesRegex(ValueError, "clean verified candidate source commit"):
+                    replay.verify_candidate_source(source, other)
+                (source / "main.py").write_text("# changed\n", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "clean verified candidate source commit"):
+                    replay.verify_candidate_source(source, expected)
+
+    def test_owned_process_cleanup_stops_child_after_launcher_exits(self):
+        command = [sys.executable, "-c",
+                   "import subprocess, sys; "
+                   "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+                   "print(child.pid, flush=True)"]
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "launcher.log"
+            child = None
+            try:
+                with log.open("wb") as out, launch_owned_process(command, cwd=temp, env=os.environ.copy(), stdout=out) as launcher:
+                    self.assertEqual(launcher.wait(timeout=10), 0)
+                    child = psutil.Process(int(log.read_text(encoding="utf-8").strip()))
+                    self.assertTrue(child.is_running())
+                if os.name == "nt":
+                    child.wait(timeout=10)
+                    self.assertFalse(child.is_running())
+                else:
+                    # An orphan may remain as a zombie until its new parent reaps it.
+                    deadline = replay.time.monotonic() + 10
+                    while child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
+                        self.assertLess(replay.time.monotonic(), deadline)
+                        replay.time.sleep(.05)
+            finally:
+                if child is not None and child.is_running():
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
 
     def test_gpu_owner_rejects_entry_points_outside_the_candidate_checkout(self):
         with tempfile.TemporaryDirectory() as temp:

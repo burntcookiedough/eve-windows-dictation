@@ -22,6 +22,7 @@ from websockets.exceptions import WebSocketException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.perf_regression_benchmark import replay_trial
+from scripts.sim_acceptance.owned_process import launch_owned_process
 from scripts.sim_acceptance.score import (
     CANDIDATE,
     add_candidate_argument,
@@ -242,8 +243,9 @@ async def run_replay(port, process, clips, result, result_file, audit=None):
 
 
 def verify_candidate_source(source, expected_commit):
-    head = subprocess.check_output(["git", "-C", source, "rev-parse", "HEAD"], text=True).strip()
-    changed = subprocess.check_output(["git", "-C", source, "status", "--porcelain"], text=True).strip()
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    head = subprocess.check_output(["git", "-C", source, "rev-parse", "HEAD"], env=env, text=True).strip()
+    changed = subprocess.check_output(["git", "-C", source, "status", "--porcelain"], env=env, text=True).strip()
     if head != expected_commit or changed:
         raise ValueError("GPU server requires the clean verified candidate source commit")
 
@@ -322,23 +324,6 @@ async def watch_gpu_child(launcher, process):
     raise RuntimeError("Launched GPU server exited during replay")
 
 
-def stop_gpu_child(launcher, process):
-    try:
-        children = launcher.children(recursive=True) if launcher.poll() is None else []
-    except psutil.NoSuchProcess:
-        children = []
-    if process is not None and process != launcher and process not in children:
-        children.append(process)
-    for member in [*reversed(children), launcher]:
-        try:
-            if member.is_running():
-                member.kill()
-        except psutil.NoSuchProcess:
-            pass
-    psutil.wait_procs(children, timeout=10)
-    launcher.wait(timeout=10)
-
-
 async def run_gpu(args, *, candidate=None):
     if candidate is None:
         owner, process = await asyncio.to_thread(gpu_owner, args)
@@ -371,11 +356,8 @@ async def run_gpu(args, *, candidate=None):
                "MURMUR_PERF_TRACE": "1", "MURMUR_WHISPER_MODEL": "large-v3-turbo", "MURMUR_WHISPER_DEVICE": "cuda"}
         for name in ("PYTHONPATH", "PYTHONHOME", "MURMUR_GPU_RUNTIME_DIR", "MURMUR_GPU_PACK_ID"):
             env.pop(name, None)
-        with (scratch / "server.log").open("wb") as log:
-            launcher = psutil.Popen([str(python), "-B", str(entry_point)], cwd=server, env=env,
-                                   stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
-        process = None
-        try:
+        with ((scratch / "server.log").open("wb") as log,
+              launch_owned_process([str(python), "-B", str(entry_point)], cwd=server, env=env, stdout=log) as launcher):
             owner, process = await wait_for_gpu_child(launcher, pid_file)
             audit_path = scratch / "audit.json" if args.entity_audit else None
             replay_task = asyncio.create_task(observe_gpu(args, candidate, owner, process, scratch / "evidence.json", audit_path))
@@ -395,8 +377,6 @@ async def run_gpu(args, *, candidate=None):
                 for task in (replay_task, watch_task):
                     task.cancel()
                 await asyncio.gather(replay_task, watch_task, return_exceptions=True)
-        finally:
-            await asyncio.to_thread(stop_gpu_child, launcher, process)
 
 
 def main():

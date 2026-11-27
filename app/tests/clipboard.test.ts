@@ -450,7 +450,7 @@ describe('pasteText', () => {
     expect(execFile).not.toHaveBeenCalled();
   });
 
-  test('does not restore after a newer paste starts while an ownership read is pending', async () => {
+  test('finishes a pending restore before a newer paste can write', async () => {
     await pasteText('first text', {
       restoreClipboard: true,
       restoreDelayMs: 1,
@@ -472,7 +472,7 @@ describe('pasteText', () => {
     finishRead?.('first text');
     await secondPaste;
 
-    expect(clipboardWrites).toEqual(['first text', 'second text']);
+    expect(clipboardWrites).toEqual(['first text', 'previous', 'second text']);
     expect(clipboardText).toBe('second text');
   });
 
@@ -1496,63 +1496,60 @@ describe('persistent paste helper', () => {
     });
   }
 
-  for (const timing of ['before clipboard change', 'after clipboard change', 'after baseline read', 'after budget'] as const) {
-    test(`resamples the baseline when the replacement is ready ${timing}`, async () => {
+  for (const scenario of ['stalled second read', 'user copy during baseline', 'ready past deadline'] as const) {
+    test(`preserves the pending restore on helper replacement with ${scenario}`, async () => {
       const paste = await readyPasteHelper();
-      let readyRequest: HelperRequest | undefined;
-      const replacement = nextHelper((request, helper) => {
-        if (request.type === 'ready') readyRequest = request;
-        if (request.type === 'sequence') helper.reply(request, 'sequence', { sequence: clipboardSequence });
-        if (request.type === 'paste') helper.reply(request, 'prepared');
-        if (request.type === 'commit') helper.reply(request, 'pasted');
-      });
+      const replacement = nextHelper();
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Original clipboard' })], 'Original clipboard');
+      await expect(pasteText('First dictation', {
+        targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
+      })).resolves.toEqual({ kind: 'pasted' });
       const baselineStarted = Promise.withResolvers<void>();
       const baselineRead = Promise.withResolvers<string>();
-      sequenceRead.mockRestore();
+      const unexpectedRead = Promise.withResolvers<string>();
       clipboardWriteText.mockClear();
-      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'First baseline' })], 'First baseline');
-      clipboardReadText.mockImplementationOnce(() => {
-        baselineStarted.resolve();
-        return baselineRead.promise;
+      clipboardReadText.mockClear();
+      clipboardReadText.mockImplementation(() => {
+        if (clipboardReadText.mock.calls.length === 1) {
+          baselineStarted.resolve();
+          return baselineRead.promise;
+        }
+        return unexpectedRead.promise;
       });
-      const clock = timing === 'after budget' ? spyOn(Date, 'now').mockReturnValue(100_000) : undefined;
-      const delivery = pasteText('Synthetic dictation', {
+      const clock = spyOn(Date, 'now').mockReturnValue(100_000);
+      const delivery = pasteText('Second dictation', {
         targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
-        deadlineUnixMs: Date.now() + (clock ? 1700 : 4000),
+        deadlineUnixMs: 101_000, signal: AbortSignal.timeout(450),
       });
       try {
         await Promise.race([baselineStarted.promise, delivery.then(() => { throw new Error('Baseline read did not start'); })]);
+        if (scenario === 'ready past deadline') clock.mockReturnValue(101_001);
         paste.crash();
-        if (timing === 'before clipboard change' || timing === 'after clipboard change') {
-          if (timing === 'before clipboard change') replacement.reply(readyRequest!, 'ready');
-          setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
-          if (timing === 'after clipboard change') replacement.reply(readyRequest!, 'ready');
-          expect(pasteHelper.pasteWarmup).toBeUndefined();
+        expect(pasteHelper.pasteWarmup).toBeUndefined();
+        if (scenario === 'user copy during baseline') {
+          setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'User copy' })], 'User copy');
         }
-        const baselineEndedAt = performance.now();
-        baselineRead.resolve('First baseline');
-        if (timing === 'after baseline read' || timing === 'after budget') {
-          await Bun.sleep(50);
-          expect(clipboardWriteText).not.toHaveBeenCalled();
-          setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
-          if (timing === 'after baseline read') replacement.reply(readyRequest!, 'ready');
-        }
-        if (timing !== 'after budget') {
-          expect(await delivery).toEqual({ kind: 'pasted' });
-          expect(types(replacement)).toEqual(['ready', 'sequence', 'paste', 'commit']);
-          await Bun.sleep(850);
-          expect(clipboardWriteText.mock.calls).toEqual([['Synthetic dictation'], ['Second baseline']]);
-        } else {
-          expect(await delivery).toEqual({ kind: 'skipped_unsafe', reason: 'paste_unavailable', copied: false });
-          expect(performance.now() - baselineEndedAt).toBeGreaterThanOrEqual(150);
-          expect(types(replacement)).toEqual(['ready']);
-          expect(clipboardWriteText).not.toHaveBeenCalled();
-        }
-        expect(clipboardText).toBe('Second baseline');
+        baselineRead.resolve('First dictation');
+        expect(await delivery).toEqual({ kind: 'skipped_unsafe', reason: 'paste_unavailable', copied: false });
+        expect(clipboardReadText).toHaveBeenCalledTimes(1);
+        expect(clipboardWriteText).not.toHaveBeenCalled();
+        expect(types(replacement)).toEqual(['ready']);
+        expect(types(paste)).toEqual(['ready', 'paste', 'commit']);
         expect(execFile).not.toHaveBeenCalled();
       } finally {
-        baselineRead.resolve('First baseline');
-        clock?.mockRestore();
+        baselineRead.resolve('First dictation');
+        unexpectedRead.resolve(clipboardText);
+        clipboardReadText.mockImplementation(async () => clipboardText);
+        clock.mockRestore();
+      }
+      await Bun.sleep(850);
+      expect(clipboardReadText).toHaveBeenCalledTimes(2);
+      if (scenario === 'user copy during baseline') {
+        expect(clipboardText).toBe('User copy');
+        expect(clipboardWriteText).not.toHaveBeenCalled();
+      } else {
+        expect(clipboardText).toBe('Original clipboard');
+        expect(clipboardWriteText.mock.calls).toEqual([['Original clipboard']]);
       }
     });
   }
