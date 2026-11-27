@@ -85,7 +85,8 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.Future()
 
                 with (patch.object(replay.subprocess, "check_output",
-                                   side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
+                                   side_effect=[str(args.source), NEW_CANDIDATE["commit"], "",
+                                                "NVIDIA GeForce RTX 3060 Laptop GPU"]),
                       patch.object(replay, "launch_owned_process", side_effect=launch) as start,
                       patch.object(replay, "has_loopback_listener", return_value=True) as listener,
                       patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
@@ -118,7 +119,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
         args = SimpleNamespace(source=Path("candidate"))
         for head, status in ((NEW_CANDIDATE["commit"], ""), (score.CANDIDATE["commit"], " M source.py")):
             with (self.subTest(head=head, dirty=bool(status)),
-                  patch.object(replay.subprocess, "check_output", side_effect=[head, status]),
+                  patch.object(replay.subprocess, "check_output", side_effect=[str(args.source.resolve()), head, status]),
                   self.assertRaisesRegex(ValueError, "clean verified candidate source commit")):
                 replay.gpu_owner(args)
 
@@ -148,6 +149,29 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                 (source / "main.py").write_text("# changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "clean verified candidate source commit"):
                     replay.verify_candidate_source(source, expected)
+
+    def test_candidate_source_rejects_an_ignored_nested_server_copy(self):
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+
+            def git(*args):
+                return subprocess.check_output(["git", "-C", source, *args], env=env, text=True).strip()
+
+            git("init", "--quiet")
+            (source / ".gitignore").write_text("nested/\n", encoding="utf-8")
+            git("add", ".gitignore")
+            git("-c", "user.name=Replay fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture")
+            nested = source / "nested"
+            entry_point = nested / "server/src/main.py"
+            entry_point.parent.mkdir(parents=True)
+            entry_point.write_text("# ignored server copy\n", encoding="utf-8")
+            self.assertEqual(git("status", "--porcelain"), "")
+            commit = git("rev-parse", "HEAD")
+            replay.verify_candidate_source(source, commit)
+            with self.assertRaisesRegex(ValueError, "candidate Git worktree root"):
+                replay.verify_candidate_source(nested, commit)
 
     def test_owned_process_cleanup_stops_child_after_launcher_exits(self):
         command = [sys.executable, "-c",
@@ -196,7 +220,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
             for command in (["python", str(outside)], ["python", str(outside), str(entry_point)],
                             ["python", "-m", "src.main", str(entry_point)]):
                 with (self.subTest(command=command),
-                      patch.object(replay.subprocess, "check_output", side_effect=[score.CANDIDATE["commit"], ""]),
+                      patch.object(replay.subprocess, "check_output", side_effect=[str(source), score.CANDIDATE["commit"], ""]),
                       patch.object(replay.psutil, "Process", return_value=process),
                       patch.object(replay, "has_loopback_listener") as listener):
                     process.cmdline.return_value = command
