@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -247,9 +248,14 @@ def gpu_owner(args, *, expected_commit=CANDIDATE["commit"]):
         raise ValueError("GPU server requires the clean verified candidate source commit")
     owner = json.loads(args.pid_file.read_text(encoding="utf-8"))
     process = psutil.Process(owner["pid"])
-    if not Path(process.cwd()).resolve().is_relative_to(source):
+    cwd = Path(process.cwd()).resolve()
+    if not cwd.is_relative_to(source):
         raise ValueError("GPU server PID is outside the candidate checkout")
-    if not any(Path(arg).name == "main.py" for arg in process.cmdline()[1:]):
+    command = process.cmdline()
+    entry_point = (source / "server/src/main.py").resolve()
+    if (not entry_point.is_relative_to(source) or len(command) < 2
+            or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?", Path(process.exe()).name, re.IGNORECASE)
+            or (cwd / command[1]).resolve() != entry_point):
         raise ValueError("GPU server PID does not launch the candidate entry point")
     if not has_loopback_listener(process, owner["port"]):
         raise ValueError("GPU server PID does not own the specified loopback listener")

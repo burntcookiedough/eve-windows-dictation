@@ -417,32 +417,39 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
     let clipboardWrite: 'not_attempted' | 'uncertain' | 'written' = 'not_attempted';
     let failureReason: PastePreDispatchReason = 'clipboard_baseline_read_failed';
     try {
-      if (isSuperseded()) return skip('superseded');
-      const warming = pasteHelper.pasteWarmup;
-      if (warming === null) return skip('paste_unavailable', false, 'paste_helper_not_ready');
-      if (warming) {
-        // Sample the native sequence right after the write. Waiting between
-        // those operations could bind the sequence of a different clipboard owner.
-        const timeLeft = (options.deadlineUnixMs ?? Infinity) - Date.now();
-        if (timeLeft <= 0) return skip('expired', false, 'paste_expired');
-        const waitMs = Math.min(PASTE_WARM_WAIT_MS, timeLeft - PASTE_DEADLINE_RESERVE_MS);
-        if (waitMs <= 0) return skip('paste_unavailable', false, 'paste_helper_not_ready');
-        const waitSignal = AbortSignal.any([signal, AbortSignal.timeout(waitMs)]);
-        const ready = await readClipboardWhileActive(waitSignal, () => warming.then(() => true)).catch(() => false);
+      let warmupDeadline: number | undefined;
+      while (true) {
         if (isSuperseded()) return skip('superseded');
-        if (!ready) return skip('paste_unavailable', false, 'paste_helper_not_ready');
-      }
-      if (options.restoreClipboard) {
+        const warming = pasteHelper.pasteWarmup;
+        if (warming === null) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+        if (warming) {
+          // Wait before reading the baseline and writing so the sequence can
+          // be sampled immediately after the write.
+          const timeLeft = (options.deadlineUnixMs ?? Infinity) - Date.now();
+          if (timeLeft <= 0) return skip('expired', false, 'paste_expired');
+          const now = performance.now();
+          warmupDeadline ??= now + PASTE_WARM_WAIT_MS;
+          const waitMs = Math.floor(Math.min(warmupDeadline - now, timeLeft - PASTE_DEADLINE_RESERVE_MS));
+          if (waitMs <= 0) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+          const waitSignal = AbortSignal.any([signal, AbortSignal.timeout(waitMs)]);
+          const ready = await readClipboardWhileActive(waitSignal, () => warming.then(() => true)).catch(() => false);
+          if (isSuperseded()) return skip('superseded');
+          if (!ready || performance.now() >= now + waitMs) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+          continue;
+        }
+        if (!options.restoreClipboard) {
+          if (activePasteSequence) discardPasteSequence(activePasteSequence);
+          break;
+        }
         const operation = await beginPasteOperation(signal);
         if (isSuperseded()) return skip('superseded');
         sequence = operation.sequence;
         baselineSnapshot = operation.baselineSnapshot;
-      } else if (activePasteSequence) {
-        discardPasteSequence(activePasteSequence);
+        // If the helper exited during the read, wait again and resample.
+        if (pasteHelper.pasteWarmup === undefined) break;
       }
 
-      // A helper may have exited while the baseline read was pending.
-      if (pasteHelper.pasteWarmup !== undefined) return skip('paste_unavailable', false, 'paste_helper_not_ready');
+      if (Date.now() >= (options.deadlineUnixMs ?? Infinity)) return skip('expired', false, 'paste_expired');
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       failureReason = 'clipboard_write_failed';
       clipboardWrite = 'uncertain';

@@ -88,8 +88,9 @@ Never route this command through the packaged Eve app.
 
 From the harness checkout, run
 `python scripts/sim_acceptance/prepare_corpus.py --root <corpus-dir> --config gpu-close-quiet`.
-Run the candidate's `server/src/main.py` with the dev Python executable,
-headless, using localhost and `MURMUR_PORT=0`. Set `HF_HOME` and
+From within the candidate checkout, launch `server/src/main.py` directly with
+the dev Python executable, headless and using localhost and `MURMUR_PORT=0`.
+Set `HF_HOME` and
 `HF_HUB_CACHE` to the isolated cache, `MURMUR_SETTINGS_FILE` and
 `MURMUR_PID_FILE` to scratch files, `MURMUR_PERF_TRACE=1`,
 `MURMUR_WHISPER_MODEL=large-v3-turbo` and `MURMUR_WHISPER_DEVICE=cuda`.

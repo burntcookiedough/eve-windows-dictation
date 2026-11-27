@@ -38,6 +38,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
             args.pid_file.write_text(json.dumps({"pid": 123, "port": 456}), encoding="utf-8")
             process = Mock()
             process.cwd.return_value = str(root / "server")
+            process.exe.return_value = "python.exe"
             process.cmdline.return_value = ["python", "src/main.py"]
             with (patch.object(replay.subprocess, "check_output",
                                side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
@@ -60,6 +61,32 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
                   patch.object(replay.subprocess, "check_output", side_effect=[head, status]),
                   self.assertRaisesRegex(ValueError, "clean verified candidate source commit")):
                 replay.gpu_owner(args, expected_commit=NEW_CANDIDATE["commit"])
+
+    def test_gpu_owner_rejects_entry_points_outside_the_candidate_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "candidate"
+            entry_point = source / "server/src/main.py"
+            outside = root / "other-checkout/server/src/main.py"
+            for path in (entry_point, outside):
+                path.parent.mkdir(parents=True)
+                path.write_text("# synthetic fixture\n", encoding="utf-8")
+            pid_file = root / "server.pid"
+            pid_file.write_text(json.dumps({"pid": 123, "port": 456}), encoding="utf-8")
+            args = SimpleNamespace(source=source, pid_file=pid_file)
+            process = Mock()
+            process.cwd.return_value = str(source / "server")
+            process.exe.return_value = "python.exe"
+            for command in (["python", str(outside)], ["python", str(outside), str(entry_point)],
+                            ["python", "-m", "src.main", str(entry_point)]):
+                with (self.subTest(command=command),
+                      patch.object(replay.subprocess, "check_output", side_effect=[NEW_CANDIDATE["commit"], ""]),
+                      patch.object(replay.psutil, "Process", return_value=process),
+                      patch.object(replay, "has_loopback_listener") as listener):
+                    process.cmdline.return_value = command
+                    with self.assertRaisesRegex(ValueError, "does not launch the candidate entry point"):
+                        replay.gpu_owner(args, expected_commit=NEW_CANDIDATE["commit"])
+                    listener.assert_not_called()
 
     async def test_warmup_timeout_still_attempts_each_clip(self):
         clips = [{"id": clip_id, "mode": "quick", "duration_s": 8,

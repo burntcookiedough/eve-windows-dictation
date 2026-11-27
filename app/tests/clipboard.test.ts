@@ -1496,6 +1496,59 @@ describe('persistent paste helper', () => {
     });
   }
 
+  for (const replacementReady of [true, false]) {
+    test(`waits for a replacement that warms during the baseline read (ready in budget: ${replacementReady})`, async () => {
+      const paste = await readyPasteHelper();
+      let readyRequest: HelperRequest | undefined;
+      const replacement = nextHelper((request, helper) => {
+        if (request.type === 'ready') readyRequest = request;
+        if (request.type === 'sequence') helper.reply(request, 'sequence', { sequence: clipboardSequence });
+        if (request.type === 'paste') helper.reply(request, 'prepared');
+        if (request.type === 'commit') helper.reply(request, 'pasted');
+      });
+      const baselineStarted = Promise.withResolvers<void>();
+      const baselineRead = Promise.withResolvers<string>();
+      sequenceRead.mockRestore();
+      clipboardWriteText.mockClear();
+      setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'First baseline' })], 'First baseline');
+      clipboardReadText.mockImplementationOnce(() => {
+        baselineStarted.resolve();
+        return baselineRead.promise;
+      });
+      const clock = replacementReady ? undefined : spyOn(Date, 'now').mockReturnValue(100_000);
+      const delivery = pasteText('Synthetic dictation', {
+        targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
+        deadlineUnixMs: Date.now() + (replacementReady ? 4000 : 1700),
+      });
+      try {
+        await Promise.race([baselineStarted.promise, delivery.then(() => { throw new Error('Baseline read did not start'); })]);
+        paste.crash();
+        const baselineEndedAt = performance.now();
+        baselineRead.resolve('First baseline');
+        await Bun.sleep(50);
+        expect(clipboardWriteText).not.toHaveBeenCalled();
+        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
+        if (replacementReady) {
+          replacement.reply(readyRequest!, 'ready');
+          expect(await delivery).toEqual({ kind: 'pasted' });
+          expect(types(replacement)).toEqual(['ready', 'sequence', 'paste', 'commit']);
+          await Bun.sleep(850);
+          expect(clipboardWriteText.mock.calls).toEqual([['Synthetic dictation'], ['Second baseline']]);
+        } else {
+          expect(await delivery).toEqual({ kind: 'skipped_unsafe', reason: 'paste_unavailable', copied: false });
+          expect(performance.now() - baselineEndedAt).toBeGreaterThanOrEqual(150);
+          expect(types(replacement)).toEqual(['ready']);
+          expect(clipboardWriteText).not.toHaveBeenCalled();
+        }
+        expect(clipboardText).toBe('Second baseline');
+        expect(execFile).not.toHaveBeenCalled();
+      } finally {
+        baselineRead.resolve('First baseline');
+        clock?.mockRestore();
+      }
+    });
+  }
+
   test('a stale authorization read preserves the pre-dispatch fallback timeout trace', async () => {
     const originalRead = Promise.withResolvers<string>();
     const fallbackRead = Promise.withResolvers<string>();
