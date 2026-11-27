@@ -10,6 +10,7 @@ import type { TextFrameFinal } from '../../shared/protocol.js';
 import { countWords } from '../../shared/insights.js';
 import { copyToClipboard, pasteText, type ClipboardCopyOutcome, type ClipboardPasteOutcome } from './clipboard.js';
 import type { HistoryService } from './history.js';
+import type { ForegroundSnapshot } from './paste-helper.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('Pipeline');
@@ -134,7 +135,8 @@ interface DispatchOptions {
   onHistorySaved?: (entry: HistoryEntryWithGroup) => void;
 }
 
-type PasteTarget = number | null | Promise<number | null>;
+type PasteTargetValue = ForegroundSnapshot | number | null;
+type PasteTarget = PasteTargetValue | Promise<PasteTargetValue>;
 
 async function deliverToClipboard(
   entry: TranscriptionEntry,
@@ -143,20 +145,26 @@ async function deliverToClipboard(
   perfTraceId: string | undefined,
   signal: AbortSignal,
   deadlineUnixMs: number,
+  onPasteDispatch: () => void,
 ): Promise<ClipboardCopyOutcome | ClipboardPasteOutcome> {
   if (!settings.autoPaste) return copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
 
-  const targetWindowHandle = await pasteTarget ?? null;
+  const target = await pasteTarget ?? null;
+  const snapshot = typeof target === 'object' ? target : null;
+  const targetWindowHandle = typeof target === 'number' ? target : snapshot && 'handle' in snapshot ? snapshot.handle : null;
   const delivery = await pasteText(entry.text, {
     restoreClipboard: settings.restoreClipboardAfterPaste && !settings.autoCopy,
     restoreDelayMs: settings.clipboardRestoreDelayMs,
     targetWindowHandle,
+    snapshotFailure: snapshot && 'reason' in snapshot ? snapshot.reason : undefined,
     signal,
     deadlineUnixMs,
+    onDispatch: onPasteDispatch,
     ...(perfTraceId ? { perfTraceId } : {}),
   });
-  // A paste that reached the target check may already have written or sent input.
-  if (settings.autoCopy && delivery.kind === 'skipped_unsafe' && delivery.reason === 'no_target') {
+  // Both preflight exits occur before any paste-side clipboard write.
+  if (settings.autoCopy && delivery.kind === 'skipped_unsafe'
+      && (delivery.reason === 'no_target' || delivery.reason === 'paste_unavailable')) {
     const copy = await copyToClipboard(entry.text, perfTraceId, signal, deadlineUnixMs);
     return copy.kind === 'copied' ? { ...delivery, copied: true } : copy;
   }
@@ -205,8 +213,12 @@ export async function dispatchToOutputs(
     const timeoutMs = options.clipboardTimeoutMs ?? CLIPBOARD_FINALIZATION_TIMEOUT_MS;
     const deadlineUnixMs = Date.now() + timeoutMs;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let pasteDispatchAttempted = false;
     const expiration = new Promise<DeliveryOutcome>(resolve => {
       timeout = setTimeout(() => {
+        if (settings.autoPaste && !pasteDispatchAttempted) {
+          perfTraceManager.pastePreDispatch(perfTraceId, 'clipboard_finalization_timeout');
+        }
         controller.abort();
         log.warn('Clipboard finalization timed out');
         resolve({ kind: 'failed' });
@@ -214,10 +226,13 @@ export async function dispatchToOutputs(
     });
     try {
       delivery = await Promise.race([
-        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal, deadlineUnixMs),
+        deliverToClipboard(entry, settings, pasteTargetWindowHandle, perfTraceId, controller.signal, deadlineUnixMs, () => {
+          pasteDispatchAttempted = true;
+        }),
         expiration,
       ]);
     } catch {
+      if (settings.autoPaste && !pasteDispatchAttempted) perfTraceManager.pastePreDispatch(perfTraceId, 'clipboard_delivery_failed');
       log.error('Clipboard delivery did not complete');
       delivery = { kind: 'failed' };
     } finally {

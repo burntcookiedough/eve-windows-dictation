@@ -11,6 +11,7 @@ export type ServerStatusPhase =
   | 'checking'
   | 'downloading'
   | 'loading'
+  | 'preparing'
   | 'ready'
   | 'error';
 
@@ -41,12 +42,15 @@ export function getServerStatusPhase(state: ServerStatePayload | null): ServerSt
   if (model?.phase === 'loading' || state.engineStatus?.status === 'loading') return 'loading';
   if (model?.status === 'missing') return 'missing';
   if (model?.status === 'partial') return 'partial';
-  if (state.status === 'running' && state.engineStatus?.status === 'ready') return 'ready';
+  if (state.status === 'running' && state.engineStatus?.status === 'ready') {
+    // Auto-paste helpers hold Ready for a bounded time; dictation already works.
+    return state.pasteReadiness === 'warming' ? 'preparing' : 'ready';
+  }
   if (state.status === 'idle') return 'stale';
   return 'unavailable';
 }
 
-function phaseAnnouncement(phase: ServerStatusPhase, state: ServerStatePayload | null): string {
+export function getServerStatusAnnouncement(phase: ServerStatusPhase, state: ServerStatePayload | null): string {
   const model = state?.modelDownload?.model;
   switch (phase) {
     case 'connecting': return 'Connecting to Eve speech services.';
@@ -57,7 +61,10 @@ function phaseAnnouncement(phase: ServerStatusPhase, state: ServerStatePayload |
     case 'checking': return 'Checking speech model files.';
     case 'downloading': return 'Downloading the speech model.';
     case 'loading': return 'Loading the speech model.';
-    case 'ready': return 'Speech model is ready.';
+    case 'preparing': return 'Dictation is ready. Paste is warming up.';
+    case 'ready': return state?.pasteReadiness === 'degraded'
+      ? 'Dictation is ready. Auto-paste is unavailable.'
+      : 'Speech model is ready.';
     case 'error': return 'Speech model setup needs attention.';
   }
 }
@@ -91,9 +98,10 @@ function publish(state: ServerStatePayload | null): void {
   const phase = getServerStatusPhase(state);
   const nextMilestone = milestone(state);
   const phaseChanged = phase !== current.phase;
+  const readinessChanged = phase === 'ready' && state?.pasteReadiness !== current.state?.pasteReadiness;
   const milestoneChanged = phase === 'downloading' && nextMilestone !== null && nextMilestone !== announcedMilestone;
-  const announcement = phaseChanged || milestoneChanged
-    ? (milestoneChanged ? `Speech model download ${nextMilestone}% complete.` : phaseAnnouncement(phase, state))
+  const announcement = phaseChanged || readinessChanged || milestoneChanged
+    ? (milestoneChanged ? `Speech model download ${nextMilestone}% complete.` : getServerStatusAnnouncement(phase, state))
     : current.announcement;
 
   announcedMilestone = nextMilestone;

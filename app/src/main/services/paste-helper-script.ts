@@ -186,9 +186,6 @@ while ($null -ne ($line = [Console]::ReadLine())) {
   $reply = @{ id = $id; type = $request.type }
   switch ($request.type) {
     'ready' {}
-    'foreground' {
-      $reply.handle = [NativePaste]::GetForegroundWindow().ToInt64()
-    }
     'sequence' {
       $reply.sequence = [NativePaste]::GetClipboardSequenceNumber()
     }
@@ -216,6 +213,247 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       }
     }
     default { throw 'Unknown paste helper request.' }
+  }
+  [Console]::WriteLine((ConvertTo-Json -InputObject $reply -Compress))
+}
+`.trim();
+}
+
+// The snapshot helper never samples "whatever is foreground now". A background
+// thread records every EVENT_SYSTEM_FOREGROUND, and each capture names the
+// hotkey keydown by its KBDLLHOOKSTRUCT tick. Both use the GetTickCount clock,
+// so the helper returns the window only when no foreground change happened at
+// or after that keydown; otherwise it rejects and Eve uses the copy and History
+// fallback. The C# avoids "$" because it sits in a PowerShell here-string.
+export const FOREGROUND_TRACKER_TYPE = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Threading;
+
+public sealed class ForegroundCapture {
+  public long Handle;
+  public string Reason;
+}
+
+public static class ForegroundTracker {
+  public const ulong MaxKeydownAgeMs = 2000;
+  private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+  // A private event in the OEM range marks how far the hook has drained.
+  private const uint EVENT_TRACKER_SYNC = 0x01EE;
+  private const uint EVENT_OEM_DEFINED_END = 0x01FF;
+  private const uint WINEVENT_OUTOFCONTEXT = 0;
+  private const uint PM_NOREMOVE = 0;
+  private const uint WS_POPUP = 0x80000000;
+  private const uint WS_EX_TOOLWINDOW = 0x00000080;
+  private const uint WS_EX_NOACTIVATE = 0x08000000;
+
+  private delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint eventTime);
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct MSG {
+    public IntPtr hwnd;
+    public uint message;
+    public IntPtr wParam;
+    public IntPtr lParam;
+    public uint time;
+    public int x;
+    public int y;
+  }
+
+  [DllImport("user32.dll")]
+  private static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr module, WinEventProc callback, uint processId, uint threadId, uint flags);
+  [DllImport("user32.dll")]
+  private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int idObject, int idChild);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  private static extern IntPtr CreateWindowEx(uint exStyle, string className, string windowName, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+  [DllImport("user32.dll")]
+  private static extern int GetMessage(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax);
+  [DllImport("user32.dll")]
+  private static extern bool PeekMessage(out MSG message, IntPtr hwnd, uint filterMin, uint filterMax, uint remove);
+  [DllImport("user32.dll")]
+  private static extern bool TranslateMessage(ref MSG message);
+  [DllImport("user32.dll")]
+  private static extern IntPtr DispatchMessage(ref MSG message);
+  [DllImport("user32.dll")]
+  private static extern IntPtr GetForegroundWindow();
+  [DllImport("kernel32.dll")]
+  private static extern ulong GetTickCount64();
+  [DllImport("kernel32.dll")]
+  private static extern uint GetCurrentThreadId();
+
+  private static readonly object Gate = new object();
+  private static readonly RandomNumberGenerator MarkerRandom = RandomNumberGenerator.Create();
+  private static WinEventProc callback;
+  private static IntPtr trackerWindow;
+  private static uint hookThreadId;
+  private static ulong installedAt;
+  private static ulong lastChangeAt;
+  private static int syncObjectId;
+  private static int syncChildId;
+  private static bool syncCompleted;
+
+  // Read-only views for diagnostics and the native ordering tests.
+  public static long TrackerWindow { get { lock (Gate) { return trackerWindow.ToInt64(); } } }
+  public static uint HookThreadId { get { lock (Gate) { return hookThreadId; } } }
+
+  // Places a past GetTickCount value on the 64-bit clock that produced it.
+  public static ulong ExpandTick(uint tick, ulong now) {
+    uint age = unchecked((uint)now - tick);
+    return age <= now ? now - age : 0;
+  }
+
+  // A change is never recorded earlier than it happened. An implausible event
+  // time is replaced by the delivery time, which can only cause a rejection.
+  public static ulong EventTime(uint eventTick, ulong now) {
+    ulong at = ExpandTick(eventTick, now);
+    return now - at > MaxKeydownAgeMs ? now : at;
+  }
+
+  // Null means the window sampled now is the one that was foreground at the keydown.
+  public static string Judge(ulong keydownAt, ulong now, ulong installed, ulong lastChange, long before, long after) {
+    if (keydownAt > now || now - keydownAt > MaxKeydownAgeMs) return "keydown_unverified";
+    if (installed == 0 || installed >= keydownAt) return "tracker_unready";
+    // The tick is coarse, so a change in the keydown's own tick counts as later.
+    if (lastChange >= keydownAt || before != after) return "focus_changed";
+    return null;
+  }
+
+  public static bool Start(int timeoutMs) {
+    ManualResetEvent started = new ManualResetEvent(false);
+    Thread thread = new Thread(delegate() { Run(started); });
+    thread.IsBackground = true;
+    thread.Start();
+    started.WaitOne(timeoutMs);
+    lock (Gate) { return installedAt != 0; }
+  }
+
+  private static void Run(ManualResetEvent started) {
+    MSG message;
+    PeekMessage(out message, IntPtr.Zero, 0, 0, PM_NOREMOVE);
+    // A hidden, never-activated window that only names this helper's sync events.
+    IntPtr window = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "STATIC", "", WS_POPUP, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+    callback = OnEvent;
+    // One hook delivers foreground changes and sync markers through the same
+    // per-thread event queue, so a marker is never seen before an earlier change.
+    IntPtr hook = window == IntPtr.Zero ? IntPtr.Zero
+      : SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_OEM_DEFINED_END, IntPtr.Zero, callback, 0, 0, WINEVENT_OUTOFCONTEXT);
+    if (hook != IntPtr.Zero) {
+      lock (Gate) {
+        trackerWindow = window;
+        hookThreadId = GetCurrentThreadId();
+        installedAt = GetTickCount64();
+      }
+    }
+    started.Set();
+    if (hook == IntPtr.Zero) return;
+    while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
+      TranslateMessage(ref message);
+      DispatchMessage(ref message);
+    }
+    // A helper without a working tracker exits so Eve can start a replacement.
+    Environment.Exit(3);
+  }
+
+  private static void OnEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint eventThread, uint eventTime) {
+    if (eventType == EVENT_SYSTEM_FOREGROUND) {
+      ulong at = EventTime(eventTime, GetTickCount64());
+      lock (Gate) {
+        if (at > lastChangeAt) lastChangeAt = at;
+      }
+    } else if (eventType == EVENT_TRACKER_SYNC) {
+      lock (Gate) {
+        // Windows attributes window events to the owner thread, including when
+        // NotifyWinEvent is called elsewhere. Match the per-capture IDs as well.
+        if (eventThread == hookThreadId && hwnd == trackerWindow && idObject == syncObjectId && idChild == syncChildId) {
+          syncCompleted = true;
+          Monitor.PulseAll(Gate);
+        }
+      }
+    }
+  }
+
+  public static ForegroundCapture Capture(uint keydownTick, int waitMs) {
+    ForegroundCapture result = new ForegroundCapture();
+    ulong now = GetTickCount64();
+    ulong keydownAt = ExpandTick(keydownTick, now);
+    long before = GetForegroundWindow().ToInt64();
+    byte[] nonce = new byte[8];
+    MarkerRandom.GetBytes(nonce);
+    // Positive custom object and child IDs, with neither ID equal to zero.
+    int objectId = (BitConverter.ToInt32(nonce, 0) & int.MaxValue) | 1;
+    int childId = (BitConverter.ToInt32(nonce, 4) & int.MaxValue) | 1;
+    IntPtr window;
+    lock (Gate) {
+      syncObjectId = objectId;
+      syncChildId = childId;
+      syncCompleted = false;
+      window = trackerWindow;
+    }
+    if (window == IntPtr.Zero) {
+      result.Reason = "tracker_unavailable";
+      return result;
+    }
+    // Every change that completed before the read above is already queued to
+    // the hook thread, ahead of this marker.
+    NotifyWinEvent(EVENT_TRACKER_SYNC, window, objectId, childId);
+    ulong installed;
+    ulong lastChange;
+    DateTime until = DateTime.UtcNow.AddMilliseconds(Math.Max(0, waitMs));
+    lock (Gate) {
+      while (!syncCompleted) {
+        int remaining = (int)(until - DateTime.UtcNow).TotalMilliseconds;
+        if (remaining <= 0) {
+          result.Reason = "tracker_unavailable";
+          return result;
+        }
+        Monitor.Wait(Gate, remaining);
+      }
+      installed = installedAt;
+    }
+    long after = GetForegroundWindow().ToInt64();
+    lock (Gate) { lastChange = lastChangeAt; }
+    result.Reason = Judge(keydownAt, now, installed, lastChange, before, after);
+    if (result.Reason == null) result.Handle = before;
+    return result;
+  }
+}
+"@
+`.trim();
+
+export function buildForegroundSnapshotScript(): string {
+  return `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+${FOREGROUND_TRACKER_TYPE}
+
+# Ready means the foreground hook is installed, so later keydowns can be judged.
+if (-not [ForegroundTracker]::Start(2000)) { throw 'Foreground tracker unavailable.' }
+
+while ($null -ne ($line = [Console]::ReadLine())) {
+  $request = ConvertFrom-Json -InputObject $line
+  $reply = @{ id = [long]$request.id; type = $request.type }
+  switch ($request.type) {
+    'ready' {}
+    'foreground' {
+      $remaining = [long]$request.deadlineUnixMs - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+      if ($remaining -le 0) {
+        $reply.type = 'expired'
+      } else {
+        $capture = [ForegroundTracker]::Capture([uint32]$request.keydownTick, [int]$remaining)
+        if ($null -ne $capture.Reason) {
+          $reply.type = 'rejected'
+          $reply.reason = $capture.Reason
+        } elseif ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [long]$request.deadlineUnixMs) {
+          $reply.type = 'expired'
+        } else {
+          $reply.handle = $capture.Handle
+        }
+      }
+    }
+    default { throw 'Unknown foreground snapshot request.' }
   }
   [Console]::WriteLine((ConvertTo-Json -InputObject $reply -Compress))
 }

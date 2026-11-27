@@ -91,11 +91,61 @@ ambiguous, so Eve reports the failure and skips retrying the paste. The helper
 reply measures dispatch and leaves actual editor insertion to the isolated
 observer.
 
-Eve requests the recording target before settings-file reads or overlay work,
-using a ready, idle helper with a 100 ms reply deadline. A cold helper warms for
-the next recording. When no valid handle was captured at recording start, Eve
-follows the session's copy and History settings.
+With auto-paste enabled, Eve starts the paste and foreground helpers when it
+starts, in parallel with window creation and server startup. The dictation hook
+is registered before the server can report Ready and never waits for the
+helpers. The server state carries `pasteReadiness` (`off`, `warming`, `ready`
+or `degraded`). While it is `warming`, the app shows "dictation ready · paste
+warming up". The hosted harness waits for paste readiness to settle on
+candidates that report it. After
+10 seconds without both helpers, or as soon as one exits before it is ready,
+Eve reports Ready with auto-paste degraded. Hotkeys work throughout and use the
+copy and History fallback. Enabling auto-paste in Settings starts the same
+warm-up. Disabling it
+stops the foreground helper once any accepted capture has settled. While
+auto-paste is off, neither helper is replaced after it exits. With auto-paste
+on, a ready helper that disconnects starts one replacement in the background.
 
+The foreground target is bound to the hotkey keydown. The global hook reports
+the keydown's `KBDLLHOOKSTRUCT.time`, a 32-bit `GetTickCount` value, and Eve
+sends it with the capture request. The foreground helper runs a
+`SetWinEventHook` tracker on a message-pumping thread.
+Each `EVENT_SYSTEM_FOREGROUND` is recorded at its `dwmsEventTime`, which uses the
+same clock. For each request, the helper reads the foreground window, then raises
+a private OEM event with `NotifyWinEvent` on a hidden helper-owned window and
+waits until the same hook delivers it. Out-of-context events reach the hook
+thread in the order they were raised. A thread message would not work here,
+because `GetMessage` can return a posted message before pending events. So every
+change that finished before the read is recorded by the time the marker arrives,
+even when the hook thread lags. The helper returns that window only when no foreground change
+happened at or after the keydown's tick and the window did not change during
+the read. The tick has a resolution of about 16 ms, so a change in the
+keydown's own tick counts as a later change. Otherwise the helper rejects the
+capture and never returns a window that became foreground after the keydown.
+The helper also rejects a keydown older than two seconds, and one that happened
+before its tracker was installed. The foreground helper handles only readiness
+and capture requests, so clipboard sequence queries and paste commits cannot
+delay a capture. Eve accepts a reply within 100 ms and keeps that result for the
+session, including when a Long dictation waits for a Quick dictation to finish.
+
+When no target is proven, Eve follows the session's copy and History settings.
+A hotkey pressed while the helpers are still starting, after auto-paste is
+enabled or while a crashed helper is replaced, shows "Paste warming up" on the
+overlay. That dictation keeps the copy and History fallback. If a target was
+captured but the paste helper is still starting at stop, Eve waits up to
+2.5 seconds for the helper before writing to the clipboard. This keeps the
+sequence sample adjacent to the write and reserves 1.5 seconds of the delivery
+deadline for the guarded paste or configured copy fallback.
+
+Completed performance traces include an allowlisted `pastePreDispatchReason`
+when a foreground capture or clipboard preflight prevents dispatch. Capture
+reasons from Eve are `helper_absent`, `helper_unready`, `helper_busy`,
+`rpc_timeout`, and `no_hwnd`. Reasons from the foreground helper are
+`focus_changed`, `tracker_unready`, `tracker_unavailable`, and
+`keydown_unverified`. Clipboard reasons identify the failing preflight step,
+such as `paste_helper_not_ready`, `clipboard_sequence_unavailable`, or
+`clipboard_ownership_changed`. The
+field contains only a reason code or null.
 For the explicit editor, from `app/` run `bun run dev:vite` and open
 `http://127.0.0.1:5173/app/fixtures/isolated-editor-observer.html` (use the configured
 port if different). Focus its empty textarea before the scripted dictation paste.

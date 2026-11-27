@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('45784796424')][string]$RunId,
-    [Parameter(Mandatory)][ValidateSet('15101085356')][string]$ArtifactId,
-    [Parameter(Mandatory)][ValidatePattern('(?-i)^22aa01d70a10fc8b52668866ff1c0bd5ac02c751$')][string]$Commit,
-    [Parameter(Mandatory)][ValidatePattern('(?-i)^e0004b05ee119467a037c201ea723159e01adda3615f5a2668cfb05433fe763f$')][string]$ManifestSha256
+    [Parameter(Mandatory)][ValidatePattern('\A[1-9][0-9]*\z')][string]$RunId,
+    [Parameter(Mandatory)][ValidatePattern('\A[1-9][0-9]*\z')][string]$ArtifactId,
+    [Parameter(Mandatory)][ValidatePattern('\A[0-9a-fA-F]{40}\z')][string]$Commit,
+    [Parameter(Mandatory)][ValidatePattern('\A[0-9a-fA-F]{64}\z')][string]$ManifestSha256
 )
 
 Set-StrictMode -Version Latest
@@ -34,9 +34,9 @@ $pins = @{
     RetainedDir = $bundle
     Source = 'retained'
     CandidateId = $ArtifactId
-    CandidateCommit = $Commit
+    CandidateCommit = $Commit.ToLowerInvariant()
     CandidateTag = 'v0.9.0-beta.1'
-    ExpectedManifestSha256 = $ManifestSha256
+    ExpectedManifestSha256 = $ManifestSha256.ToLowerInvariant()
 }
 $candidate = Save-RetainedHistoryCandidate @pins
 $env:GH_TOKEN = $null
@@ -54,5 +54,12 @@ if (Test-Path -LiteralPath $uninstallKey) { throw 'Eve is already installed on t
 $installer = Start-Process -FilePath $wrapper -ArgumentList @('/S', "/D=$install") -WorkingDirectory $stage -WindowStyle Hidden -Wait -PassThru
 if ($installer.ExitCode -ne 0) { throw "Verified installer exit code $($installer.ExitCode)." }
 Assert-InstalledPayload -InstallDir $install -ManifestPath (Join-Path $bundle 'qa/candidate-payload-manifest.json')
+$identity = @{
+    run_id = $candidate.RunId
+    artifact_id = $candidate.ArtifactId
+    commit = $candidate.CandidateCommit
+    manifest_sha256 = $candidate.ManifestSha256
+} | ConvertTo-Json -Compress
 "root=$root" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
 "install=$install" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+"identity=$identity" | Add-Content -LiteralPath $env:GITHUB_OUTPUT

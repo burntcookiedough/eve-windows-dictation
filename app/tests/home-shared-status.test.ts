@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { get } from 'svelte/store';
+import type { ServerStatePayload } from '../src/shared/types';
 import {
   disposeServerStatus,
   getDownloadMilestone,
+  getServerStatusAnnouncement,
   getServerStatusPhase,
   initializeServerStatus,
   refresh,
@@ -30,6 +32,38 @@ const packageJson = source('../package.json');
 const serverVersion = source('../../server/src/version.py');
 
 describe('Home and shared server status', () => {
+  test('publishes updated announcements when paste readiness changes within Ready', async () => {
+    const degraded: ServerStatePayload = {
+      status: 'running', managed: true, engineStatus: { current: 'whisper', status: 'ready' },
+      pasteReadiness: 'degraded',
+    };
+    let publish: (state: ServerStatePayload) => void = () => { throw new Error('Server status is not subscribed'); };
+    (globalThis as { window: unknown }).window = {
+      murmurMain: {
+        getServerStatus: async () => degraded,
+        onServerStateChange: (callback: typeof publish) => { publish = callback; return () => {}; },
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+
+    initializeServerStatus();
+    try {
+      await Promise.resolve();
+      for (const readiness of ['off', 'ready'] as const) {
+        publish(degraded);
+        expect(get(serverStatusState)).toMatchObject({
+          phase: 'ready',
+          announcement: 'Dictation is ready. Auto-paste is unavailable.',
+        });
+        publish({ ...degraded, pasteReadiness: readiness });
+        expect(get(serverStatusState)).toMatchObject({ phase: 'ready', announcement: 'Speech model is ready.' });
+      }
+    } finally {
+      disposeServerStatus();
+    }
+  });
+
   test('initializes one subscription, reseeds on focus, and tears down only its own listener', async () => {
     let getCalls = 0;
     let stateSubscriptions = 0;
@@ -169,6 +203,21 @@ describe('Home and shared server status', () => {
     expect(statusController).toContain('publish(null);');
   });
 
+  test('holds Ready while auto-paste warms and reports a degraded paste honestly', () => {
+    const engine = { current: 'whisper', status: 'ready' } as const;
+    const running = { status: 'running', managed: true, engineStatus: engine } as const;
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'warming' })).toBe('preparing');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'ready' })).toBe('ready');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'off' })).toBe('ready');
+    expect(getServerStatusPhase({ ...running, pasteReadiness: 'degraded' })).toBe('ready');
+    // The speech model still decides first: a loading model is not "preparing auto-paste".
+    expect(getServerStatusPhase({ ...running, engineStatus: { current: 'whisper', status: 'loading' }, pasteReadiness: 'warming' })).toBe('loading');
+    expect(getServerStatusAnnouncement('preparing', { ...running, pasteReadiness: 'warming' }))
+      .toBe('Dictation is ready. Paste is warming up.');
+    expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'degraded' }))
+      .toBe('Dictation is ready. Auto-paste is unavailable.');
+    expect(getServerStatusAnnouncement('ready', { ...running, pasteReadiness: 'ready' })).toBe('Speech model is ready.');
+  });
   test('announces only bounded download milestones after 25%', () => {
     expect(getDownloadMilestone(0)).toBeNull();
     expect(getDownloadMilestone(24)).toBeNull();

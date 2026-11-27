@@ -27,6 +27,10 @@ store.onDidChange('autoPaste', value => {
   autoPasteEnabled = value ?? DEFAULT_SETTINGS.autoPaste;
 });
 
+export function onAutoPasteChange(callback: (enabled: boolean) => void): void {
+  store.onDidChange('autoPaste', value => callback(value ?? DEFAULT_SETTINGS.autoPaste));
+}
+
 /**
  * Validate that a hotkey object has the correct shape
  */

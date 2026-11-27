@@ -19,11 +19,13 @@ import { isPerfTraceEnabled } from './perf-trace.js';
 
 const log = createLogger('Hotkey');
 
+// keydownTick is KBDLLHOOKSTRUCT.time from the low-level hook: the GetTickCount
+// value of the keydown itself, on the same clock as foreground-change events.
 interface HotkeyCallbacks {
-  onHoldStart: (hotkeyAt?: number) => boolean;
+  onHoldStart: (hotkeyAt: number | undefined, keydownTick: number) => boolean;
   onHoldEnd: () => void;
-  onDoubleTap: (hotkeyAt?: number) => boolean;
-  onLongShortcut: (hotkeyAt?: number) => boolean;
+  onDoubleTap: (hotkeyAt: number | undefined, keydownTick: number) => boolean;
+  onLongShortcut: (hotkeyAt: number | undefined, keydownTick: number) => boolean;
 }
 
 let callbacks: HotkeyCallbacks | null = null;
@@ -90,23 +92,24 @@ export function setupHotkeyService(hotkeyCallbacks: HotkeyCallbacks): void {
 
   uIOhook.on('keydown', (e) => {
     const hotkeyAt = isPerfTraceEnabled() ? performance.now() : undefined;
+    const keydownTick = e.time;
     updateHeldModifiers(e, true);
     const snapshot = eventSnapshot(e);
     const longAction = longRecognizer.keyDown(snapshot, getCurrentLongHotkey());
     if (longAction === 'hold-start' || longAction === 'double-tap') {
       quickRecognizer.reset();
       log.debug('Long hotkey', { keycode: e.keycode });
-      if (callbacks?.onLongShortcut(hotkeyAt) === false) longRecognizer.rejectActivePress();
+      if (callbacks?.onLongShortcut(hotkeyAt, keydownTick) === false) longRecognizer.rejectActivePress();
       return;
     }
 
     const action = quickRecognizer.keyDown(snapshot, getCurrentHotkey());
     if (action === 'hold-start') {
       log.debug('Hotkey hold start', { keycode: e.keycode });
-      if (callbacks?.onHoldStart(hotkeyAt) === false) quickRecognizer.rejectActivePress();
+      if (callbacks?.onHoldStart(hotkeyAt, keydownTick) === false) quickRecognizer.rejectActivePress();
     } else if (action === 'double-tap') {
       log.debug('Hotkey double tap', { keycode: e.keycode });
-      if (callbacks?.onDoubleTap(hotkeyAt) === false) quickRecognizer.rejectActivePress();
+      if (callbacks?.onDoubleTap(hotkeyAt, keydownTick) === false) quickRecognizer.rejectActivePress();
     }
   });
 

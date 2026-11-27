@@ -1,9 +1,7 @@
 # Simulated Windows acceptance
 
-Use this lane for the verified Eve 0.9.0-beta.1 bundle retained from lifecycle
-run 45784796424, artifact 15101085356. It expires on 2026-12-03 at 08:50 UTC.
-The candidate commit, artifact ID, run ID and release manifest SHA-256 are pinned
-in the verifier. The workflow downloads the original zip, verifies provenance,
+Use this lane for a verified Eve 0.9.0-beta.1 bundle retained by the installer
+lifecycle workflow. The workflow downloads the original zip, verifies provenance,
 phase status, expected manifest and each staged file, then verifies the installed
 payload. The job uses a read-only token on GitHub-hosted Windows.
 
@@ -13,12 +11,31 @@ payload. The job uses a read-only token on GitHub-hosted Windows.
 four-job matrix. Same-repository pull requests targeting trunk run the smoke
 when this workflow or its harness changes. Apply the sim-full label once the
 smoke passes to run the full matrix. Keep the lane off the required checks.
-Manual dispatch is also available once the workflow exists on the default branch.
 
 Run ID `45784796424`, artifact ID `15101085356`, commit
 `22aa01d70a10fc8b52668866ff1c0bd5ac02c751` and manifest SHA-256
 `e0004b05ee119467a037c201ea723159e01adda3615f5a2668cfb05433fe763f` are the
-approved inputs. Each CPU job uses `small` and an isolated candidate profile
+pull request defaults. That candidate expires on 2026-12-03 at 08:50 UTC and can
+omit paste readiness or retry once after a pre-dispatch paste skip. Other
+candidates must report settled paste readiness and must insert on the first
+attempt in smoke mode.
+
+For a new candidate, dispatch `installer-lifecycle-ci.yml` on `trunk` with
+`expected_commit` set to the full trunk commit and `retain_candidate=true`.
+After that run succeeds, use its retained artifact to dispatch the full matrix
+on `trunk` from Windows PowerShell.
+
+```powershell
+@{
+  candidate_run_id = '<successful lifecycle run ID>'
+  artifact_id = '<ID of eve-v0.9.0-beta.1-unsigned-candidate-qa-RUN_ID>'
+  candidate_commit = '<40-character commit SHA from the lifecycle run>'
+  manifest_sha256 = '<SHA-256 of eve-v0.9.0-beta.1-artifact-manifest.json>'
+  smoke_only = $false
+} | ConvertTo-Json -Compress | gh workflow run simulated-acceptance.yml --ref trunk --json
+```
+
+Each CPU job uses `small` and an isolated candidate profile
 and Hugging Face cache. The launch includes Chromium's fake audio capture
 flags and a non-looping file. Eve opens its normal audio worklet with packaged
 media processing enabled. The noise mix SNR applies at the WAV input.
@@ -30,7 +47,9 @@ Scored trials enable paste and restoration with auto-copy disabled, because
 the candidate retains the dictated text on the clipboard when auto-copy is
 enabled. An isolated native Ctrl+V control checks the runner/editor path.
 Evidence retains counts, timings, hashes and scores. Performance marks use
-Eve's main clock for stop-to-final and for paste helper diagnostics. For the
+Eve's main clock for stop-to-final and for paste helper diagnostics. The
+completed trace's allowlisted `paste_pre_dispatch_reason` is retained in
+smoke evidence when the candidate provides it. For the
 GPU latency estimate the scorer adds the largest observed close/quiet
 stop-to-insert minus main stop-to-final interval per mode. This subtraction
 uses durations and includes hotkey delivery and observer timing. Full GPU
@@ -69,21 +88,45 @@ Never route this command through the packaged Eve app.
 
 From the harness checkout, run
 `python scripts/sim_acceptance/prepare_corpus.py --root <corpus-dir> --config gpu-close-quiet`.
-Run the candidate's `server/src/main.py` with the dev Python executable,
-headless, using localhost and `MURMUR_PORT=0`. Set `HF_HOME` and
-`HF_HUB_CACHE` to the isolated cache, `MURMUR_SETTINGS_FILE` and
-`MURMUR_PID_FILE` to scratch files, `MURMUR_PERF_TRACE=1`,
-`MURMUR_WHISPER_MODEL=large-v3-turbo` and `MURMUR_WHISPER_DEVICE=cuda`.
-Use the installed CUDA Toolkit through the dev environment. Clear
-`MURMUR_GPU_RUNTIME_DIR` and `MURMUR_GPU_PACK_ID` if present in that
-shell. The replay checks the exact source commit, ready CUDA and model health,
-RTX 3060 Laptop and absence of a managed GPU pack.
+Use the installed CUDA Toolkit through the dev environment. Pass the same four
+verified pins as the hosted dispatch and offline scorer. Replay checks the clean
+checkout, launches its server with the prepared venv, and publishes evidence only
+after the owned process completes the observations. It uses a loopback ephemeral
+port, an isolated PID and settings file, and an `hf` cache beside the output.
 
-`python scripts/sim_acceptance/replay.py --source <candidate-worktree> --pid-file <scratch-pid-file> --manifest <corpus-manifest> --output <gpu-evidence.json>`
+```powershell
+python scripts/sim_acceptance/replay.py --source '<candidate-worktree>' `
+  --manifest '<corpus-manifest>' --output '<scratch-dir>/gpu-evidence.json' `
+  --candidate '<lifecycle run ID>' '<artifact ID>' '<commit SHA>' '<manifest SHA-256>'
+```
+
+For the original retained candidate's manually started server, supply
+`--pid-file '<scratch-pid-file>'` without `--candidate`. Start its
+`server/src/main.py` directly from the checkout using the dev venv, localhost,
+and `MURMUR_PORT=0`. Set `HF_HOME`, `HF_HUB_CACHE`, `MURMUR_SETTINGS_FILE`
+and `MURMUR_PID_FILE` to isolated paths, and set `MURMUR_PERF_TRACE=1`,
+`MURMUR_WHISPER_MODEL=large-v3-turbo` and `MURMUR_WHISPER_DEVICE=cuda`.
+Clear `MURMUR_GPU_RUNTIME_DIR` and `MURMUR_GPU_PACK_ID` in that shell.
+
+## Offline scoring
 
 Use `score.py --output <report.md> <cpu/gpu evidence files>` to
-render the frozen gate table. Exit codes are 0 for all rows passed, 1 for at
-least one failure and 2 for open rows with no observed failure. To verify G2,
+render the frozen gate table for the original candidate. For a new candidate,
+pass the same four pins you supplied to the hosted dispatch. Every evidence
+file must match the full tuple.
+
+```powershell
+python scripts/sim_acceptance/score.py --output acceptance.md `
+  --candidate '<lifecycle run ID>' '<artifact ID>' '<commit SHA>' '<manifest SHA-256>' `
+  .\far-quiet\evidence.json .\far-moderate\evidence.json `
+  .\close-moderate\evidence.json .\close-quiet\evidence.json
+```
+
+Include `gpu-evidence.json` as another input if you ran the local CUDA replay
+with those pins.
+
+Exit codes are 0 for all rows passed, 1 for at least one failure and 2 for
+open rows with no observed failure. To verify G2,
 supply `--lifecycle-run`, `--history-run`, `--history-evidence` pointing to
 the original History artifact ZIP, and `--history-metadata` pointing to the
 GitHub artifact API response. The scorer checks the ZIP digest and run linkage.

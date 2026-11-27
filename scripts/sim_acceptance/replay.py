@@ -5,8 +5,10 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import asynccontextmanager, nullcontext
 from functools import partial
@@ -20,9 +22,12 @@ from websockets.exceptions import WebSocketException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.perf_regression_benchmark import replay_trial
+from scripts.sim_acceptance.owned_process import launch_owned_process
 from scripts.sim_acceptance.score import (
     CANDIDATE,
+    add_candidate_argument,
     load_clips,
+    resolve_candidate,
     trial_record,
     write_evidence,
 )
@@ -237,28 +242,49 @@ async def run_replay(port, process, clips, result, result_file, audit=None):
             break
 
 
-def gpu_owner(args):
-    source = args.source.resolve()
-    head = subprocess.check_output(["git", "-C", source, "rev-parse", "HEAD"], text=True).strip()
-    changed = subprocess.check_output(["git", "-C", source, "status", "--porcelain"], text=True).strip()
-    if head != CANDIDATE["commit"] or changed:
+def verify_candidate_source(source, expected_commit):
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+
+    def git(*args):
+        # Git prints paths as UTF-8 regardless of the console code page.
+        return subprocess.check_output(["git", "-C", source, *args], env=env, encoding="utf-8").strip()
+
+    top_level = git("rev-parse", "--show-toplevel")
+    if Path(top_level).resolve() != source.resolve():
+        raise ValueError("GPU server source must be the candidate Git worktree root")
+    head = git("rev-parse", "HEAD")
+    changed = git("status", "--porcelain")
+    if head != expected_commit or changed:
         raise ValueError("GPU server requires the clean verified candidate source commit")
-    owner = json.loads(args.pid_file.read_text(encoding="utf-8"))
-    process = psutil.Process(owner["pid"])
-    if not Path(process.cwd()).resolve().is_relative_to(source):
-        raise ValueError("GPU server PID is outside the candidate checkout")
-    if not any(Path(arg).name == "main.py" for arg in process.cmdline()[1:]):
-        raise ValueError("GPU server PID does not launch the candidate entry point")
-    if not has_loopback_listener(process, owner["port"]):
-        raise ValueError("GPU server PID does not own the specified loopback listener")
+
+
+def require_test_gpu():
     gpus = subprocess.check_output(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], text=True)
     if "RTX 3060 Laptop GPU" not in gpus:
         raise ValueError("The required RTX 3060 Laptop GPU is unavailable")
+
+
+def gpu_owner(args):
+    source = args.source.resolve()
+    verify_candidate_source(source, CANDIDATE["commit"])
+    owner = json.loads(args.pid_file.read_text(encoding="utf-8"))
+    process = psutil.Process(owner["pid"])
+    cwd = Path(process.cwd()).resolve()
+    if not cwd.is_relative_to(source):
+        raise ValueError("GPU server PID is outside the candidate checkout")
+    command = process.cmdline()
+    entry_point = (source / "server/src/main.py").resolve()
+    if (not entry_point.is_relative_to(source) or len(command) < 2
+            or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?", Path(process.exe()).name, re.IGNORECASE)
+            or (cwd / command[1]).resolve() != entry_point):
+        raise ValueError("GPU server PID does not launch the candidate entry point")
+    if not has_loopback_listener(process, owner["port"]):
+        raise ValueError("GPU server PID does not own the specified loopback listener")
+    require_test_gpu()
     return owner, process
 
 
-async def run_gpu(args):
-    owner, process = await asyncio.to_thread(gpu_owner, args)
+async def observe_gpu(args, candidate, owner, process, output, audit_path):
     health = await wait_health(owner["port"], "cuda", "large-v3-turbo", 1800)
     if not await asyncio.to_thread(has_loopback_listener, process, owner["port"]):
         raise ValueError("GPU server no longer owns the specified loopback listener")
@@ -266,27 +292,114 @@ async def run_gpu(args):
         raise ValueError("Development CUDA replay must use the system toolkit")
     clips = load_clips(args.manifest, "gpu-close-quiet")
     result = {
-        "candidate": CANDIDATE, "config": "gpu-close-quiet", "method": "source-cuda-replay",
+        "candidate": candidate, "config": "gpu-close-quiet", "method": "source-cuda-replay",
         "device": "cuda", "model": "large-v3-turbo", "gpu": "RTX 3060 Laptop GPU",
         "resources": {}, "trials": [],
     }
-    write_evidence(args.output, result)
+    write_evidence(output, result)
     audit = None
-    if args.entity_audit:
+    if audit_path:
         from scripts.sim_acceptance.entity_audit import EntityAudit
 
-        audit = EntityAudit(args.entity_audit, "gpu-close-quiet", CANDIDATE)
-    await run_replay(owner["port"], process, clips, result, args.output, audit)
+        audit = EntityAudit(audit_path, "gpu-close-quiet", candidate)
+    await run_replay(owner["port"], process, clips, result, output, audit)
+    return result
+
+
+async def wait_for_gpu_child(launcher, pid_file):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if launcher.poll() is not None:
+            raise RuntimeError("Launched GPU server exited during startup")
+        try:
+            owner = json.loads(pid_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            await asyncio.sleep(.1)
+            continue
+        # A Windows venv redirector can launch the Python interpreter as a child.
+        process = launcher if owner["pid"] == launcher.pid else next(
+            (child for child in launcher.children(recursive=True) if child.pid == owner["pid"]), None,
+        )
+        if process is None or not await asyncio.to_thread(has_loopback_listener, process, owner["port"]):
+            raise ValueError("Launched GPU server does not own the reported loopback listener")
+        return owner, process
+    raise RuntimeError("Launched GPU server did not publish its PID file")
+
+
+async def watch_gpu_child(launcher, process):
+    while launcher.poll() is None and process.is_running():
+        await asyncio.sleep(.25)
+    raise RuntimeError("Launched GPU server exited during replay")
+
+
+async def run_gpu(args, *, candidate=None):
+    if candidate is None:
+        owner, process = await asyncio.to_thread(gpu_owner, args)
+        await observe_gpu(args, CANDIDATE, owner, process, args.output, args.entity_audit)
+        return
+    if args.pid_file is not None:
+        raise ValueError("--candidate launches its own server and cannot use --pid-file")
+
+    source = args.source.resolve()
+    verify_candidate_source(source, candidate["commit"])
+    server = (source / "server").resolve()
+    entry_point = (server / "src/main.py").resolve()
+    if not server.is_relative_to(source) or not entry_point.is_relative_to(server) or not entry_point.is_file():
+        raise ValueError("Candidate checkout must provide its own server entry point")
+    python = server / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+    if not python.is_file():
+        raise ValueError("Prepare the candidate server's development venv before replay")
+    require_test_gpu()
+    output_dir = args.output.resolve().parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="eve-cuda-", dir=output_dir) as directory:
+        scratch = Path(directory)
+        pid_file = scratch / "server.pid"
+        cache = output_dir / "hf"
+        env = {**os.environ, "TEMP": str(scratch), "TMP": str(scratch),
+               "HF_HOME": str(cache), "HF_HUB_CACHE": str(cache / "hub"),
+               "HUGGINGFACE_HUB_CACHE": str(cache / "hub"), "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
+               "PYTHONNOUSERSITE": "1", "MURMUR_HOST": "127.0.0.1", "MURMUR_PORT": "0",
+               "MURMUR_PID_FILE": str(pid_file), "MURMUR_SETTINGS_FILE": str(scratch / "settings.json"),
+               "MURMUR_PERF_TRACE": "1", "MURMUR_WHISPER_MODEL": "large-v3-turbo", "MURMUR_WHISPER_DEVICE": "cuda"}
+        for name in ("PYTHONPATH", "PYTHONHOME", "MURMUR_GPU_RUNTIME_DIR", "MURMUR_GPU_PACK_ID"):
+            env.pop(name, None)
+        with ((scratch / "server.log").open("wb") as log,
+              launch_owned_process([str(python), "-B", str(entry_point)], cwd=server, env=env, stdout=log) as launcher):
+            owner, process = await wait_for_gpu_child(launcher, pid_file)
+            audit_path = scratch / "audit.json" if args.entity_audit else None
+            replay_task = asyncio.create_task(observe_gpu(args, candidate, owner, process, scratch / "evidence.json", audit_path))
+            watch_task = asyncio.create_task(watch_gpu_child(launcher, process))
+            try:
+                done, _ = await asyncio.wait((replay_task, watch_task), return_when=asyncio.FIRST_COMPLETED)
+                if watch_task in done:
+                    await watch_task
+                result = await replay_task
+                owns_listener = await asyncio.to_thread(has_loopback_listener, process, owner["port"])
+                if not owns_listener or launcher.poll() is not None or result.get("replay_stopped_reason"):
+                    raise RuntimeError("Launched GPU server was lost during replay")
+                if audit_path is not None and audit_path.is_file():
+                    write_evidence(args.entity_audit, json.loads(audit_path.read_text(encoding="utf-8")))
+                write_evidence(args.output, result)
+            finally:
+                for task in (replay_task, watch_task):
+                    task.cancel()
+                await asyncio.gather(replay_task, watch_task, return_exceptions=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--pid-file", type=Path, required=True)
+    parser.add_argument("--pid-file", type=Path, help="PID file for the original candidate's external server")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    add_candidate_argument(parser)
     parser.add_argument("--entity-audit", type=Path)
-    asyncio.run(run_gpu(parser.parse_args()))
+    args = parser.parse_args()
+    if (args.candidate is None) == (args.pid_file is None):
+        parser.error("provide --candidate to launch a server, or --pid-file for the original candidate")
+    candidate = resolve_candidate(parser, args.candidate) if args.candidate is not None else None
+    asyncio.run(run_gpu(args, candidate=candidate))
 
 
 if __name__ == "__main__":

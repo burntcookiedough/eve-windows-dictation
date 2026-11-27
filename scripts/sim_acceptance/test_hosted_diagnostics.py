@@ -20,9 +20,21 @@ from scripts.sim_acceptance.hosted import (
     poll,
     smoke_delivery_issue,
 )
+from scripts.sim_acceptance.score import CANDIDATE
+
+NEW_CANDIDATE_COMMIT = "a" * 40
 
 
 class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
+    def test_app_ready_accepts_retained_candidate_without_paste_readiness(self):
+        owner = {"pid": 123, "port": 456}
+        state = {**owner, "status": "running", "engineStatus": {"status": "ready"}}
+        self.assertTrue(hosted.app_ready(state, owner, candidate_commit=CANDIDATE["commit"]))
+        self.assertFalse(hosted.app_ready(state, owner, candidate_commit=NEW_CANDIDATE_COMMIT))
+        self.assertFalse(hosted.app_ready({**state, "pid": 321}, owner, candidate_commit=CANDIDATE["commit"]))
+        self.assertFalse(hosted.app_ready({**state, "engineStatus": {"status": "loading"}}, owner,
+                                          candidate_commit=CANDIDATE["commit"]))
+
     async def test_startup_poll_reports_the_named_fixture(self):
         with self.assertRaises(FixtureUnavailable) as caught:
             await poll(None, bool, 0, failure="cdp-http-unreachable")
@@ -41,6 +53,44 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(smoke_delivery_issue(skipped, False), "warmup-native-editor-control-unobserved")
         skipped["paste_helper_request_observed"] = True
         self.assertEqual(smoke_delivery_issue(skipped, True), "warmup-editor-insertion-unobserved")
+
+    async def test_only_legacy_smoke_can_pass_on_relaunch_after_a_skipped_first_paste(self):
+        final = {"final_count": 1, "empty": False, "history_correct": True}
+        skipped = {**final, "failed": True, "insertion_count": 0, "insert_matches_final": False,
+                   "delivery": "paste_skipped", "paste_helper_request_observed": False}
+        delivered = {**final, "failed": False, "insertion_count": 1, "insert_matches_final": True,
+                     "clipboard_restored": True, "stop_to_insert_ms": 100}
+
+        async def observe(_root, _install, _desktop, _clip, evidence, _output, label, control_key):
+            evidence[control_key] = True
+            return skipped if label == "warmup" else delivered
+
+        observer = AsyncMock(side_effect=observe)
+        with self.assertRaisesRegex(FixtureUnavailable, "warmup-paste-skipped-before-helper"):
+            await self.run_stub(smoke=True, candidate_commit=NEW_CANDIDATE_COMMIT, warmup=observer)
+        observer.assert_awaited_once()
+
+        observer.reset_mock()
+        evidence = await self.run_stub(smoke=True, warmup=observer)
+        self.assertEqual(observer.await_count, 2)
+        self.assertEqual(evidence["warmup"], skipped)
+        self.assertEqual(evidence["smoke_retry"], delivered)
+
+    async def test_new_smoke_accepts_the_first_insertion(self):
+        delivered = {"final_count": 1, "empty": False, "history_correct": True, "failed": False,
+                     "insertion_count": 1, "insert_matches_final": True, "clipboard_restored": True,
+                     "stop_to_insert_ms": 100}
+
+        async def observe(_root, _install, _desktop, _clip, evidence, _output, _label, control_key):
+            evidence[control_key] = True
+            return delivered
+
+        observer = AsyncMock(side_effect=observe)
+        evidence = await self.run_stub(smoke=True, candidate_commit=NEW_CANDIDATE_COMMIT, warmup=observer)
+        observer.assert_awaited_once()
+        self.assertEqual(evidence["candidate"]["commit"], NEW_CANDIDATE_COMMIT)
+        self.assertEqual(evidence["warmup"], delivered)
+        self.assertNotIn("smoke_retry", evidence)
 
     async def test_accuracy_uses_first_final_when_editor_and_later_final_differ(self):
         clip = {"id": "Q01", "mode": "quick", "sha256": "0" * 64, "duration_s": 0,
@@ -63,6 +113,48 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["final_count"], 2)
         self.assertEqual(record["insertion_count"], 2)
         self.assertFalse(record["insert_matches_final"])
+
+    async def test_capture_reports_only_the_correlated_allowlisted_pre_dispatch_reason(self):
+        clip = {"id": "Q01", "mode": "quick", "sha256": "0" * 64, "duration_s": 0,
+                "reference": "Alice arrived", "entities": []}
+        main = SimpleNamespace(eval=AsyncMock(return_value={
+            "finals": ["Alice arrived"], "editorDuringSpeech": 0, "delivery": "paste_skipped",
+        }))
+        editor = {"keys": [], "insertions": [], "text": "",
+                  "clipboard_restored": True, "clipboard_matches_final": False}
+        ready = {"correlationId": "warmup", "status": "open"}
+        decoy = {"correlationId": "other", "status": "complete", "pastePreDispatchReason": "helper_busy"}
+        for fields, expected in (
+            ({"pastePreDispatchReason": "rpc_timeout"}, "rpc_timeout"),
+            ({"pastePreDispatchReason": "focus_changed"}, "focus_changed"),
+            ({"pastePreDispatchReason": "unsafe diagnostic text"}, None),
+            ({"pastePreDispatchReason": {"handle": 12345}}, None),
+            ({}, None),
+        ):
+            with self.subTest(fields=fields):
+                completed = {**ready, "status": "complete", "main": {}, **fields}
+                desktop = SimpleNamespace(send=AsyncMock(side_effect=[None, 0, 1, editor]))
+                with (patch.object(hosted, "history", AsyncMock(return_value={})),
+                      patch.object(hosted, "poll", AsyncMock(side_effect=[ready, None])),
+                      patch.object(hosted.asyncio, "sleep", AsyncMock()),
+                      patch.object(hosted, "read_perf", return_value=[ready, completed, decoy]),
+                      patch.object(hosted, "detect_paste_diagnostics", return_value={})):
+                    record, _ = await hosted.capture(main, SimpleNamespace(pid=os.getpid()), desktop,
+                                                     Path("trial.out.log"), clip)
+                self.assertEqual(record["paste_pre_dispatch_reason"], expected)
+                self.assertFalse(record["paste_helper_request_observed"])
+
+    def test_app_ready_waits_for_settled_auto_paste(self):
+        owner = {"pid": 10, "port": 20}
+        base = {"status": "running", "pid": 10, "port": 20, "engineStatus": {"status": "ready"}}
+        for readiness, expected in (("warming", False), (None, False), ("ready", True),
+                                    ("degraded", True), ("off", True), ("unknown", False)):
+            for commit in (CANDIDATE["commit"], NEW_CANDIDATE_COMMIT):
+                with self.subTest(readiness=readiness, commit=commit):
+                    self.assertEqual(hosted.app_ready({**base, "pasteReadiness": readiness}, owner,
+                                                     candidate_commit=commit), expected)
+        self.assertFalse(hosted.app_ready({**base, "pasteReadiness": "ready", "pid": 11}, owner,
+                                          candidate_commit=NEW_CANDIDATE_COMMIT))
 
     async def test_runtime_warmup_error_requests_bundled_recovery(self):
         fallback = AsyncMock()
@@ -107,7 +199,7 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
               ])),
               patch.object(hosted, "kill_managed_server") as kill,
               patch.object(hosted.asyncio, "sleep", AsyncMock())):
-            self.assertEqual(await hosted.interrupt_download(None, None, None), 25)
+            self.assertEqual(await hosted.interrupt_download(None, None, None, candidate_commit=CANDIDATE["commit"]), 25)
         kill.assert_called_once()
 
     def test_immediate_stop_requires_observed_editor_key_and_app_stop_within_guard(self):
@@ -141,7 +233,8 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("word_errors", first)
         self.assertEqual(second, recovered)
 
-    async def run_stub(self, warmup_error=None, *, fallback=None, capture=None):
+    async def run_stub(self, warmup_error=None, *, fallback=None, capture=None, warmup=None,
+                       smoke=False, candidate_commit=CANDIDATE["commit"]):
         @asynccontextmanager
         async def app_session(*args, **kwargs):
             yield (None, None, {"pid": 1}, None, None)
@@ -152,20 +245,22 @@ class FixtureDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             manifest = root / "manifest.json"
             manifest.write_text("{}", encoding="utf-8")
             args = SimpleNamespace(root=root, install=root / "install", manifest=manifest,
-                                   config="far-quiet", smoke=False, entity_audit=None,
+                                   candidate={**CANDIDATE, "commit": candidate_commit}, config="far-quiet",
+                                   smoke=smoke, entity_audit=None,
                                    output=root / "evidence.json")
             clips = [{"id": clip_id, "mode": "quick", "duration_s": 8,
                       "reference": "Alice arrived", "entities": [], "sha256": "0" * 64}
                      for clip_id in ("Q01", "Q02")]
-            warmup = {"final_count": 1, "empty": False, "history_correct": True}
+            if warmup is None:
+                warmup = AsyncMock(return_value={"final_count": 1, "empty": False, "history_correct": True},
+                                   side_effect=warmup_error)
             editor_process = SimpleNamespace(returncode=0, wait=AsyncMock())
             with (patch.dict(os.environ, {"RUNNER_TEMP": temp, "GITHUB_SHA": "0" * 40,
                                           "GITHUB_RUN_ID": "123"}),
                   patch.object(hosted, "load_clips", return_value=clips),
                   patch.object(hosted.asyncio, "create_subprocess_exec",
                                AsyncMock(return_value=editor_process)),
-                  patch.object(hosted, "observe_warmup",
-                               AsyncMock(return_value=warmup, side_effect=warmup_error)),
+                  patch.object(hosted, "observe_warmup", warmup),
                   patch.object(hosted, "hosted_replay", fallback or AsyncMock()),
                   patch.object(hosted, "app_session", app_session),
                   patch.object(hosted, "capture", capture or AsyncMock())):

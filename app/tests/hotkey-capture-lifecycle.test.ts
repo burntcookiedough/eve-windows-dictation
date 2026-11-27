@@ -1,7 +1,8 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 
 type KeyboardEvent = {
   keycode: number;
+  time?: number;
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
@@ -54,7 +55,7 @@ mock.module('../src/main/services/settings.js', () => ({
   }),
 }));
 
-const { cancelHotkeyCapture, setupHotkeyService, startHotkeyCapture, unregisterHotkey } = await import('../src/main/services/hotkey.js');
+const { cancelHotkeyCapture, resetKeyState, setupHotkeyService, startHotkeyCapture, unregisterHotkey } = await import('../src/main/services/hotkey.js');
 
 const keyEvent = (keycode: number): KeyboardEvent => ({
   keycode,
@@ -97,8 +98,56 @@ test('a tap rejected during delivery cannot seed Long or release Quick', () => {
   }
 });
 
-describe('hotkey capture lifecycle', () => {
-  test('cancellation settles the pending invocation and detaches its listener', async () => {
+test('each hotkey callback receives the hook timestamp of its own keydown', () => {
+  const ticks: Array<[callback: string, keydownTick: number]> = [];
+  resetKeyState();
+  setupHotkeyService({
+    onHoldStart: (_hotkeyAt, keydownTick) => { ticks.push(['quick', keydownTick]); return true; },
+    onHoldEnd: () => {},
+    onDoubleTap: (_hotkeyAt, keydownTick) => { ticks.push(['double', keydownTick]); return true; },
+    onLongShortcut: (_hotkeyAt, keydownTick) => { ticks.push(['long', keydownTick]); return true; },
+  });
+  // KBDLLHOOKSTRUCT.time is a 32-bit GetTickCount value, so it may sit near the wrap.
+  const down = (code: number, time: number) => listeners.forEach(listener => listener({ ...keyEvent(code), time }));
+  const up = (code: number) => keyUpListeners.forEach(listener => listener(keyEvent(code)));
+  let nowMs = 1000;
+  const clock = spyOn(Date, 'now').mockImplementation(() => nowMs);
+  try {
+    down(29, 4294967000);
+    down(3675, 4294967001);
+    nowMs += 30;
+    up(3675);
+    up(29);
+
+    nowMs += 70;
+    down(29, 4294967100);
+    down(3675, 4294967101);
+    nowMs += 30;
+    up(3675);
+    up(29);
+
+    nowMs += 70;
+    down(29, 4294967200);
+    down(42, 4294967201);
+    down(3675, 4294967202);
+    expect(ticks).toEqual([
+      ['quick', 4294967001],
+      ['double', 4294967101],
+      ['long', 4294967202],
+    ]);
+  } finally {
+    up(3675);
+    up(42);
+    up(29);
+    clock.mockRestore();
+    resetKeyState();
+    unregisterHotkey();
+    listeners.clear();
+    keyUpListeners.clear();
+  }
+});
+
+describe('hotkey capture lifecycle', () => {  test('cancellation settles the pending invocation and detaches its listener', async () => {
     const pending = startHotkeyCapture();
 
     cancelHotkeyCapture();

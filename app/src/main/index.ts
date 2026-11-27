@@ -14,9 +14,9 @@ import { HistoryService } from './services/history.js';
 import { ServerManager } from './services/server-manager.js';
 import { createGpuPackManager, PINNED_GPU_PACK_DESCRIPTOR } from './services/gpu-pack-manager.js';
 import { processFinalTranscription } from './services/pipeline.js';
-import { getForegroundWindowHandle, suspendClipboardPaste } from './services/clipboard.js';
-import { pasteHelper } from './services/paste-helper.js';
-import { autoPasteEnabled, getSettings, getSetting } from './services/settings.js';
+import { suspendClipboardPaste } from './services/clipboard.js';
+import { isPasteWarmingUp, pasteHelper, type ForegroundSnapshot } from './services/paste-helper.js';
+import { autoPasteEnabled, getSettings, getSetting, onAutoPasteChange } from './services/settings.js';
 import { LOCAL_SERVER_URL } from './services/server-api-url.js';
 import type { TextFrameFinal } from '../shared/protocol.js';
 import { GPU_PACK_CTRANSLATE2_BUILD_ID, IPC_CHANNELS } from '../shared/constants.js';
@@ -49,7 +49,7 @@ let isRecording = false;
 let recordingSource: 'lab' | 'normal' | null = null;
 let recordingSessionMode: DictationSessionMode = 'quick';
 let isStopping = false;
-let startLongAfterStop: { hotkeyAt: number | undefined } | null = null;
+let startLongAfterStop: { hotkeyAt: number | undefined; pasteTarget: Promise<ForegroundSnapshot> | null } | null = null;
 let currentRecordingState: RecordingStatePayload = { state: 'idle', isRecording: false, mode: 'quick' };
 let currentConnectionState: ConnectionStatePayload = { status: 'disconnected' };
 let latestTranscription: TranscriptionPayload | null = null;
@@ -191,11 +191,21 @@ function getRecordingDebugState(): RecordingDebugState {
   };
 }
 
-async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSessionMode = 'quick', hotkeyAt?: number) {
+async function startRecording(
+  source: 'lab' | 'normal',
+  sessionMode: DictationSessionMode = 'quick',
+  hotkeyAt?: number,
+  keydownTick?: number,
+  queuedPasteTarget?: Promise<ForegroundSnapshot> | null,
+) {
   if (isRecording || isStopping || !overlayWindow) return;
   const dispatchedAt = isPerfTraceEnabled() ? performance.now() : undefined;
-  const autoPaste = source === 'normal' && autoPasteEnabled;
-  const pasteTargetWindowHandlePromise = autoPaste ? getForegroundWindowHandle() : null;
+  // The target is bound to the keydown that started this session.
+  let pasteTarget: Promise<ForegroundSnapshot> | null = null;
+  if (source === 'normal' && autoPasteEnabled) {
+    pasteTarget = queuedPasteTarget === undefined ? pasteHelper.foreground(keydownTick) : queuedPasteTarget;
+  }
+  const autoPaste = pasteTarget !== null;
 
   // Packaged builds only trust the URL discovered from the managed server.
   const serverState = serverManager?.getState();
@@ -274,6 +284,13 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
   );
   transcriptionService = service;
   let serviceCapture: CaptureSession | null = null;
+  // A session that started while the helpers warmed keeps its copy and History
+  // fallback; say so instead of implying that paste is available.
+  void pasteTarget?.then(snapshot => {
+    if (transcriptionService === service && isPasteWarmingUp(snapshot) && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send(IPC_CHANNELS.STATE_WARNING, { code: 'paste_warming_up', message: 'Paste warming up' });
+    }
+  });
   const serviceSessionMode = sessionMode;
 
   service.onRecordingState((payload) => {
@@ -322,10 +339,10 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
     const result = await processFinalTranscription(
       frame,
-      { ...getSettings(), autoPaste },
+      { ...getSettings(), autoPaste: autoPaste && (queuedPasteTarget === undefined || autoPasteEnabled) },
       historyService,
       serviceSessionMode,
-      pasteTargetWindowHandlePromise,
+      pasteTarget,
       serviceTraceId,
       {
         onHistorySaved: entry => {
@@ -378,7 +395,7 @@ async function startRecording(source: 'lab' | 'normal', sessionMode: DictationSe
 
     if (shouldStartLongAfterStop) {
       startLongAfterStop = null;
-      void startRecording('normal', 'long', shouldStartLongAfterStop.hotkeyAt);
+      void startRecording('normal', 'long', shouldStartLongAfterStop.hotkeyAt, undefined, shouldStartLongAfterStop.pasteTarget);
     }
   });
 
@@ -440,15 +457,11 @@ async function stopRecording() {
   service?.stop();
 }
 
-function queueLongRecordingAfterStop(hotkeyAt?: number): void {
-  startLongAfterStop = { hotkeyAt };
-  if (!isRecording && !isStopping) {
-    startLongAfterStop = null;
-    void startRecording('normal', 'long', hotkeyAt);
-  }
+function queueLongRecordingAfterStop(hotkeyAt?: number, keydownTick?: number): void {
+  startLongAfterStop = { hotkeyAt, pasteTarget: autoPasteEnabled ? pasteHelper.foreground(keydownTick) : null };
 }
 
-function toggleLongRecording(hotkeyAt?: number): boolean {
+function toggleLongRecording(hotkeyAt?: number, keydownTick?: number): boolean {
   if (isStopping) {
     showRecordingBusy();
     return false;
@@ -458,11 +471,11 @@ function toggleLongRecording(hotkeyAt?: number): boolean {
     startLongAfterStop = null;
     stopRecording();
   } else if (isRecording) {
+    queueLongRecordingAfterStop(hotkeyAt, keydownTick);
     log.info('Long dictation queued after quick dictation stop');
-    queueLongRecordingAfterStop(hotkeyAt);
     stopRecording();
   } else {
-    startRecording('normal', 'long', hotkeyAt);
+    startRecording('normal', 'long', hotkeyAt, keydownTick);
     log.info('Long dictation started');
   }
   return true;
@@ -628,6 +641,10 @@ function setupDisplayChangeHandlers() {
 
 async function startApplication(): Promise<void> {
   log.info('Eve starting');
+  // The helpers warm in the background and never gate the hotkeys. A dictation
+  // that starts before they are ready keeps its copy and History fallback.
+  pasteHelper.setAutoPaste(autoPasteEnabled);
+  onAutoPasteChange(enabled => pasteHelper.setAutoPaste(enabled));
 
   // Initialize history service early
   historyService = new HistoryService();
@@ -645,7 +662,11 @@ async function startApplication(): Promise<void> {
   });
 
   // Initialize server manager
-  serverManager = new ServerManager(gpuPackManager);
+  const server = new ServerManager(gpuPackManager);
+  serverManager = server;
+  // Ready also waits, for a bounded time, until auto-paste can insert text.
+  pasteHelper.onReadinessChange(readiness => server.setPasteReadiness(readiness));
+  server.setPasteReadiness(pasteHelper.readiness());
   log.info('Server manager initialized');
 
   // Set up IPC handlers before creating windows (renderers call handlers on mount)
@@ -675,15 +696,16 @@ async function startApplication(): Promise<void> {
   if (['dev', 'development'].includes(process.env.NODE_ENV?.toLowerCase() ?? '')) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
-  // Set up global hotkey (supports hold-to-talk and toggle modes)
+
+  // Register the dictation hook before the server can report Ready.
   setupHotkeyService({
-    onHoldStart: (hotkeyAt) => {
+    onHoldStart: (hotkeyAt, keydownTick) => {
       if (isStopping) {
         showRecordingBusy();
         return false;
       }
       if (!isRecording) {
-        startRecording('normal', 'quick', hotkeyAt);
+        startRecording('normal', 'quick', hotkeyAt, keydownTick);
         log.info(getSetting('holdToTalk') ? 'Quick dictation started (hold mode)' : 'Quick dictation started (toggle mode)');
       } else if (!getSetting('holdToTalk')) {
         log.info('Quick dictation stopped (toggle mode)');
@@ -697,13 +719,13 @@ async function startApplication(): Promise<void> {
         stopRecording();
       }
     },
-    onDoubleTap: (hotkeyAt) => {
-      if (!toggleLongRecording(hotkeyAt)) return false;
+    onDoubleTap: (hotkeyAt, keydownTick) => {
+      if (!toggleLongRecording(hotkeyAt, keydownTick)) return false;
       log.info('Long dictation toggled (double-tap)');
       return true;
     },
-    onLongShortcut: (hotkeyAt) => {
-      if (!toggleLongRecording(hotkeyAt)) return false;
+    onLongShortcut: (hotkeyAt, keydownTick) => {
+      if (!toggleLongRecording(hotkeyAt, keydownTick)) return false;
       log.info('Long dictation toggled (long hotkey)');
       return true;
     },
@@ -716,29 +738,15 @@ async function startApplication(): Promise<void> {
     }
   });
 
-  // Handle server lifecycle based on environment
-  // Use app.isPackaged (true when running from asar/built app, false in dev)
-  const isDev = !app.isPackaged;
-
-  if (isDev) {
-    // Development mode: just detect existing server, don't spawn
+  if (!app.isPackaged) {
     log.info('Development mode: detecting existing server');
-    await serverManager.detectExisting();
+    await server.detectExisting();
+  } else if (getSetting('serverAutoStart')) {
+    log.info('Production mode: auto-starting server');
+    await server.start();
   } else {
-    // Production mode: auto-start if enabled
-    if (getSetting('serverAutoStart')) {
-      log.info('Production mode: auto-starting server');
-      await serverManager.start();
-    } else {
-      log.info('Production mode: server auto-start disabled, detecting existing');
-      await serverManager.detectExisting();
-    }
-  }
-
-  if (getSetting('autoPaste') && serverManager.getState().status === 'running') {
-    void pasteHelper.warmUp().catch(() => {
-      log.debug('Paste helper prewarm failed');
-    });
+    log.info('Production mode: server auto-start disabled, detecting existing');
+    await server.detectExisting();
   }
   log.info('Eve ready');
 

@@ -57,6 +57,13 @@ export interface ServerPidFile {
   startedAt: number;
 }
 
+/**
+ * Whether auto-paste can insert text. `warming` holds the user-visible Ready
+ * state for a bounded time while the paste helpers start; `degraded` means they
+ * did not become ready, so dictation keeps its copy and History fallback.
+ */
+export type PasteReadiness = 'off' | 'warming' | 'ready' | 'degraded';
+
 export interface ServerStatePayload {
   status: ServerStatus;
   pid?: number;
@@ -70,6 +77,7 @@ export interface ServerStatePayload {
   diagnostics?: ServerDiagnostics;
   modelDownload?: ModelDownloadState;
   runtime?: ServerRuntimeFingerprint;
+  pasteReadiness?: PasteReadiness;
 }
 
 export interface ServerLogEntry {

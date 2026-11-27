@@ -7,6 +7,7 @@ import { IPC_CHANNELS } from '../../shared/constants.js';
 import type {
   ServerStatus,
   ServerPidFile,
+  PasteReadiness,
   ServerStatePayload,
   ServerLogEntry,
   ServerDiagnostics,
@@ -101,6 +102,7 @@ export class ServerManager {
   private engineStatus: EngineStatus | null = null;
   private runtime: ServerRuntimeFingerprint | null = null;
   private runningRuntimeIdentity: ExpectedRuntimeIdentity | null = null;
+  private pasteReadiness: PasteReadiness | undefined;
 
   private async expectedRuntime(): Promise<{
     identity: ExpectedRuntimeIdentity;
@@ -116,6 +118,13 @@ export class ServerManager {
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window;
+  }
+
+  /** Publishes auto-paste readiness with the server state the UI shows as Ready. */
+  setPasteReadiness(readiness: PasteReadiness): void {
+    if (this.pasteReadiness === readiness) return;
+    this.pasteReadiness = readiness;
+    this.broadcastState();
   }
 
   /**
@@ -475,6 +484,7 @@ export class ServerManager {
       diagnostics: this.diagnostics ?? undefined,
       modelDownload: this.modelDownload ?? undefined,
       runtime: this.runtime ?? undefined,
+      pasteReadiness: this.pasteReadiness,
     };
   }
 

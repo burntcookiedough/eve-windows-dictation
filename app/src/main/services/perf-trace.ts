@@ -26,6 +26,24 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 const elapsed = (start: number | null, end: number | null): number | null =>
   start !== null && end !== null && end >= start ? end - start : null;
 
+// Reasons the snapshot helper itself gives when it cannot prove the keydown window.
+export const foregroundRejections = ['keydown_unverified', 'tracker_unready', 'tracker_unavailable', 'focus_changed'] as const;
+export type ForegroundRejection = typeof foregroundRejections[number];
+const foregroundSnapshotFailures = [
+  'helper_absent', 'helper_unready', 'helper_busy', 'rpc_timeout', 'no_hwnd', ...foregroundRejections,
+] as const;
+export type ForegroundSnapshotFailure = typeof foregroundSnapshotFailures[number];
+const pastePreDispatchReasons = [
+  ...foregroundSnapshotFailures, 'no_target', 'superseded', 'clipboard_baseline_read_failed',
+  'clipboard_write_failed', 'clipboard_written_read_failed', 'clipboard_written_text_changed',
+  'clipboard_ownership_read_failed', 'clipboard_ownership_changed', 'clipboard_sequence_unavailable',
+  'clipboard_authorization_read_failed', 'clipboard_authorization_changed', 'paste_expired',
+  'native_clipboard_changed', 'native_foreground_changed',
+  'paste_helper_not_ready', 'paste_prepare_failed', 'paste_not_authorized',
+  'clipboard_finalization_timeout', 'clipboard_delivery_failed',
+] as const;
+export type PastePreDispatchReason = typeof pastePreDispatchReasons[number];
+
 export function isPerfTraceEnabled(): boolean {
   return ['1', 'true', 'yes', 'on'].includes((process.env.MURMUR_PERF_TRACE ?? '').trim().toLowerCase());
 }
@@ -49,6 +67,7 @@ export interface ClientPerfTrace {
   };
   historyCommitMs: number | null;
   clipboardWriteMs: number | null;
+  pastePreDispatchReason: PastePreDispatchReason | null;
   renderer: OverlayPerfObservation | null;
   serverTimings: ServerPerfTiming | null;
   // Production never observes arbitrary target editors.
@@ -69,7 +88,7 @@ class PerfTraceManager {
     const trace: SessionTrace = {
       correlationId: id, clientClockDomain: 'electron_main_performance_now', status: 'open',
       startedAt: performance.now(), main: Object.fromEntries(mainEvents.map(event => [event, null])) as ClientPerfTrace['main'],
-      historyCommitMs: null, clipboardWriteMs: null, renderer: null, serverTimings: null,
+      historyCommitMs: null, clipboardWriteMs: null, pastePreDispatchReason: null, renderer: null, serverTimings: null,
       actualInsertionObservedAt: null,
     };
     this.traces.set(id, trace);
@@ -101,6 +120,12 @@ class PerfTraceManager {
     if (kind === 'history') trace.historyCommitMs = duration;
     else trace.clipboardWriteMs = duration;
     this.mark(id, kind === 'history' ? 'historyCompletedAt' : 'clipboardCompletedAt', completedAt);
+  }
+
+  pastePreDispatch(id: string | undefined, reason: PastePreDispatchReason): void {
+    if (!id || !isPerfTraceEnabled() || !pastePreDispatchReasons.includes(reason)) return;
+    const trace = this.traces.get(id);
+    if (trace && trace.status !== 'complete' && trace.status !== 'cancelled') trace.pastePreDispatchReason ??= reason;
   }
 
   server(id: string | undefined, value: unknown): void {

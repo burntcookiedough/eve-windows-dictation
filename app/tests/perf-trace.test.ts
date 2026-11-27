@@ -3,7 +3,7 @@ import { isPerfTraceEnabled, perfTraceManager as manager, validateCorrelationId 
 import { OverlayPerfObserver } from '../src/renderer/overlay/perf-observation.js';
 import { IsolatedEditorObserver } from '../src/renderer/app/fixtures/isolated-editor-observer.js';
 import { addTransport } from '../src/main/lib/logger.js';
-import type { ClientPerfTrace } from '../src/main/services/perf-trace.js';
+import type { ClientPerfTrace, PastePreDispatchReason } from '../src/main/services/perf-trace.js';
 const loggedTraces: ClientPerfTrace[] = [];
 addTransport(entry => {
   if (entry.context === 'Performance' && entry.message === 'B4_PERF' && typeof entry.data?.trace === 'string') {
@@ -137,12 +137,17 @@ describe('passive correlated diagnostics', () => {
     manager.mark('busy', 'finalReceivedAt', 100);
     manager.output('busy', 'history', 4, 104);
     manager.output('busy', 'clipboard', 2, 106);
+    manager.pastePreDispatch('busy', 'PRIVATE_CANARY' as PastePreDispatchReason);
+    expect(manager.getRecentTraces()[0].pastePreDispatchReason).toBeNull();
+    manager.pastePreDispatch('busy', 'helper_unready');
+    manager.pastePreDispatch('busy', 'clipboard_finalization_timeout');
     manager.completeTrace('busy');
     const completed = loggedTraces.at(-1)!;
     expect(completed.status).toBe('complete');
     expect(completed.main.finalReceivedAt).toBe(100);
     expect(completed.historyCommitMs).toBe(4);
     expect(completed.clipboardWriteMs).toBe(2);
+    expect(completed.pastePreDispatchReason).toBe('helper_unready');
     for (let i = 0; i < 40; i++) { manager.completeTrace('busy'); manager.renderer(overlay.snapshot()); }
     expect(loggedTraces.filter(trace => trace.status === 'complete')).toHaveLength(1);
     expect(loggedTraces.length).toBeLessThanOrEqual(8);

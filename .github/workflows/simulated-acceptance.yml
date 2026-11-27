@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       smoke_only:
-        description: Smoke close/quiet and relaunch once if paste is skipped before dispatch
+        description: Smoke close/quiet against the verified candidate
         default: false
         type: boolean
 
@@ -69,10 +69,10 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id || '45784796424' }}
-          ARTIFACT_ID: ${{ inputs.artifact_id || '15101085356' }}
-          CANDIDATE_COMMIT: ${{ inputs.candidate_commit || '22aa01d70a10fc8b52668866ff1c0bd5ac02c751' }}
-          MANIFEST_SHA256: ${{ inputs.manifest_sha256 || 'e0004b05ee119467a037c201ea723159e01adda3615f5a2668cfb05433fe763f' }}
+          CANDIDATE_RUN_ID: ${{ github.event_name == 'pull_request' && '45784796424' || inputs.candidate_run_id }}
+          ARTIFACT_ID: ${{ github.event_name == 'pull_request' && '15101085356' || inputs.artifact_id }}
+          CANDIDATE_COMMIT: ${{ github.event_name == 'pull_request' && '22aa01d70a10fc8b52668866ff1c0bd5ac02c751' || inputs.candidate_commit }}
+          MANIFEST_SHA256: ${{ github.event_name == 'pull_request' && 'e0004b05ee119467a037c201ea723159e01adda3615f5a2668cfb05433fe763f' || inputs.manifest_sha256 }}
         run: |
           $pins = @{
             RunId = $env:CANDIDATE_RUN_ID
@@ -99,10 +99,12 @@ jobs:
         env:
           QA_ROOT: ${{ steps.candidate.outputs.root }}
           INSTALL: ${{ steps.candidate.outputs.install }}
+          VERIFIED_CANDIDATE: ${{ steps.candidate.outputs.identity }}
           CONFIG: ${{ matrix.config }}
         run: |
           $arguments = @(
             'scripts/sim_acceptance/hosted.py', '--root', $env:QA_ROOT, '--install', $env:INSTALL,
+            '--candidate', $env:VERIFIED_CANDIDATE,
             '--manifest', "$env:QA_ROOT/corpus/manifest.json", '--config', $env:CONFIG,
             '--output', "$env:QA_ROOT/evidence.json", '--entity-audit', "$env:QA_ROOT/entity-audit.json"
           )

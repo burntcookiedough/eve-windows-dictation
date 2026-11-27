@@ -25,6 +25,22 @@ CANDIDATE = {
 }
 
 
+def add_candidate_argument(parser):
+    parser.add_argument("--candidate", nargs=4, metavar=("RUN_ID", "ARTIFACT_ID", "COMMIT", "MANIFEST_SHA256"),
+                        help="Expected pins from the verified retained candidate (default: original candidate)")
+
+
+def resolve_candidate(parser, pins):
+    if pins is None:
+        return CANDIDATE
+    run_id, artifact_id, commit, manifest_sha256 = pins
+    if not all((re.fullmatch(r"[1-9][0-9]*", run_id), re.fullmatch(r"[1-9][0-9]*", artifact_id),
+                re.fullmatch(r"[0-9a-fA-F]{40}", commit), re.fullmatch(r"[0-9a-fA-F]{64}", manifest_sha256))):
+        parser.error("--candidate requires positive decimal IDs, a 40-hex commit and a 64-hex manifest digest")
+    return {"run_id": run_id, "artifact_id": artifact_id,
+            "commit": commit.lower(), "manifest_sha256": manifest_sha256.lower()}
+
+
 def text_hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -327,11 +343,11 @@ def supplemental_observations(by_config, overhead):
     return out
 
 
-def render(all_evidence, lifecycle, history):
+def render(all_evidence, lifecycle, history, *, expected_candidate=CANDIDATE):
     by_config = {item["config"]: item for item in all_evidence if item.get("config")}
     if len(by_config) != len([item for item in all_evidence if item.get("config")]):
         raise ValueError("More than one evidence file for a configuration")
-    if any(item.get("candidate") != CANDIDATE for item in all_evidence):
+    if any(item.get("candidate") != expected_candidate for item in all_evidence):
         raise ValueError("Every evidence file must identify the verified candidate")
     measurements = by_config.get("close-quiet", {}).get("trials", [])
     overhead = tuple(
@@ -377,8 +393,8 @@ def render(all_evidence, lifecycle, history):
     out = [
         "# Eve 0.9.0-beta.1 simulated acceptance", "",
         f"**{statuses['PASS']} pass · {statuses['FAIL']} fail · {statuses['OPEN']} open**", "",
-        (f"Candidate commit `{CANDIDATE['commit']}`, retained run {CANDIDATE['run_id']}, "
-         f"artifact {CANDIDATE['artifact_id']}. Manifest SHA-256 `{CANDIDATE['manifest_sha256']}`."),
+        (f"Candidate commit `{expected_candidate['commit']}`, retained run {expected_candidate['run_id']}, "
+         f"artifact {expected_candidate['artifact_id']}. Manifest SHA-256 `{expected_candidate['manifest_sha256']}`."),
         "",
         "| Config or gate | Metric | Frozen limit | Observed | Result |",
         "|---|---|---|---|---|",
@@ -388,7 +404,7 @@ def render(all_evidence, lifecycle, history):
     return "\n".join(out) + "\n", statuses
 
 
-def verify_history(run_id, artifact, metadata_path):
+def verify_history(run_id, artifact, metadata_path, *, expected_candidate=CANDIDATE):
     metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
     workflow_run = metadata.get("workflow_run") or {}
     if (not re.fullmatch(r"[1-9][0-9]*", run_id)
@@ -406,10 +422,10 @@ def verify_history(run_id, artifact, metadata_path):
                 raise ValueError("History artifact must contain one gate evidence file")
             gate = json.loads(archive.read(member).decode("utf-8-sig"))
     source = gate["candidateSource"]
-    if (gate["overallStatus"] != "passed" or source["runId"] != CANDIDATE["run_id"]
-            or source["artifactId"] != CANDIDATE["artifact_id"]
-            or gate["candidateCommit"] != CANDIDATE["commit"]
-            or gate["manifestSha256"] != CANDIDATE["manifest_sha256"]):
+    if (gate["overallStatus"] != "passed" or source["runId"] != expected_candidate["run_id"]
+            or source["artifactId"] != expected_candidate["artifact_id"]
+            or gate["candidateCommit"] != expected_candidate["commit"]
+            or gate["manifestSha256"] != expected_candidate["manifest_sha256"]):
         raise ValueError("History evidence does not show a passing gate on the retained candidate")
     return run_id
 
@@ -418,19 +434,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("files", nargs="*", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    add_candidate_argument(parser)
     parser.add_argument("--lifecycle-run")
     parser.add_argument("--history-run")
     parser.add_argument("--history-evidence", type=Path, help="Original retained History artifact ZIP")
     parser.add_argument("--history-metadata", type=Path, help="GitHub API metadata for the ZIP")
     args = parser.parse_args()
-    if args.lifecycle_run and args.lifecycle_run != CANDIDATE["run_id"]:
+    expected_candidate = resolve_candidate(parser, args.candidate)
+    if args.lifecycle_run and args.lifecycle_run != expected_candidate["run_id"]:
         raise ValueError("Lifecycle run must match the candidate")
     history_inputs = (args.history_run, args.history_evidence, args.history_metadata)
     if any(history_inputs) and not all(history_inputs):
         raise ValueError("History run, downloaded ZIP, and artifact metadata are required together")
-    history = verify_history(*history_inputs) if all(history_inputs) else None
+    history = verify_history(*history_inputs, expected_candidate=expected_candidate) if all(history_inputs) else None
     evidence = [json.loads(path.read_text(encoding="utf-8-sig")) for path in args.files]
-    markdown, statuses = render(evidence, args.lifecycle_run, history)
+    markdown, statuses = render(evidence, args.lifecycle_run, history, expected_candidate=expected_candidate)
     args.output.write_text(markdown, encoding="utf-8")
     return 1 if statuses["FAIL"] else 2 if statuses["OPEN"] else 0
 

@@ -6,12 +6,66 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.sim_acceptance import score
 from scripts.sim_acceptance.score import CANDIDATE, assess, render, score_text
 
+NEW_CANDIDATE = {
+    "run_id": "45880000001",
+    "artifact_id": "15110000002",
+    "commit": "ab" * 20,
+    "manifest_sha256": "cd" * 32,
+}
+
 
 class AcceptanceScoreTests(unittest.TestCase):
+    def test_cli_scores_the_new_candidate_across_the_full_hosted_matrix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            evidence_files = []
+            for config in score.CONFIGS[:4]:
+                path = root / f"{config}.json"
+                path.write_text(json.dumps({"candidate": NEW_CANDIDATE, "config": config}), encoding="utf-8")
+                evidence_files.append(str(path))
+            report = root / "report.md"
+            pins = [NEW_CANDIDATE["run_id"], NEW_CANDIDATE["artifact_id"],
+                    NEW_CANDIDATE["commit"].upper(), NEW_CANDIDATE["manifest_sha256"].upper()]
+            args = ["score.py", "--output", str(report), "--candidate", *pins, *evidence_files]
+            with patch("sys.argv", [*args, "--lifecycle-run", NEW_CANDIDATE["run_id"]]):
+                self.assertEqual(score.main(), 2)  # Fixtures leave the measurement gates open.
+            markdown = report.read_text(encoding="utf-8")
+            for pin in NEW_CANDIDATE.values():
+                self.assertIn(pin, markdown)
+            with patch("sys.argv", [*args, "--lifecycle-run", CANDIDATE["run_id"]]):
+                with self.assertRaisesRegex(ValueError, "Lifecycle run must match"):
+                    score.main()
+
+    def test_rejects_evidence_that_does_not_match_the_exact_expected_tuple(self):
+        evidence = {"candidate": NEW_CANDIDATE, "config": "close-quiet"}
+        with self.assertRaisesRegex(ValueError, "Every evidence file"):
+            render([evidence], None, None)  # Default remains the legacy candidate.
+        mismatches = [{**NEW_CANDIDATE, key: CANDIDATE[key]} for key in NEW_CANDIDATE]
+        mismatches.extend((None, {"commit": NEW_CANDIDATE["commit"]}, {**NEW_CANDIDATE, "extra": True}))
+        for candidate in mismatches:
+            with self.subTest(candidate=candidate):
+                with self.assertRaisesRegex(ValueError, "Every evidence file"):
+                    render([evidence, {"candidate": candidate, "config": "far-quiet"}], None, None,
+                           expected_candidate=NEW_CANDIDATE)
+
+    def test_cli_rejects_malformed_candidate_override(self):
+        with tempfile.TemporaryDirectory() as temp:
+            report = Path(temp) / "report.md"
+            for field, malformed in (("run_id", "0"), ("artifact_id", "12.3"), ("commit", "g" * 40),
+                                     ("manifest_sha256", "a" * 63)):
+                with self.subTest(field=field):
+                    pins = {**NEW_CANDIDATE, field: malformed}
+                    with patch("sys.argv", ["score.py", "--output", str(report), "--candidate", *pins.values()]):
+                        with self.assertRaises(SystemExit) as caught:
+                            score.main()
+                        self.assertEqual(caught.exception.code, 2)
+                    self.assertFalse(report.exists())
+
     def test_observed_empty_and_unobservable_are_distinct(self):
         clip = {"reference": "Ship thirty cases", "entities": [[1, 2, "number"]]}
         self.assertEqual(score_text(clip, "")["word_errors"], 3)
@@ -90,15 +144,19 @@ class AcceptanceScoreTests(unittest.TestCase):
             self.assertTrue(row.endswith(f"| {status} |"), row)
 
     def test_history_report_binds_verified_zip_to_its_workflow_run(self):
+        for expected in (CANDIDATE, NEW_CANDIDATE):
+            with self.subTest(commit=expected["commit"]):
+                self.check_history_candidate(expected)
+
+    def check_history_candidate(self, expected):
         with tempfile.TemporaryDirectory() as temp:
             artifact = Path(temp) / "history.zip"
             with zipfile.ZipFile(artifact, "w") as archive:
                 archive.writestr("functional-history-evidence.json", json.dumps({
                     "overallStatus": "passed",
-                    "candidateSource": {"runId": CANDIDATE["run_id"],
-                                        "artifactId": CANDIDATE["artifact_id"]},
-                    "candidateCommit": CANDIDATE["commit"],
-                    "manifestSha256": CANDIDATE["manifest_sha256"],
+                    "candidateSource": {"runId": expected["run_id"], "artifactId": expected["artifact_id"]},
+                    "candidateCommit": expected["commit"],
+                    "manifestSha256": expected["manifest_sha256"],
                 }))
             metadata = Path(temp) / "metadata.json"
             metadata.write_text(json.dumps({
@@ -107,12 +165,15 @@ class AcceptanceScoreTests(unittest.TestCase):
                 "digest": "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest(),
                 "size_in_bytes": artifact.stat().st_size,
             }), encoding="utf-8")
-            self.assertEqual(score.verify_history("123", artifact, metadata), "123")
+            self.assertEqual(score.verify_history("123", artifact, metadata, expected_candidate=expected), "123")
+            other = NEW_CANDIDATE if expected == CANDIDATE else CANDIDATE
+            with self.assertRaisesRegex(ValueError, "passing gate on the retained candidate"):
+                score.verify_history("123", artifact, metadata, expected_candidate=other)
             with self.assertRaisesRegex(ValueError, "History artifact"):
-                score.verify_history("124", artifact, metadata)
+                score.verify_history("124", artifact, metadata, expected_candidate=expected)
             artifact.write_bytes(artifact.read_bytes() + b"corrupt")
             with self.assertRaisesRegex(ValueError, "History artifact"):
-                score.verify_history("123", artifact, metadata)
+                score.verify_history("123", artifact, metadata, expected_candidate=expected)
 
     def test_gpu_proxy_below_limit_keeps_editor_evidence_open(self):
         evidence = {"trials": [
