@@ -244,11 +244,16 @@ async def run_replay(port, process, clips, result, result_file, audit=None):
 
 def verify_candidate_source(source, expected_commit):
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
-    top_level = subprocess.check_output(["git", "-C", source, "rev-parse", "--show-toplevel"], env=env, text=True).strip()
+
+    def git(*args):
+        # Git prints paths as UTF-8 regardless of the console code page.
+        return subprocess.check_output(["git", "-C", source, *args], env=env, encoding="utf-8").strip()
+
+    top_level = git("rev-parse", "--show-toplevel")
     if Path(top_level).resolve() != source.resolve():
         raise ValueError("GPU server source must be the candidate Git worktree root")
-    head = subprocess.check_output(["git", "-C", source, "rev-parse", "HEAD"], env=env, text=True).strip()
-    changed = subprocess.check_output(["git", "-C", source, "status", "--porcelain"], env=env, text=True).strip()
+    head = git("rev-parse", "HEAD")
+    changed = git("status", "--porcelain")
     if head != expected_commit or changed:
         raise ValueError("GPU server requires the clean verified candidate source commit")
 

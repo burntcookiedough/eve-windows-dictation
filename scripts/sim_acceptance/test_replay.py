@@ -173,6 +173,32 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "candidate Git worktree root"):
                 replay.verify_candidate_source(nested, commit)
 
+    def test_candidate_source_accepts_a_non_ascii_root_under_a_legacy_code_page(self):
+        env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "Évé candidate ü"
+            source.mkdir()
+
+            def git(*args):
+                return subprocess.check_output(["git", "-C", source, *args], env=env, encoding="utf-8").strip()
+
+            git("init", "--quiet")
+            (source / "main.py").write_text("# candidate\n", encoding="utf-8")
+            git("add", "main.py")
+            git("-c", "user.name=Replay fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture")
+            commit = git("rev-parse", "HEAD")
+            real_check_output = subprocess.check_output
+
+            def cp1252_default(command, **kwargs):
+                # Simulate text=True decoding with a CP1252 locale.
+                if kwargs.pop("text", False):
+                    return real_check_output(command, **kwargs).decode("cp1252", errors="replace")
+                return real_check_output(command, **kwargs)
+
+            with patch.object(replay.subprocess, "check_output", side_effect=cp1252_default):
+                replay.verify_candidate_source(source, commit)
+
     def test_owned_process_cleanup_stops_child_after_launcher_exits(self):
         command = [sys.executable, "-c",
                    "import subprocess, sys; "
