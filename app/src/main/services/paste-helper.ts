@@ -15,7 +15,7 @@ type RequestType = 'ready' | 'foreground' | 'sequence' | 'paste' | 'commit' | 'd
 type HelperChannel = 'paste' | 'snapshot';
 type NativePasteAbortCode = typeof PasteAbortCode[keyof typeof PasteAbortCode];
 
-export type AuthorizePaste = (dispatch: () => void | Promise<void>) => Promise<void>;
+export type AuthorizePaste = (dispatch: (onHandoff?: () => void) => void | Promise<void>) => Promise<void>;
 export type ForegroundSnapshot = { handle: number } | { reason: ForegroundSnapshotFailure };
 
 const warmingReasons: readonly ForegroundSnapshotFailure[] = ['helper_absent', 'helper_unready', 'tracker_unready'];
@@ -200,11 +200,11 @@ export class PersistentPasteHelper {
     }
   }
 
-  /** Null means that auto-paste is off and accepted work cannot reuse a ready helper. */
+  /** Undefined means ready, a promise means warming, and null means unavailable. */
   get pasteWarmup(): Promise<number | null> | null | undefined {
     const connection = this.connections.paste;
     if (connection?.ready) return undefined;
-    return this.autoPaste ? connection?.warming : null;
+    return this.autoPaste ? (connection?.warming ?? null) : null;
   }
 
   async clipboardSequence(): Promise<number | null> {
@@ -391,7 +391,7 @@ export class PersistentPasteHelper {
   }
 
   private async authorizeCommit(connection: HelperConnection, id: number, pending: PendingRequest): Promise<void> {
-    const commit = () => {
+    const commit = (onHandoff?: () => void) => {
       if (this.connections.paste !== connection || connection.requests.get(id) !== pending
         || pending.type !== 'authorizing') return;
       if (performance.now() >= pending.expiresAt) {
@@ -400,6 +400,7 @@ export class PersistentPasteHelper {
       }
       // From the instant we hand off commit, a lost reply cannot tell us whether SendInput ran.
       pending.type = 'commit';
+      onHandoff?.();
       this.send(connection, { id, type: 'commit' });
     };
     try {

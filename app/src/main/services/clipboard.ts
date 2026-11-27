@@ -182,6 +182,7 @@ export async function simulatePaste(
   authorize: AuthorizePaste = async dispatch => dispatch(),
   signal = pasteLifetime.signal,
   deadlineUnixMs = Date.now() + PASTE_PROCESS_TIMEOUT_MS,
+  onDispatch?: () => void,
 ): Promise<boolean> {
   if (signal.aborted) return false;
   if (!Number.isSafeInteger(targetWindowHandle) || targetWindowHandle <= 0) {
@@ -190,14 +191,21 @@ export async function simulatePaste(
   if (Date.now() >= deadlineUnixMs) throw new NativePasteAbortedError(PasteAbortCode.Expired);
   let dispatched = false;
   let expired = false;
+  const markDispatched = () => {
+    dispatched = true;
+    try {
+      onDispatch?.();
+    } catch {
+      log.error('Could not report paste handoff');
+    }
+  };
   const dispatchIfAuthorized: AuthorizePaste = dispatch => authorize(() => {
     if (signal.aborted) return;
     if (Date.now() >= deadlineUnixMs) {
       expired = true;
       return;
     }
-    dispatched = true;
-    return dispatch();
+    return dispatch(markDispatched);
   });
   try {
     if (!isClipboardSequence(clipboardSequence)) return false;
@@ -216,11 +224,10 @@ export async function simulatePaste(
       if (!(error instanceof PasteHelperUnavailableError && error.allowFallback)) throw error;
       if (signal.aborted) return false;
       if (Date.now() >= deadlineUnixMs) throw new NativePasteAbortedError(PasteAbortCode.Expired);
-      dispatched = false;
       const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ensureSendInputScript(),
         '-TargetWindowHandle', String(targetWindowHandle), '-ClipboardSequence', String(clipboardSequence),
         '-DeadlineUnixMs', String(deadlineUnixMs)];
-      await dispatchIfAuthorized(() => runOneShotPaste(args, signal, perfTraceId));
+      await dispatchIfAuthorized(onHandoff => runOneShotPaste(args, signal, perfTraceId, onHandoff));
     }
   } catch (error) {
     if (signal.aborted) return false;
@@ -228,14 +235,15 @@ export async function simulatePaste(
     log.error('Paste dispatch failed', { error: error as Error });
     throw error;
   }
-  if (expired) throw new NativePasteAbortedError(PasteAbortCode.Expired);
+  if (expired && !dispatched) throw new NativePasteAbortedError(PasteAbortCode.Expired);
   return dispatched;
 }
 
-async function runOneShotPaste(args: string[], signal: AbortSignal, perfTraceId?: string): Promise<void> {
+async function runOneShotPaste(args: string[], signal: AbortSignal, perfTraceId?: string, onHandoff?: () => void): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve, reject) => {
     if (perfTraceId) perfTraceManager.mark(perfTraceId, 'pasteHelperRequestSentAt');
+    onHandoff?.();
     execFile('powershell', args, {
       windowsHide: true,
       timeout: PASTE_PROCESS_TIMEOUT_MS,
@@ -433,6 +441,8 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
         discardPasteSequence(activePasteSequence);
       }
 
+      // A helper may have exited while the baseline read was pending.
+      if (pasteHelper.pasteWarmup !== undefined) return skip('paste_unavailable', false, 'paste_helper_not_ready');
       const writeStart = options.perfTraceId && isPerfTraceEnabled() ? performance.now() : null;
       failureReason = 'clipboard_write_failed';
       clipboardWrite = 'uncertain';
@@ -498,12 +508,13 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
           authorizationFailure = 'clipboard_authorization_changed';
           return;
         }
-        dispatchAttempted = true;
-        options.onDispatch?.();
         return dispatch();
       };
       failureReason = 'paste_prepare_failed';
-      const dispatched = await simulatePaste(target, clipboardSequence, options.perfTraceId, authorize, signal, options.deadlineUnixMs);
+      const dispatched = await simulatePaste(target, clipboardSequence, options.perfTraceId, authorize, signal, options.deadlineUnixMs, () => {
+        dispatchAttempted = true;
+        options.onDispatch?.();
+      });
       if (signal.aborted) return skip('superseded');
       if (dispatched) return { kind: 'pasted' };
       return isSuperseded() ? skip('superseded') : skip('clipboard_changed', false, authorizationFailure);

@@ -11,10 +11,56 @@ from unittest.mock import AsyncMock, Mock, patch
 import psutil
 from websockets.exceptions import ConnectionClosedError
 
-from scripts.sim_acceptance import replay
+from scripts.sim_acceptance import replay, score
+
+
+NEW_CANDIDATE = {"run_id": "45880000001", "artifact_id": "15110000002",
+                 "commit": "ab" * 20, "manifest_sha256": "cd" * 32}
 
 
 class ReplayTests(unittest.IsolatedAsyncioTestCase):
+    def test_replay_cli_selects_explicit_or_legacy_candidate(self):
+        argv = ["replay.py", "--source", "candidate", "--pid-file", "server.pid",
+                "--manifest", "manifest.json", "--output", "evidence.json"]
+        pins = [NEW_CANDIDATE["run_id"], NEW_CANDIDATE["artifact_id"],
+                NEW_CANDIDATE["commit"].upper(), NEW_CANDIDATE["manifest_sha256"].upper()]
+        for options, candidate in (([], score.CANDIDATE), (["--candidate", *pins], NEW_CANDIDATE)):
+            with (self.subTest(candidate=candidate), patch("sys.argv", argv + options),
+                  patch.object(replay, "run_gpu", AsyncMock()) as run):
+                replay.main()
+                self.assertEqual(run.await_args.kwargs["candidate"], candidate)
+
+    async def test_gpu_replay_scores_with_the_selected_pins(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            args = SimpleNamespace(source=root, pid_file=root / "server.pid", manifest=root / "manifest.json",
+                                   output=root / "evidence.json", entity_audit=root / "audit.json")
+            args.pid_file.write_text(json.dumps({"pid": 123, "port": 456}), encoding="utf-8")
+            process = Mock()
+            process.cwd.return_value = str(root / "server")
+            process.cmdline.return_value = ["python", "src/main.py"]
+            with (patch.object(replay.subprocess, "check_output",
+                               side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
+                  patch.object(replay.psutil, "Process", return_value=process),
+                  patch.object(replay, "has_loopback_listener", return_value=True),
+                  patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
+                  patch.object(replay, "load_clips", return_value=[]),
+                  patch.object(replay, "run_replay", AsyncMock()) as run):
+                await replay.run_gpu(args, candidate=NEW_CANDIDATE)
+            evidence = json.loads(args.output.read_text(encoding="utf-8"))
+            self.assertEqual(evidence["candidate"], NEW_CANDIDATE)
+            self.assertEqual(run.await_args.args[-1].snapshot["candidate"], NEW_CANDIDATE)
+            report, _ = score.render([evidence], None, None, expected_candidate=NEW_CANDIDATE)
+            self.assertIn(NEW_CANDIDATE["commit"], report)
+
+    def test_gpu_owner_rejects_mismatched_or_dirty_candidate_source(self):
+        args = SimpleNamespace(source=Path("candidate"))
+        for head, status in ((score.CANDIDATE["commit"], ""), (NEW_CANDIDATE["commit"], " M source.py")):
+            with (self.subTest(head=head, dirty=bool(status)),
+                  patch.object(replay.subprocess, "check_output", side_effect=[head, status]),
+                  self.assertRaisesRegex(ValueError, "clean verified candidate source commit")):
+                replay.gpu_owner(args, expected_commit=NEW_CANDIDATE["commit"])
+
     async def test_warmup_timeout_still_attempts_each_clip(self):
         clips = [{"id": clip_id, "mode": "quick", "duration_s": 8,
                   "reference": "Alice arrived", "entities": [], "sha256": "0" * 64}

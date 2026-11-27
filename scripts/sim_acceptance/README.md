@@ -98,7 +98,14 @@ Use the installed CUDA Toolkit through the dev environment. Clear
 shell. The replay checks the exact source commit, ready CUDA and model health,
 RTX 3060 Laptop and absence of a managed GPU pack.
 
-`python scripts/sim_acceptance/replay.py --source <candidate-worktree> --pid-file <scratch-pid-file> --manifest <corpus-manifest> --output <gpu-evidence.json>`
+For a new candidate, use the same four verified pins as the hosted dispatch and
+offline scorer. Omit `--candidate` to use the original retained candidate.
+
+```powershell
+python scripts/sim_acceptance/replay.py --source '<candidate-worktree>' `
+  --pid-file '<scratch-pid-file>' --manifest '<corpus-manifest>' --output gpu-evidence.json `
+  --candidate '<lifecycle run ID>' '<artifact ID>' '<commit SHA>' '<manifest SHA-256>'
+```
 
 ## Offline scoring
 
@@ -113,6 +120,9 @@ python scripts/sim_acceptance/score.py --output acceptance.md `
   .\far-quiet\evidence.json .\far-moderate\evidence.json `
   .\close-moderate\evidence.json .\close-quiet\evidence.json
 ```
+
+Include `gpu-evidence.json` as another input if you ran the local CUDA replay
+with those pins.
 
 Exit codes are 0 for all rows passed, 1 for at least one failure and 2 for
 open rows with no observed failure. To verify G2,

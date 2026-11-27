@@ -22,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.perf_regression_benchmark import replay_trial
 from scripts.sim_acceptance.score import (
     CANDIDATE,
+    add_candidate_argument,
     load_clips,
+    resolve_candidate,
     trial_record,
     write_evidence,
 )
@@ -237,11 +239,11 @@ async def run_replay(port, process, clips, result, result_file, audit=None):
             break
 
 
-def gpu_owner(args):
+def gpu_owner(args, *, expected_commit=CANDIDATE["commit"]):
     source = args.source.resolve()
     head = subprocess.check_output(["git", "-C", source, "rev-parse", "HEAD"], text=True).strip()
     changed = subprocess.check_output(["git", "-C", source, "status", "--porcelain"], text=True).strip()
-    if head != CANDIDATE["commit"] or changed:
+    if head != expected_commit or changed:
         raise ValueError("GPU server requires the clean verified candidate source commit")
     owner = json.loads(args.pid_file.read_text(encoding="utf-8"))
     process = psutil.Process(owner["pid"])
@@ -257,8 +259,8 @@ def gpu_owner(args):
     return owner, process
 
 
-async def run_gpu(args):
-    owner, process = await asyncio.to_thread(gpu_owner, args)
+async def run_gpu(args, *, candidate=CANDIDATE):
+    owner, process = await asyncio.to_thread(gpu_owner, args, expected_commit=candidate["commit"])
     health = await wait_health(owner["port"], "cuda", "large-v3-turbo", 1800)
     if not await asyncio.to_thread(has_loopback_listener, process, owner["port"]):
         raise ValueError("GPU server no longer owns the specified loopback listener")
@@ -266,7 +268,7 @@ async def run_gpu(args):
         raise ValueError("Development CUDA replay must use the system toolkit")
     clips = load_clips(args.manifest, "gpu-close-quiet")
     result = {
-        "candidate": CANDIDATE, "config": "gpu-close-quiet", "method": "source-cuda-replay",
+        "candidate": candidate, "config": "gpu-close-quiet", "method": "source-cuda-replay",
         "device": "cuda", "model": "large-v3-turbo", "gpu": "RTX 3060 Laptop GPU",
         "resources": {}, "trials": [],
     }
@@ -275,7 +277,7 @@ async def run_gpu(args):
     if args.entity_audit:
         from scripts.sim_acceptance.entity_audit import EntityAudit
 
-        audit = EntityAudit(args.entity_audit, "gpu-close-quiet", CANDIDATE)
+        audit = EntityAudit(args.entity_audit, "gpu-close-quiet", candidate)
     await run_replay(owner["port"], process, clips, result, args.output, audit)
 
 
@@ -285,8 +287,10 @@ def main():
     parser.add_argument("--pid-file", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    add_candidate_argument(parser)
     parser.add_argument("--entity-audit", type=Path)
-    asyncio.run(run_gpu(parser.parse_args()))
+    args = parser.parse_args()
+    asyncio.run(run_gpu(args, candidate=resolve_candidate(parser, args.candidate)))
 
 
 if __name__ == "__main__":

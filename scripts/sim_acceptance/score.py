@@ -25,6 +25,22 @@ CANDIDATE = {
 }
 
 
+def add_candidate_argument(parser):
+    parser.add_argument("--candidate", nargs=4, metavar=("RUN_ID", "ARTIFACT_ID", "COMMIT", "MANIFEST_SHA256"),
+                        help="Expected pins from the verified retained candidate (default: original candidate)")
+
+
+def resolve_candidate(parser, pins):
+    if pins is None:
+        return CANDIDATE
+    run_id, artifact_id, commit, manifest_sha256 = pins
+    if not all((re.fullmatch(r"[1-9][0-9]*", run_id), re.fullmatch(r"[1-9][0-9]*", artifact_id),
+                re.fullmatch(r"[0-9a-fA-F]{40}", commit), re.fullmatch(r"[0-9a-fA-F]{64}", manifest_sha256))):
+        parser.error("--candidate requires positive decimal IDs, a 40-hex commit and a 64-hex manifest digest")
+    return {"run_id": run_id, "artifact_id": artifact_id,
+            "commit": commit.lower(), "manifest_sha256": manifest_sha256.lower()}
+
+
 def text_hash(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -418,21 +434,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("files", nargs="*", type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--candidate", nargs=4, metavar=("RUN_ID", "ARTIFACT_ID", "COMMIT", "MANIFEST_SHA256"),
-                        help="Expected pins from the verified retained candidate (default: original candidate)")
+    add_candidate_argument(parser)
     parser.add_argument("--lifecycle-run")
     parser.add_argument("--history-run")
     parser.add_argument("--history-evidence", type=Path, help="Original retained History artifact ZIP")
     parser.add_argument("--history-metadata", type=Path, help="GitHub API metadata for the ZIP")
     args = parser.parse_args()
-    expected_candidate = CANDIDATE
-    if args.candidate is not None:
-        run_id, artifact_id, commit, manifest_sha256 = args.candidate
-        if not all((re.fullmatch(r"[1-9][0-9]*", run_id), re.fullmatch(r"[1-9][0-9]*", artifact_id),
-                    re.fullmatch(r"[0-9a-fA-F]{40}", commit), re.fullmatch(r"[0-9a-fA-F]{64}", manifest_sha256))):
-            parser.error("--candidate requires positive decimal IDs, a 40-hex commit and a 64-hex manifest digest")
-        expected_candidate = {"run_id": run_id, "artifact_id": artifact_id,
-                              "commit": commit.lower(), "manifest_sha256": manifest_sha256.lower()}
+    expected_candidate = resolve_candidate(parser, args.candidate)
     if args.lifecycle_run and args.lifecycle_run != expected_candidate["run_id"]:
         raise ValueError("Lifecycle run must match the candidate")
     history_inputs = (args.history_run, args.history_evidence, args.history_metadata)
