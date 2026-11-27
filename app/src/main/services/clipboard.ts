@@ -282,9 +282,7 @@ function discardPasteSequence(sequence: PasteSequence): void {
   }
 }
 
-async function beginPasteOperation(signal: AbortSignal): Promise<{ sequence: PasteSequence | null; baselineSnapshot: ClipboardSnapshot }> {
-  const snapshot = await readClipboardWhileActive(signal, readClipboardSnapshot);
-  signal.throwIfAborted();
+function beginPasteOperation(snapshot: ClipboardSnapshot): { sequence: PasteSequence | null; baselineSnapshot: ClipboardSnapshot } {
   const currentSequence = activePasteSequence;
 
   if (currentSequence) {
@@ -441,12 +439,15 @@ export async function pasteText(text: string, options: PasteTextOptions): Promis
           if (activePasteSequence) discardPasteSequence(activePasteSequence);
           break;
         }
-        const operation = await beginPasteOperation(signal);
+        const helperGeneration = pasteHelper.pasteConnectionGeneration;
+        const snapshot = await readClipboardWhileActive(signal, readClipboardSnapshot);
         if (isSuperseded()) return skip('superseded');
+        // A replacement can already be ready by the time the read completes.
+        if (pasteHelper.pasteConnectionGeneration !== helperGeneration || pasteHelper.pasteWarmup !== undefined) continue;
+        const operation = beginPasteOperation(snapshot);
         sequence = operation.sequence;
         baselineSnapshot = operation.baselineSnapshot;
-        // If the helper exited during the read, wait again and resample.
-        if (pasteHelper.pasteWarmup === undefined) break;
+        break;
       }
 
       if (Date.now() >= (options.deadlineUnixMs ?? Infinity)) return skip('expired', false, 'paste_expired');

@@ -1,5 +1,6 @@
 """Synthetic coverage and transport regressions for replay without a server."""
 
+import asyncio
 import json
 import os
 import tempfile
@@ -20,47 +21,97 @@ NEW_CANDIDATE = {"run_id": "45880000001", "artifact_id": "15110000002",
 
 class ReplayTests(unittest.IsolatedAsyncioTestCase):
     def test_replay_cli_selects_explicit_or_legacy_candidate(self):
-        argv = ["replay.py", "--source", "candidate", "--pid-file", "server.pid",
-                "--manifest", "manifest.json", "--output", "evidence.json"]
+        argv = ["replay.py", "--source", "candidate", "--manifest", "manifest.json", "--output", "evidence.json"]
         pins = [NEW_CANDIDATE["run_id"], NEW_CANDIDATE["artifact_id"],
                 NEW_CANDIDATE["commit"].upper(), NEW_CANDIDATE["manifest_sha256"].upper()]
-        for options, candidate in (([], score.CANDIDATE), (["--candidate", *pins], NEW_CANDIDATE)):
+        for options, candidate in ((["--pid-file", "server.pid"], None), (["--candidate", *pins], NEW_CANDIDATE)):
             with (self.subTest(candidate=candidate), patch("sys.argv", argv + options),
                   patch.object(replay, "run_gpu", AsyncMock()) as run):
                 replay.main()
                 self.assertEqual(run.await_args.kwargs["candidate"], candidate)
+        with (patch("sys.argv", argv + ["--pid-file", "foreign.pid", "--candidate", *pins]),
+              patch.object(replay, "run_gpu", AsyncMock()) as run,
+              self.assertRaises(SystemExit)):
+            replay.main()
+        run.assert_not_awaited()
 
-    async def test_gpu_replay_scores_with_the_selected_pins(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            args = SimpleNamespace(source=root, pid_file=root / "server.pid", manifest=root / "manifest.json",
-                                   output=root / "evidence.json", entity_audit=root / "audit.json")
-            args.pid_file.write_text(json.dumps({"pid": 123, "port": 456}), encoding="utf-8")
-            process = Mock()
-            process.cwd.return_value = str(root / "server")
-            process.exe.return_value = "python.exe"
-            process.cmdline.return_value = ["python", "src/main.py"]
-            with (patch.object(replay.subprocess, "check_output",
-                               side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
-                  patch.object(replay.psutil, "Process", return_value=process),
-                  patch.object(replay, "has_loopback_listener", return_value=True),
-                  patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
-                  patch.object(replay, "load_clips", return_value=[]),
-                  patch.object(replay, "run_replay", AsyncMock()) as run):
-                await replay.run_gpu(args, candidate=NEW_CANDIDATE)
-            evidence = json.loads(args.output.read_text(encoding="utf-8"))
-            self.assertEqual(evidence["candidate"], NEW_CANDIDATE)
-            self.assertEqual(run.await_args.args[-1].snapshot["candidate"], NEW_CANDIDATE)
-            report, _ = score.render([evidence], None, None, expected_candidate=NEW_CANDIDATE)
-            self.assertIn(NEW_CANDIDATE["commit"], report)
+    async def test_candidate_stamp_requires_a_live_launched_child(self):
+        for scenario in ("completed", "foreign PID", "child exit"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                args = SimpleNamespace(source=root / "candidate", pid_file=None, manifest=root / "manifest.json",
+                                       output=root / "evidence.json", entity_audit=root / "audit.json")
+                server = args.source / "server"
+                python = server / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+                python.parent.mkdir(parents=True)
+                python.touch()
+                entry_point = server / "src/main.py"
+                entry_point.parent.mkdir()
+                entry_point.touch()
+                launcher = Mock(pid=123)
+                launcher.poll.return_value = None
+                process = Mock(pid=124)
+                process.is_running.return_value = True
+                launcher.children.return_value = [process]
+
+                def launch(command, *, cwd, env, **_options):
+                    self.assertEqual(command, [str(python), "-B", str(entry_point)])
+                    self.assertEqual(cwd, server)
+                    self.assertEqual((env["MURMUR_HOST"], env["MURMUR_PORT"]), ("127.0.0.1", "0"))
+                    pid_file = Path(env["MURMUR_PID_FILE"])
+                    self.assertFalse(pid_file.exists())
+                    pid = 456 if scenario == "foreign PID" else process.pid
+                    pid_file.write_text(json.dumps({"pid": pid, "port": 789}), encoding="utf-8")
+                    return launcher
+
+                async def replay_clips(port, owned, clips, result, path, audit):
+                    self.assertEqual(port, 789)
+                    self.assertIs(owned, process)
+                    self.assertEqual(result["candidate"], NEW_CANDIDATE)
+                    self.assertNotEqual(path, args.output)
+                    score.write_evidence(audit.path, audit.snapshot)
+                    if scenario == "child exit":
+                        process.is_running.return_value = False
+                        await asyncio.Future()
+
+                with (patch.object(replay.subprocess, "check_output",
+                                   side_effect=[NEW_CANDIDATE["commit"], "", "NVIDIA GeForce RTX 3060 Laptop GPU"]),
+                      patch.object(replay.psutil, "Popen", side_effect=launch) as start,
+                      patch.object(replay, "stop_gpu_child") as stop,
+                      patch.object(replay, "has_loopback_listener", return_value=True) as listener,
+                      patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
+                      patch.object(replay, "load_clips", return_value=[]),
+                      patch.object(replay, "run_replay", AsyncMock(side_effect=replay_clips)) as run):
+                    if scenario == "foreign PID":
+                        with self.assertRaisesRegex(ValueError, "does not own"):
+                            await replay.run_gpu(args, candidate=NEW_CANDIDATE)
+                        listener.assert_not_called()
+                        run.assert_not_awaited()
+                    elif scenario == "child exit":
+                        with self.assertRaisesRegex(RuntimeError, "exited during replay"):
+                            await asyncio.wait_for(replay.run_gpu(args, candidate=NEW_CANDIDATE), timeout=3)
+                        run.assert_awaited_once()
+                    else:
+                        await replay.run_gpu(args, candidate=NEW_CANDIDATE)
+                        evidence = json.loads(args.output.read_text(encoding="utf-8"))
+                        audit = json.loads(args.entity_audit.read_text(encoding="utf-8"))
+                        self.assertEqual(evidence["candidate"], NEW_CANDIDATE)
+                        self.assertEqual(audit["candidate"], NEW_CANDIDATE)
+                        report, _ = score.render([evidence], None, None, expected_candidate=NEW_CANDIDATE)
+                        self.assertIn(NEW_CANDIDATE["commit"], report)
+                    start.assert_called_once()
+                    stop.assert_called_once_with(launcher, None if scenario == "foreign PID" else process)
+                if scenario != "completed":
+                    self.assertFalse(args.output.exists())
+                    self.assertFalse(args.entity_audit.exists())
 
     def test_gpu_owner_rejects_mismatched_or_dirty_candidate_source(self):
         args = SimpleNamespace(source=Path("candidate"))
-        for head, status in ((score.CANDIDATE["commit"], ""), (NEW_CANDIDATE["commit"], " M source.py")):
+        for head, status in ((NEW_CANDIDATE["commit"], ""), (score.CANDIDATE["commit"], " M source.py")):
             with (self.subTest(head=head, dirty=bool(status)),
                   patch.object(replay.subprocess, "check_output", side_effect=[head, status]),
                   self.assertRaisesRegex(ValueError, "clean verified candidate source commit")):
-                replay.gpu_owner(args, expected_commit=NEW_CANDIDATE["commit"])
+                replay.gpu_owner(args)
 
     def test_gpu_owner_rejects_entry_points_outside_the_candidate_checkout(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -80,12 +131,12 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
             for command in (["python", str(outside)], ["python", str(outside), str(entry_point)],
                             ["python", "-m", "src.main", str(entry_point)]):
                 with (self.subTest(command=command),
-                      patch.object(replay.subprocess, "check_output", side_effect=[NEW_CANDIDATE["commit"], ""]),
+                      patch.object(replay.subprocess, "check_output", side_effect=[score.CANDIDATE["commit"], ""]),
                       patch.object(replay.psutil, "Process", return_value=process),
                       patch.object(replay, "has_loopback_listener") as listener):
                     process.cmdline.return_value = command
                     with self.assertRaisesRegex(ValueError, "does not launch the candidate entry point"):
-                        replay.gpu_owner(args, expected_commit=NEW_CANDIDATE["commit"])
+                        replay.gpu_owner(args)
                     listener.assert_not_called()
 
     async def test_warmup_timeout_still_attempts_each_clip(self):
@@ -162,7 +213,7 @@ class ReplayTests(unittest.IsolatedAsyncioTestCase):
               patch.object(replay, "wait_health", AsyncMock(return_value={"runtime": {}})),
               patch.object(replay, "has_loopback_listener", return_value=False) as verify,
               self.assertRaisesRegex(ValueError, "no longer owns")):
-            await replay.run_gpu(None)
+            await replay.run_gpu(SimpleNamespace(output=None, entity_audit=None))
         verify.assert_called_once_with(owned, 123)
 
     def test_validates_loopback_listener_on_specific_port(self):

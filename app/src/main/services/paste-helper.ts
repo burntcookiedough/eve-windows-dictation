@@ -91,6 +91,7 @@ export class PasteHelperUnavailableError extends Error {
 export class PersistentPasteHelper {
   private readonly connections: Partial<Record<HelperChannel, HelperConnection>> = {};
   private nextId = 0;
+  private pasteGeneration = 0;
   private stopped = false;
   private autoPaste = true;
   private degraded = false;
@@ -207,6 +208,10 @@ export class PersistentPasteHelper {
     return this.autoPaste ? (connection?.warming ?? null) : null;
   }
 
+  get pasteConnectionGeneration(): number {
+    return this.pasteGeneration;
+  }
+
   async clipboardSequence(): Promise<number | null> {
     if (!this.connections.paste?.ready) return null;
     return this.request('paste', 'sequence', SNAPSHOT_TIMEOUT_MS);
@@ -286,6 +291,7 @@ export class PersistentPasteHelper {
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     const connection: HelperConnection = { channel, child, requests: new Map(), output: '', ready: false };
+    if (channel === 'paste') this.pasteGeneration++;
     this.connections[channel] = connection;
     child.on('error', () => this.disconnect(connection, 'Paste helper process failed'));
     child.on('close', () => this.disconnect(connection, 'Paste helper exited'));

@@ -88,25 +88,25 @@ Never route this command through the packaged Eve app.
 
 From the harness checkout, run
 `python scripts/sim_acceptance/prepare_corpus.py --root <corpus-dir> --config gpu-close-quiet`.
-From within the candidate checkout, launch `server/src/main.py` directly with
-the dev Python executable, headless and using localhost and `MURMUR_PORT=0`.
-Set `HF_HOME` and
-`HF_HUB_CACHE` to the isolated cache, `MURMUR_SETTINGS_FILE` and
-`MURMUR_PID_FILE` to scratch files, `MURMUR_PERF_TRACE=1`,
-`MURMUR_WHISPER_MODEL=large-v3-turbo` and `MURMUR_WHISPER_DEVICE=cuda`.
-Use the installed CUDA Toolkit through the dev environment. Clear
-`MURMUR_GPU_RUNTIME_DIR` and `MURMUR_GPU_PACK_ID` if present in that
-shell. The replay checks the exact source commit, ready CUDA and model health,
-RTX 3060 Laptop and absence of a managed GPU pack.
-
-For a new candidate, use the same four verified pins as the hosted dispatch and
-offline scorer. Omit `--candidate` to use the original retained candidate.
+Use the installed CUDA Toolkit through the dev environment. Pass the same four
+verified pins as the hosted dispatch and offline scorer. Replay checks the clean
+checkout, launches its server with the prepared venv, and publishes evidence only
+after the owned process completes the observations. It uses a loopback ephemeral
+port, an isolated PID and settings file, and an `hf` cache beside the output.
 
 ```powershell
 python scripts/sim_acceptance/replay.py --source '<candidate-worktree>' `
-  --pid-file '<scratch-pid-file>' --manifest '<corpus-manifest>' --output gpu-evidence.json `
+  --manifest '<corpus-manifest>' --output '<scratch-dir>/gpu-evidence.json' `
   --candidate '<lifecycle run ID>' '<artifact ID>' '<commit SHA>' '<manifest SHA-256>'
 ```
+
+For the original retained candidate's manually started server, supply
+`--pid-file '<scratch-pid-file>'` without `--candidate`. Start its
+`server/src/main.py` directly from the checkout using the dev venv, localhost,
+and `MURMUR_PORT=0`. Set `HF_HOME`, `HF_HUB_CACHE`, `MURMUR_SETTINGS_FILE`
+and `MURMUR_PID_FILE` to isolated paths, and set `MURMUR_PERF_TRACE=1`,
+`MURMUR_WHISPER_MODEL=large-v3-turbo` and `MURMUR_WHISPER_DEVICE=cuda`.
+Clear `MURMUR_GPU_RUNTIME_DIR` and `MURMUR_GPU_PACK_ID` in that shell.
 
 ## Offline scoring
 

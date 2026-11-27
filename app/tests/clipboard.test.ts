@@ -1496,8 +1496,8 @@ describe('persistent paste helper', () => {
     });
   }
 
-  for (const replacementReady of [true, false]) {
-    test(`waits for a replacement that warms during the baseline read (ready in budget: ${replacementReady})`, async () => {
+  for (const timing of ['before clipboard change', 'after clipboard change', 'after baseline read', 'after budget'] as const) {
+    test(`resamples the baseline when the replacement is ready ${timing}`, async () => {
       const paste = await readyPasteHelper();
       let readyRequest: HelperRequest | undefined;
       const replacement = nextHelper((request, helper) => {
@@ -1515,21 +1515,29 @@ describe('persistent paste helper', () => {
         baselineStarted.resolve();
         return baselineRead.promise;
       });
-      const clock = replacementReady ? undefined : spyOn(Date, 'now').mockReturnValue(100_000);
+      const clock = timing === 'after budget' ? spyOn(Date, 'now').mockReturnValue(100_000) : undefined;
       const delivery = pasteText('Synthetic dictation', {
         targetWindowHandle: 12345, restoreClipboard: true, restoreDelayMs: 1,
-        deadlineUnixMs: Date.now() + (replacementReady ? 4000 : 1700),
+        deadlineUnixMs: Date.now() + (clock ? 1700 : 4000),
       });
       try {
         await Promise.race([baselineStarted.promise, delivery.then(() => { throw new Error('Baseline read did not start'); })]);
         paste.crash();
+        if (timing === 'before clipboard change' || timing === 'after clipboard change') {
+          if (timing === 'before clipboard change') replacement.reply(readyRequest!, 'ready');
+          setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
+          if (timing === 'after clipboard change') replacement.reply(readyRequest!, 'ready');
+          expect(pasteHelper.pasteWarmup).toBeUndefined();
+        }
         const baselineEndedAt = performance.now();
         baselineRead.resolve('First baseline');
-        await Bun.sleep(50);
-        expect(clipboardWriteText).not.toHaveBeenCalled();
-        setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
-        if (replacementReady) {
-          replacement.reply(readyRequest!, 'ready');
+        if (timing === 'after baseline read' || timing === 'after budget') {
+          await Bun.sleep(50);
+          expect(clipboardWriteText).not.toHaveBeenCalled();
+          setSyntheticClipboard([new MockClipboardItem({ 'text/plain': 'Second baseline' })], 'Second baseline');
+          if (timing === 'after baseline read') replacement.reply(readyRequest!, 'ready');
+        }
+        if (timing !== 'after budget') {
           expect(await delivery).toEqual({ kind: 'pasted' });
           expect(types(replacement)).toEqual(['ready', 'sequence', 'paste', 'commit']);
           await Bun.sleep(850);
